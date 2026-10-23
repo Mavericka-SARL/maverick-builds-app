@@ -16,7 +16,9 @@ test("a file import can replace the cells it lists, and says that incremental ad
   await mockApi(page);
   const sent: Array<{ import_mode?: string }> = [];
   await page.route("**/api/import/upload", async (route) => {
-    sent.push(route.request().postDataJSON());
+    const body = route.request().postDataJSON();
+    if (body.dry_run) return route.fulfill(json({ dry_run: true, rows: 1, values: 1, error_rows: 0, errors: [] }));
+    sent.push(body);
     await route.fulfill(json({ job_id: "job-1", status: "committed", total_rows: 1, valid_rows: 1, error_rows: 0, revision_id: "rev-1" }));
   });
   await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ id: "rev-1", name: "Working", is_active: true }])));

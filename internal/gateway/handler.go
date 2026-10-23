@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	importpkgv1 "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1"
 	workflowv1 "github.com/mavericks-engine/mavericks/gen/go/workflow/v1"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
@@ -7839,6 +7840,14 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		XLSXBase64 string `json:"xlsx_base64"`
 		RevisionID string `json:"revision_id"`
 		ImportMode string `json:"import_mode"` // "incremental" (default) | "replace" | "full_reload"
+		// DryRun reads and checks every row and imports nothing: the
+		// wizard's Validate step, which used to pass a row naming a member
+		// the model does not have and leave the refusal to the commit.
+		DryRun bool `json:"dry_run"`
+		// RowLines is the line in the person's file of each data row of
+		// csv, when csv was written out of it (the Import Wizard's):
+		// every answer about a row names that line (importpkg.RenumberRows).
+		RowLines []int `json:"row_lines"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
 		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
@@ -7874,7 +7883,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := act.UserID
 	store := importpkg.NewStore(h.db.For(ctx))
-	if key != "" && !h.replayKeyedImport(w, ctx, store, modelID, userID, key) {
+	if key != "" && !body.DryRun && !h.replayKeyedImport(w, ctx, store, modelID, userID, key) {
 		return
 	}
 
@@ -7905,6 +7914,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		header, rawRows, err = importpkg.ParseXLSXRows(raw)
 	} else {
 		header, rawRows, err = importpkg.ParseCSVRows([]byte(body.CSV))
+		importpkg.RenumberRows(rawRows, body.RowLines)
 	}
 	if err != nil {
 		jsonErr(w, fmt.Errorf("parse file: %w", err), http.StatusBadRequest)
@@ -7916,26 +7926,25 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("parse file: %w", err), http.StatusBadRequest)
 		return
 	}
+	okRows, failedRows := fileRows(staged, importErrs)
+	if body.DryRun {
+		jsonOK(w, map[string]any{
+			"dry_run": true, "rows": okRows, "values": len(staged),
+			"error_rows": failedRows, "errors": importErrorRows(importErrs),
+		})
+		return
+	}
 	// Atomic: any row failing validation rejects the whole file. Nothing is
 	// staged or committed — the caller fixes the file and re-uploads, rather
-	// than silently getting a partial import. jsonErr can only carry a
-	// message string, so the per-row detail the UI needs to actually show
-	// the user what to fix is written directly here instead.
+	// than silently getting a partial import. The refused import is kept in
+	// Recent Imports with its reasons: it used to leave no line there.
 	if len(importErrs) > 0 {
-		rows := make([]map[string]any, 0, len(importErrs))
-		for _, e := range importErrs {
-			rows = append(rows, map[string]any{
-				"row": e.RowNumber, "column": e.Column, "code": e.ErrorCode,
-				"message": e.Message, "raw_value": e.RawValue,
-			})
+		if job, jErr := store.CreateImportJob(ctx, modelID, revisionID, "upload", userID, nil); jErr != nil {
+			h.log.Warn().Err(jErr).Msg("record a refused import")
+		} else if sErr := store.StageRows(ctx, job.Id, nil, importErrs); sErr != nil {
+			h.log.Warn().Err(sErr).Msg("record a refused import's errors")
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":      fmt.Sprintf("import rejected: %d row(s) failed validation, nothing was imported", len(importErrs)),
-			"error_rows": len(importErrs),
-			"errors":     rows,
-		})
+		jsonGridRowErrs(w, staged, importErrs)
 		return
 	}
 	if len(staged) == 0 {
@@ -7999,6 +8008,8 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		"valid_rows":  len(staged),
 		"error_rows":  0,
 		"revision_id": revisionID,
+		"rows":        okRows,
+		"values":      len(staged),
 	})
 }
 
@@ -8017,11 +8028,38 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	if jobs == nil {
-		jsonOK(w, []any{})
-		return
+	// Each job with its revision's name and, refused, its first problem:
+	// Recent Imports read a revision_name the list never had, and a refused
+	// import left no line at all.
+	type jobView struct {
+		*importpkgv1.ImportJob
+		RevisionName string `json:"revision_name,omitempty"`
+		Error        string `json:"error,omitempty"`
 	}
-	jsonOK(w, jobs)
+	out := make([]jobView, len(jobs))
+	ids := make([]string, len(jobs))
+	for i, j := range jobs {
+		out[i].ImportJob, ids[i] = j, j.Id
+	}
+	names, problems := map[string]string{}, map[string]string{}
+	if rows, qErr := h.db.For(ctx).Query(ctx, `
+		SELECT j.id::text, COALESCE(r.name, ''),
+		       COALESCE((SELECT 'row ' || e.row_number || COALESCE(', ' || NULLIF(e.column_name, ''), '') || ': ' || e.message
+		                 FROM import.import_error e WHERE e.job_id = j.id ORDER BY e.row_number, e.created_at LIMIT 1), '')
+		FROM import.import_job j LEFT JOIN model.revision r ON r.id = j.revision_id
+		WHERE j.id = ANY($1::uuid[])`, ids); qErr == nil {
+		for rows.Next() {
+			var id, name, problem string
+			if rows.Scan(&id, &name, &problem) == nil {
+				names[id], problems[id] = name, problem
+			}
+		}
+		rows.Close()
+	}
+	for i := range out {
+		out[i].RevisionName, out[i].Error = names[out[i].Id], problems[out[i].Id]
+	}
+	jsonOK(w, out)
 }
 
 func (h *handler) importJobAction(w http.ResponseWriter, r *http.Request) {
@@ -9210,6 +9248,14 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		ImportMode string             `json:"import_mode"`
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
+	// ?dry_run=true reads and checks the file as the run would and imports
+	// nothing, records no run: the Import Wizard's Validate step for a saved
+	// integration. A grid or a table's file only.
+	dryRun := r.URL.Query().Get("dry_run") == "true"
+	if dryRun && intg.TargetType == "dimension" {
+		jsonErr(w, fmt.Errorf("a dry run checks a file for a grid or a table, not a dimension"), http.StatusBadRequest)
+		return
+	}
 
 	// A csv_import integration carries its file in the request body — CSV
 	// text, or a workbook as xlsx_base64 (+ sheet); a google_sheets one
@@ -9248,12 +9294,14 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-		Category: auditlog.CategoryDataChange, EventType: auditlog.EventIntegrationRun,
-		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ApplicationID: appID, ResourceType: "integration", ResourceID: intID,
-		Metadata: map[string]string{"target_type": intg.TargetType, "target_id": intg.TargetID, "integration_type": intg.Type},
-	})
+	if !dryRun {
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryDataChange, EventType: auditlog.EventIntegrationRun,
+			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+			ApplicationID: appID, ResourceType: "integration", ResourceID: intID,
+			Metadata: map[string]string{"target_type": intg.TargetType, "target_id": intg.TargetID, "integration_type": intg.Type},
+		})
+	}
 
 	switch intg.TargetType {
 	case "form":
@@ -9275,8 +9323,16 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("table not found"), http.StatusNotFound)
 			return
 		}
-		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows, false)
+		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun)
+		if dryRun && iErr == nil {
+			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "error_rows": len(rowErrs), "errors": rowErrs})
+			return
+		}
 		if iErr != nil {
+			if dryRun {
+				h.jsonLimitErr(w, iErr)
+				return
+			}
 			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
 			h.jsonLimitErr(w, iErr)
 			return
@@ -9319,7 +9375,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 				mode = importpkg.ModeReplace
 			}
 		}
-		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type)
+		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type, dryRun)
 	}
 }
 

@@ -28509,11 +28509,29 @@ func (s *FormImportRequest) encodeFields(e *jx.Encoder) {
 			s.XlsxBase64.Encode(e)
 		}
 	}
+	{
+		if s.DryRun.Set {
+			e.FieldStart("dry_run")
+			s.DryRun.Encode(e)
+		}
+	}
+	{
+		if s.RowLines != nil {
+			e.FieldStart("row_lines")
+			e.ArrStart()
+			for _, elem := range s.RowLines {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfFormImportRequest = [2]string{
+var jsonFieldsNameOfFormImportRequest = [4]string{
 	0: "csv",
 	1: "xlsx_base64",
+	2: "dry_run",
+	3: "row_lines",
 }
 
 // Decode decodes FormImportRequest from json.
@@ -28543,6 +28561,35 @@ func (s *FormImportRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"xlsx_base64\"")
+			}
+		case "dry_run":
+			if err := func() error {
+				s.DryRun.Reset()
+				if err := s.DryRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dry_run\"")
+			}
+		case "row_lines":
+			if err := func() error {
+				s.RowLines = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.RowLines = append(s.RowLines, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row_lines\"")
 			}
 		default:
 			return d.Skip()
@@ -36474,11 +36521,43 @@ func (s *ImportFormRecordsOK) encodeFields(e *jx.Encoder) {
 			s.RecordsCreated.Encode(e)
 		}
 	}
+	{
+		if s.DryRun.Set {
+			e.FieldStart("dry_run")
+			s.DryRun.Encode(e)
+		}
+	}
+	{
+		if s.Rows.Set {
+			e.FieldStart("rows")
+			s.Rows.Encode(e)
+		}
+	}
+	{
+		if s.ErrorRows.Set {
+			e.FieldStart("error_rows")
+			s.ErrorRows.Encode(e)
+		}
+	}
+	{
+		if s.Errors != nil {
+			e.FieldStart("errors")
+			e.ArrStart()
+			for _, elem := range s.Errors {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfImportFormRecordsOK = [2]string{
+var jsonFieldsNameOfImportFormRecordsOK = [6]string{
 	0: "status",
 	1: "records_created",
+	2: "dry_run",
+	3: "rows",
+	4: "error_rows",
+	5: "errors",
 }
 
 // Decode decodes ImportFormRecordsOK from json.
@@ -36509,6 +36588,53 @@ func (s *ImportFormRecordsOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"records_created\"")
 			}
+		case "dry_run":
+			if err := func() error {
+				s.DryRun.Reset()
+				if err := s.DryRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dry_run\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows.Reset()
+				if err := s.Rows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "error_rows":
+			if err := func() error {
+				s.ErrorRows.Reset()
+				if err := s.ErrorRows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error_rows\"")
+			}
+		case "errors":
+			if err := func() error {
+				s.Errors = make([]ImportFormRecordsOKErrorsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem ImportFormRecordsOKErrorsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Errors = append(s.Errors, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"errors\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -36529,6 +36655,103 @@ func (s *ImportFormRecordsOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ImportFormRecordsOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ImportFormRecordsOKErrorsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ImportFormRecordsOKErrorsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.Row.Set {
+			e.FieldStart("row")
+			s.Row.Encode(e)
+		}
+	}
+	{
+		if s.Column.Set {
+			e.FieldStart("column")
+			s.Column.Encode(e)
+		}
+	}
+	{
+		if s.Message.Set {
+			e.FieldStart("message")
+			s.Message.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfImportFormRecordsOKErrorsItem = [3]string{
+	0: "row",
+	1: "column",
+	2: "message",
+}
+
+// Decode decodes ImportFormRecordsOKErrorsItem from json.
+func (s *ImportFormRecordsOKErrorsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportFormRecordsOKErrorsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "row":
+			if err := func() error {
+				s.Row.Reset()
+				if err := s.Row.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row\"")
+			}
+		case "column":
+			if err := func() error {
+				s.Column.Reset()
+				if err := s.Column.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"column\"")
+			}
+		case "message":
+			if err := func() error {
+				s.Message.Reset()
+				if err := s.Message.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"message\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ImportFormRecordsOKErrorsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportFormRecordsOKErrorsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportFormRecordsOKErrorsItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -36817,9 +37040,21 @@ func (s *ImportJob) encodeFields(e *jx.Encoder) {
 			s.RevisionID.Encode(e)
 		}
 	}
+	{
+		if s.RevisionName.Set {
+			e.FieldStart("revision_name")
+			s.RevisionName.Encode(e)
+		}
+	}
+	{
+		if s.Error.Set {
+			e.FieldStart("error")
+			s.Error.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfImportJob = [11]string{
+var jsonFieldsNameOfImportJob = [13]string{
 	0:  "id",
 	1:  "model_id",
 	2:  "scenario",
@@ -36831,6 +37066,8 @@ var jsonFieldsNameOfImportJob = [11]string{
 	8:  "created_at",
 	9:  "completed_at",
 	10: "revision_id",
+	11: "revision_name",
+	12: "error",
 }
 
 // Decode decodes ImportJob from json.
@@ -36957,6 +37194,26 @@ func (s *ImportJob) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
+			}
+		case "revision_name":
+			if err := func() error {
+				s.RevisionName.Reset()
+				if err := s.RevisionName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revision_name\"")
+			}
+		case "error":
+			if err := func() error {
+				s.Error.Reset()
+				if err := s.Error.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error\"")
 			}
 		default:
 			return d.Skip()
@@ -38253,6 +38510,34 @@ func (s *ImportUploadOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Rows.Set {
+			e.FieldStart("rows")
+			s.Rows.Encode(e)
+		}
+	}
+	{
+		if s.Values.Set {
+			e.FieldStart("values")
+			s.Values.Encode(e)
+		}
+	}
+	{
+		if s.DryRun.Set {
+			e.FieldStart("dry_run")
+			s.DryRun.Encode(e)
+		}
+	}
+	{
+		if s.Errors != nil {
+			e.FieldStart("errors")
+			e.ArrStart()
+			for _, elem := range s.Errors {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.Replayed.Set {
 			e.FieldStart("replayed")
 			s.Replayed.Encode(e)
@@ -38260,14 +38545,18 @@ func (s *ImportUploadOK) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfImportUploadOK = [7]string{
-	0: "job_id",
-	1: "status",
-	2: "total_rows",
-	3: "valid_rows",
-	4: "error_rows",
-	5: "revision_id",
-	6: "replayed",
+var jsonFieldsNameOfImportUploadOK = [11]string{
+	0:  "job_id",
+	1:  "status",
+	2:  "total_rows",
+	3:  "valid_rows",
+	4:  "error_rows",
+	5:  "revision_id",
+	6:  "rows",
+	7:  "values",
+	8:  "dry_run",
+	9:  "errors",
+	10: "replayed",
 }
 
 // Decode decodes ImportUploadOK from json.
@@ -38338,6 +38627,53 @@ func (s *ImportUploadOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
 			}
+		case "rows":
+			if err := func() error {
+				s.Rows.Reset()
+				if err := s.Rows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "values":
+			if err := func() error {
+				s.Values.Reset()
+				if err := s.Values.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"values\"")
+			}
+		case "dry_run":
+			if err := func() error {
+				s.DryRun.Reset()
+				if err := s.DryRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dry_run\"")
+			}
+		case "errors":
+			if err := func() error {
+				s.Errors = make([]ImportUploadOKErrorsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem ImportUploadOKErrorsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Errors = append(s.Errors, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"errors\"")
+			}
 		case "replayed":
 			if err := func() error {
 				s.Replayed.Reset()
@@ -38373,6 +38709,137 @@ func (s *ImportUploadOK) UnmarshalJSON(data []byte) error {
 }
 
 // Encode implements json.Marshaler.
+func (s *ImportUploadOKErrorsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ImportUploadOKErrorsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.Row.Set {
+			e.FieldStart("row")
+			s.Row.Encode(e)
+		}
+	}
+	{
+		if s.Column.Set {
+			e.FieldStart("column")
+			s.Column.Encode(e)
+		}
+	}
+	{
+		if s.Code.Set {
+			e.FieldStart("code")
+			s.Code.Encode(e)
+		}
+	}
+	{
+		if s.Message.Set {
+			e.FieldStart("message")
+			s.Message.Encode(e)
+		}
+	}
+	{
+		if s.RawValue.Set {
+			e.FieldStart("raw_value")
+			s.RawValue.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfImportUploadOKErrorsItem = [5]string{
+	0: "row",
+	1: "column",
+	2: "code",
+	3: "message",
+	4: "raw_value",
+}
+
+// Decode decodes ImportUploadOKErrorsItem from json.
+func (s *ImportUploadOKErrorsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportUploadOKErrorsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "row":
+			if err := func() error {
+				s.Row.Reset()
+				if err := s.Row.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row\"")
+			}
+		case "column":
+			if err := func() error {
+				s.Column.Reset()
+				if err := s.Column.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"column\"")
+			}
+		case "code":
+			if err := func() error {
+				s.Code.Reset()
+				if err := s.Code.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"code\"")
+			}
+		case "message":
+			if err := func() error {
+				s.Message.Reset()
+				if err := s.Message.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"message\"")
+			}
+		case "raw_value":
+			if err := func() error {
+				s.RawValue.Reset()
+				if err := s.RawValue.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"raw_value\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ImportUploadOKErrorsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportUploadOKErrorsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportUploadOKErrorsItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
 func (s *ImportUploadRequest) Encode(e *jx.Encoder) {
 	e.ObjStart()
 	s.encodeFields(e)
@@ -38400,6 +38867,22 @@ func (s *ImportUploadRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.DryRun.Set {
+			e.FieldStart("dry_run")
+			s.DryRun.Encode(e)
+		}
+	}
+	{
+		if s.RowLines != nil {
+			e.FieldStart("row_lines")
+			e.ArrStart()
+			for _, elem := range s.RowLines {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.ImportMode.Set {
 			e.FieldStart("import_mode")
 			s.ImportMode.Encode(e)
@@ -38407,11 +38890,13 @@ func (s *ImportUploadRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfImportUploadRequest = [4]string{
+var jsonFieldsNameOfImportUploadRequest = [6]string{
 	0: "csv",
 	1: "xlsx_base64",
 	2: "revision_id",
-	3: "import_mode",
+	3: "dry_run",
+	4: "row_lines",
+	5: "import_mode",
 }
 
 // Decode decodes ImportUploadRequest from json.
@@ -38452,6 +38937,35 @@ func (s *ImportUploadRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
+			}
+		case "dry_run":
+			if err := func() error {
+				s.DryRun.Reset()
+				if err := s.DryRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dry_run\"")
+			}
+		case "row_lines":
+			if err := func() error {
+				s.RowLines = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.RowLines = append(s.RowLines, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row_lines\"")
 			}
 		case "import_mode":
 			if err := func() error {
@@ -39021,6 +39535,16 @@ func (s *IntegrationRunRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.RowLines != nil {
+			e.FieldStart("row_lines")
+			e.ArrStart()
+			for _, elem := range s.RowLines {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.XlsxBase64.Set {
 			e.FieldStart("xlsx_base64")
 			s.XlsxBase64.Encode(e)
@@ -39034,10 +39558,11 @@ func (s *IntegrationRunRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfIntegrationRunRequest = [3]string{
+var jsonFieldsNameOfIntegrationRunRequest = [4]string{
 	0: "csv",
-	1: "xlsx_base64",
-	2: "sheet",
+	1: "row_lines",
+	2: "xlsx_base64",
+	3: "sheet",
 }
 
 // Decode decodes IntegrationRunRequest from json.
@@ -39057,6 +39582,25 @@ func (s *IntegrationRunRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"csv\"")
+			}
+		case "row_lines":
+			if err := func() error {
+				s.RowLines = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.RowLines = append(s.RowLines, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row_lines\"")
 			}
 		case "xlsx_base64":
 			if err := func() error {
@@ -53538,6 +54082,16 @@ func (s *PreviewImportReshapeOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Lines != nil {
+			e.FieldStart("lines")
+			e.ArrStart()
+			for _, elem := range s.Lines {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.RowCount.Set {
 			e.FieldStart("row_count")
 			s.RowCount.Encode(e)
@@ -53545,12 +54099,13 @@ func (s *PreviewImportReshapeOK) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfPreviewImportReshapeOK = [5]string{
+var jsonFieldsNameOfPreviewImportReshapeOK = [6]string{
 	0: "sheets",
 	1: "raw",
 	2: "header",
 	3: "rows",
-	4: "row_count",
+	4: "lines",
+	5: "row_count",
 }
 
 // Decode decodes PreviewImportReshapeOK from json.
@@ -53652,6 +54207,25 @@ func (s *PreviewImportReshapeOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "lines":
+			if err := func() error {
+				s.Lines = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.Lines = append(s.Lines, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"lines\"")
 			}
 		case "row_count":
 			if err := func() error {
@@ -59575,6 +60149,24 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.DryRun.Set {
+			e.FieldStart("dry_run")
+			s.DryRun.Encode(e)
+		}
+	}
+	{
+		if s.Rows.Set {
+			e.FieldStart("rows")
+			s.Rows.Encode(e)
+		}
+	}
+	{
+		if s.Values.Set {
+			e.FieldStart("values")
+			s.Values.Encode(e)
+		}
+	}
+	{
 		if s.Errors != nil {
 			e.FieldStart("errors")
 			e.ArrStart()
@@ -59586,11 +60178,14 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfRunIntegrationOK = [4]string{
+var jsonFieldsNameOfRunIntegrationOK = [7]string{
 	0: "rows_imported",
 	1: "values_imported",
 	2: "error_rows",
-	3: "errors",
+	3: "dry_run",
+	4: "rows",
+	5: "values",
+	6: "errors",
 }
 
 // Decode decodes RunIntegrationOK from json.
@@ -59630,6 +60225,36 @@ func (s *RunIntegrationOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"error_rows\"")
+			}
+		case "dry_run":
+			if err := func() error {
+				s.DryRun.Reset()
+				if err := s.DryRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dry_run\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows.Reset()
+				if err := s.Rows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "values":
+			if err := func() error {
+				s.Values.Reset()
+				if err := s.Values.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"values\"")
 			}
 		case "errors":
 			if err := func() error {
@@ -59799,6 +60424,245 @@ func (s *RunIntegrationOKErrorsItem) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *RunIntegrationOKErrorsItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *RunIntegrationUnprocessableEntity) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *RunIntegrationUnprocessableEntity) encodeFields(e *jx.Encoder) {
+	{
+		if s.Error.Set {
+			e.FieldStart("error")
+			s.Error.Encode(e)
+		}
+	}
+	{
+		if s.ErrorRows.Set {
+			e.FieldStart("error_rows")
+			s.ErrorRows.Encode(e)
+		}
+	}
+	{
+		if s.Errors != nil {
+			e.FieldStart("errors")
+			e.ArrStart()
+			for _, elem := range s.Errors {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfRunIntegrationUnprocessableEntity = [3]string{
+	0: "error",
+	1: "error_rows",
+	2: "errors",
+}
+
+// Decode decodes RunIntegrationUnprocessableEntity from json.
+func (s *RunIntegrationUnprocessableEntity) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RunIntegrationUnprocessableEntity to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "error":
+			if err := func() error {
+				s.Error.Reset()
+				if err := s.Error.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error\"")
+			}
+		case "error_rows":
+			if err := func() error {
+				s.ErrorRows.Reset()
+				if err := s.ErrorRows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error_rows\"")
+			}
+		case "errors":
+			if err := func() error {
+				s.Errors = make([]RunIntegrationUnprocessableEntityErrorsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RunIntegrationUnprocessableEntityErrorsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Errors = append(s.Errors, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"errors\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode RunIntegrationUnprocessableEntity")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RunIntegrationUnprocessableEntity) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RunIntegrationUnprocessableEntity) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.Row.Set {
+			e.FieldStart("row")
+			s.Row.Encode(e)
+		}
+	}
+	{
+		if s.Column.Set {
+			e.FieldStart("column")
+			s.Column.Encode(e)
+		}
+	}
+	{
+		if s.Code.Set {
+			e.FieldStart("code")
+			s.Code.Encode(e)
+		}
+	}
+	{
+		if s.Message.Set {
+			e.FieldStart("message")
+			s.Message.Encode(e)
+		}
+	}
+	{
+		if s.RawValue.Set {
+			e.FieldStart("raw_value")
+			s.RawValue.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfRunIntegrationUnprocessableEntityErrorsItem = [5]string{
+	0: "row",
+	1: "column",
+	2: "code",
+	3: "message",
+	4: "raw_value",
+}
+
+// Decode decodes RunIntegrationUnprocessableEntityErrorsItem from json.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RunIntegrationUnprocessableEntityErrorsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "row":
+			if err := func() error {
+				s.Row.Reset()
+				if err := s.Row.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row\"")
+			}
+		case "column":
+			if err := func() error {
+				s.Column.Reset()
+				if err := s.Column.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"column\"")
+			}
+		case "code":
+			if err := func() error {
+				s.Code.Reset()
+				if err := s.Code.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"code\"")
+			}
+		case "message":
+			if err := func() error {
+				s.Message.Reset()
+				if err := s.Message.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"message\"")
+			}
+		case "raw_value":
+			if err := func() error {
+				s.RawValue.Reset()
+				if err := s.RawValue.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"raw_value\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode RunIntegrationUnprocessableEntityErrorsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

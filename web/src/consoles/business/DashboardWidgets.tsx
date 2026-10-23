@@ -3,7 +3,7 @@ import { serialToISO } from "../dateSerial";
 import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
-import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
+import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
@@ -479,7 +479,8 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
   const run = useMutation({
     mutationFn: (file?: { csv?: string; xlsx_base64?: string }) => api.runIntegration(integrationId, file),
     onSuccess: (data) => setResult(data as typeof result),
-    onError: (err) => setResult({ message: (err as Error).message }),
+    // A refused file lists its rows in the error's body: nothing went in.
+    onError: (err) => setResult({ message: (err as Error).message, errors: (err as ApiError).body?.errors as ImportRowError[] | undefined }),
   });
   const download = useMutation({
     mutationFn: async () => {
@@ -533,7 +534,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
           {result.message
             ? result.message
             : `${result.rows_imported ?? 0} rows imported${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
-          {!result.message && result.errors && result.errors.length > 0 && (
+          {result.errors && result.errors.length > 0 && (
             <div style={{ color: "var(--color-danger)" }}>
               Row {result.errors[0].row}: {result.errors[0].message}{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}
             </div>

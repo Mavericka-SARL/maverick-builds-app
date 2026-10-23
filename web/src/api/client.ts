@@ -1830,7 +1830,9 @@ export interface Execution {
 export interface ImportJob {
   id: string;
   model_id: string;
-  revision_name: string;
+  revision_name?: string;
+  // A refused import's first problem ("row 4, product: …").
+  error?: string;
   status: number;
   total_rows: number;
   valid_rows: number;
@@ -1844,10 +1846,24 @@ export type ImportModeParam = "incremental" | "replace" | "full_reload";
 export interface ImportUploadResult {
   job_id: string;
   status: string;
+  // total_rows and valid_rows count values: a row of a wide file is one
+  // value per metric. rows counts the file's rows.
   total_rows: number;
   valid_rows: number;
   error_rows: number;
   revision_id?: string;
+  rows?: number;
+  values?: number;
+}
+
+// A dry run's answer (dry_run: true): what the import would read, and every
+// row it would refuse, by its line in the file sent. Nothing is imported.
+export interface ImportCheck {
+  dry_run: true;
+  rows: number;
+  values?: number;
+  error_rows: number;
+  errors: Array<{ row: number; column: string; message: string; code?: string; raw_value?: string }>;
 }
 
 // Body of the 422 atomic-rejection response from /api/import/upload — every
@@ -2528,11 +2544,16 @@ export const api = {
     return apiFetchBlob(`/api/admin/audit/export?${q}`);
   },
 
-  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam) =>
+  // rowLines: the line in the person's file of each data row of csv, when
+  // csv was written out of it (the Import Wizard's) — every answer, and the
+  // import's history, then names a row by its line in that file.
+  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam, rowLines?: number[]) =>
     apiFetch<ImportUploadResult>(
       "/api/import/upload",
-      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental" }) },
+      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental", row_lines: rowLines }) },
     ),
+  checkImport: (csv: string, revisionId?: string, rowLines?: number[]) =>
+    apiFetch<ImportCheck>("/api/import/upload", { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, dry_run: true, row_lines: rowLines }) }),
   // Native .xlsx upload — the file is sent as-is (base64) and parsed
   // server-side (column headers map to metric/dimension names there), not
   // transcoded to CSV client-side.
@@ -2547,7 +2568,7 @@ export const api = {
   // The Import Wizard's Shape step: a reshape applied to a sample file by
   // the server's own code (POST /api/import/reshape-preview).
   reshapePreview: (body: { csv?: string; xlsx_base64?: string; sheet?: string; reshape: FileReshape }) =>
-    apiFetch<{ sheets?: string[]; raw: string[][]; header: string[]; rows: string[][]; row_count: number }>("/api/import/reshape-preview", {
+    apiFetch<{ sheets?: string[]; raw: (string[] | null)[]; header: string[]; rows: string[][]; lines?: number[]; row_count: number }>("/api/import/reshape-preview", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -2619,11 +2640,13 @@ export const api = {
   // re-fetches the configured sheet at run time. The integration's saved
   // column map is applied server-side, so a file of metric and member names
   // runs as it is.
-  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }) =>
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[]) =>
     apiFetch<{ rows_imported: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
       method: "POST",
-      body: JSON.stringify(typeof file === "string" ? { csv: file } : (file ?? {})),
+      body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}) }),
     }),
+  checkIntegrationRun: (id: string, csv: string, rowLines?: number[]) =>
+    apiFetch<ImportCheck>(`/api/integrations/${id}/run?dry_run=true`, { method: "POST", body: JSON.stringify({ csv, row_lines: rowLines }) }),
 
   getDimensions: () => apiFetch<DevDimension[]>("/api/dimensions"),
   listForms: (revisionId?: string) =>
@@ -2666,11 +2689,13 @@ export const api = {
   // Given a query (without totals), the export holds what it matches, in its order.
   exportFormRecords: (formId: string, format: "csv" | "xlsx" = "xlsx", query?: RecordsQuery) =>
     apiFetchBlob(`/api/forms/${formId}/export?format=${format}${query ? `&query=${encodeURIComponent(JSON.stringify(query))}` : ""}`),
-  importFormRecords: (formId: string, csv: string) =>
+  importFormRecords: (formId: string, csv: string, rowLines?: number[]) =>
     apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
       method: "POST",
-      body: JSON.stringify({ csv }),
+      body: JSON.stringify({ csv, row_lines: rowLines }),
     }),
+  checkFormRecords: (formId: string, csv: string, rowLines?: number[]) =>
+    apiFetch<ImportCheck>(`/api/forms/${formId}/import`, { method: "POST", body: JSON.stringify({ csv, dry_run: true, row_lines: rowLines }) }),
   importFormRecordsXlsx: (formId: string, xlsxBase64: string) =>
     apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
       method: "POST",

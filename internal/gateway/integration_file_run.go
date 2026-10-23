@@ -47,6 +47,10 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
 		Sheet      string `json:"sheet"`
+		// RowLines is the line in the person's file of each data row of
+		// csv, when csv was written out of it (the Import Wizard's):
+		// every answer about a row names that line (importpkg.RenumberRows).
+		RowLines []int `json:"row_lines"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBodyBytes)).Decode(&body); err != nil {
 		return nil, nil, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
@@ -59,7 +63,9 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		}
 		return importpkg.ReadShaped("run.xlsx", raw, body.Sheet, reshape)
 	case body.CSV != "":
-		return importpkg.ShapeCSV([]byte(body.CSV), reshape)
+		header, rows, err := importpkg.ShapeCSV([]byte(body.CSV), reshape)
+		importpkg.RenumberRows(rows, body.RowLines)
+		return header, rows, err
 	}
 	return nil, nil, fmt.Errorf("csv or xlsx_base64 field required")
 }
@@ -146,13 +152,16 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 	return metricIDs, nil
 }
 
-// runGridIntegration runs a file integration into its grid's revision with
-// the run endpoint's lenient contract: valid rows commit, invalid ones are
-// counted and detailed (row, column, message). The run is recorded in the
-// integration's history either way.
-func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string) {
+// runGridIntegration runs a file integration into its grid's revision: the
+// file whole, or — when a row has a problem — none of it, every such row
+// detailed (row, column, message). The run is recorded in the integration's
+// history either way; a dry run (the Import Wizard's Validate step) only
+// answers what the run would do.
+func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, dryRun bool) {
 	fail := func(status int, err error) {
-		h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", err.Error())
+		if !dryRun {
+			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", err.Error())
+		}
 		var le *plan.LimitError
 		if errors.As(err, &le) {
 			h.jsonLimitErr(w, err)
@@ -182,26 +191,26 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		fail(http.StatusBadRequest, fmt.Errorf("%w — map the column to a metric or dimension name, \"metric\"/\"value\", or \"ignore\" in the integration's column map", err))
 		return
 	}
-	errRows := make([]map[string]any, 0, len(importErrs))
-	badRows := map[int32]bool{}
-	for _, e := range importErrs {
-		badRows[e.RowNumber] = true
-		errRows = append(errRows, map[string]any{
-			"row": e.RowNumber, "column": e.Column, "code": e.ErrorCode,
-			"message": e.Message, "raw_value": e.RawValue,
+	okRows, failedRows := fileRows(staged, importErrs)
+	if dryRun {
+		jsonOK(w, map[string]any{
+			"dry_run": true, "rows": okRows, "values": len(staged),
+			"error_rows": failedRows, "errors": importErrorRows(importErrs),
 		})
+		return
 	}
-	goodRows := map[int]bool{}
-	for _, s := range staged {
-		goodRows[s.RowNumber] = true
+	// A file imports whole or not at all, as the Import Wizard's and the
+	// table's do. A run used to import the rows that passed and name only
+	// the first that failed.
+	if len(importErrs) > 0 {
+		h.recordIntegrationRun(ctx, intID, act.UserID, 0, failedRows, "error",
+			fmt.Sprintf("%d row(s) failed validation, nothing was imported — %s", failedRows, firstRowProblem(importErrs)))
+		jsonGridRowErrs(w, staged, importErrs)
+		return
 	}
 	if len(staged) == 0 {
-		msg := "no valid rows"
-		if len(errRows) > 0 {
-			msg = fmt.Sprintf("no valid rows: %v", errRows[0]["message"])
-		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, 0, len(badRows), "error", msg)
-		jsonOK(w, map[string]any{"rows_imported": 0, "values_imported": 0, "error_rows": len(badRows), "errors": errRows})
+		h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", "no valid rows")
+		jsonOK(w, map[string]any{"rows_imported": 0, "values_imported": 0, "error_rows": 0, "errors": []any{}})
 		return
 	}
 	if _, err := h.commitGridRows(ctx, act, modelID, revisionID, staged, mode, source); err != nil {
@@ -212,9 +221,9 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		fail(status, err)
 		return
 	}
-	h.recordIntegrationRun(ctx, intID, act.UserID, len(goodRows), len(badRows), "success", "")
+	h.recordIntegrationRun(ctx, intID, act.UserID, okRows, 0, "success", "")
 	jsonOK(w, map[string]any{
-		"rows_imported": len(goodRows), "values_imported": len(staged),
-		"error_rows": len(badRows), "errors": errRows,
+		"rows_imported": okRows, "values_imported": len(staged),
+		"error_rows": 0, "errors": []any{},
 	})
 }

@@ -2127,6 +2127,8 @@ components:
         csv:          { type: string, description: "Raw CSV text; required unless xlsx_base64 is given" }
         xlsx_base64:  { type: string, description: "Base64-encoded .xlsx workbook; required unless csv is given" }
         revision_id:  { type: string, format: uuid, description: "Defaults to the model's active revision" }
+        dry_run:      { type: boolean, description: "Read and check every row and import nothing: the answer lists each row the import would refuse (200, dry_run true). No import job is recorded." }
+        row_lines:    { type: array, items: { type: integer }, description: "With csv written out of another file (the Import Wizard's): the line in that file of each data row, in order; every answer and the import's history name a row by it" }
         import_mode:
           type: string
           enum: [incremental, replace, full_reload]
@@ -2173,6 +2175,8 @@ components:
         created_at:    { $ref: "#/components/schemas/ProtoTimestamp" }
         completed_at:  { $ref: "#/components/schemas/ProtoTimestamp" }
         revision_id:   { type: string, format: uuid }
+        revision_name: { type: string, description: The name of the revision the import wrote to }
+        error:         { type: string, description: "A refused import's first problem (\"row 5, product: …\"); its job has status 4" }
 
     ExportSpec:
       type: object
@@ -2201,6 +2205,10 @@ components:
         csv:
           type: string
           description: The file as CSV text (csv_import).
+        row_lines:
+          type: array
+          items: { type: integer }
+          description: With csv written out of another file (the Import Wizard's) — the line in that file of each data row, in order; every answer and the run's history name a row by it.
         xlsx_base64:
           type: string
           description: The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB before encoding.
@@ -2503,6 +2511,8 @@ components:
       properties:
         csv:         { type: string, description: "Raw CSV text; required unless xlsx_base64 is given. Columns match table field names, falling back to labels." }
         xlsx_base64: { type: string, description: "Base64-encoded .xlsx workbook; required unless csv is given" }
+        dry_run:     { type: boolean, description: "Check every row as the import would and create nothing: 200 with dry_run, rows and errors" }
+        row_lines:   { type: array, items: { type: integer }, description: "With csv written out of another file (the Import Wizard's): the line in that file of each data row, in order; every answer names a row by it" }
 
     AutomationRule:
       type: object
@@ -8660,6 +8670,7 @@ paths:
                   raw:       { type: array, items: { type: array, items: { type: string } } }
                   header:    { type: array, items: { type: string } }
                   rows:      { type: array, items: { type: array, items: { type: string } } }
+                  lines:     { type: array, items: { type: integer }, description: "lines[i] is the row of the file rows[i] comes from" }
                   row_count: { type: integer }
         "400": { $ref: "#/components/responses/BadRequest" }
         "422":
@@ -8701,7 +8712,7 @@ paths:
             schema: { $ref: "#/components/schemas/ImportUploadRequest" }
       responses:
         "200":
-          description: Import committed (or, under an Idempotency-Key already used, the first import's answer)
+          description: Import committed (or, under an Idempotency-Key already used, the first import's answer; or, with dry_run, the check of every row)
           content:
             application/json:
               schema:
@@ -8709,10 +8720,17 @@ paths:
                 properties:
                   job_id:      { type: string, format: uuid }
                   status:      { type: string }
-                  total_rows:  { type: integer }
-                  valid_rows:  { type: integer }
-                  error_rows:  { type: integer }
+                  total_rows:  { type: integer, description: Values — a row of a wide file is one value per metric }
+                  valid_rows:  { type: integer, description: Values imported }
+                  error_rows:  { type: integer, description: Rows with a problem }
                   revision_id: { type: string, format: uuid }
+                  rows:        { type: integer, description: The file's rows imported (or, with dry_run, that would be) }
+                  values:      { type: integer, description: The values they hold }
+                  dry_run:     { type: boolean }
+                  errors:
+                    type: array
+                    description: With dry_run — each problem the import would refuse
+                    items: {type: object, properties: {row: {type: integer, description: "The row's line in the file"}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
                   replayed:    { type: boolean, description: "true when this is the answer of an import sent before under the same Idempotency-Key; nothing was applied" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "409":
@@ -8726,20 +8744,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "422":
-          description: One or more rows failed validation — nothing was imported
+          description: One or more rows failed validation — nothing was imported; the refusal is kept in the import jobs with its problems
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   error:      { type: string }
-                  error_rows: { type: integer }
+                  error_rows: { type: integer, description: Rows with a problem }
                   errors:
                     type: array
                     items:
                       type: object
                       properties:
-                        row:       { type: integer }
+                        row:       { type: integer, description: "The row's line in the file" }
                         column:    { type: string }
                         code:      { type: string }
                         message:   { type: string }
@@ -8912,12 +8930,17 @@ paths:
     post:
       operationId: runIntegration
       tags: [Import & Integrations]
-      summary: Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the edition's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).
+      summary: Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid or table run imports the file whole or not at all — a row with a problem refuses it (422, every such row listed); a grid run resolves names, checks members are leaves, commits through the write guard and the edition's limits, and recalculates. Every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: dry_run
+          in: query
+          required: false
+          description: "true reads and checks the file as the run would and imports nothing, records no run (a grid or a table's integration only): 200 with dry_run, rows and errors"
+          schema: { type: boolean }
       requestBody:
         required: true
         content:
@@ -8925,7 +8948,7 @@ paths:
             schema: { $ref: "#/components/schemas/IntegrationRunRequest" }
       responses:
         "200":
-          description: Rows imported
+          description: Rows imported (or, with dry_run, the check of every row)
           content:
             application/json:
               schema:
@@ -8934,10 +8957,25 @@ paths:
                   rows_imported:   { type: integer }
                   values_imported: { type: integer, description: Grid runs — one row can carry several metrics' values }
                   error_rows:      { type: integer }
+                  dry_run:         { type: boolean }
+                  rows:            { type: integer, description: With dry_run — the rows that would be imported }
+                  values:          { type: integer, description: With dry_run — the values they hold (grid) }
                   errors:
                     type: array
-                    description: Grid runs — each value that failed, by row and column
-                    items: {type: object, properties: {row: {type: integer}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
+                    description: With dry_run — each problem the run would refuse, by the row's line in the file
+                    items: {type: object, properties: {row: {type: integer, description: "The row's line in the file"}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
+        "422":
+          description: One or more rows of a grid or table's file failed validation — nothing was imported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:      { type: string }
+                  error_rows: { type: integer }
+                  errors:
+                    type: array
+                    items: {type: object, properties: {row: {type: integer, description: "The row's line in the file"}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
         "400": { $ref: "#/components/responses/BadRequest" }
         "402": {description: The tenant's edition limit would be exceeded}
         "403": {description: The file writes a member, metric or scope the caller may not write}
@@ -9292,7 +9330,7 @@ paths:
             schema: { $ref: "#/components/schemas/FormImportRequest" }
       responses:
         "200":
-          description: Records created
+          description: Records created (or, with dry_run, the check of every row)
           content:
             application/json:
               schema:
@@ -9300,6 +9338,13 @@ paths:
                 properties:
                   status:          { type: string }
                   records_created: { type: integer }
+                  dry_run:         { type: boolean }
+                  rows:            { type: integer, description: With dry_run — the records that would be created }
+                  error_rows:      { type: integer }
+                  errors:
+                    type: array
+                    description: With dry_run — each problem, by the row's line in the file
+                    items: {type: object, properties: {row: {type: integer}, column: {type: string}, message: {type: string}}}
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":

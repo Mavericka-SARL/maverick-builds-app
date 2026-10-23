@@ -66,13 +66,14 @@ func TestReshapeAPeopleShapedWorkbook(t *testing.T) {
 	}
 	want := []row{
 		// Blank cells make no row (EMEA Travel has no March, APAC no February).
-		{1, "EMEA", "Travel", "2026-01", "10000", "Budget"},
-		{1, "EMEA", "Travel", "2026-02", "12500", "Budget"},
-		{2, "EMEA", "Rent", "2026-01", "-5000", "Budget"},
-		{2, "EMEA", "Rent", "2026-02", "5000", "Budget"},
-		{2, "EMEA", "Rent", "2026-03", "5000", "Budget"},
-		{4, "APAC", "Travel", "2026-01", "3000", "Budget"},
-		{4, "APAC", "Travel", "2026-03", "4000", "Budget"},
+		// Each row keeps its row in the sheet.
+		{4, "EMEA", "Travel", "2026-01", "10000", "Budget"},
+		{4, "EMEA", "Travel", "2026-02", "12500", "Budget"},
+		{5, "EMEA", "Rent", "2026-01", "-5000", "Budget"},
+		{5, "EMEA", "Rent", "2026-02", "5000", "Budget"},
+		{5, "EMEA", "Rent", "2026-03", "5000", "Budget"},
+		{7, "APAC", "Travel", "2026-01", "3000", "Budget"},
+		{7, "APAC", "Travel", "2026-03", "4000", "Budget"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows =\n%v\nwant\n%v", got, want)
@@ -153,7 +154,27 @@ func TestCSVRowsAfterARaggedRowAreRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(header) != 2 || len(rows) != 3 || rows[2].Cells["Region"] != "AMER" || rows[2].RowNumber != 3 {
+	if len(header) != 2 || len(rows) != 3 || rows[2].Cells["Region"] != "AMER" || rows[2].RowNumber != 4 {
 		t.Fatalf("header %v, rows %+v", header, rows)
+	}
+}
+
+// An empty row of a workbook reads as a row with no cells, not as nil: the
+// Shape step's preview sent it as null and its table could not draw it. Each
+// row's number is its row in the sheet.
+func TestAnEmptyWorkbookRowIsARowWithNoCells(t *testing.T) {
+	grid, err := ReadGrid("plan.xlsx", peopleWorkbook(t), "", ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grid[1] == nil || len(grid[1]) != 0 {
+		t.Fatalf("row 2 = %#v, want an empty row", grid[1])
+	}
+	_, rows, err := ShapeGrid(grid, &Reshape{HeaderRow: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].RowNumber != 4 || rows[0].Cells["Account"] != "Travel" {
+		t.Fatalf("first row under the header on row 3 = %+v, want row 4", rows[0])
 	}
 }

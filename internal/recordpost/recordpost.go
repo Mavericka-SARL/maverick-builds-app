@@ -913,9 +913,18 @@ type RecordState struct {
 // which the message says. It answers the status code and message of the
 // first refusal, or 0 and "" when the change may go ahead.
 func (ps *Poster) PostingRefusal(ctx context.Context, creatorID string, forYou bool, form *crudapp.FormDef, recordID string, to *RecordState) (int, string, error) {
-	mappings, err := ps.liveFormMappings(ctx, form.ID)
-	if err != nil || len(mappings) == 0 {
+	tp, err := ps.newTablePosting(ctx, form)
+	if err != nil {
 		return 0, "", err
+	}
+	return ps.postingRefusal(ctx, tp, creatorID, forYou, recordID, to)
+}
+
+// postingRefusal is PostingRefusal with what tp has read and checked
+// already: an import checks each of its rows with one tablePosting.
+func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorID string, forYou bool, recordID string, to *RecordState) (int, string, error) {
+	if len(tp.mappings) == 0 {
+		return 0, "", nil
 	}
 	posted := map[string]*plannedPosting{}
 	if recordID != "" {
@@ -941,13 +950,12 @@ func (ps *Poster) PostingRefusal(ctx context.Context, creatorID string, forYou b
 			return 0, "", err
 		}
 	}
-	hasStatus := form.HasStatus()
-	period := ps.periodResolver(ctx)
-	for _, m := range mappings {
+	hasStatus := tp.form.HasStatus()
+	for i, m := range tp.mappings {
 		before := posted[m.id]
 		var after *plannedPosting
 		if to != nil {
-			after = m.planned(hasStatus, to.Status, to.Data, true, period)
+			after = m.planned(hasStatus, to.Status, to.Data, true, tp.period)
 		}
 		if samePosting(before, after) {
 			continue
@@ -959,7 +967,7 @@ func (ps *Poster) PostingRefusal(ctx context.Context, creatorID string, forYou b
 		if p == nil {
 			continue
 		}
-		code, msg, err := ps.postingCellRefusal(ctx, creatorID, forYou, form, m, p)
+		code, msg, err := ps.postingCellRefusal(ctx, tp, i, creatorID, forYou, p)
 		if err != nil || code != 0 {
 			return code, msg, err
 		}
@@ -968,11 +976,25 @@ func (ps *Poster) PostingRefusal(ctx context.Context, creatorID string, forYou b
 }
 
 // postingCellRefusal says why userID — the record's creator — may not
-// write the cell posting p of mapping m is in: the metric, each member,
-// then the write guard's own checks (a system-managed revision, a
-// calculated member, a workflow lock). forYou says the creator is the
-// caller.
-func (ps *Poster) postingCellRefusal(ctx context.Context, userID string, forYou bool, form *crudapp.FormDef, m formMapping, p *plannedPosting) (int, string, error) {
+// write the cell posting p of tp's mapping i is in, once per cell: the
+// metric, each member, then the write guard's own checks (a system-managed
+// revision, a calculated member, a workflow lock). forYou says the creator
+// is the caller.
+func (ps *Poster) postingCellRefusal(ctx context.Context, tp *tablePosting, i int, userID string, forYou bool, p *plannedPosting) (int, string, error) {
+	key := strconv.FormatBool(forYou) + "|" + cellKey(i, userID, p.members)
+	if r, ok := tp.refusals[key]; ok {
+		return r.code, r.msg, nil
+	}
+	code, msg, err := ps.cellRefusal(writeguard.WithMemo(ctx, tp.memo), userID, forYou, tp.form, tp.mappings[i], tp.revisions[i], p)
+	if err == nil {
+		tp.refusals[key] = cellRefusal{code: code, msg: msg}
+	}
+	return code, msg, err
+}
+
+// cellRefusal is postingCellRefusal's check of a cell of mapping m, which
+// posts into revisionID.
+func (ps *Poster) cellRefusal(ctx context.Context, userID string, forYou bool, form *crudapp.FormDef, m formMapping, revisionID string, p *plannedPosting) (int, string, error) {
 	pool := ps.db(ctx)
 	whose, readOnly := "your", "read-only for you, and this record posts into it"
 	if !forYou {
@@ -991,7 +1013,6 @@ func (ps *Poster) postingCellRefusal(ctx context.Context, userID string, forYou 
 		_ = ps.db(ctx).QueryRow(ctx, `SELECT COALESCE(NULLIF(label,''), name) FROM model.metric_def WHERE id=$1::uuid`, m.targetMetricID).Scan(&label)
 		return http.StatusForbidden, fmt.Sprintf("%s is %s", label, readOnly), nil
 	}
-	revisionID := ps.postingRevision(ctx, m)
 	memberIDs, err := writeguard.ResolveWriteMembers(ctx, pool, m.modelID, revisionID, p.members)
 	if writeguard.IsMemberError(err) {
 		return http.StatusBadRequest, fmt.Sprintf("this record posts into %s, which cannot hold it: %v", form.Label, err), nil
@@ -1101,16 +1122,7 @@ func RetryTransient(ctx context.Context, attempts int, op func() error) error {
 // Apply posts one record through each of its table's live mappings and
 // rebuilds the totals they post into.
 func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, data map[string]any, userID string) error {
-	return ps.apply(ctx, recordID, formID, status, data, userID, false)
-}
-
-// apply is Apply; deferTotals leaves the totals and the recalculation to
-// the caller, who posts many records and rebuilds each total once
-// (RebuildPostings).
-func (ps *Poster) apply(ctx context.Context, recordID, formID, status string, data map[string]any, userID string, deferTotals bool) error {
-	if !deferTotals {
-		defer ps.pending(ctx, formID)()
-	}
+	defer ps.pending(ctx, formID)()
 	// Every caller fires this from its own `go func()` per record
 	// status-transition, so two calls for the SAME record (e.g. its
 	// creation-as-draft call and a subsequent approve call) race with no
@@ -1122,198 +1134,26 @@ func (ps *Poster) apply(ctx context.Context, recordID, formID, status string, da
 	// call sees the record's real current state and becomes a no-op or a
 	// harmless re-post of the same value, instead of undoing a newer
 	// call's work.
+	rec := postingRecord{id: recordID}
 	var rawData []byte
-	var creator string
 	if err := ps.db(ctx).QueryRow(ctx,
-		`SELECT COALESCE(status::text, ''), data, COALESCE(created_by::text, '') FROM runtime.form_record WHERE id=$1::uuid`, recordID,
-	).Scan(&status, &rawData, &creator); err != nil {
+		`SELECT COALESCE(status::text, ''), data, COALESCE(created_by::text, ''), updated_at FROM runtime.form_record WHERE id=$1::uuid`, recordID,
+	).Scan(&rec.status, &rawData, &rec.creator, &rec.updatedAt); err != nil {
 		ps.Log.Warn().Err(err).Str("record_id", recordID).Msg("Apply: re-read current record state failed")
 		return err
 	}
-	data = map[string]any{}
-	_ = json.Unmarshal(rawData, &data)
-	// A record posts within its creator's access (the owner's decision of
-	// 2026-10-06): an approver, or an administrator syncing the table,
-	// needs no write access where it posts. A legacy record with no creator
-	// posts within the access of whoever changes it. userID stays the one
-	// the posted facts are entered by.
-	guardUser := userID
-	if creator != "" {
-		guardUser = creator
-	}
-
-	// A record without a status — every record of a table without a status
-	// field — counts whatever its mappings' posting statuses say.
+	rec.data = map[string]any{}
+	_ = json.Unmarshal(rawData, &rec.data)
 	form, err := crudapp.NewStore(ps.db(ctx)).GetForm(ctx, formID)
 	if err != nil {
 		return err
 	}
-	hasStatus := form.HasStatus()
-	mappings, err := ps.liveFormMappings(ctx, formID)
+	tp, err := ps.newTablePosting(ctx, form)
 	if err != nil {
 		ps.Log.Warn().Err(err).Str("form_id", formID).Msg("Apply: read mappings")
 		return err
 	}
-
-	var affected []struct{ RevisionID, MetricID string }
-	var affectedModelID string
-	period := ps.periodResolver(ctx)
-
-	for _, m := range mappings {
-		eligible := m.postsAt(hasStatus, status)
-
-		// Post into the mapping's own revision; revision-global (legacy)
-		// mappings fall back to the model's active revision, then most-recent.
-		revisionID := ps.postingRevision(ctx, m)
-
-		// Resolve source value. A record with no numeric value in the
-		// source field contributes nothing, like one whose status is not
-		// eligible.
-		val, hasValue := m.value(data)
-
-		if !eligible || !hasValue {
-			// Retract this record's posting and re-aggregate the postings
-			// that remain. A missing value used to retract without
-			// re-aggregating, leaving the old value in the metric until
-			// something else recomputed it.
-			_, _ = ps.db(ctx).Exec(ctx,
-				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
-				m.id, recordID)
-			if !deferTotals {
-				ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
-			}
-			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-			affectedModelID = m.modelID
-			continue
-		}
-
-		// Build dim_members from dimension_mappings {dim_id: form_field_name}
-		dimMembers := m.members(data, period)
-
-		// Generic write guard — the same check cells() applies to every
-		// interactive grid writeback (writeguard.MetricAccess +
-		// writeguard.CheckWrite): the record's creator, hidden or
-		// read-restricted from this metric or from one of the dimension
-		// members this posting targets, must not have that restriction
-		// bypassed by saving a record instead of writing the cell. A save
-		// is checked before it is made (PostingRefusal), so a refusal here
-		// means the rules changed in between, or a sync or a workflow moved
-		// a record whose creator has lost access since: skip-and-log, as
-		// this runs from a detached goroutine after the response.
-		//
-		// A refused re-post leaves the record's existing posting as it is:
-		// the checks run before anything is retracted, and the upsert below
-		// replaces the posting in place. The posting used to be deleted
-		// first, so a caller the guard refuses — a restricted user's own
-		// edit, or a restricted administrator's form sync re-posting other
-		// people's records — withdrew the contribution without writing
-		// anything, and the next recompute dropped it from the metric.
-		// A transient error here is NOT a denial, but both used to `continue`
-		// and drop the posting for good. Retry the read; only give up — and
-		// say so at error level — once it keeps failing.
-		var access string
-		if maErr := RetryTransient(ctx, 3, func() error {
-			a, e := writeguard.MetricAccess(ctx, ps.db(ctx), guardUser, m.targetMetricID)
-			access = a
-			return e
-		}); maErr != nil {
-			ps.Log.Error().Err(maErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("Apply: metric access check kept failing — posting dropped, aggregate now under-counts")
-			continue
-		} else if access == "hidden" || access == "read" {
-			ps.Log.Warn().Str("mapping_id", m.id).Str("metric_id", m.targetMetricID).Msg("Apply: posting rejected, caller lacks write access to metric")
-			continue
-		}
-		// A record naming a code the dimension does not have, a parent or a
-		// calculated member posts nowhere: the posting used to be stored at
-		// that code, where no grid or total reads it. Its earlier posting is
-		// retracted, as for a record with no value — the record no longer
-		// names that coordinate.
-		var memberIDs []string
-		var refused error
-		if rErr := RetryTransient(ctx, 3, func() error {
-			ids, e := writeguard.ResolveWriteMembers(ctx, ps.db(ctx), m.modelID, revisionID, dimMembers)
-			memberIDs = ids
-			if writeguard.IsMemberError(e) {
-				refused = e // a refusal, not a failed read: no retry
-				return nil
-			}
-			return e
-		}); refused != nil {
-			ps.Log.Warn().Err(refused).Str("mapping_id", m.id).Str("record_id", recordID).Msg("Apply: record names no leaf member — nothing posted")
-			_, _ = ps.db(ctx).Exec(ctx,
-				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
-				m.id, recordID)
-			if !deferTotals {
-				ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
-			}
-			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-			affectedModelID = m.modelID
-			continue
-		} else if rErr != nil {
-			ps.Log.Error().Err(rErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("Apply: member lookup kept failing — posting dropped, aggregate now under-counts")
-			continue
-		}
-		var reason string
-		if gErr := RetryTransient(ctx, 3, func() error {
-			r, e := writeguard.CheckWriteMetrics(ctx, ps.db(ctx), m.modelID, revisionID, guardUser, memberIDs, []string{m.targetMetricID})
-			reason = r
-			return e
-		}); gErr != nil {
-			ps.Log.Error().Err(gErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("Apply: write guard check kept failing — posting dropped, aggregate now under-counts")
-			continue
-		} else if reason != "" {
-			ps.Log.Warn().Str("mapping_id", m.id).Str("reason", reason).Msg("Apply: posting rejected by write guard")
-			continue
-		}
-
-		dimJSON, _ := json.Marshal(dimMembers)
-
-		// Insert posting record. This is the failure that most directly
-		// under-counts a total: the posting row IS the record's contribution,
-		// so losing it loses that record's value until something else happens
-		// to re-post it. ON CONFLICT DO UPDATE makes the retry idempotent.
-		// A foreign key refusal is not a failure: the mapping (or the record)
-		// was deleted after this call read it, and there is nothing to post.
-		gone := false
-		if postErr := RetryTransient(ctx, 3, func() error {
-			_, e := ps.db(ctx).Exec(ctx, `
-				INSERT INTO runtime.form_record_posting
-				  (mapping_id, form_record_id, target_metric_id, revision_id, dim_members, posted_value)
-				VALUES ($1::uuid, $2::uuid, $3::uuid, NULLIF($4,'')::uuid, $5, $6)
-				ON CONFLICT (mapping_id, form_record_id) DO UPDATE
-				  SET target_metric_id=$3::uuid, revision_id=NULLIF($4,'')::uuid,
-				      dim_members=$5, posted_value=$6, posted_at=now()`,
-				m.id, recordID, m.targetMetricID, revisionID, dimJSON, val)
-			if isForeignKeyViolation(e) {
-				gone = true
-				return nil
-			}
-			return e
-		}); gone {
-			continue
-		} else if postErr != nil {
-			ps.Log.Error().Err(postErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("form posting insert kept failing — this record's value is missing from the metric total")
-			continue
-		}
-
-		if !deferTotals {
-			ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
-		}
-
-		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-		affectedModelID = m.modelID
-	}
-
-	// Recalc against each mapping's OWN revision (captured above, per
-	// mapping — revision-scoped mappings can legitimately target a
-	// different revision than the model's current active one), not a
-	// single re-derived active_revision_id: that discarded per-mapping
-	// scoping entirely, silently skipping recalc altogether whenever the
-	// model had no active revision yet (e.g. pre-promote), or recalculating
-	// the wrong revision when a mapping's own revision differed from it.
-	if !deferTotals {
-		ps.recalc(ctx, affectedModelID, affected)
-	}
+	ps.totals(ctx, tp, ps.post(ctx, tp, []postingRecord{rec}, userID), userID)
 	return nil
 }
 
@@ -1352,16 +1192,20 @@ func (ps *Poster) RebuildPostings(ctx context.Context, modelID, revisionID, user
 	}
 	n := 0
 	for _, formID := range forms {
-		records, err := ids(`SELECT id::text FROM runtime.form_record WHERE form_id=$1::uuid ORDER BY created_at, id`, formID)
+		form, err := crudapp.NewStore(ps.db(ctx)).GetForm(ctx, formID)
 		if err != nil {
 			return n, err
 		}
-		for _, recordID := range records {
-			if err := ps.apply(ctx, recordID, formID, "", nil, userID, true); err != nil {
-				return n, err
-			}
-			n++
+		tp, err := ps.newTablePosting(ctx, form)
+		if err != nil {
+			return n, err
 		}
+		records, err := ps.recordsToPost(ctx, formID)
+		if err != nil {
+			return n, err
+		}
+		ps.post(ctx, tp, records, userID)
+		n += len(records)
 	}
 	return n, nil
 }
@@ -1536,64 +1380,50 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 	return nil
 }
 
-// Backfill processes all existing records that match the posting status rule.
+// Backfill posts every record of mappingID's table through the table's
+// live mappings: what a new mapping needs for the records already there.
+// It returns how many records it went through.
 func (ps *Poster) Backfill(ctx context.Context, mappingID, userID string) (int, error) {
-	var formIDStr, status0 string
-	var postingStatuses []string
+	var formID string
+	var ownModel bool
 	if err := ps.db(ctx).QueryRow(ctx, `
-		SELECT form_id::text, posting_statuses[1]
-		FROM model.form_metric_mapping WHERE id=$1::uuid`, mappingID,
-	).Scan(&formIDStr, &status0); err != nil {
+		SELECT m.form_id::text,
+		       EXISTS (SELECT 1 FROM model.form_def fd WHERE fd.id = m.form_id AND fd.model_id = m.model_id)
+		FROM model.form_metric_mapping m WHERE m.id=$1::uuid`, mappingID,
+	).Scan(&formID, &ownModel); err != nil {
 		return 0, fmt.Errorf("mapping not found: %w", err)
 	}
-	// Get all posting statuses for the mapping
-	rows, err := ps.db(ctx).Query(ctx, `
-		SELECT fr.id::text, fr.data, COALESCE(fr.status::text, '')
-		FROM runtime.form_record fr
-		JOIN model.form_metric_mapping m ON m.form_id = fr.form_id
-		JOIN model.form_def fd ON fd.id = m.form_id AND fd.model_id = m.model_id
-		WHERE m.id=$1::uuid`, mappingID)
+	if !ownModel {
+		return 0, nil // a mapping naming another model's table posts nothing
+	}
+	return ps.repost(ctx, formID, userID)
+}
+
+// repost posts every record of formID through its live mappings again,
+// rebuilds each total they changed once and recalculates once. Each record
+// used to post on its own — its totals rebuilt and a recalculation after
+// every one, and a sync went through the table once per mapping. It
+// returns how many records it went through.
+func (ps *Poster) repost(ctx context.Context, formID, userID string) (int, error) {
+	// Resolve a valid entered_by user — prefer the passed userID, fall back to first user in DB.
+	if userID == "" {
+		_ = ps.db(ctx).QueryRow(ctx, `SELECT id::text FROM identity.user LIMIT 1`).Scan(&userID)
+	}
+	form, err := crudapp.NewStore(ps.db(ctx)).GetForm(ctx, formID)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-
-	_ = status0
-	_ = formIDStr
-	_ = postingStatuses
-
-	type recRow struct {
-		id, status string
-		data       []byte
+	tp, err := ps.newTablePosting(ctx, form)
+	if err != nil {
+		return 0, err
 	}
-	var recs []recRow
-	for rows.Next() {
-		var rec recRow
-		if err := rows.Scan(&rec.id, &rec.data, &rec.status); err == nil {
-			recs = append(recs, rec)
-		}
+	records, err := ps.recordsToPost(ctx, formID)
+	if err != nil || len(records) == 0 {
+		return 0, err
 	}
-	rows.Close()
-
-	// Resolve a valid entered_by user — prefer the passed userID, fall back to first user in DB.
-	resolvedUser := userID
-	if resolvedUser == "" {
-		_ = ps.db(ctx).QueryRow(ctx, `SELECT id::text FROM identity.user LIMIT 1`).Scan(&resolvedUser)
-	}
-
-	count := 0
-	for _, rec := range recs {
-		var data map[string]any
-		if err := json.Unmarshal(rec.data, &data); err != nil {
-			continue
-		}
-		var fid string
-		_ = ps.db(ctx).QueryRow(ctx, `SELECT form_id::text FROM runtime.form_record WHERE id=$1::uuid`, rec.id).Scan(&fid)
-		if err := ps.Apply(ctx, rec.id, fid, rec.status, data, resolvedUser); err == nil {
-			count++
-		}
-	}
-	return count, nil
+	defer ps.pending(ctx, formID)()
+	ps.totals(ctx, tp, ps.post(ctx, tp, records, userID), userID)
+	return len(records), nil
 }
 
 // DispatchRecordCreated fires, in the background, the form_submit automation
@@ -1671,15 +1501,15 @@ func (ps *Poster) RepostTable(ctx context.Context, formID, userID string) (mappi
 		ps.Log.Warn().Err(err).Str("form_id", formID).Msg("repost table: read mappings")
 		return 0, 0
 	}
-	for _, m := range ms {
-		n, err := ps.Backfill(ctx, m.id, userID)
-		if err != nil {
-			ps.Log.Warn().Err(err).Str("mapping_id", m.id).Msg("repost table: backfill failed")
-			continue
-		}
-		processed += n
+	if len(ms) == 0 {
+		return 0, 0
 	}
-	return len(ms), processed
+	n, err := ps.repost(ctx, formID, userID)
+	if err != nil {
+		ps.Log.Warn().Err(err).Str("form_id", formID).Msg("repost table failed")
+		return len(ms), 0
+	}
+	return len(ms), n * len(ms)
 }
 func firstNonEmpty(vs ...string) string {
 	for _, v := range vs {

@@ -46,6 +46,7 @@ func IsMemberError(err error) bool {
 //
 // A *MemberError is a refusal (400); any other error is a failed read.
 func ResolveWriteMembers(ctx context.Context, pool QueryRower, modelID, revisionID string, dimCodes map[string]string) ([]string, error) {
+	memo := memoOf(ctx)
 	ids := make([]string, 0, len(dimCodes))
 	for dimID, code := range dimCodes {
 		unknownDim := &MemberError{Code: "UNKNOWN_DIMENSION",
@@ -53,37 +54,58 @@ func ResolveWriteMembers(ctx context.Context, pool QueryRower, modelID, revision
 		if uuid.Validate(dimID) != nil {
 			return nil, unknownDim
 		}
-		var dimName, memberID string
-		var hasChildren, calculated bool
-		err := pool.QueryRow(ctx, `
-			SELECT d.name, COALESCE(m.id::text,''),
-			       COALESCE(EXISTS(SELECT 1 FROM model.dimension_member c
-			                       WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id), false),
-			       COALESCE(NULLIF(btrim(m.formula),'') IS NOT NULL, false)
-			FROM model.dimension_def d
-			LEFT JOIN model.dimension_member m ON m.dimension_id = d.id AND m.code = $2
-			WHERE d.id = $1::uuid AND d.model_id = $3::uuid
-			  AND (d.revision_id = $4::uuid OR d.revision_id IS NULL)`,
-			dimID, code, modelID, revisionID,
-		).Scan(&dimName, &memberID, &hasChildren, &calculated)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, unknownDim
+		key := [4]string{modelID, revisionID, dimID, code}
+		r, known := resolvedMember{}, false
+		if memo != nil {
+			r, known = memo.member(key)
 		}
-		if err != nil {
-			return nil, fmt.Errorf("resolve member %q: %w", code, err)
+		if !known {
+			var err error
+			if r, err = resolveMember(ctx, pool, modelID, revisionID, dimID, code); err != nil {
+				return nil, err
+			}
+			if memo != nil {
+				memo.setMember(key, r)
+			}
 		}
 		switch {
-		case memberID == "":
+		case r.unknownDim:
+			return nil, unknownDim
+		case r.memberID == "":
 			return nil, &MemberError{Code: "UNKNOWN_MEMBER",
-				Message: fmt.Sprintf("there is no member %q in %s (member codes match exactly)", code, dimName)}
-		case calculated:
+				Message: fmt.Sprintf("there is no member %q in %s (member codes match exactly)", code, r.dimName)}
+		case r.calculated:
 			return nil, &MemberError{Code: "CALCULATED_MEMBER",
-				Message: fmt.Sprintf("%q is a calculated member of %s: its values are computed from the other members, so it takes no input", code, dimName)}
-		case hasChildren:
+				Message: fmt.Sprintf("%q is a calculated member of %s: its values are computed from the other members, so it takes no input", code, r.dimName)}
+		case r.hasChildren:
 			return nil, &MemberError{Code: "NOT_LEAF",
-				Message: fmt.Sprintf("%q is not a leaf member of %s (has child members): values are entered at its leaves", code, dimName)}
+				Message: fmt.Sprintf("%q is not a leaf member of %s (has child members): values are entered at its leaves", code, r.dimName)}
 		}
-		ids = append(ids, memberID)
+		ids = append(ids, r.memberID)
 	}
 	return ids, nil
+}
+
+// resolveMember reads the member code names in dimension dimID of the
+// revision.
+func resolveMember(ctx context.Context, pool QueryRower, modelID, revisionID, dimID, code string) (resolvedMember, error) {
+	var r resolvedMember
+	err := pool.QueryRow(ctx, `
+		SELECT d.name, COALESCE(m.id::text,''),
+		       COALESCE(EXISTS(SELECT 1 FROM model.dimension_member c
+		                       WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id), false),
+		       COALESCE(NULLIF(btrim(m.formula),'') IS NOT NULL, false)
+		FROM model.dimension_def d
+		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id AND m.code = $2
+		WHERE d.id = $1::uuid AND d.model_id = $3::uuid
+		  AND (d.revision_id = $4::uuid OR d.revision_id IS NULL)`,
+		dimID, code, modelID, revisionID,
+	).Scan(&r.dimName, &r.memberID, &r.hasChildren, &r.calculated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return resolvedMember{unknownDim: true}, nil
+	}
+	if err != nil {
+		return r, fmt.Errorf("resolve member %q: %w", code, err)
+	}
+	return r, nil
 }

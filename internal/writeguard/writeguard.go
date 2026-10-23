@@ -41,6 +41,12 @@ type AncestorRef struct {
 // parent_member_id) legitimately ends the chain there; any other error is
 // propagated rather than silently truncating the walk.
 func AncestorChain(ctx context.Context, pool *pgxpool.Pool, memberID string) ([]AncestorRef, error) {
+	memo := memoOf(ctx)
+	if memo != nil {
+		if chain, ok := memo.chain(memberID); ok {
+			return chain, nil
+		}
+	}
 	chain := make([]AncestorRef, 0, 4)
 	cur := memberID
 	for i := 0; i < 20; i++ {
@@ -61,6 +67,9 @@ func AncestorChain(ctx context.Context, pool *pgxpool.Pool, memberID string) ([]
 			break
 		}
 		cur = *parentID
+	}
+	if memo != nil {
+		memo.setChain(memberID, chain)
 	}
 	return chain, nil
 }
@@ -93,6 +102,12 @@ func IsLeafMember(ctx context.Context, pool *pgxpool.Pool, memberID string) (boo
 // without a lineage takes the lineage of the row its ref_id points at, as
 // in RulesForRevision. When several rules match, the stricter access wins.
 func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID string) (string, error) {
+	memo, key := memoOf(ctx), [3]string{userID, ruleType, refID}
+	if memo != nil {
+		if access, ok := memo.rule(key); ok {
+			return access, nil
+		}
+	}
 	var access string
 	var err error
 	switch {
@@ -122,10 +137,13 @@ func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID
 		).Scan(&access)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+		access, err = "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if memo != nil {
+		memo.setRule(key, access)
 	}
 	return access, nil
 }
@@ -183,10 +201,19 @@ func SystemManaged(ctx context.Context, pool *pgxpool.Pool, revisionID string) (
 	if revisionID == "" {
 		return false, nil
 	}
+	memo := memoOf(ctx)
+	if memo != nil {
+		if v, ok := memo.systemManaged(revisionID); ok {
+			return v, nil
+		}
+	}
 	var systemManaged bool
 	err := pool.QueryRow(ctx,
 		`SELECT system_managed FROM model.revision WHERE id=$1::uuid`, revisionID,
 	).Scan(&systemManaged)
+	if err == nil && memo != nil {
+		memo.setSystemManaged(revisionID, systemManaged)
+	}
 	return systemManaged, err
 }
 

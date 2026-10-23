@@ -22,7 +22,7 @@ func TestCSVBlankLinesAreRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(header, []string{"account", "amount"}) || len(rows) != 3 || rows[2].Cells["account"] != "4200" || rows[2].RowNumber != 4 {
+	if !reflect.DeepEqual(header, []string{"account", "amount"}) || len(rows) != 3 || rows[2].Cells["account"] != "4200" || rows[2].RowNumber != 9 {
 		t.Fatalf("header %q, rows %+v", header, rows)
 	}
 	// No header row named: the first row that is not blank.

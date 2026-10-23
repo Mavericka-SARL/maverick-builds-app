@@ -17,6 +17,7 @@ import {
   type DevModel,
   type DevRevision,
   type FileReshape,
+  type ImportCheck,
   describeReshape,
   cleanReshape,
   isEmptyReshape,
@@ -35,6 +36,9 @@ interface ParsedFile {
   activeSheet: string;
   headers: string[];
   rows: string[][];
+  // lines[i] is rows[i]'s line in the file (the Shape step's, from the
+  // server), which every step names a row by.
+  lines?: number[];
   // The file as it came, for the Shape step's server preview.
   source?: ShapeSource;
 }
@@ -55,7 +59,8 @@ interface ColMapping {
 }
 
 interface ValError {
-  row: number;
+  row: number; // the row's line in the file
+  index: number; // the row in ParsedFile.rows; -1 for the file as a whole
   col: string;
   value: string;
   issue: string;
@@ -90,6 +95,7 @@ interface WizardConfig {
 
 interface CommitResult {
   rowsImported: number;
+  values?: number; // a grid's: a row of a wide file is one value per metric
   errorRows: number;
   status: "success" | "error";
   message?: string;
@@ -319,29 +325,74 @@ function resolveAndSerialize(
 
 // ── Validation ─────────────────────────────────────────────────────────────────
 
+// lineOf is row i's line in the file.
+function lineOf(pf: ParsedFile, i: number): number {
+  return pf.lines?.[i] ?? i + 2;
+}
+
 function runValidation(
-  headers: string[],
-  rows: string[][],
+  pf: ParsedFile,
   mappings: ColMapping[],
   reqFields: string[],
 ): ValError[] {
   const errs: ValError[] = [];
   const reqMapped = mappings.filter(m => m.targetField && reqFields.includes(m.targetField));
-  rows.forEach((row, ri) => {
+  pf.rows.forEach((row, ri) => {
     if (row.every(v => !v.trim())) {
-      errs.push({ row: ri + 2, col: "—", value: "", issue: "Empty row — will be skipped", sev: "warning" });
+      errs.push({ row: lineOf(pf, ri), index: ri, col: "—", value: "", issue: "Empty row — will be skipped", sev: "warning" });
       return;
     }
     reqMapped.forEach(m => {
-      const idx = headers.indexOf(m.sourceCol);
+      const idx = pf.headers.indexOf(m.sourceCol);
       const val = (row[idx] ?? "").trim();
       if (!val) {
-        errs.push({ row: ri + 2, col: m.sourceCol, value: "", issue: `Required "${m.targetField}" is empty`, sev: "error" });
+        errs.push({ row: lineOf(pf, ri), index: ri, col: m.sourceCol, value: "", issue: `Required "${m.targetField}" is empty`, sev: "error" });
       }
     });
   });
   return errs;
 }
+
+// checkOnServer asks the server what the import would refuse — a member or
+// metric the model does not have, a value that is no number, a table's
+// field rules — without importing anything (a dry run). Validate used to
+// check only that required fields were filled, so a grid file naming an
+// unknown product read "All rows are valid" and the commit refused all of
+// it (2026-10-21). The rows go with their lines in the file (row_lines),
+// which the server's answers name.
+async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Promise<ValError[]> {
+  const lines = pf.rows.map((_, i) => lineOf(pf, i));
+  const indexOf = new Map(lines.map((l, i) => [l, i]));
+  let res: ImportCheck | undefined;
+  try {
+    if (cfg.integrationId) res = await api.checkIntegrationRun(cfg.integrationId, csv, lines);
+    else if (cfg.targetType === "grid") res = await api.checkImport(csv, cfg.revisionId, lines);
+    else res = await api.checkFormRecords(cfg.targetId, csv, lines);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Refused as a whole (a column naming no metric or dimension) — or not
+    // checked at all, which the commit then does.
+    return [(e as ApiError).status === 400
+      ? { row: 0, index: -1, col: "—", value: "", issue: message, sev: "error" }
+      : { row: 0, index: -1, col: "—", value: "", issue: `The rows could not be checked (${message}); the import checks them when you commit`, sev: "warning" }];
+  }
+  return (res?.errors ?? []).map(e => (
+    { row: e.row, index: indexOf.get(e.row) ?? -1, col: e.column || "—", value: e.raw_value ?? "", issue: e.message, sev: "error" as const }
+  ));
+}
+
+// savedMode is the import mode a saved integration keeps: a grid's, from
+// a file as well as a sheet. A file integration used to keep none and run
+// as incremental, whatever was chosen (2026-10-21).
+function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"] } {
+  return cfg.targetType === "grid" || cfg.source === "google_sheets" ? { import_mode: cfg.importMode } : {};
+}
+
+const MODE_LABEL: Record<string, string> = {
+  incremental: "Incremental (adds to each cell)",
+  replace: "Replace listed cells",
+  full_reload: "Full reload",
+};
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
@@ -893,19 +944,26 @@ function MapColumnsStep({
 function ValidateStep({
   parsedFile,
   errors,
+  checking,
   onNext,
   onBack,
+  onBackToShape,
 }: {
   parsedFile: ParsedFile;
   errors: ValError[];
+  checking: boolean;
   onNext: (importValidOnly: boolean) => void;
   onBack: () => void;
+  onBackToShape: () => void;
 }) {
   const [filter, setFilter] = useState<"all" | "errors" | "warnings" | "valid">("all");
 
   const errCount = errors.filter(e => e.sev === "error").length;
   const warnCount = errors.filter(e => e.sev === "warning").length;
-  const validRows = parsedFile.rows.filter(r => !r.every(v => !v.trim())).length - errCount;
+  // Rows, not problems: a row can have two.
+  const errorRows = new Set(errors.filter(e => e.sev === "error" && e.index >= 0).map(e => e.index));
+  const wholeFileError = errors.some(e => e.sev === "error" && e.index < 0);
+  const validRows = parsedFile.rows.filter((r, i) => !r.every(v => !v.trim()) && !errorRows.has(i)).length;
   const hasErrors = errCount > 0;
 
   const shown = errors.filter(e =>
@@ -932,10 +990,17 @@ function ValidateStep({
         ))}
       </div>
 
-      {errors.length === 0 ? (
-        <InlineAlert tone="success" className="mvx-toolbar--spaced">
-          All rows are valid — ready to commit
+      {checking && (
+        <InlineAlert tone="info" className="mvx-toolbar--spaced">
+          Checking the rows as the import will read them…
         </InlineAlert>
+      )}
+      {errors.length === 0 ? (
+        !checking && (
+          <InlineAlert tone="success" className="mvx-toolbar--spaced">
+            All rows are valid — ready to commit
+          </InlineAlert>
+        )
       ) : (
         <>
           {/* Filter tabs */}
@@ -960,7 +1025,7 @@ function ValidateStep({
               <tbody>
                 {shown.slice(0, 100).map((e, i) => (
                   <tr key={i}>
-                    <td className="mvx-admin-mono mvx-admin-muted">{e.row}</td>
+                    <td className="mvx-admin-mono mvx-admin-muted">{e.index < 0 ? "—" : e.row}</td>
                     <td>
                       <StatusBadge tone={e.sev === "error" ? "danger" : "warning"}>{e.sev}</StatusBadge>
                     </td>
@@ -981,14 +1046,19 @@ function ValidateStep({
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Button leadingIcon={<ArrowLeft size={14} />} onClick={onBack}>Back</Button>
         <div style={{ display: "flex", gap: 10 }}>
-          {hasErrors && (
-            <Button onClick={() => onNext(true)}>
+          <Button leadingIcon={<ArrowLeft size={14} />} onClick={onBack}>Back</Button>
+          {/* A wrong member name is fixed where the file is shaped (Rename
+              values), not by starting over. */}
+          {hasErrors && <Button variant="ghost" onClick={onBackToShape}>Back to Shape</Button>}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {errorRows.size > 0 && !wholeFileError && (
+            <Button disabled={checking} onClick={() => onNext(true)}>
               Import Valid Rows Only ({Math.max(0, validRows)})
             </Button>
           )}
-          <Button variant="primary" trailingIcon={<ArrowRight size={14} />} onClick={() => onNext(false)}>
+          <Button variant="primary" disabled={checking} trailingIcon={<ArrowRight size={14} />} onClick={() => onNext(false)}>
             {hasErrors ? "Import All Anyway" : "Commit Import"}
           </Button>
         </div>
@@ -1021,17 +1091,20 @@ function CommitStep({
   const qc = useQueryClient();
   const [result, setResult] = useState<CommitResult | null>(null);
 
-  const errRows = new Set(errors.filter(e => e.sev === "error").map(e => e.row - 2));
-  const rowsToImport = importValidOnly
-    ? parsedFile.rows.filter((_, i) => !errRows.has(i))
-    : parsedFile.rows;
+  const errRows = new Set(errors.filter(e => e.sev === "error" && e.index >= 0).map(e => e.index));
+  const sent = parsedFile.rows.map((_, i) => i).filter(i => !importValidOnly || !errRows.has(i));
+  const rowsToImport = sent.map(i => parsedFile.rows[i]);
+  // Each row goes with its line in the file, which a refusal and the
+  // import's history then name — also after Import Valid Rows Only.
+  const rowLines = sent.map(i => lineOf(parsedFile, i));
 
   const commit = useMutation({
     mutationFn: async () => {
       const csv = resolveAndSerialize(parsedFile.headers, rowsToImport, mappings, resolveCtx);
-      let out: { rows_imported: number; error_rows: number };
+      let out: { rows_imported: number; error_rows: number; values?: number };
       if (config.integrationId) {
-        out = await api.runIntegration(config.integrationId, csv);
+        const res = await api.runIntegration(config.integrationId, csv, rowLines);
+        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
@@ -1040,11 +1113,11 @@ function CommitStep({
       } else if (config.targetType === "form") {
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.
-        const res = await api.importFormRecords(config.targetId, csv);
+        const res = await api.importFormRecords(config.targetId, csv, rowLines);
         out = { rows_imported: res.records_created, error_rows: 0 };
       } else {
-        const res = await api.uploadImport(csv, config.revisionId, config.importMode);
-        out = { rows_imported: res.valid_rows, error_rows: res.error_rows };
+        const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines);
+        out = { rows_imported: res.rows ?? res.valid_rows, error_rows: res.error_rows, values: res.values };
       }
       // Finishing the wizard from a resumed draft activates it, with the
       // final column mapping saved back. Best-effort: the import itself
@@ -1061,7 +1134,8 @@ function CommitStep({
           await api.updateIntegrationConfig(config.draftId, {
             ...(isEmptyReshape(shaped) ? {} : { reshape: shaped }),
             column_map: columnMapOf(mappings),
-            ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl, import_mode: config.importMode } : {}),
+            ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
+            ...savedMode(config),
           });
         } catch { /* draft stays a draft; the import result stands */ }
       }
@@ -1079,7 +1153,7 @@ function CommitStep({
         if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
         void invalidateModelData(qc);
       }
-      setResult({ rowsImported: data.rows_imported, errorRows: data.error_rows, status: "success" });
+      setResult({ rowsImported: data.rows_imported, values: data.values, errorRows: data.error_rows, status: "success" });
     },
     onError: (e) => {
       const rows = (e as ApiError).body?.errors;
@@ -1098,6 +1172,7 @@ function CommitStep({
             <h3 style={{ margin: "0 0 8px", color: "var(--color-live)" }}>Import Complete</h3>
             <p className="mvx-admin-muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
               {result.rowsImported} rows imported
+              {result.values && result.values !== result.rowsImported ? ` (${result.values} values)` : ""}
               {result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}
             </p>
           </>
@@ -1129,7 +1204,14 @@ function CommitStep({
             )}
           </>
         )}
-        <Button variant="primary" onClick={onDone}>Done</Button>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          {/* A refused file goes back to Validate with the wizard's work
+              kept; it used to offer only Done, which closed the wizard. */}
+          {result.status === "error" && (
+            <Button leadingIcon={<ArrowLeft size={14} />} onClick={() => { setResult(null); onBack(); }}>Back</Button>
+          )}
+          <Button variant="primary" onClick={onDone}>Done</Button>
+        </div>
       </div>
     );
   }
@@ -1147,7 +1229,7 @@ function CommitStep({
             config.integrationId ? ["Integration", config.integrationName ?? config.integrationId] : null,
             ["Rows to import", String(rowsToImport.length)],
             ["Columns mapped", String(mappings.filter(m => m.targetField).length)],
-            errors.length > 0 ? ["Rows skipped (errors)", importValidOnly ? String(errRows.size) : "0 (importing all)"] : null,
+            errRows.size > 0 ? ["Rows skipped (errors)", importValidOnly ? String(errRows.size) : "0 (importing all)"] : null,
           ].filter((x): x is [string, string] => x !== null).map(([k, v]) => (
             <div key={k}>
               <div className="mvx-admin-muted" style={{ marginBottom: 2 }}>{k}</div>
@@ -1215,7 +1297,8 @@ function ImportHistory() {
         <table className="mvx-table mvx-table--compact">
           <thead>
             <tr>
-              {["Date", "Revision", "Rows", "Errors", "Status", ""].map((h, i) => (
+              {/* Values: a row of a wide file is one value per metric. */}
+              {["Date", "Revision", "Values", "Errors", "Status", ""].map((h, i) => (
                 <th key={i}>{h}</th>
               ))}
             </tr>
@@ -1226,13 +1309,14 @@ function ImportHistory() {
               return (
                 <tr key={j.id}>
                   <td className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(j.created_at)}</td>
-                  <td>{j.revision_name}</td>
+                  <td>{j.revision_name || "—"}</td>
                   <td className="mvx-admin-mono">{j.total_rows ?? "—"}</td>
                   <td className="mvx-admin-mono" style={{ color: (j.error_rows ?? 0) > 0 ? "var(--color-danger)" : "var(--color-text-subtle)" }}>
                     {j.error_rows ?? 0}
                   </td>
                   <td>
                     <StatusBadge tone={s.tone}>{s.label}</StatusBadge>
+                    {j.error && <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>{j.error}</div>}
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <IconButton
@@ -1283,6 +1367,8 @@ function ImportWizard({
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null);
   const [mappings, setMappings] = useState<ColMapping[]>([]);
   const [errors, setErrors] = useState<ValError[]>([]);
+  const [checking, setChecking] = useState(false);
+  const checkRun = useRef(0); // the server check whose answer counts
   const [importValidOnly, setImportValidOnly] = useState(false);
 
   // Targets, and the dimensions labels are resolved against, come from the
@@ -1345,13 +1431,15 @@ function ImportWizard({
   // columns are the shaped ones, which a saved column map names.
   const handleShaped = (shaped: Shaped) => {
     if (!sourceFile) return;
-    const pf = { ...sourceFile, headers: shaped.headers, rows: shaped.rows };
+    const pf = { ...sourceFile, headers: shaped.headers, rows: shaped.rows, lines: shaped.lines };
     setParsedFile(pf);
     const opts = getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps, gridMetrics);
     const saved = config.editIntegration?.config.column_map ?? config.savedColumnMap ?? {};
-    setMappings(autoMap(pf.headers, opts).map(m => saved[m.sourceCol] !== undefined
+    // Back to Shape and on again keeps what was mapped by hand.
+    const chosen = new Map(mappings.filter(m => m.status !== "auto").map(m => [m.sourceCol, m]));
+    setMappings(autoMap(pf.headers, opts).map(m => chosen.get(m.sourceCol) ?? (saved[m.sourceCol] !== undefined
       ? { ...m, targetField: saved[m.sourceCol] === "ignore" ? "" : saved[m.sourceCol], status: saved[m.sourceCol] === "ignore" ? "ignored" : "manual" }
-      : m));
+      : m)));
     setStep("map");
   };
   const savedReshape = () => {
@@ -1366,16 +1454,35 @@ function ImportWizard({
       const it = config.editIntegration!;
       const { reshape: _old, column_map: _oldMap, ...rest } = it.config;
       void _old; void _oldMap;
-      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap() });
+      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config) });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-integrations"] }); onClose(); },
   });
 
   const handleMappingDone = () => {
     if (!parsedFile) return;
-    const errs = runValidation(parsedFile.headers, parsedFile.rows, mappings, reqFields);
-    setErrors(errs);
+    const own = runValidation(parsedFile, mappings, reqFields);
+    setErrors(own);
     setStep("validate");
+    const run = ++checkRun.current;
+    if (config.targetType === "dimension") {
+      setChecking(false);
+      return;
+    }
+    setChecking(true);
+    const csv = resolveAndSerialize(parsedFile.headers, parsedFile.rows, mappings, resolveCtx);
+    // checkOnServer answers what it could not check as a warning; it does
+    // not throw. The rows and the end of the check show together.
+    void checkOnServer(config, parsedFile, csv).then(found => {
+      if (run !== checkRun.current) return;
+      setErrors([...own, ...found]);
+      setChecking(false);
+    });
+  };
+  const leaveValidate = (to: WizardStep) => {
+    checkRun.current++;
+    setChecking(false);
+    setStep(to);
   };
 
   const handleValidateDone = (validOnly: boolean) => {
@@ -1395,11 +1502,10 @@ function ImportWizard({
         api.updateIntegrationConfig(res.id, {
           ...savedReshape(),
           column_map: columnMap(),
-          // A google_sheets integration stores its source and mode so a run
-          // needs no input at all — the server re-fetches the sheet.
-          ...(config.source === "google_sheets"
-            ? { sheet_url: config.sheetUrl, import_mode: config.importMode }
-            : {}),
+          // A google_sheets integration stores its source so a run needs no
+          // input at all — the server re-fetches the sheet.
+          ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
+          ...savedMode(config),
         })
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-integrations"] }),
@@ -1462,8 +1568,10 @@ function ImportWizard({
         <ValidateStep
           parsedFile={parsedFile}
           errors={errors}
+          checking={checking}
           onNext={handleValidateDone}
-          onBack={() => setStep("map")}
+          onBack={() => leaveValidate("map")}
+          onBackToShape={() => leaveValidate("shape")}
         />
       )}
 
@@ -1617,6 +1725,11 @@ function SavedIntegrationsList({
                     {Object.values(d.config.column_map).filter(t => t !== "ignore").length} columns mapped
                   </span>
                 )}
+                {d.target_type === "grid" && (d.type === "csv_import" || d.type === "google_sheets") && (
+                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-mode-${d.id}`} title="How each run writes the grid; change it with Edit shape and mapping">
+                    Mode: {MODE_LABEL[d.config?.import_mode ?? (d.type === "google_sheets" ? "replace" : "incremental")] ?? d.config?.import_mode}
+                  </span>
+                )}
                 {d.config?.reshape && describeReshape(d.config.reshape) && (
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-reshape-${d.id}`} title="Applies to every run; change it with Edit shape and mapping">
                     Reshapes each file: {describeReshape(d.config.reshape)}
@@ -1670,6 +1783,7 @@ function SavedIntegrationsList({
                     integrationName: d.name,
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
+                    importMode: (d.config?.import_mode as WizardConfig["importMode"] | undefined) ?? (d.type === "google_sheets" ? "replace" : "incremental"),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
                   })}
@@ -1737,7 +1851,9 @@ function RunReshapedIntegration({ integration }: { integration: IntegrationDef }
     if (/\.xls[xm]$/i.test(file.name)) run.mutate({ xlsx_base64: await fileToBase64(file) });
     else run.mutate({ csv: await file.text() });
   };
-  const firstError = run.data?.errors?.[0];
+  // A refused file (422) lists its rows in the error's body: nothing of it
+  // went in. A run used to import the rows that passed.
+  const refused = ((run.error as ApiError | null)?.body?.errors ?? []) as Array<{ row: number; column: string; message: string }>;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm,text/csv" style={{ display: "none" }} onChange={pick}
@@ -1748,11 +1864,16 @@ function RunReshapedIntegration({ integration }: { integration: IntegrationDef }
       </Button>
       {run.isSuccess && (
         <span className="mvx-admin-muted" style={{ fontSize: 12 }} role="status">
-          {run.data.values_imported ?? run.data.rows_imported} value(s) imported
-          {firstError ? ` · row ${firstError.row}, ${firstError.column}: ${firstError.message}` : ""}
+          {run.data.rows_imported} row(s) imported
+          {run.data.values_imported && run.data.values_imported !== run.data.rows_imported ? ` (${run.data.values_imported} values)` : ""}
         </span>
       )}
-      {run.isError && <span className="mvx-admin-error" style={{ fontSize: 12 }}>{(run.error as Error).message}</span>}
+      {run.isError && (
+        <span className="mvx-admin-error" style={{ fontSize: 12 }}>
+          {(run.error as Error).message}
+          {refused[0] ? ` · row ${refused[0].row}${refused[0].column ? `, ${refused[0].column}` : ""}: ${refused[0].message}${refused.length > 1 ? ` (+${refused.length - 1} more)` : ""}` : ""}
+        </span>
+      )}
     </span>
   );
 }

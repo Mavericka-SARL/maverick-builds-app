@@ -197,7 +197,7 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
                 {(jobs as ImportJob[]).map((j) => (
                   <tr key={j.id}>
                     <td className="mvx-admin-mono mvx-admin-muted">{j.id.slice(0, 8)}</td>
-                    <td>{j.revision_name}</td>
+                    <td>{j.revision_name || "—"}</td>
                     <td style={{ textAlign: "right" }}>{j.total_rows}</td>
                     <td style={{ textAlign: "right", color: "var(--color-live)" }}>{j.valid_rows}</td>
                     <td style={{ textAlign: "right", color: j.error_rows > 0 ? "var(--color-danger)" : "var(--color-text-subtle)" }}>{j.error_rows}</td>
@@ -205,6 +205,7 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
                       <StatusBadge tone={IMPORT_STATUS_TONE[j.status] ?? "neutral"}>
                         {STATUS_LABEL[j.status] ?? String(j.status)}
                       </StatusBadge>
+                      {j.error && <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>{j.error}</div>}
                     </td>
                   </tr>
                 ))}

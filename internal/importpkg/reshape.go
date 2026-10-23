@@ -299,13 +299,23 @@ func readXLSXSheetGrid(data []byte, sheet string, rawValues bool) (sheets []stri
 	if len(grid) == 0 {
 		return sheets, name, nil, fmt.Errorf("sheet %q has no header row", name)
 	}
+	// An empty row of a workbook is a row with no cells, as a blank line of
+	// a CSV is: excelize gives it as nil, which a preview sent as null and
+	// the Shape step's table could not draw (2026-10-21).
+	for i := range grid {
+		if grid[i] == nil {
+			grid[i] = []string{}
+		}
+	}
 	return sheets, name, grid, nil
 }
 
 // ShapeGrid turns a sheet's rows into an import's header and rows, applying
-// r. Row numbers count data rows from 1 after the header row; every row an
-// unpivot makes from one keeps its number, so an error names the line a
-// person can find.
+// r. A row's number is its row in the sheet — the line of the file a person
+// opens — and every row an unpivot makes from one keeps it, so an error
+// names the line a person can find. It used to count data rows from 1 after
+// the header, so the first row under a header on line 3 was "row 1" in an
+// error while the sheet and the wizard said 4 (2026-10-21).
 func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err error) {
 	if r == nil {
 		r = &Reshape{}
@@ -332,7 +342,7 @@ func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err
 		if isBlankRecord(record) {
 			continue
 		}
-		rows = append(rows, recordToRawRow(header, record, rowNum))
+		rows = append(rows, recordToRawRow(header, record, h+rowNum))
 	}
 	s := &shaper{header: header, rows: rows}
 	steps := []func(*Reshape) error{s.fillDown, s.skipRows, s.unpivot, s.constants, s.valueMap, s.numbers}
@@ -660,4 +670,19 @@ func ParseHumanNumber(s string, decimalComma bool) (float64, bool) {
 		f = -f
 	}
 	return f, true
+}
+
+// RenumberRows gives the rows of a CSV written out of another file — the
+// Import Wizard sends the rows it shaped and mapped as a new CSV — the
+// lines they came from: the CSV's data row on line L came from line
+// lines[L-2] of the file (the CSV's header is line 1). Every answer about a
+// row then names its line in the file the person opened, the import's
+// history too; they named the line of the CSV the wizard wrote (2026-10-22).
+// A row with no line given keeps its own.
+func RenumberRows(rows []RawRow, lines []int) {
+	for i := range rows {
+		if k := rows[i].RowNumber - 2; k >= 0 && k < len(lines) && lines[k] > 0 {
+			rows[i].RowNumber = lines[k]
+		}
+	}
 }

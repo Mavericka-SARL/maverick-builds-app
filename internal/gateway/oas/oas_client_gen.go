@@ -1528,10 +1528,11 @@ type Invoker interface {
 	// RunIntegration invokes runIntegration operation.
 	//
 	// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
-	// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-	// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
-	// rows are listed), and recalculates; every run is recorded in the integration's history. A
-	// file_export is downloaded instead (GET /api/integrations/{id}/export).
+	// re-fetching its sheet — into its form, dimension or grid. A grid or table run imports the file
+	// whole or not at all — a row with a problem refuses it (422, every such row listed); a grid run
+	// resolves names, checks members are leaves, commits through the write guard and the edition's
+	// limits, and recalculates. Every run is recorded in the integration's history. A file_export is
+	// downloaded instead (GET /api/integrations/{id}/export).
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
@@ -29087,10 +29088,11 @@ func (c *Client) sendRevokeScimToken(ctx context.Context, params RevokeScimToken
 // RunIntegration invokes runIntegration operation.
 //
 // Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
-// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
-// rows are listed), and recalculates; every run is recorded in the integration's history. A
-// file_export is downloaded instead (GET /api/integrations/{id}/export).
+// re-fetching its sheet — into its form, dimension or grid. A grid or table run imports the file
+// whole or not at all — a row with a problem refuses it (422, every such row listed); a grid run
+// resolves names, checks members are leaves, commits through the write guard and the edition's
+// limits, and recalculates. Every run is recorded in the integration's history. A file_export is
+// downloaded instead (GET /api/integrations/{id}/export).
 //
 // POST /api/integrations/{id}/run
 func (c *Client) RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error) {
@@ -29157,6 +29159,27 @@ func (c *Client) sendRunIntegration(ctx context.Context, request *IntegrationRun
 	}
 	pathParts[2] = "/run"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "dry_run" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "dry_run",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.DryRun.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)

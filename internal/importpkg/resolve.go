@@ -43,7 +43,7 @@ type Querier interface {
 }
 
 type RawRow struct {
-	RowNumber int
+	RowNumber int // the row's line in the file (ShapeGrid)
 	Cells     map[string]string
 }
 

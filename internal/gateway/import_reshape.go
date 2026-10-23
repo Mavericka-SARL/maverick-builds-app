@@ -76,12 +76,15 @@ func (h *handler) importReshapePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([][]string, len(rows))
+	// lines[i] is the row of the file rows[i] comes from, so the wizard
+	// names a row by its line in the file, as the server's errors do.
+	lines := make([]int, len(rows))
 	for i, row := range rows {
 		line := make([]string, len(header))
 		for j, col := range header {
 			line[j] = row.Cells[col]
 		}
-		out[i] = line
+		out[i], lines[i] = line, row.RowNumber
 	}
-	jsonOK(w, map[string]any{"sheets": sheets, "raw": raw, "header": header, "rows": out, "row_count": len(out)})
+	jsonOK(w, map[string]any{"sheets": sheets, "raw": raw, "header": header, "rows": out, "lines": lines, "row_count": len(out)})
 }

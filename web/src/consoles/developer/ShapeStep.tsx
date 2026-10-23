@@ -19,12 +19,16 @@ export interface ShapeSource {
 export interface Shaped {
   headers: string[];
   rows: string[][];
+  /** Each row's line in the file, as the server's errors name it. */
+  lines?: number[];
 }
 
 interface Preview {
-  raw: string[][];
+  // A row of the sheet as read; an empty row was sent as null (2026-10-21).
+  raw: (string[] | null)[];
   header?: string[];
   rows?: string[][];
+  lines?: number[];
   row_count?: number;
   error?: string;
 }
@@ -79,7 +83,7 @@ export function ShapeStep({
       setPreview(res);
       return res;
     } catch (e) {
-      const body = (e as ApiError).body as { error?: string; raw?: string[][] } | undefined;
+      const body = (e as ApiError).body as { error?: string; raw?: (string[] | null)[] } | undefined;
       const p = { raw: body?.raw ?? rawGrid, error: body?.error ?? (e as Error).message };
       setPreview(p);
       return p;
@@ -88,13 +92,13 @@ export function ShapeStep({
     }
   };
 
+  // The rows the rest of the wizard maps are the server's, with nothing set
+  // as well: the import reads them so (a blank line is a row, a quoted cell
+  // may span lines), and each keeps its line in the file. The browser's own
+  // reading dropped blank lines, so its row numbers were not the file's.
   const next = async () => {
-    if (isEmptyReshape(cleanReshape(r))) {
-      onNext(asRead);
-      return;
-    }
     const p = preview?.header ? preview : await run();
-    if (p?.header && p.rows) onNext({ headers: p.header, rows: p.rows });
+    if (p?.header && p.rows) onNext({ headers: p.header, rows: p.rows, lines: p.lines });
   };
 
   const list = "mvx-shape-cols";
@@ -103,14 +107,14 @@ export function ShapeStep({
   );
   // numbered: the sheet as read shows each row's number — the one Header
   // row takes (a CSV reader skips blank lines; a workbook keeps them).
-  const rows = (cells: string[][], header?: string[], numbered?: boolean) => (
+  const rows = (cells: (string[] | null)[], header?: string[], numbered?: boolean) => (
     <div style={{ overflowX: "auto", border: "1px solid var(--color-border)", borderRadius: 6 }}>
       <table className="mvx-table" style={{ fontSize: 12, width: "100%" }}>
         {header && <thead><tr>{header.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>}
         <tbody>{cells.map((row, i) => (
           <tr key={i}>
             {numbered && <td className="mvx-admin-muted" style={{ width: 28, textAlign: "right" }}>{i + 1}</td>}
-            {row.map((c, j) => <td key={j}>{c}</td>)}
+            {(row ?? []).map((c, j) => <td key={j}>{c}</td>)}
           </tr>
         ))}</tbody>
       </table>

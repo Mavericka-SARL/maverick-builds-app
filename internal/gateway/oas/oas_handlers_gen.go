@@ -40170,10 +40170,11 @@ func (s *Server) handleRevokeScimTokenRequest(args [1]string, argsEscaped bool, 
 // handleRunIntegrationRequest handles runIntegration operation.
 //
 // Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
-// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
-// rows are listed), and recalculates; every run is recorded in the integration's history. A
-// file_export is downloaded instead (GET /api/integrations/{id}/export).
+// re-fetching its sheet — into its form, dimension or grid. A grid or table run imports the file
+// whole or not at all — a row with a problem refuses it (422, every such row listed); a grid run
+// resolves names, checks members are leaves, commits through the write guard and the edition's
+// limits, and recalculates. Every run is recorded in the integration's history. A file_export is
+// downloaded instead (GET /api/integrations/{id}/export).
 //
 // POST /api/integrations/{id}/run
 func (s *Server) handleRunIntegrationRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -40324,7 +40325,7 @@ func (s *Server) handleRunIntegrationRequest(args [1]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    RunIntegrationOperation,
-			OperationSummary: "Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the edition's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).",
+			OperationSummary: "Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid or table run imports the file whole or not at all — a row with a problem refuses it (422, every such row listed); a grid run resolves names, checks members are leaves, commits through the write guard and the edition's limits, and recalculates. Every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).",
 			OperationID:      "runIntegration",
 			Body:             request,
 			RawBody:          rawBody,
@@ -40333,6 +40334,10 @@ func (s *Server) handleRunIntegrationRequest(args [1]string, argsEscaped bool, w
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "dry_run",
+					In:   "query",
+				}: params.DryRun,
 			},
 			Raw: r,
 		}

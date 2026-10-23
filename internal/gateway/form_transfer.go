@@ -153,6 +153,13 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
+		// DryRun checks every row as the import would and creates nothing:
+		// the Import Wizard's Validate step.
+		DryRun bool `json:"dry_run"`
+		// RowLines is the line in the person's file of each data row of
+		// csv, when csv was written out of it (the Import Wizard's):
+		// every answer about a row names that line (importpkg.RenumberRows).
+		RowLines []int `json:"row_lines"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
 		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
@@ -170,6 +177,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		header, rawRows, err = importpkg.ParseXLSXRows(raw)
 	} else {
 		header, rawRows, err = importpkg.ParseCSVRows([]byte(body.CSV))
+		importpkg.RenumberRows(rawRows, body.RowLines)
 	}
 	if err != nil {
 		jsonErr(w, fmt.Errorf("parse file: %w", err), http.StatusBadRequest)
@@ -180,9 +188,13 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
-	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows, false)
+	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun)
 	if err != nil {
 		h.jsonLimitErr(w, err)
+		return
+	}
+	if body.DryRun {
+		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "error_rows": len(errs), "errors": errs})
 		return
 	}
 	if len(errs) > 0 {

@@ -162,13 +162,14 @@ async function dashboardWithButtons(page: Page) {
     }));
 }
 
-test("a dashboard Integration button sends a workbook as it is and names the first bad row", async ({ page }) => {
+test("a dashboard Integration button sends a workbook as it is, and a file with a bad row is refused with the row named", async ({ page }) => {
   await mockApi(page);
   await dashboardWithButtons(page);
   const bodies: Array<Record<string, unknown>> = [];
   await page.route("**/api/integrations/int-1/run", async (route) => {
     bodies.push(route.request().postDataJSON());
-    await route.fulfill({ json: { rows_imported: 2, values_imported: 4, error_rows: 1,
+    // A file imports whole or not at all (2026-10-22): its valid rows used to go in.
+    await route.fulfill({ status: 422, json: { error: "import rejected: 1 row(s) failed validation, nothing was imported", error_rows: 1,
       errors: [{ row: 3, column: "Country", code: "UNKNOWN_MEMBER", message: "\"FR\" is not a member of dimension \"geography\"" }] } });
   });
   await loadAs(page, "business_admin");
@@ -183,7 +184,7 @@ test("a dashboard Integration button sends a workbook as it is and names the fir
   await chooser.setFiles({ name: "actuals.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("PK\u0003\u0004 workbook") });
   await expect.poll(() => bodies.length).toBe(1);
   expect(bodies[0]).toEqual({ xlsx_base64: Buffer.from("PK\u0003\u0004 workbook").toString("base64") });
-  await expect(page.getByText("2 rows imported, 1 errors")).toBeVisible();
+  await expect(page.getByText("import rejected: 1 row(s) failed validation, nothing was imported")).toBeVisible();
   await expect(page.getByText(/Row 3: "FR" is not a member/)).toBeVisible();
 
   // A CSV still goes as text.
@@ -277,6 +278,6 @@ test("a file integration the AI set up to reshape says how in the Integrations t
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows_imported: 2, values_imported: 4, error_rows: 0, errors: [] }) });
   });
   await page.getByLabel("File for Plan upload").setInputFiles({ name: "plan.csv", mimeType: "text/csv", buffer: Buffer.from("Plan FY26\n\nCountry,Line,Quarter 1\nCanada,Revenue,10\n") });
-  await expect(page.getByRole("status").filter({ hasText: "4 value(s) imported" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "2 row(s) imported (4 values)" })).toBeVisible();
   expect(sent).toEqual({ csv: "Plan FY26\n\nCountry,Line,Quarter 1\nCanada,Revenue,10\n" });
 });

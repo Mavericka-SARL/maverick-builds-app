@@ -481,6 +481,20 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (method === "PUT" && path.startsWith("/api/admin/plans/")) {
       return ok({ key: path.split("/").pop(), updated_at: "2026-09-17T00:00:00Z", ...(route.request().postDataJSON() as object) });
     }
+    // The Shape step's preview with a header row at most: the server reads
+    // a CSV's first row that is not blank as its header unless told which,
+    // and each row after it keeps its line in the file. A spec shaping a file
+    // further mocks its own preview.
+    if (method === "POST" && path === "/api/import/reshape-preview") {
+      const body = (route.request().postDataJSON() ?? {}) as { csv?: string; reshape?: { header_row?: number } };
+      const grid = String(body.csv ?? "").split(/\r?\n/).map((l) => (l.trim() ? l.split(",") : []));
+      while (grid.length && grid[grid.length - 1].length === 0) grid.pop();
+      const h = body.reshape?.header_row ? body.reshape.header_row - 1 : grid.findIndex((r) => r.length > 0);
+      const rows: string[][] = [];
+      const lines: number[] = [];
+      grid.slice(h + 1).forEach((r, i) => { if (r.length) { rows.push(r); lines.push(h + 2 + i); } });
+      return ok({ raw: grid.slice(0, 12), header: h >= 0 ? grid[h] : [], rows, lines, row_count: rows.length });
+    }
     if (method !== "GET") return ok({ status: "ok", id: "new-id" });
     if (path === "/api/cells/history") return ok(cellHistory);
     if (path === "/api/admin/audit/settings") return ok({ retention_days: 0, min_retention_days: 30 });

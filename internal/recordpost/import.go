@@ -98,8 +98,12 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 	// A dry run of a connector nobody has run yet has no principal: there
 	// is nobody's access to check its rows against.
 	view := &AccessView{}
+	var checks *tablePosting // what a row posts, checked once per cell
 	if req.CreatorID != "" {
 		if view, err = ps.AccessViewFor(ctx, req.CreatorID, form); err != nil {
+			return 0, nil, err
+		}
+		if checks, err = ps.newTablePosting(ctx, form); err != nil {
 			return 0, nil, err
 		}
 	}
@@ -155,7 +159,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 			continue
 		}
 		if req.CreatorID != "" {
-			code, msg, rErr := ps.PostingRefusal(ctx, req.CreatorID, true, form, "", &RecordState{Status: status, Data: data})
+			code, msg, rErr := ps.postingRefusal(ctx, checks, req.CreatorID, true, "", &RecordState{Status: status, Data: data})
 			if rErr != nil {
 				return 0, nil, rErr
 			}
@@ -211,10 +215,10 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 	// everything downstream per record — hundreds of overlapping passes for
 	// one file (about nine records a second on an FP&A model).
 	if req.Inline {
-		ps.postBatch(ctx, form.ID, recs, creator)
+		ps.postBatch(ctx, form, recs, creator)
 	} else {
 		bgCtx := context.WithoutCancel(ctx)
-		go ps.postBatch(bgCtx, form.ID, recs, creator)
+		go ps.postBatch(bgCtx, form, recs, creator)
 	}
 	// The rules a record created by hand fires: an automation that starts a
 	// workflow per submitted expense did not start for imported ones. The
@@ -227,29 +231,28 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 }
 
 // postBatch posts records created together through their table's live
-// mappings, rebuilds each mapping's total once and recalculates once.
-func (ps *Poster) postBatch(ctx context.Context, formID string, recs []*crudapp.FormRecord, userID string) {
+// mappings — the table and its mappings read once, each cell checked once,
+// one statement per mapping writing the postings — rebuilds each total they
+// changed once and recalculates once. The records are posted as created,
+// not read back: one changed since posts through its change instead
+// (insertPostings).
+func (ps *Poster) postBatch(ctx context.Context, form *crudapp.FormDef, recs []*crudapp.FormRecord, userID string) {
 	if len(recs) == 0 {
 		return
 	}
-	defer ps.pending(ctx, formID)()
-	for _, rec := range recs {
-		if err := ps.apply(ctx, rec.ID, formID, rec.Status, rec.Data, userID, true); err != nil {
-			ps.Log.Warn().Err(err).Str("record_id", rec.ID).Msg("import: posting a record failed")
-		}
-	}
-	mappings, err := ps.liveFormMappings(ctx, formID)
+	defer ps.pending(ctx, form.ID)()
+	tp, err := ps.newTablePosting(ctx, form)
 	if err != nil {
-		ps.Log.Error().Err(err).Str("form_id", formID).Msg("import: read mappings to rebuild totals")
+		ps.Log.Error().Err(err).Str("form_id", form.ID).Msg("import: read mappings to post records")
 		return
 	}
-	var affected []struct{ RevisionID, MetricID string }
-	modelID := ""
-	for _, m := range mappings {
-		revisionID := ps.postingRevision(ctx, m)
-		ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
-		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-		modelID = m.modelID
+	batch := make([]postingRecord, 0, len(recs))
+	for _, rec := range recs {
+		pr := postingRecord{id: rec.ID, status: rec.Status, data: asStored(rec.Data), updatedAt: rec.UpdatedAt}
+		if rec.CreatedBy != nil {
+			pr.creator = *rec.CreatedBy
+		}
+		batch = append(batch, pr)
 	}
-	ps.recalc(ctx, modelID, affected)
+	ps.totals(ctx, tp, ps.post(ctx, tp, batch, userID), userID)
 }

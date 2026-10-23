@@ -11469,6 +11469,11 @@ type FormImportRequest struct {
 	Csv OptString `json:"csv"`
 	// Base64-encoded .xlsx workbook; required unless csv is given.
 	XlsxBase64 OptString `json:"xlsx_base64"`
+	// Check every row as the import would and create nothing: 200 with dry_run, rows and errors.
+	DryRun OptBool `json:"dry_run"`
+	// With csv written out of another file (the Import Wizard's): the line in that file of each data row,
+	//  in order; every answer names a row by it.
+	RowLines []int `json:"row_lines"`
 }
 
 // GetCsv returns the value of Csv.
@@ -11481,6 +11486,16 @@ func (s *FormImportRequest) GetXlsxBase64() OptString {
 	return s.XlsxBase64
 }
 
+// GetDryRun returns the value of DryRun.
+func (s *FormImportRequest) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetRowLines returns the value of RowLines.
+func (s *FormImportRequest) GetRowLines() []int {
+	return s.RowLines
+}
+
 // SetCsv sets the value of Csv.
 func (s *FormImportRequest) SetCsv(val OptString) {
 	s.Csv = val
@@ -11489,6 +11504,16 @@ func (s *FormImportRequest) SetCsv(val OptString) {
 // SetXlsxBase64 sets the value of XlsxBase64.
 func (s *FormImportRequest) SetXlsxBase64(val OptString) {
 	s.XlsxBase64 = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *FormImportRequest) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetRowLines sets the value of RowLines.
+func (s *FormImportRequest) SetRowLines(val []int) {
+	s.RowLines = val
 }
 
 // Ref: #/components/schemas/FormMetricMapping
@@ -14771,6 +14796,12 @@ func (*ImportFormRecordsNotFound) importFormRecordsRes() {}
 type ImportFormRecordsOK struct {
 	Status         OptString `json:"status"`
 	RecordsCreated OptInt    `json:"records_created"`
+	DryRun         OptBool   `json:"dry_run"`
+	// With dry_run — the records that would be created.
+	Rows      OptInt `json:"rows"`
+	ErrorRows OptInt `json:"error_rows"`
+	// With dry_run — each problem, by the row's line in the file.
+	Errors []ImportFormRecordsOKErrorsItem `json:"errors"`
 }
 
 // GetStatus returns the value of Status.
@@ -14783,6 +14814,26 @@ func (s *ImportFormRecordsOK) GetRecordsCreated() OptInt {
 	return s.RecordsCreated
 }
 
+// GetDryRun returns the value of DryRun.
+func (s *ImportFormRecordsOK) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetRows returns the value of Rows.
+func (s *ImportFormRecordsOK) GetRows() OptInt {
+	return s.Rows
+}
+
+// GetErrorRows returns the value of ErrorRows.
+func (s *ImportFormRecordsOK) GetErrorRows() OptInt {
+	return s.ErrorRows
+}
+
+// GetErrors returns the value of Errors.
+func (s *ImportFormRecordsOK) GetErrors() []ImportFormRecordsOKErrorsItem {
+	return s.Errors
+}
+
 // SetStatus sets the value of Status.
 func (s *ImportFormRecordsOK) SetStatus(val OptString) {
 	s.Status = val
@@ -14793,7 +14844,63 @@ func (s *ImportFormRecordsOK) SetRecordsCreated(val OptInt) {
 	s.RecordsCreated = val
 }
 
+// SetDryRun sets the value of DryRun.
+func (s *ImportFormRecordsOK) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetRows sets the value of Rows.
+func (s *ImportFormRecordsOK) SetRows(val OptInt) {
+	s.Rows = val
+}
+
+// SetErrorRows sets the value of ErrorRows.
+func (s *ImportFormRecordsOK) SetErrorRows(val OptInt) {
+	s.ErrorRows = val
+}
+
+// SetErrors sets the value of Errors.
+func (s *ImportFormRecordsOK) SetErrors(val []ImportFormRecordsOKErrorsItem) {
+	s.Errors = val
+}
+
 func (*ImportFormRecordsOK) importFormRecordsRes() {}
+
+type ImportFormRecordsOKErrorsItem struct {
+	Row     OptInt    `json:"row"`
+	Column  OptString `json:"column"`
+	Message OptString `json:"message"`
+}
+
+// GetRow returns the value of Row.
+func (s *ImportFormRecordsOKErrorsItem) GetRow() OptInt {
+	return s.Row
+}
+
+// GetColumn returns the value of Column.
+func (s *ImportFormRecordsOKErrorsItem) GetColumn() OptString {
+	return s.Column
+}
+
+// GetMessage returns the value of Message.
+func (s *ImportFormRecordsOKErrorsItem) GetMessage() OptString {
+	return s.Message
+}
+
+// SetRow sets the value of Row.
+func (s *ImportFormRecordsOKErrorsItem) SetRow(val OptInt) {
+	s.Row = val
+}
+
+// SetColumn sets the value of Column.
+func (s *ImportFormRecordsOKErrorsItem) SetColumn(val OptString) {
+	s.Column = val
+}
+
+// SetMessage sets the value of Message.
+func (s *ImportFormRecordsOKErrorsItem) SetMessage(val OptString) {
+	s.Message = val
+}
 
 type ImportFormRecordsUnprocessableEntity struct {
 	Error     OptString                                        `json:"error"`
@@ -14885,6 +14992,10 @@ type ImportJob struct {
 	CreatedAt   OptProtoTimestamp  `json:"created_at"`
 	CompletedAt OptProtoTimestamp  `json:"completed_at"`
 	RevisionID  OptUUID            `json:"revision_id"`
+	// The name of the revision the import wrote to.
+	RevisionName OptString `json:"revision_name"`
+	// A refused import's first problem ("row 5, product: …"); its job has status 4.
+	Error OptString `json:"error"`
 }
 
 // GetID returns the value of ID.
@@ -14942,6 +15053,16 @@ func (s *ImportJob) GetRevisionID() OptUUID {
 	return s.RevisionID
 }
 
+// GetRevisionName returns the value of RevisionName.
+func (s *ImportJob) GetRevisionName() OptString {
+	return s.RevisionName
+}
+
+// GetError returns the value of Error.
+func (s *ImportJob) GetError() OptString {
+	return s.Error
+}
+
 // SetID sets the value of ID.
 func (s *ImportJob) SetID(val OptUUID) {
 	s.ID = val
@@ -14995,6 +15116,16 @@ func (s *ImportJob) SetCompletedAt(val OptProtoTimestamp) {
 // SetRevisionID sets the value of RevisionID.
 func (s *ImportJob) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
+}
+
+// SetRevisionName sets the value of RevisionName.
+func (s *ImportJob) SetRevisionName(val OptString) {
+	s.RevisionName = val
+}
+
+// SetError sets the value of Error.
+func (s *ImportJob) SetError(val OptString) {
+	s.Error = val
 }
 
 type ImportJobStatus int
@@ -15292,12 +15423,22 @@ type ImportUploadNotFound Error
 func (*ImportUploadNotFound) importUploadRes() {}
 
 type ImportUploadOK struct {
-	JobID      OptUUID   `json:"job_id"`
-	Status     OptString `json:"status"`
-	TotalRows  OptInt    `json:"total_rows"`
-	ValidRows  OptInt    `json:"valid_rows"`
-	ErrorRows  OptInt    `json:"error_rows"`
-	RevisionID OptUUID   `json:"revision_id"`
+	JobID  OptUUID   `json:"job_id"`
+	Status OptString `json:"status"`
+	// Values — a row of a wide file is one value per metric.
+	TotalRows OptInt `json:"total_rows"`
+	// Values imported.
+	ValidRows OptInt `json:"valid_rows"`
+	// Rows with a problem.
+	ErrorRows  OptInt  `json:"error_rows"`
+	RevisionID OptUUID `json:"revision_id"`
+	// The file's rows imported (or.
+	Rows OptInt `json:"rows"`
+	// The values they hold.
+	Values OptInt  `json:"values"`
+	DryRun OptBool `json:"dry_run"`
+	// With dry_run — each problem the import would refuse.
+	Errors []ImportUploadOKErrorsItem `json:"errors"`
 	// True when this is the answer of an import sent before under the same Idempotency-Key; nothing was
 	// applied.
 	Replayed OptBool `json:"replayed"`
@@ -15331,6 +15472,26 @@ func (s *ImportUploadOK) GetErrorRows() OptInt {
 // GetRevisionID returns the value of RevisionID.
 func (s *ImportUploadOK) GetRevisionID() OptUUID {
 	return s.RevisionID
+}
+
+// GetRows returns the value of Rows.
+func (s *ImportUploadOK) GetRows() OptInt {
+	return s.Rows
+}
+
+// GetValues returns the value of Values.
+func (s *ImportUploadOK) GetValues() OptInt {
+	return s.Values
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *ImportUploadOK) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetErrors returns the value of Errors.
+func (s *ImportUploadOK) GetErrors() []ImportUploadOKErrorsItem {
+	return s.Errors
 }
 
 // GetReplayed returns the value of Replayed.
@@ -15368,12 +15529,91 @@ func (s *ImportUploadOK) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
 }
 
+// SetRows sets the value of Rows.
+func (s *ImportUploadOK) SetRows(val OptInt) {
+	s.Rows = val
+}
+
+// SetValues sets the value of Values.
+func (s *ImportUploadOK) SetValues(val OptInt) {
+	s.Values = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *ImportUploadOK) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetErrors sets the value of Errors.
+func (s *ImportUploadOK) SetErrors(val []ImportUploadOKErrorsItem) {
+	s.Errors = val
+}
+
 // SetReplayed sets the value of Replayed.
 func (s *ImportUploadOK) SetReplayed(val OptBool) {
 	s.Replayed = val
 }
 
 func (*ImportUploadOK) importUploadRes() {}
+
+type ImportUploadOKErrorsItem struct {
+	// The row's line in the file.
+	Row      OptInt    `json:"row"`
+	Column   OptString `json:"column"`
+	Code     OptString `json:"code"`
+	Message  OptString `json:"message"`
+	RawValue OptString `json:"raw_value"`
+}
+
+// GetRow returns the value of Row.
+func (s *ImportUploadOKErrorsItem) GetRow() OptInt {
+	return s.Row
+}
+
+// GetColumn returns the value of Column.
+func (s *ImportUploadOKErrorsItem) GetColumn() OptString {
+	return s.Column
+}
+
+// GetCode returns the value of Code.
+func (s *ImportUploadOKErrorsItem) GetCode() OptString {
+	return s.Code
+}
+
+// GetMessage returns the value of Message.
+func (s *ImportUploadOKErrorsItem) GetMessage() OptString {
+	return s.Message
+}
+
+// GetRawValue returns the value of RawValue.
+func (s *ImportUploadOKErrorsItem) GetRawValue() OptString {
+	return s.RawValue
+}
+
+// SetRow sets the value of Row.
+func (s *ImportUploadOKErrorsItem) SetRow(val OptInt) {
+	s.Row = val
+}
+
+// SetColumn sets the value of Column.
+func (s *ImportUploadOKErrorsItem) SetColumn(val OptString) {
+	s.Column = val
+}
+
+// SetCode sets the value of Code.
+func (s *ImportUploadOKErrorsItem) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetMessage sets the value of Message.
+func (s *ImportUploadOKErrorsItem) SetMessage(val OptString) {
+	s.Message = val
+}
+
+// SetRawValue sets the value of RawValue.
+func (s *ImportUploadOKErrorsItem) SetRawValue(val OptString) {
+	s.RawValue = val
+}
 
 // Ref: #/components/schemas/ImportUploadRequest
 type ImportUploadRequest struct {
@@ -15383,6 +15623,12 @@ type ImportUploadRequest struct {
 	XlsxBase64 OptString `json:"xlsx_base64"`
 	// Defaults to the model's active revision.
 	RevisionID OptUUID `json:"revision_id"`
+	// Read and check every row and import nothing: the answer lists each row the import would refuse
+	// (200, dry_run true). No import job is recorded.
+	DryRun OptBool `json:"dry_run"`
+	// With csv written out of another file (the Import Wizard's): the line in that file of each data row,
+	//  in order; every answer and the import's history name a row by it.
+	RowLines []int `json:"row_lines"`
 	// Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
 	// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
 	// revision's typed values the caller may write, then sets the file's.
@@ -15404,6 +15650,16 @@ func (s *ImportUploadRequest) GetRevisionID() OptUUID {
 	return s.RevisionID
 }
 
+// GetDryRun returns the value of DryRun.
+func (s *ImportUploadRequest) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetRowLines returns the value of RowLines.
+func (s *ImportUploadRequest) GetRowLines() []int {
+	return s.RowLines
+}
+
 // GetImportMode returns the value of ImportMode.
 func (s *ImportUploadRequest) GetImportMode() OptImportUploadRequestImportMode {
 	return s.ImportMode
@@ -15422,6 +15678,16 @@ func (s *ImportUploadRequest) SetXlsxBase64(val OptString) {
 // SetRevisionID sets the value of RevisionID.
 func (s *ImportUploadRequest) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *ImportUploadRequest) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetRowLines sets the value of RowLines.
+func (s *ImportUploadRequest) SetRowLines(val []int) {
+	s.RowLines = val
 }
 
 // SetImportMode sets the value of ImportMode.
@@ -15481,7 +15747,8 @@ func (s *ImportUploadRequestImportMode) UnmarshalText(data []byte) error {
 }
 
 type ImportUploadUnprocessableEntity struct {
-	Error     OptString                                   `json:"error"`
+	Error OptString `json:"error"`
+	// Rows with a problem.
 	ErrorRows OptInt                                      `json:"error_rows"`
 	Errors    []ImportUploadUnprocessableEntityErrorsItem `json:"errors"`
 }
@@ -15519,6 +15786,7 @@ func (s *ImportUploadUnprocessableEntity) SetErrors(val []ImportUploadUnprocessa
 func (*ImportUploadUnprocessableEntity) importUploadRes() {}
 
 type ImportUploadUnprocessableEntityErrorsItem struct {
+	// The row's line in the file.
 	Row      OptInt    `json:"row"`
 	Column   OptString `json:"column"`
 	Code     OptString `json:"code"`
@@ -15669,6 +15937,9 @@ type IntegrationOAuthCallbackFound struct{}
 type IntegrationRunRequest struct {
 	// The file as CSV text (csv_import).
 	Csv OptString `json:"csv"`
+	// With csv written out of another file (the Import Wizard's) — the line in that file of each data
+	// row, in order; every answer and the run's history name a row by it.
+	RowLines []int `json:"row_lines"`
 	// The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB
 	// before encoding.
 	XlsxBase64 OptString `json:"xlsx_base64"`
@@ -15679,6 +15950,11 @@ type IntegrationRunRequest struct {
 // GetCsv returns the value of Csv.
 func (s *IntegrationRunRequest) GetCsv() OptString {
 	return s.Csv
+}
+
+// GetRowLines returns the value of RowLines.
+func (s *IntegrationRunRequest) GetRowLines() []int {
+	return s.RowLines
 }
 
 // GetXlsxBase64 returns the value of XlsxBase64.
@@ -15694,6 +15970,11 @@ func (s *IntegrationRunRequest) GetSheet() OptString {
 // SetCsv sets the value of Csv.
 func (s *IntegrationRunRequest) SetCsv(val OptString) {
 	s.Csv = val
+}
+
+// SetRowLines sets the value of RowLines.
+func (s *IntegrationRunRequest) SetRowLines(val []int) {
+	s.RowLines = val
 }
 
 // SetXlsxBase64 sets the value of XlsxBase64.
@@ -25808,11 +26089,13 @@ func (s *PreviewFormMappingOKItem) init() PreviewFormMappingOKItem {
 }
 
 type PreviewImportReshapeOK struct {
-	Sheets   []string   `json:"sheets"`
-	Raw      [][]string `json:"raw"`
-	Header   []string   `json:"header"`
-	Rows     [][]string `json:"rows"`
-	RowCount OptInt     `json:"row_count"`
+	Sheets []string   `json:"sheets"`
+	Raw    [][]string `json:"raw"`
+	Header []string   `json:"header"`
+	Rows   [][]string `json:"rows"`
+	// Lines[i] is the row of the file rows[i] comes from.
+	Lines    []int  `json:"lines"`
+	RowCount OptInt `json:"row_count"`
 }
 
 // GetSheets returns the value of Sheets.
@@ -25833,6 +26116,11 @@ func (s *PreviewImportReshapeOK) GetHeader() []string {
 // GetRows returns the value of Rows.
 func (s *PreviewImportReshapeOK) GetRows() [][]string {
 	return s.Rows
+}
+
+// GetLines returns the value of Lines.
+func (s *PreviewImportReshapeOK) GetLines() []int {
+	return s.Lines
 }
 
 // GetRowCount returns the value of RowCount.
@@ -25858,6 +26146,11 @@ func (s *PreviewImportReshapeOK) SetHeader(val []string) {
 // SetRows sets the value of Rows.
 func (s *PreviewImportReshapeOK) SetRows(val [][]string) {
 	s.Rows = val
+}
+
+// SetLines sets the value of Lines.
+func (s *PreviewImportReshapeOK) SetLines(val []int) {
+	s.Lines = val
 }
 
 // SetRowCount sets the value of RowCount.
@@ -27896,9 +28189,14 @@ func (*RunIntegrationNotFound) runIntegrationRes() {}
 type RunIntegrationOK struct {
 	RowsImported OptInt `json:"rows_imported"`
 	// Grid runs — one row can carry several metrics' values.
-	ValuesImported OptInt `json:"values_imported"`
-	ErrorRows      OptInt `json:"error_rows"`
-	// Grid runs — each value that failed, by row and column.
+	ValuesImported OptInt  `json:"values_imported"`
+	ErrorRows      OptInt  `json:"error_rows"`
+	DryRun         OptBool `json:"dry_run"`
+	// With dry_run — the rows that would be imported.
+	Rows OptInt `json:"rows"`
+	// With dry_run — the values they hold (grid).
+	Values OptInt `json:"values"`
+	// With dry_run — each problem the run would refuse, by the row's line in the file.
 	Errors []RunIntegrationOKErrorsItem `json:"errors"`
 }
 
@@ -27915,6 +28213,21 @@ func (s *RunIntegrationOK) GetValuesImported() OptInt {
 // GetErrorRows returns the value of ErrorRows.
 func (s *RunIntegrationOK) GetErrorRows() OptInt {
 	return s.ErrorRows
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *RunIntegrationOK) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetRows returns the value of Rows.
+func (s *RunIntegrationOK) GetRows() OptInt {
+	return s.Rows
+}
+
+// GetValues returns the value of Values.
+func (s *RunIntegrationOK) GetValues() OptInt {
+	return s.Values
 }
 
 // GetErrors returns the value of Errors.
@@ -27937,6 +28250,21 @@ func (s *RunIntegrationOK) SetErrorRows(val OptInt) {
 	s.ErrorRows = val
 }
 
+// SetDryRun sets the value of DryRun.
+func (s *RunIntegrationOK) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetRows sets the value of Rows.
+func (s *RunIntegrationOK) SetRows(val OptInt) {
+	s.Rows = val
+}
+
+// SetValues sets the value of Values.
+func (s *RunIntegrationOK) SetValues(val OptInt) {
+	s.Values = val
+}
+
 // SetErrors sets the value of Errors.
 func (s *RunIntegrationOK) SetErrors(val []RunIntegrationOKErrorsItem) {
 	s.Errors = val
@@ -27945,6 +28273,7 @@ func (s *RunIntegrationOK) SetErrors(val []RunIntegrationOKErrorsItem) {
 func (*RunIntegrationOK) runIntegrationRes() {}
 
 type RunIntegrationOKErrorsItem struct {
+	// The row's line in the file.
 	Row      OptInt    `json:"row"`
 	Column   OptString `json:"column"`
 	Code     OptString `json:"code"`
@@ -28006,6 +28335,103 @@ func (s *RunIntegrationOKErrorsItem) SetRawValue(val OptString) {
 type RunIntegrationPaymentRequired struct{}
 
 func (*RunIntegrationPaymentRequired) runIntegrationRes() {}
+
+type RunIntegrationUnprocessableEntity struct {
+	Error     OptString                                     `json:"error"`
+	ErrorRows OptInt                                        `json:"error_rows"`
+	Errors    []RunIntegrationUnprocessableEntityErrorsItem `json:"errors"`
+}
+
+// GetError returns the value of Error.
+func (s *RunIntegrationUnprocessableEntity) GetError() OptString {
+	return s.Error
+}
+
+// GetErrorRows returns the value of ErrorRows.
+func (s *RunIntegrationUnprocessableEntity) GetErrorRows() OptInt {
+	return s.ErrorRows
+}
+
+// GetErrors returns the value of Errors.
+func (s *RunIntegrationUnprocessableEntity) GetErrors() []RunIntegrationUnprocessableEntityErrorsItem {
+	return s.Errors
+}
+
+// SetError sets the value of Error.
+func (s *RunIntegrationUnprocessableEntity) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetErrorRows sets the value of ErrorRows.
+func (s *RunIntegrationUnprocessableEntity) SetErrorRows(val OptInt) {
+	s.ErrorRows = val
+}
+
+// SetErrors sets the value of Errors.
+func (s *RunIntegrationUnprocessableEntity) SetErrors(val []RunIntegrationUnprocessableEntityErrorsItem) {
+	s.Errors = val
+}
+
+func (*RunIntegrationUnprocessableEntity) runIntegrationRes() {}
+
+type RunIntegrationUnprocessableEntityErrorsItem struct {
+	// The row's line in the file.
+	Row      OptInt    `json:"row"`
+	Column   OptString `json:"column"`
+	Code     OptString `json:"code"`
+	Message  OptString `json:"message"`
+	RawValue OptString `json:"raw_value"`
+}
+
+// GetRow returns the value of Row.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) GetRow() OptInt {
+	return s.Row
+}
+
+// GetColumn returns the value of Column.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) GetColumn() OptString {
+	return s.Column
+}
+
+// GetCode returns the value of Code.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) GetCode() OptString {
+	return s.Code
+}
+
+// GetMessage returns the value of Message.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) GetMessage() OptString {
+	return s.Message
+}
+
+// GetRawValue returns the value of RawValue.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) GetRawValue() OptString {
+	return s.RawValue
+}
+
+// SetRow sets the value of Row.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) SetRow(val OptInt) {
+	s.Row = val
+}
+
+// SetColumn sets the value of Column.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) SetColumn(val OptString) {
+	s.Column = val
+}
+
+// SetCode sets the value of Code.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetMessage sets the value of Message.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) SetMessage(val OptString) {
+	s.Message = val
+}
+
+// SetRawValue sets the value of RawValue.
+func (s *RunIntegrationUnprocessableEntityErrorsItem) SetRawValue(val OptString) {
+	s.RawValue = val
+}
 
 type SaveAiSettingsOK struct {
 	Status OptString `json:"status"`

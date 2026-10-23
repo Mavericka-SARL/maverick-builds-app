@@ -221,10 +221,11 @@ func TestGoogleSheetsIntegrationRunSyncsGridFacts(t *testing.T) {
 		t.Errorf("fact_input rows = %d, want 2 (append-only history, one per sync)", total)
 	}
 
-	// A sheet row that fails validation is counted, not committed.
+	// A sheet row that fails validation refuses the sync: nothing is
+	// committed and the row is named (a file imports whole or not at all).
 	setSheetCSV("Q3 Revenue\nnot-a-number\n")
 	status, body = do(t, "POST", "/api/integrations/"+intID+"/run", nil)
-	if status != http.StatusOK {
+	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("run with bad row: status=%d body=%v", status, body)
 	}
 	if got, _ := body["error_rows"].(float64); got != 1 {

@@ -12506,6 +12506,9 @@ func decodeRevokeScimTokenParams(args [1]string, argsEscaped bool, r *http.Reque
 // RunIntegrationParams is parameters of runIntegration operation.
 type RunIntegrationParams struct {
 	ID uuid.UUID
+	// True reads and checks the file as the run would and imports nothing, records no run (a grid or a
+	// table's integration only): 200 with dry_run, rows and errors.
+	DryRun OptBool `json:",omitempty,omitzero"`
 }
 
 func unpackRunIntegrationParams(packed middleware.Parameters) (params RunIntegrationParams) {
@@ -12516,10 +12519,20 @@ func unpackRunIntegrationParams(packed middleware.Parameters) (params RunIntegra
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "dry_run",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.DryRun = v.(OptBool)
+		}
+	}
 	return params
 }
 
 func decodeRunIntegrationParams(args [1]string, argsEscaped bool, r *http.Request) (params RunIntegrationParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -12562,6 +12575,47 @@ func decodeRunIntegrationParams(args [1]string, argsEscaped bool, r *http.Reques
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: dry_run.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "dry_run",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotDryRunVal bool
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToBool(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotDryRunVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.DryRun.SetTo(paramsDotDryRunVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dry_run",
+			In:   "query",
 			Err:  err,
 		}
 	}

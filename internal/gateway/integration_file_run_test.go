@@ -14,9 +14,10 @@ import (
 // A saved Excel/CSV integration mapped by NAME — the kind the Import Wizard
 // and the AI Developer save — is re-run by a business user from a dashboard
 // button with the file they have: a CSV in the long layout or a formatted
-// workbook in the wide one. Valid rows commit, bad ones are named, negative
-// values are values, the write guard still applies, and every run is in the
-// integration's history. The run endpoint used to take CSV only and stage
+// workbook in the wide one. A file with a bad row is refused whole, the row
+// named by its line (the owner's decision of 2026-10-22: valid rows used to
+// commit), negative values are values, the write guard still applies, and
+// every run is in the integration's history. The run endpoint used to take CSV only and stage
 // the raw metric cell as a metric id, so none of these files ran.
 func TestBusinessUserRunsANameMappedFileIntegration(t *testing.T) {
 	f := newSalesFileFixture(t)
@@ -64,14 +65,23 @@ func TestBusinessUserRunsANameMappedFileIntegration(t *testing.T) {
 		return status, res, string(body)
 	}
 
-	// 1. A long CSV: metric names per row, a credit, an unknown member.
-	status, res, raw := run(map[string]any{"csv": "Country,Quarter,Account,Amount,Notes\n" +
-		"CA,Q1,revenue,100,\nCA,Q1,cost,-20,credit note\nUK,Q2,revenue,50,\nFR,Q1,revenue,5,\n"})
-	if status != http.StatusOK || res.RowsImported != 3 || res.ErrorRows != 1 {
-		t.Fatalf("long csv run: %d %s", status, raw)
+	// 1. A long CSV: metric names per row, a credit — and an unknown member
+	// on line 5, which refuses the file: nothing of it is written.
+	longCSV := "Country,Quarter,Account,Amount,Notes\n" +
+		"CA,Q1,revenue,100,\nCA,Q1,cost,-20,credit note\nUK,Q2,revenue,50,\n"
+	status, res, raw := run(map[string]any{"csv": longCSV + "FR,Q1,revenue,5,\n"})
+	if status != http.StatusUnprocessableEntity || res.ErrorRows != 1 || len(res.Errors) != 1 {
+		t.Fatalf("long csv run with a bad row: %d %s", status, raw)
 	}
-	if msg, _ := res.Errors[0]["message"].(string); !strings.Contains(msg, `"FR" is not a member of dimension "geography"`) {
-		t.Errorf("the bad row must be named: %v", res.Errors)
+	if msg, _ := res.Errors[0]["message"].(string); !strings.Contains(msg, `"FR" is not a member of dimension "geography"`) || res.Errors[0]["row"] != 5.0 {
+		t.Errorf("the bad row must be named by its line: %v", res.Errors)
+	}
+	if _, ok := value("CA", "Q1", "cost"); ok {
+		t.Error("a refused file wrote its valid rows")
+	}
+	status, res, raw = run(map[string]any{"csv": longCSV})
+	if status != http.StatusOK || res.RowsImported != 3 || res.ErrorRows != 0 {
+		t.Fatalf("long csv run: %d %s", status, raw)
 	}
 	if v, ok := value("CA", "Q1", "cost"); !ok || v != -20 {
 		t.Errorf("CA Q1 cost = %v (found %v), want the credit -20", v, ok)
@@ -118,15 +128,15 @@ func TestBusinessUserRunsANameMappedFileIntegration(t *testing.T) {
 		ErrorRows    int    `json:"error_rows"`
 	}
 	_ = json.Unmarshal(body, &runs)
-	if status != http.StatusOK || len(runs) != 3 {
+	if status != http.StatusOK || len(runs) != 4 {
 		t.Fatalf("run history: %d %s", status, body)
 	}
 	statuses := map[string]int{}
 	for _, r := range runs {
 		statuses[r.Status]++
 	}
-	if statuses["success"] != 2 || statuses["error"] != 1 {
-		t.Errorf("run statuses = %v, want 2 success and 1 error", statuses)
+	if statuses["success"] != 2 || statuses["error"] != 2 {
+		t.Errorf("run statuses = %v, want 2 success and 2 error (the refused file, the hidden member)", statuses)
 	}
 
 	// A run without a file says what it needs.
