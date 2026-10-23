@@ -122,6 +122,7 @@ func formCellString(v any) string {
 // rejects the entire file before anything is created.
 func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID string) {
 	extendImportDeadlines(w)
+	started := time.Now()
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB limit
 	ctx := r.Context()
 	store := crudapp.NewStore(h.db.For(ctx))
@@ -160,6 +161,8 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		// csv, when csv was written out of it (the Import Wizard's):
 		// every answer about a row names that line (importpkg.RenumberRows).
 		RowLines []int `json:"row_lines"`
+		// FileName names the person's file in Recent Imports.
+		FileName string `json:"file_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
 		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
@@ -189,12 +192,17 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	}
 
 	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun)
-	if err != nil {
-		h.jsonLimitErr(w, err)
+	if body.DryRun && err == nil {
+		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "error_rows": len(errs), "errors": errs})
 		return
 	}
-	if body.DryRun {
-		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "error_rows": len(errs), "errors": errs})
+	job := importpkg.FinishedJob{}
+	if !body.DryRun && (err != nil || len(errs) > 0 || created > 0) {
+		job = h.tableImportJob(ctx, formID, "upload", act.UserID, body.FileName, started, created, errs, err)
+		h.recordImportJob(ctx, job)
+	}
+	if err != nil {
+		h.jsonLimitErr(w, err)
 		return
 	}
 	if len(errs) > 0 {
@@ -209,7 +217,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
+		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID, RevisionID: job.RevisionID,
 		Metadata: map[string]string{"records_created": strconv.Itoa(created)},
 	})
 	jsonOK(w, map[string]any{"status": "ok", "records_created": created})

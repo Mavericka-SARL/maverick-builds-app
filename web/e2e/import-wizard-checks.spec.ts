@@ -92,13 +92,13 @@ test("a file integration keeps the import mode it was saved with, shows it, and 
 });
 
 test("Recent Imports names each import's revision and why a refused one went in not at all", async ({ page }) => {
-  await page.route("**/api/import/jobs", (route) => route.fulfill(json([
+  await page.route("**/api/import/jobs?*", (route) => route.fulfill(json([
     { id: "job-2", model_id: "model-1", revision_id: "rev-1", revision_name: "Working", status: 3, total_rows: 24, valid_rows: 24, error_rows: 0, created_at: "2026-10-21T10:00:00Z" },
     { id: "job-1", model_id: "model-1", revision_id: "rev-1", revision_name: "Working", status: 4, total_rows: 4, valid_rows: 0, error_rows: 4, created_at: "2026-10-21T09:00:00Z",
       error: "row 5, product: \"AI accel. cards\" is not a member of dimension \"product\"" },
   ])));
   await openIntegrations(page);
-  const history = page.getByRole("table").filter({ has: page.getByRole("columnheader", { name: "Values" }) });
+  const history = page.getByRole("table").filter({ has: page.getByRole("columnheader", { name: "Imported into" }) });
   await expect(history.getByRole("row")).toHaveCount(3);
   await expect(history.getByRole("row").nth(1)).toContainText("Working");
   await expect(history.getByRole("row").nth(2)).toContainText("Failed");

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -803,11 +804,21 @@ func oneDimSliceRows(
 		aggRule == string(rollup.AggRate) ||
 		(aggRule == "average" && !dimConditional)
 
+	// Each member's leaves, found once per dimension: a slice used to scan
+	// every leaf, so a node × day metric's 420 slices read its 43,200
+	// leaves 420 times over (2026-10-23). In ascending leaf order, a slice
+	// reduces its values in the order the scan met them.
 	var out []CalcResultRow
 	for _, dimID := range dimIDs {
 		d := dims[dimID]
 		if d == nil {
 			continue
+		}
+		rowsOf := map[string][]int{}
+		for i, r := range leafResults {
+			if code, ok := r.DimMembers[dimID]; ok {
+				rowsOf[code] = append(rowsOf[code], i)
+			}
 		}
 		childrenOf := map[string][]string{}
 		for _, m := range d.Members {
@@ -841,20 +852,33 @@ func oneDimSliceRows(
 				sub[c] = true
 				queue = append(queue, childrenOf[c]...)
 			}
+			var picked []int
+			lists := 0
+			for c := range sub {
+				if rows := rowsOf[c]; len(rows) > 0 {
+					picked = append(picked, rows...)
+					lists++
+				}
+			}
+			if lists > 1 {
+				sort.Ints(picked)
+			}
+			sliceLeaves := make([]CalcResultRow, len(picked))
+			for k, i := range picked {
+				sliceLeaves[k] = leafResults[i]
+			}
 			if axis != nil && (dimID != axis.dim.ID || !m.IsLeafPeriod()) {
 				// A non-time member reduces time by the summary; so does an
 				// AGGREGATE period (H1 = its quarters reduced). A leaf period
 				// is a single period and falls through to the plain combine.
-				if v, ok := summarizeOverTime(leafResults, axis, aggRule, timeSummaryRule, map[string]map[string]bool{dimID: sub}); ok {
+				if v, ok := summarizeOverTime(sliceLeaves, axis, aggRule, timeSummaryRule, map[string]map[string]bool{dimID: sub}); ok {
 					out = append(out, CalcResultRow{DimMembers: slice, Value: v})
 				}
 				continue
 			}
-			vals := make([]float64, 0)
-			for _, r := range leafResults {
-				if code, ok := r.DimMembers[dimID]; ok && sub[code] {
-					vals = append(vals, r.Value)
-				}
+			vals := make([]float64, 0, len(sliceLeaves))
+			for _, r := range sliceLeaves {
+				vals = append(vals, r.Value)
 			}
 			if len(vals) == 0 {
 				continue

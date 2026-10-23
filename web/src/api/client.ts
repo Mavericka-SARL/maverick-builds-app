@@ -1839,6 +1839,24 @@ export interface ImportJob {
   error_rows: number;
   // Go serialises protobuf Timestamp as {seconds, nanos} via encoding/json
   created_at: string | { seconds: number; nanos: number };
+  // How the import came: "upload" (the Import Wizard), "csv_import" or
+  // "google_sheets" (a saved integration), "rest_api", "ai_attachment", …
+  source?: string;
+  // What it wrote into, named as it was then. Someone else's import is
+  // described to the model's builders only: the rest see counts and status.
+  target_type?: "grid" | "dimension" | "table";
+  target_name?: string;
+  import_mode?: ImportModeParam;
+  file_name?: string;
+  by?: string;
+  duration_ms?: number;
+}
+
+// What a file import says about itself for Recent Imports; it changes
+// nothing about what is imported.
+export interface ImportAbout {
+  gridId?: string;
+  fileName?: string;
 }
 
 export type ImportModeParam = "incremental" | "replace" | "full_reload";
@@ -2547,10 +2565,10 @@ export const api = {
   // rowLines: the line in the person's file of each data row of csv, when
   // csv was written out of it (the Import Wizard's) — every answer, and the
   // import's history, then names a row by its line in that file.
-  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam, rowLines?: number[]) =>
+  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam, rowLines?: number[], about?: ImportAbout) =>
     apiFetch<ImportUploadResult>(
       "/api/import/upload",
-      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental", row_lines: rowLines }) },
+      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental", row_lines: rowLines, grid_id: about?.gridId, file_name: about?.fileName }) },
     ),
   checkImport: (csv: string, revisionId?: string, rowLines?: number[]) =>
     apiFetch<ImportCheck>("/api/import/upload", { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, dry_run: true, row_lines: rowLines }) }),
@@ -2587,7 +2605,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sheet_url: sheetUrl }),
     }),
-  getImportJobs: () => apiFetch<ImportJob[]>("/api/import/jobs"),
+  // revisionId: the history of that revision's model (the Build working
+  // revision's), not the application's default model's.
+  getImportJobs: (revisionId?: string) =>
+    apiFetch<ImportJob[]>(`/api/import/jobs${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
   deleteImportJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/import/jobs/${id}`, { method: "DELETE" }),
 
@@ -2615,10 +2636,10 @@ export const api = {
   getInfraNodes: () => apiFetch<InfraNode[]>("/api/admin/infra/nodes"),
   listIntegrationRuns: (id: string) =>
     apiFetch<IntegrationRun[]>(`/api/developer/integrations/${id}/runs`),
-  importDimensionMembers: (dimensionId: string, csv: string) =>
+  importDimensionMembers: (dimensionId: string, csv: string, about?: ImportAbout) =>
     apiFetch<{ rows_imported: number; error_rows: number }>("/api/import/dimension-members", {
       method: "POST",
-      body: JSON.stringify({ dimension_id: dimensionId, csv }),
+      body: JSON.stringify({ dimension_id: dimensionId, csv, file_name: about?.fileName }),
     }),
   createExportIntegration: (body: { name: string; target_id: string; status?: string; tags?: string[]; config: ExportSpec }, revisionId?: string) =>
     apiFetch<{ id: string }>(`/api/developer/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
@@ -2640,10 +2661,10 @@ export const api = {
   // re-fetches the configured sheet at run time. The integration's saved
   // column map is applied server-side, so a file of metric and member names
   // runs as it is.
-  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[]) =>
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout) =>
     apiFetch<{ rows_imported: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
       method: "POST",
-      body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}) }),
+      body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}) }),
     }),
   checkIntegrationRun: (id: string, csv: string, rowLines?: number[]) =>
     apiFetch<ImportCheck>(`/api/integrations/${id}/run?dry_run=true`, { method: "POST", body: JSON.stringify({ csv, row_lines: rowLines }) }),
@@ -2689,10 +2710,10 @@ export const api = {
   // Given a query (without totals), the export holds what it matches, in its order.
   exportFormRecords: (formId: string, format: "csv" | "xlsx" = "xlsx", query?: RecordsQuery) =>
     apiFetchBlob(`/api/forms/${formId}/export?format=${format}${query ? `&query=${encodeURIComponent(JSON.stringify(query))}` : ""}`),
-  importFormRecords: (formId: string, csv: string, rowLines?: number[]) =>
+  importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout) =>
     apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
       method: "POST",
-      body: JSON.stringify({ csv, row_lines: rowLines }),
+      body: JSON.stringify({ csv, row_lines: rowLines, file_name: about?.fileName }),
     }),
   checkFormRecords: (formId: string, csv: string, rowLines?: number[]) =>
     apiFetch<ImportCheck>(`/api/forms/${formId}/import`, { method: "POST", body: JSON.stringify({ csv, dry_run: true, row_lines: rowLines }) }),

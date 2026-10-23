@@ -23,6 +23,7 @@ export { LoadingState } from "./LoadingState";
 export { ErrorState } from "./ErrorState";
 export { UnsavedChangesBar } from "./UnsavedChangesBar";
 export { WidgetErrorBoundary } from "./WidgetErrorBoundary";
+export { PageErrorBoundary } from "./PageErrorBoundary";
 
 export { Field } from "./Field";
 export { TextInput } from "./TextInput";

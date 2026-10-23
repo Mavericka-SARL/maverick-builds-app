@@ -48,7 +48,7 @@ func (h *handler) aiWriteValues(ctx context.Context, act *actor, req aiassistant
 		}
 	}
 	if len(staged) > 0 {
-		if _, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, importpkg.ModeReplace, "ai_values"); err != nil {
+		if _, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, importpkg.ModeReplace, "ai_values", importpkg.JobDetails{}); err != nil {
 			return "", err
 		}
 	}

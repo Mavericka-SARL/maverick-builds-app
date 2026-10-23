@@ -28525,13 +28525,20 @@ func (s *FormImportRequest) encodeFields(e *jx.Encoder) {
 			e.ArrEnd()
 		}
 	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfFormImportRequest = [4]string{
+var jsonFieldsNameOfFormImportRequest = [5]string{
 	0: "csv",
 	1: "xlsx_base64",
 	2: "dry_run",
 	3: "row_lines",
+	4: "file_name",
 }
 
 // Decode decodes FormImportRequest from json.
@@ -28590,6 +28597,16 @@ func (s *FormImportRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_lines\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
 			}
 		default:
 			return d.Skip()
@@ -36328,11 +36345,18 @@ func (s *ImportDimensionMembersReq) encodeFields(e *jx.Encoder) {
 		e.FieldStart("csv")
 		e.Str(s.Csv)
 	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfImportDimensionMembersReq = [2]string{
+var jsonFieldsNameOfImportDimensionMembersReq = [3]string{
 	0: "dimension_id",
 	1: "csv",
+	2: "file_name",
 }
 
 // Decode decodes ImportDimensionMembersReq from json.
@@ -36367,6 +36391,16 @@ func (s *ImportDimensionMembersReq) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"csv\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
 			}
 		default:
 			return d.Skip()
@@ -37052,9 +37086,51 @@ func (s *ImportJob) encodeFields(e *jx.Encoder) {
 			s.Error.Encode(e)
 		}
 	}
+	{
+		if s.Source.Set {
+			e.FieldStart("source")
+			s.Source.Encode(e)
+		}
+	}
+	{
+		if s.TargetType.Set {
+			e.FieldStart("target_type")
+			s.TargetType.Encode(e)
+		}
+	}
+	{
+		if s.TargetName.Set {
+			e.FieldStart("target_name")
+			s.TargetName.Encode(e)
+		}
+	}
+	{
+		if s.ImportMode.Set {
+			e.FieldStart("import_mode")
+			s.ImportMode.Encode(e)
+		}
+	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
+	{
+		if s.By.Set {
+			e.FieldStart("by")
+			s.By.Encode(e)
+		}
+	}
+	{
+		if s.DurationMs.Set {
+			e.FieldStart("duration_ms")
+			s.DurationMs.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfImportJob = [13]string{
+var jsonFieldsNameOfImportJob = [20]string{
 	0:  "id",
 	1:  "model_id",
 	2:  "scenario",
@@ -37068,6 +37144,13 @@ var jsonFieldsNameOfImportJob = [13]string{
 	10: "revision_id",
 	11: "revision_name",
 	12: "error",
+	13: "source",
+	14: "target_type",
+	15: "target_name",
+	16: "import_mode",
+	17: "file_name",
+	18: "by",
+	19: "duration_ms",
 }
 
 // Decode decodes ImportJob from json.
@@ -37215,6 +37298,76 @@ func (s *ImportJob) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"error\"")
 			}
+		case "source":
+			if err := func() error {
+				s.Source.Reset()
+				if err := s.Source.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"source\"")
+			}
+		case "target_type":
+			if err := func() error {
+				s.TargetType.Reset()
+				if err := s.TargetType.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"target_type\"")
+			}
+		case "target_name":
+			if err := func() error {
+				s.TargetName.Reset()
+				if err := s.TargetName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"target_name\"")
+			}
+		case "import_mode":
+			if err := func() error {
+				s.ImportMode.Reset()
+				if err := s.ImportMode.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"import_mode\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
+			}
+		case "by":
+			if err := func() error {
+				s.By.Reset()
+				if err := s.By.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"by\"")
+			}
+		case "duration_ms":
+			if err := func() error {
+				s.DurationMs.Reset()
+				if err := s.DurationMs.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"duration_ms\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -37235,6 +37388,48 @@ func (s *ImportJob) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ImportJob) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportJobImportMode as json.
+func (s ImportJobImportMode) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ImportJobImportMode from json.
+func (s *ImportJobImportMode) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportJobImportMode to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ImportJobImportMode(v) {
+	case ImportJobImportModeIncremental:
+		*s = ImportJobImportModeIncremental
+	case ImportJobImportModeReplace:
+		*s = ImportJobImportModeReplace
+	case ImportJobImportModeFullReload:
+		*s = ImportJobImportModeFullReload
+	default:
+		*s = ImportJobImportMode(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ImportJobImportMode) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportJobImportMode) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -37267,6 +37462,48 @@ func (s ImportJobStatus) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ImportJobStatus) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportJobTargetType as json.
+func (s ImportJobTargetType) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ImportJobTargetType from json.
+func (s *ImportJobTargetType) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportJobTargetType to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ImportJobTargetType(v) {
+	case ImportJobTargetTypeGrid:
+		*s = ImportJobTargetTypeGrid
+	case ImportJobTargetTypeDimension:
+		*s = ImportJobTargetTypeDimension
+	case ImportJobTargetTypeTable:
+		*s = ImportJobTargetTypeTable
+	default:
+		*s = ImportJobTargetType(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ImportJobTargetType) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportJobTargetType) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -38883,6 +39120,18 @@ func (s *ImportUploadRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.GridID.Set {
+			e.FieldStart("grid_id")
+			s.GridID.Encode(e)
+		}
+	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
+	{
 		if s.ImportMode.Set {
 			e.FieldStart("import_mode")
 			s.ImportMode.Encode(e)
@@ -38890,13 +39139,15 @@ func (s *ImportUploadRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfImportUploadRequest = [6]string{
+var jsonFieldsNameOfImportUploadRequest = [8]string{
 	0: "csv",
 	1: "xlsx_base64",
 	2: "revision_id",
 	3: "dry_run",
 	4: "row_lines",
-	5: "import_mode",
+	5: "grid_id",
+	6: "file_name",
+	7: "import_mode",
 }
 
 // Decode decodes ImportUploadRequest from json.
@@ -38966,6 +39217,26 @@ func (s *ImportUploadRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_lines\"")
+			}
+		case "grid_id":
+			if err := func() error {
+				s.GridID.Reset()
+				if err := s.GridID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"grid_id\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
 			}
 		case "import_mode":
 			if err := func() error {
@@ -39545,6 +39816,12 @@ func (s *IntegrationRunRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
+	{
 		if s.XlsxBase64.Set {
 			e.FieldStart("xlsx_base64")
 			s.XlsxBase64.Encode(e)
@@ -39558,11 +39835,12 @@ func (s *IntegrationRunRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfIntegrationRunRequest = [4]string{
+var jsonFieldsNameOfIntegrationRunRequest = [5]string{
 	0: "csv",
 	1: "row_lines",
-	2: "xlsx_base64",
-	3: "sheet",
+	2: "file_name",
+	3: "xlsx_base64",
+	4: "sheet",
 }
 
 // Decode decodes IntegrationRunRequest from json.
@@ -39601,6 +39879,16 @@ func (s *IntegrationRunRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_lines\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
 			}
 		case "xlsx_base64":
 			if err := func() error {
@@ -50083,6 +50371,39 @@ func (s *OptHistogramChartDataContext) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes ImportJobImportMode as json.
+func (o OptImportJobImportMode) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ImportJobImportMode from json.
+func (o *OptImportJobImportMode) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptImportJobImportMode to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptImportJobImportMode) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptImportJobImportMode) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ImportJobStatus as json.
 func (o OptImportJobStatus) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -50112,6 +50433,39 @@ func (s OptImportJobStatus) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptImportJobStatus) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportJobTargetType as json.
+func (o OptImportJobTargetType) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ImportJobTargetType from json.
+func (o *OptImportJobTargetType) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptImportJobTargetType to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptImportJobTargetType) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptImportJobTargetType) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

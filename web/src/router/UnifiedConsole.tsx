@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { useBrandRefresh } from "../branding/brand";
 import { BrandMark } from "../branding/BrandMark";
-import { AppShell, NotificationCenter } from "../ui";
+import { AppShell, NotificationCenter, PageErrorBoundary } from "../ui";
 import { PersonaSwitcher } from "../shell/PersonaSwitcher";
 import { PlanBanner } from "../shell/PlanBanner";
 import { UserMenu } from "../shell/UserMenu";
@@ -78,7 +78,7 @@ export default function UnifiedConsole() {
       sidebarFooter={<PersonaSwitcher />}
     >
       <PlanBanner />
-      {owner?.render(tab)}
+      <PageErrorBoundary key={tab}>{owner?.render(tab)}</PageErrorBoundary>
     </AppShell>
     </ConsolePageContext.Provider>
   );

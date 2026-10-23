@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
@@ -377,6 +378,7 @@ func (f *attachedFile) layout(req aiassistant.FileImportRequest) string {
 
 func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string, req aiassistant.FileImportRequest) (string, error) {
 	q := h.db.For(ctx)
+	started := time.Now()
 	f, err := h.loadAttachedFile(ctx, sessionID, req)
 	if err != nil {
 		return "", err
@@ -422,6 +424,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		if req.IntegrationID != "" {
 			h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, n, 0, "success", "AI import of "+f.describe())
 		}
+		h.recordImportJob(ctx, h.tableImportJob(ctx, req.TargetID, "ai_attachment", act.UserID, f.filename, started, n, nil, nil))
 		audit(n)
 		return fmt.Sprintf("Imported %d record(s) from %s into table '%s'", n, f.describe(), table), nil
 	}
@@ -444,6 +447,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		if req.IntegrationID != "" {
 			h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, imported, errs, "success", "AI import of "+f.describe())
 		}
+		h.recordImportJob(ctx, h.dimensionImportJob(ctx, req.TargetID, "ai_attachment", act.UserID, f.filename, started, imported, errs, nil))
 		audit(imported)
 		var dimName string
 		_ = h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id=$1::uuid`, req.TargetID).Scan(&dimName)
@@ -475,7 +479,8 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		return fail(fmt.Errorf("%s holds no values for any metric", f.describe()))
 	}
 	mode := importpkg.ImportMode(cmp.Or(req.ImportMode, string(importpkg.ModeReplace)))
-	metricIDs, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, mode, "ai_attachment")
+	metricIDs, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, mode, "ai_attachment",
+		h.gridJobDetails(ctx, req.RevisionID, req.TargetID, mode, f.filename, started))
 	if err != nil {
 		return fail(err)
 	}

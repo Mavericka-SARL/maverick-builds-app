@@ -355,6 +355,50 @@ test("SFTP source: the first test reports the host key; once trusted, the next t
   expect(state.externalContacted).toHaveLength(0);
 });
 
+// What a browser's "translate this page" does (Google's, Yandex's): every
+// text node becomes <font><font>its translation</font></font> — here the
+// same words, so the test can still find the buttons by name.
+async function translatePage(page: Page) {
+  await page.evaluate(() => {
+    const walker = document.createTreeWalker(document.getElementById("root")!, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue?.trim()) nodes.push(walker.currentNode as Text);
+    for (const t of nodes) {
+      const outer = document.createElement("font"), inner = document.createElement("font");
+      inner.textContent = t.nodeValue;
+      outer.appendChild(inner);
+      t.replaceWith(outer);
+    }
+  });
+}
+
+// Reported 2026-10-23 from Yandex Browser: testing an SFTP file, and Save
+// draft, blanked the console with "Failed to execute 'insertBefore' on
+// 'Node'" — a button's spinner went in before a text node the translator
+// had replaced.
+test("on a page the browser translates, testing an SFTP file and saving a draft keep the console", async ({ page }) => {
+  const state = freshState();
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await openRestAPI(page, state);
+  await fillBasics(page);
+  await page.getByRole("button", { name: "Request", exact: true }).click();
+  await page.getByLabel("Source").selectOption("sftp");
+  await page.getByLabel("SFTP server").fill("sftp.example.com");
+  await page.getByRole("button", { name: "Test & response", exact: true }).click();
+
+  await translatePage(page);
+  await page.getByRole("button", { name: "Test: read the file" }).click();
+  await expect(page.getByTestId("sftp-host-key")).toContainText("ED25519 host key SHA256:stubfp", { timeout: 10_000 });
+
+  await translatePage(page);
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  expect(errors).toEqual([]);
+  expect(state.externalContacted).toHaveLength(0);
+});
+
 test("draft save and resume; unsaved-change confirmation", async ({ page }) => {
   const state = freshState();
   await openRestAPI(page, state);

@@ -34,7 +34,17 @@ async function openWizard(page: Page, targetType: string, label: string, target:
 async function commit(page: Page) {
   await page.getByRole("button", { name: "Next: Validate" }).click();
   await page.getByRole("button", { name: /Commit Import/ }).first().click();
+  await commitConfirmed(page);
+}
+
+// Commit Import; a grid's incremental import (the wizard's default) asks
+// first, and is confirmed.
+async function commitConfirmed(page: Page) {
   await page.getByRole("button", { name: /Commit Import \(\d+ rows?\)/ }).click();
+  const ask = page.getByRole("alertdialog");
+  if (await ask.waitFor({ timeout: 1500 }).then(() => true, () => false)) {
+    await ask.getByRole("button", { name: "Add to current values" }).click();
+  }
 }
 
 test.beforeEach(async ({ page }) => {
@@ -132,7 +142,7 @@ test("a long grid file names each row's metric, sent by name; Validate lists the
   // Committed anyway, the refusal lists the same line and goes back, the
   // wizard's work kept.
   await page.getByRole("button", { name: "Import All Anyway" }).click();
-  await page.getByRole("button", { name: /Commit Import \(\d+ rows?\)/ }).click();
+  await commitConfirmed(page);
   await expect(page.getByText("Import Failed")).toBeVisible();
   await expect(page.getByRole("row", { name: /MARS/ }).getByRole("cell").first()).toHaveText("5");
   expect(sent[1].row_lines).toEqual([4, 5]);

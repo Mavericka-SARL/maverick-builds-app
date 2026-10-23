@@ -1089,7 +1089,14 @@ function CommitStep({
   onDone: () => void;
 }) {
   const qc = useQueryClient();
+  const { confirm, confirmElement } = useConfirm();
   const [result, setResult] = useState<CommitResult | null>(null);
+  // What Recent Imports says about this import: the person's file, and the
+  // grid it was mapped for.
+  const about = {
+    fileName: config.source === "google_sheets" ? undefined : parsedFile.name,
+    gridId: config.targetType === "grid" ? config.targetId : undefined,
+  };
 
   const errRows = new Set(errors.filter(e => e.sev === "error" && e.index >= 0).map(e => e.index));
   const sent = parsedFile.rows.map((_, i) => i).filter(i => !importValidOnly || !errRows.has(i));
@@ -1103,20 +1110,20 @@ function CommitStep({
       const csv = resolveAndSerialize(parsedFile.headers, rowsToImport, mappings, resolveCtx);
       let out: { rows_imported: number; error_rows: number; values?: number };
       if (config.integrationId) {
-        const res = await api.runIntegration(config.integrationId, csv, rowLines);
+        const res = await api.runIntegration(config.integrationId, csv, rowLines, about);
         out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
         // ("label matches no metric or dimension", reported live).
-        out = await api.importDimensionMembers(config.targetId, csv);
+        out = await api.importDimensionMembers(config.targetId, csv, about);
       } else if (config.targetType === "form") {
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.
-        const res = await api.importFormRecords(config.targetId, csv, rowLines);
+        const res = await api.importFormRecords(config.targetId, csv, rowLines, about);
         out = { rows_imported: res.records_created, error_rows: 0 };
       } else {
-        const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines);
+        const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines, about);
         out = { rows_imported: res.rows ?? res.valid_rows, error_rows: res.error_rows, values: res.values };
       }
       // Finishing the wizard from a resumed draft activates it, with the
@@ -1226,6 +1233,7 @@ function CommitStep({
             ["Target type", TARGET_LABEL[config.targetType]],
             ["Target", config.targetLabel || config.targetId],
             config.revisionName ? ["Revision", config.revisionName] : null,
+            config.targetType === "grid" ? ["Import mode", IMPORT_MODE_LABEL[config.importMode] ?? config.importMode] : null,
             config.integrationId ? ["Integration", config.integrationName ?? config.integrationId] : null,
             ["Rows to import", String(rowsToImport.length)],
             ["Columns mapped", String(mappings.filter(m => m.targetField).length)],
@@ -1239,13 +1247,54 @@ function CommitStep({
         </div>
       </div>
 
+      {/* The mode decides what happens to values already there; picked on the
+          first step, it was easy to forget by now — an incremental import of
+          a file imported before doubles it (tester's report, 2026-10-23). */}
+      {config.targetType === "grid" && config.importMode === "incremental" && (
+        <div style={{ marginBottom: 20 }}>
+          <InlineAlert tone="warning">
+            Incremental adds each value to the cell&apos;s current value: a cell that already holds one — from this
+            file imported before, or from anywhere else — ends up with the two added together. To make the
+            file&apos;s values the cells&apos; values instead, choose Replace listed cells in the first step.
+          </InlineAlert>
+        </div>
+      )}
+      {config.targetType === "grid" && config.importMode === "full_reload" && (
+        <div style={{ marginBottom: 20 }}>
+          <InlineAlert tone="danger">
+            Full reload first deletes every value in {config.revisionName ? <>revision <strong>{config.revisionName}</strong></> : "the revision"} —
+            not only the cells in this file — and then imports the file.
+          </InlineAlert>
+        </div>
+      )}
+
+      {confirmElement}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <Button leadingIcon={<ArrowLeft size={14} />} disabled={commit.isPending} onClick={onBack}>Back</Button>
         <Button
           variant="primary"
           loading={commit.isPending}
           loadingLabel="Importing…"
-          onClick={() => commit.mutate()}
+          onClick={() => {
+            if (config.targetType === "grid" && config.importMode === "incremental") {
+              confirm({
+                title: "Add to the cells' current values?",
+                body: "Each value in the file is added to its cell's current value. If this file was imported before, its values are counted twice.",
+                confirmLabel: "Add to current values",
+                onConfirm: () => commit.mutate(),
+              });
+            } else if (config.targetType === "grid" && config.importMode === "full_reload") {
+              confirm({
+                title: "Delete all data in the revision first?",
+                body: `Every value in ${config.revisionName ? `revision ${config.revisionName}` : "the revision"} is deleted, then the file is imported.`,
+                confirmLabel: "Delete and import",
+                destructive: true,
+                onConfirm: () => commit.mutate(),
+              });
+            } else {
+              commit.mutate();
+            }
+          }}
         >
           Commit Import ({rowsToImport.length} rows)
         </Button>
@@ -1253,6 +1302,13 @@ function CommitStep({
     </div>
   );
 }
+
+// The import modes as the Upload step names them.
+const IMPORT_MODE_LABEL: Record<string, string> = {
+  incremental: "Incremental",
+  replace: "Replace listed cells",
+  full_reload: "Full reload",
+};
 
 // ── Import History ─────────────────────────────────────────────────────────────
 
@@ -1276,10 +1332,36 @@ const STATUS: Record<number, { label: string; tone: DesignTone }> = {
   5: { label: "Aborted",    tone: "neutral" },
 };
 
-function ImportHistory() {
+// How an import came, under what it went into.
+const SOURCE_LABEL: Record<string, string> = {
+  upload: "Import Wizard",
+  csv_import: "saved import",
+  google_sheets: "Google Sheet",
+  rest_api: "REST API or SFTP",
+  ai_attachment: "AI Developer",
+  ai_values: "AI Developer",
+  sample: "sample values",
+};
+const JOB_TARGET_LABEL: Record<string, string> = { grid: "Grid", dimension: "Dimension", table: "Table" };
+const UNIT: Record<string, string> = { grid: "values", dimension: "members", table: "records" };
+
+function fmtDuration(ms?: number): string {
+  if (ms === undefined || ms === null || ms < 0) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(sec < 10 ? 1 : 0)} s`;
+  return `${Math.floor(sec / 60)} min ${Math.round(sec % 60)} s`;
+}
+
+// revisionId: the working revision — the history is its model's, which the
+// list missed while the application's default model was another.
+function ImportHistory({ revisionId }: { revisionId?: string }) {
   const qc = useQueryClient();
   const [delError, setDelError] = useState<string | null>(null);
-  const { data: jobs = [] } = useQuery({ queryKey: ["import-jobs"], queryFn: () => api.getImportJobs() });
+  const { data: jobs, isSuccess } = useQuery({
+    queryKey: ["import-jobs", revisionId],
+    queryFn: () => api.getImportJobs(revisionId),
+  });
 
   const del = useMutation({
     mutationFn: (id: string) => api.deleteImportJob(id),
@@ -1287,18 +1369,20 @@ function ImportHistory() {
     onError: (e) => setDelError(e instanceof Error ? e.message : "Delete failed"),
   });
 
-  if (!jobs.length) return null;
+  if (!isSuccess) return null;
 
   return (
     <div style={{ marginTop: 32 }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Recent Imports</div>
       {delError && <p className="mvx-admin-error" style={{ marginBottom: 8 }}>Delete failed: {delError}</p>}
+      {jobs.length === 0 ? (
+        <p className="mvx-admin-muted" style={{ fontSize: 13, margin: 0 }}>No imports into this model yet.</p>
+      ) : (
       <div className="mvx-table-wrap">
         <table className="mvx-table mvx-table--compact">
           <thead>
             <tr>
-              {/* Values: a row of a wide file is one value per metric. */}
-              {["Date", "Revision", "Values", "Errors", "Status", ""].map((h, i) => (
+              {["Started", "Imported into", "Revision", "Mode", "By", "Imported", "Errors", "Took", "Status", ""].map((h, i) => (
                 <th key={i}>{h}</th>
               ))}
             </tr>
@@ -1306,14 +1390,27 @@ function ImportHistory() {
           <tbody>
             {jobs.slice(0, 20).map(j => {
               const s = STATUS[j.status] ?? STATUS[0];
+              const how = [j.file_name, SOURCE_LABEL[j.source ?? ""] ?? j.source].filter(Boolean).join(" · ");
               return (
                 <tr key={j.id}>
                   <td className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(j.created_at)}</td>
+                  <td>
+                    {j.target_type
+                      ? <>{JOB_TARGET_LABEL[j.target_type]}{j.target_name ? <> <strong>{j.target_name}</strong></> : null}</>
+                      : "—"}
+                    {how && <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>{how}</div>}
+                  </td>
                   <td>{j.revision_name || "—"}</td>
-                  <td className="mvx-admin-mono">{j.total_rows ?? "—"}</td>
+                  <td>{j.import_mode ? IMPORT_MODE_LABEL[j.import_mode] ?? j.import_mode : "—"}</td>
+                  <td>{j.by || "—"}</td>
+                  {/* A row of a wide file is one value per metric. */}
+                  <td className="mvx-admin-mono" style={{ whiteSpace: "nowrap" }}>
+                    {j.valid_rows ?? "—"}{j.target_type ? ` ${UNIT[j.target_type]}` : ""}
+                  </td>
                   <td className="mvx-admin-mono" style={{ color: (j.error_rows ?? 0) > 0 ? "var(--color-danger)" : "var(--color-text-subtle)" }}>
                     {j.error_rows ?? 0}
                   </td>
+                  <td className="mvx-admin-mono mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{fmtDuration(j.duration_ms)}</td>
                   <td>
                     <StatusBadge tone={s.tone}>{s.label}</StatusBadge>
                     {j.error && <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>{j.error}</div>}
@@ -1336,6 +1433,7 @@ function ImportHistory() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
@@ -1926,7 +2024,7 @@ export function ExcelImportSection({ revisionId }: { revisionId?: string } = {})
           </div>
 
           <SavedIntegrationsList sourceType="csv_import" revisionId={revisionId} onRun={cfg => openWizard(cfg)} />
-          <ImportHistory />
+          <ImportHistory revisionId={revisionId} />
 
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>
             <strong style={{ color: "var(--color-text)" }}>CSV format by target type:</strong>
@@ -1969,7 +2067,7 @@ export function GoogleSheetsImportSection({ revisionId }: { revisionId?: string 
           </div>
 
           <SavedIntegrationsList sourceType="google_sheets" revisionId={revisionId} onRun={cfg => openWizard(cfg)} />
-          <ImportHistory />
+          <ImportHistory revisionId={revisionId} />
 
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>
             <strong style={{ color: "var(--color-text)" }}>How it works:</strong>

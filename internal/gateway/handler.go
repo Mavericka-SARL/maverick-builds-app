@@ -7822,6 +7822,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	extendImportDeadlines(w)
+	started := time.Now()
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB limit
 	ctx := r.Context()
 	key, ok := importIdempotencyKey(w, r)
@@ -7848,6 +7849,11 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		// csv, when csv was written out of it (the Import Wizard's):
 		// every answer about a row names that line (importpkg.RenumberRows).
 		RowLines []int `json:"row_lines"`
+		// GridID and FileName describe the import in Recent Imports: the
+		// grid the file was mapped for (one of the revision's) and the
+		// person's file. Neither changes what is imported.
+		GridID   string `json:"grid_id"`
+		FileName string `json:"file_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
 		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
@@ -7938,11 +7944,16 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 	// staged or committed — the caller fixes the file and re-uploads, rather
 	// than silently getting a partial import. The refused import is kept in
 	// Recent Imports with its reasons: it used to leave no line there.
+	mode := importpkg.ImportMode(body.ImportMode)
+	details := h.gridJobDetails(ctx, revisionID, body.GridID, mode, body.FileName, started)
 	if len(importErrs) > 0 {
 		if job, jErr := store.CreateImportJob(ctx, modelID, revisionID, "upload", userID, nil); jErr != nil {
 			h.log.Warn().Err(jErr).Msg("record a refused import")
-		} else if sErr := store.StageRows(ctx, job.Id, nil, importErrs); sErr != nil {
-			h.log.Warn().Err(sErr).Msg("record a refused import's errors")
+		} else {
+			if sErr := store.StageRows(ctx, job.Id, nil, importErrs); sErr != nil {
+				h.log.Warn().Err(sErr).Msg("record a refused import's errors")
+			}
+			h.describeImportJob(ctx, store, job.Id, details)
 		}
 		jsonGridRowErrs(w, staged, importErrs)
 		return
@@ -7973,12 +7984,12 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	h.describeImportJob(ctx, store, job.Id, details)
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
 		jsonErr(w, fmt.Errorf("stage: %w", err), http.StatusInternalServerError)
 		return
 	}
 
-	mode := importpkg.ImportMode(body.ImportMode)
 	metricIDs, err := store.CommitImport(ctx, job.Id, modelID, revisionID, userID, mode)
 	if err != nil {
 		if errors.Is(err, importpkg.ErrWriteDenied) {
@@ -8016,9 +8027,17 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// ?revision_id= names the model (resolveDemoModelID): the Integrations
+	// page asks for the history of the model it builds, which listed the
+	// application's default model's instead when that was another.
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve model")
+		return
+	}
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
 
@@ -8028,38 +8047,138 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	// Each job with its revision's name and, refused, its first problem:
-	// Recent Imports read a revision_name the list never had, and a refused
-	// import left no line at all.
+	// Each job with its revision's name, what it imported from which file,
+	// by whom and how long it took, and, refused, its first problem: Recent
+	// Imports read a revision_name the list never had, a refused import left
+	// no line at all, and the rest could be read only in the audit log.
 	type jobView struct {
 		*importpkgv1.ImportJob
 		RevisionName string `json:"revision_name,omitempty"`
 		Error        string `json:"error,omitempty"`
+		Source       string `json:"source,omitempty"`
+		TargetType   string `json:"target_type,omitempty"`
+		TargetName   string `json:"target_name,omitempty"`
+		ImportMode   string `json:"import_mode,omitempty"`
+		FileName     string `json:"file_name,omitempty"`
+		By           string `json:"by,omitempty"`
+		DurationMS   *int64 `json:"duration_ms,omitempty"`
 	}
 	out := make([]jobView, len(jobs))
 	ids := make([]string, len(jobs))
+	byID := make(map[string]*jobView, len(jobs))
 	for i, j := range jobs {
 		out[i].ImportJob, ids[i] = j, j.Id
+		byID[j.Id] = &out[i]
 	}
-	names, problems := map[string]string{}, map[string]string{}
+	// Someone else's import is described to the model's builders only: a
+	// business user's Import widget lists every import of the model, and the
+	// grid or table it went into, its file and a value its first problem
+	// quotes may be ones that user does not reach.
+	builder := act.hasRole("platform_admin") || act.hasRole("tenant_admin")
+	if !builder {
+		builder, _ = h.buildsModel(ctx, act, modelID)
+	}
 	if rows, qErr := h.db.For(ctx).Query(ctx, `
 		SELECT j.id::text, COALESCE(r.name, ''),
-		       COALESCE((SELECT 'row ' || e.row_number || COALESCE(', ' || NULLIF(e.column_name, ''), '') || ': ' || e.message
-		                 FROM import.import_error e WHERE e.job_id = j.id ORDER BY e.row_number, e.created_at LIMIT 1), '')
-		FROM import.import_job j LEFT JOIN model.revision r ON r.id = j.revision_id
+		       COALESCE((SELECT CASE WHEN e.row_number > 0 THEN 'row ' || e.row_number || COALESCE(', ' || NULLIF(e.column_name, ''), '') || ': ' ELSE '' END || e.message
+		                 FROM import.import_error e WHERE e.job_id = j.id ORDER BY e.row_number, e.created_at LIMIT 1), ''),
+		       j.file_url, j.target_type, j.target_name, j.import_mode, j.file_name,
+		       COALESCE(NULLIF(u.display_name, ''), u.email, ''), COALESCE(j.created_by::text, ''),
+		       (EXTRACT(EPOCH FROM (j.completed_at - j.created_at)) * 1000)::bigint
+		FROM import.import_job j
+		LEFT JOIN model.revision r ON r.id = j.revision_id
+		LEFT JOIN identity."user" u ON u.id = j.created_by
 		WHERE j.id = ANY($1::uuid[])`, ids); qErr == nil {
 		for rows.Next() {
-			var id, name, problem string
-			if rows.Scan(&id, &name, &problem) == nil {
-				names[id], problems[id] = name, problem
+			var v jobView
+			var id, createdBy string
+			if rows.Scan(&id, &v.RevisionName, &v.Error, &v.Source, &v.TargetType, &v.TargetName, &v.ImportMode,
+				&v.FileName, &v.By, &createdBy, &v.DurationMS) != nil {
+				continue
+			}
+			if !builder && createdBy != act.UserID {
+				v.Error, v.TargetName, v.FileName, v.By = "", "", "", ""
+			}
+			if j := byID[id]; j != nil {
+				v.ImportJob = j.ImportJob
+				*j = v
 			}
 		}
 		rows.Close()
-	}
-	for i := range out {
-		out[i].RevisionName, out[i].Error = names[out[i].Id], problems[out[i].Id]
+	} else {
+		h.log.Warn().Err(qErr).Msg("describe import jobs")
 	}
 	jsonOK(w, out)
+}
+
+// dimensionImportJob is the Recent Imports line of a file of a dimension's
+// members: the members written and the rows skipped, or the error that
+// refused the whole file (a time dimension's periods, a plan's limit).
+func (h *handler) dimensionImportJob(ctx context.Context, dimensionID, source, userID, fileName string, started time.Time, imported, errRows int, fatal error) importpkg.FinishedJob {
+	j := importpkg.FinishedJob{Source: source, UserID: userID, Rows: imported, ErrorRows: errRows,
+		Details: importpkg.JobDetails{TargetType: "dimension", FileName: fileName, StartedAt: started}}
+	_ = h.db.For(ctx).QueryRow(ctx, `
+		SELECT model_id::text, COALESCE(revision_id::text, ''), COALESCE(NULLIF(label, ''), name)
+		FROM model.dimension_def WHERE id::text = $1`, dimensionID).Scan(&j.ModelID, &j.RevisionID, &j.Details.TargetName)
+	if fatal != nil {
+		j.Failed, j.Rows = true, 0
+		j.Errors = []*importpkgv1.ImportError{{Message: fatal.Error()}}
+	}
+	return j
+}
+
+// tableImportJob is the Recent Imports line of a file of a table's records:
+// the records created, or — the file refused whole — its failing rows.
+func (h *handler) tableImportJob(ctx context.Context, formID, source, userID, fileName string, started time.Time, created int, rowErrs []formRowError, fatal error) importpkg.FinishedJob {
+	j := importpkg.FinishedJob{Source: source, UserID: userID, Rows: created,
+		Details: importpkg.JobDetails{TargetType: "table", FileName: fileName, StartedAt: started}}
+	_ = h.db.For(ctx).QueryRow(ctx, `
+		SELECT model_id::text, COALESCE(revision_id::text, ''), COALESCE(NULLIF(label, ''), name)
+		FROM model.form_def WHERE id::text = $1`, formID).Scan(&j.ModelID, &j.RevisionID, &j.Details.TargetName)
+	switch {
+	case fatal != nil:
+		j.Failed, j.Rows = true, 0
+		j.Errors = []*importpkgv1.ImportError{{Message: fatal.Error()}}
+	case len(rowErrs) > 0:
+		j.Failed, j.Rows, j.ErrorRows = true, 0, len(rowErrs)
+		for _, e := range rowErrs {
+			j.Errors = append(j.Errors, &importpkgv1.ImportError{RowNumber: int32(e.Row), Column: e.Column, Message: e.Message})
+		}
+	}
+	return j
+}
+
+// gridJobDetails describes a grid import for its line in Recent Imports:
+// the grid the file was mapped for when one of the revision's own is named
+// (any other id is ignored), the mode it was imported in, the person's file.
+func (h *handler) gridJobDetails(ctx context.Context, revisionID, gridID string, mode importpkg.ImportMode, fileName string, started time.Time) importpkg.JobDetails {
+	var name string
+	if gridID != "" {
+		_ = h.db.For(ctx).QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id::text = $1 AND revision_id = $2::uuid`, gridID, revisionID).Scan(&name)
+	}
+	if mode == "" {
+		mode = importpkg.ModeIncremental // CommitImport's default
+	}
+	return importpkg.JobDetails{TargetType: "grid", TargetName: name, Mode: string(mode), FileName: fileName, StartedAt: started}
+}
+
+// describeImportJob records d on a grid import's job — best-effort: the
+// description must never fail the import it describes.
+func (h *handler) describeImportJob(ctx context.Context, store *importpkg.Store, jobID string, d importpkg.JobDetails) {
+	if err := store.DescribeJob(ctx, jobID, d); err != nil {
+		h.log.Warn().Err(err).Str("job_id", jobID).Msg("describe an import job")
+	}
+}
+
+// recordImportJob adds a dimension's or a table's import to Recent Imports
+// — best-effort, like describeImportJob.
+func (h *handler) recordImportJob(ctx context.Context, j importpkg.FinishedJob) {
+	if j.ModelID == "" { // its dimension or table was not found: nothing was imported
+		return
+	}
+	if _, err := importpkg.NewStore(h.db.For(ctx)).RecordJob(ctx, j); err != nil {
+		h.log.Warn().Err(err).Str("model_id", j.ModelID).Msg("record an import job")
+	}
 }
 
 func (h *handler) importJobAction(w http.ResponseWriter, r *http.Request) {
@@ -8347,6 +8466,7 @@ type integrationDef struct {
 // the same shared importer backs saved-integration runs.
 func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request) {
 	extendImportDeadlines(w)
+	started := time.Now()
 	if r.Method != http.MethodPost {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
@@ -8360,6 +8480,8 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		DimensionID string `json:"dimension_id"`
 		CSV         string `json:"csv"`
+		// FileName names the person's file in Recent Imports.
+		FileName string `json:"file_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DimensionID == "" || body.CSV == "" {
 		jsonErr(w, fmt.Errorf("dimension_id and csv are required"), http.StatusBadRequest)
@@ -8381,6 +8503,8 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
+	job := h.dimensionImportJob(ctx, body.DimensionID, "upload", act.UserID, body.FileName, started, imported, errs, importErr)
+	h.recordImportJob(ctx, job)
 	if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
 		h.jsonLimitErr(w, importErr)
 		return
@@ -8392,14 +8516,11 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 	}
 
 	var appID string
-	_ = h.db.QueryRow(ctx, `
-		SELECT m.application_id::text FROM model.dimension_def d
-		JOIN core.model m ON m.id = d.model_id WHERE d.id = $1::uuid
-	`, body.DimensionID).Scan(&appID)
+	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id = $1::uuid`, job.ModelID).Scan(&appID)
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventImportUploaded,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ApplicationID: appID, ResourceType: "dimension", ResourceID: body.DimensionID,
+		ApplicationID: appID, ResourceType: "dimension", ResourceID: body.DimensionID, RevisionID: job.RevisionID,
 		Metadata: map[string]string{"rows_imported": fmt.Sprintf("%d", imported), "error_rows": fmt.Sprintf("%d", errs)},
 	})
 	jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
@@ -9145,6 +9266,7 @@ func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 // integrationRun handles POST /api/integrations/{id}/run — executes a CSV import.
 func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	extendImportDeadlines(w)
+	started := time.Now()
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -9263,6 +9385,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// which is what makes "run" a sync. See integration_file_run.go.
 	var header []string
 	var rows []importpkg.RawRow
+	var fileName string // the person's file, for Recent Imports; a sheet has none
 	if intg.Type == "google_sheets" {
 		if strings.TrimSpace(cfg.SheetURL) == "" {
 			jsonErr(w, fmt.Errorf("integration has no sheet_url configured"), http.StatusBadRequest)
@@ -9280,7 +9403,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		header, rows, err = importpkg.ShapeCSV(data, cfg.Reshape)
 	} else {
-		header, rows, err = parseRunFile(w, r, cfg.Reshape)
+		header, rows, fileName, err = parseRunFile(w, r, cfg.Reshape)
 	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
@@ -9298,7 +9421,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryDataChange, EventType: auditlog.EventIntegrationRun,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ApplicationID: appID, ResourceType: "integration", ResourceID: intID,
+			ApplicationID: appID, ResourceType: "integration", ResourceID: intID, RevisionID: intRevisionID,
 			Metadata: map[string]string{"target_type": intg.TargetType, "target_id": intg.TargetID, "integration_type": intg.Type},
 		})
 	}
@@ -9343,6 +9466,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", "")
+		h.recordImportJob(ctx, h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, nil, nil))
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": 0})
 
 	case "dimension":
@@ -9362,6 +9486,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.recordIntegrationRun(ctx, intID, act.UserID, imported, errs, "success", "")
+		h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, errs, nil))
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 
 	default: // "grid"
@@ -9375,7 +9500,8 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 				mode = importpkg.ModeReplace
 			}
 		}
-		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type, dryRun)
+		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type,
+			h.gridJobDetails(ctx, intRevisionID, intg.TargetID, mode, fileName, started), dryRun)
 	}
 }
 

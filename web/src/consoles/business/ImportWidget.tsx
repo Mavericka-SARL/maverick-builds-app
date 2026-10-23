@@ -69,8 +69,8 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
   });
 
   const { data: jobs = [] } = useQuery({
-    queryKey: ["import-jobs"],
-    queryFn: api.getImportJobs,
+    queryKey: ["import-jobs", ctx.revision_id],
+    queryFn: () => api.getImportJobs(ctx.revision_id),
     refetchInterval: 10_000,
   });
 

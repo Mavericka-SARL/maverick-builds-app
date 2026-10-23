@@ -41,8 +41,9 @@ const maxRunBodyBytes = 24 << 20
 // parseRunFile reads the file a csv_import run carries: "csv" text, or
 // "xlsx_base64" with an optional "sheet" (default the first), reshaped as
 // the integration saved (nil = as is). Workbook cells are read as stored,
-// so a formatted "1,234.50" arrives as 1234.5.
-func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape) ([]string, []importpkg.RawRow, error) {
+// so a formatted "1,234.50" arrives as 1234.5. fileName is the person's
+// file as the request names it ("file_name"), for Recent Imports.
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape) (header []string, rows []importpkg.RawRow, fileName string, err error) {
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
@@ -50,24 +51,26 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		// RowLines is the line in the person's file of each data row of
 		// csv, when csv was written out of it (the Import Wizard's):
 		// every answer about a row names that line (importpkg.RenumberRows).
-		RowLines []int `json:"row_lines"`
+		RowLines []int  `json:"row_lines"`
+		FileName string `json:"file_name"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBodyBytes)).Decode(&body); err != nil {
-		return nil, nil, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
+		return nil, nil, "", fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
 	}
 	switch {
 	case body.XLSXBase64 != "":
 		raw, err := base64.StdEncoding.DecodeString(body.XLSXBase64)
 		if err != nil {
-			return nil, nil, fmt.Errorf("xlsx_base64: %w", err)
+			return nil, nil, "", fmt.Errorf("xlsx_base64: %w", err)
 		}
-		return importpkg.ReadShaped("run.xlsx", raw, body.Sheet, reshape)
+		header, rows, err = importpkg.ReadShaped("run.xlsx", raw, body.Sheet, reshape)
+		return header, rows, body.FileName, err
 	case body.CSV != "":
-		header, rows, err := importpkg.ShapeCSV([]byte(body.CSV), reshape)
+		header, rows, err = importpkg.ShapeCSV([]byte(body.CSV), reshape)
 		importpkg.RenumberRows(rows, body.RowLines)
-		return header, rows, err
+		return header, rows, body.FileName, err
 	}
-	return nil, nil, fmt.Errorf("csv or xlsx_base64 field required")
+	return nil, nil, "", fmt.Errorf("csv or xlsx_base64 field required")
 }
 
 // rowsCSV re-serializes mapped rows for the form and dimension importers,
@@ -119,10 +122,11 @@ func fileColumnIndex(header []string) (map[string]int, error) {
 }
 
 // commitGridRows writes resolved rows into a revision the way every grid
-// import does: the plan's fact and storage limits, one import job, the
-// write guard (CommitImport refuses restricted members, metrics and locked
-// scopes with importpkg.ErrWriteDenied), and a recalculation afterwards.
-func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revisionID string, staged []importpkg.StagingRow, mode importpkg.ImportMode, source string) ([]string, error) {
+// import does: the plan's fact and storage limits, one import job (described
+// by details, when it has any), the write guard (CommitImport refuses
+// restricted members, metrics and locked scopes with
+// importpkg.ErrWriteDenied), and a recalculation afterwards.
+func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revisionID string, staged []importpkg.StagingRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails) ([]string, error) {
 	if cid := h.customerOfModel(ctx, modelID); cid != "" && h.plans != nil {
 		if err := h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, modelID, len(staged)); err != nil {
 			return nil, err
@@ -135,6 +139,9 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 	job, err := store.CreateImportJob(ctx, modelID, revisionID, source, act.UserID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
+	}
+	if details != (importpkg.JobDetails{}) {
+		h.describeImportJob(ctx, store, job.Id, details)
 	}
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
 		return nil, fmt.Errorf("stage: %w", err)
@@ -157,7 +164,7 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 // detailed (row, column, message). The run is recorded in the integration's
 // history either way; a dry run (the Import Wizard's Validate step) only
 // answers what the run would do.
-func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, dryRun bool) {
+func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails, dryRun bool) {
 	fail := func(status int, err error) {
 		if !dryRun {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", err.Error())
@@ -213,7 +220,7 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		jsonOK(w, map[string]any{"rows_imported": 0, "values_imported": 0, "error_rows": 0, "errors": []any{}})
 		return
 	}
-	if _, err := h.commitGridRows(ctx, act, modelID, revisionID, staged, mode, source); err != nil {
+	if _, err := h.commitGridRows(ctx, act, modelID, revisionID, staged, mode, source, details); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, importpkg.ErrWriteDenied) {
 			status = http.StatusForbidden

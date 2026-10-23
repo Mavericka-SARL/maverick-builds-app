@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,6 +59,105 @@ func (s *Store) CreateImportJob(ctx context.Context, modelID, revisionID, fileUR
 		Mappings:   mappings,
 		CreatedAt:  timestamppb.New(createdAt),
 	}, nil
+}
+
+// JobDetails is what a line of Recent Imports says about an import beyond
+// its counts: what it wrote into — a grid, a dimension or a table of
+// records, named as it was then — how (a grid's import mode), and from which
+// of the person's files. StartedAt, when set, is when the import began, so
+// the line's duration covers reading and checking the file, not only the
+// commit. The job's times stay on the database's clock — the time already
+// spent is taken off its start — as the gateway's may differ from it.
+type JobDetails struct {
+	TargetType string // "grid", "dimension" or "table"
+	TargetName string
+	Mode       string
+	FileName   string
+	StartedAt  time.Time
+}
+
+// DescribeJob records d on jobID.
+func (s *Store) DescribeJob(ctx context.Context, jobID string, d JobDetails) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE import.import_job
+		SET target_type = $2, target_name = $3, import_mode = $4, file_name = $5,
+		    created_at = created_at - make_interval(secs => $6)
+		WHERE id = $1::uuid
+	`, jobID, d.TargetType, d.TargetName, d.Mode, JobFileName(d.FileName), spentSince(d.StartedAt))
+	return err
+}
+
+// FinishedJob is an import that writes without staging — a dimension's
+// members, a table's records — recorded once it is over, so Recent Imports
+// lists every file import and not only a grid's. Rows is what was written,
+// ErrorRows the rows that failed; Errors (kept with the job, the first shown
+// on its line) say why.
+type FinishedJob struct {
+	ModelID, RevisionID, Source, UserID string
+	Details                             JobDetails
+	Rows, ErrorRows                     int
+	Failed                              bool
+	Errors                              []*importpkgv1.ImportError
+}
+
+// RecordJob writes j as a committed import job — or, Failed, a failed one —
+// and answers its id.
+func (s *Store) RecordJob(ctx context.Context, j FinishedJob) (string, error) {
+	status := "committed"
+	if j.Failed {
+		status = "failed"
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var id string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO import.import_job
+		    (model_id, revision_id, file_url, created_by, status, total_rows, valid_rows, error_rows,
+		     created_at, completed_at, target_type, target_name, import_mode, file_name)
+		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, $5::import.import_status, $6, $7, $8,
+		        now() - make_interval(secs => $9), now(), $10, $11, $12, $13)
+		RETURNING id::text
+	`, j.ModelID, j.RevisionID, j.Source, j.UserID, status, int32(j.Rows+j.ErrorRows), int32(j.Rows), int32(j.ErrorRows),
+		spentSince(j.Details.StartedAt), j.Details.TargetType, j.Details.TargetName, j.Details.Mode, JobFileName(j.Details.FileName)).Scan(&id); err != nil {
+		return "", err
+	}
+	if len(j.Errors) > 0 {
+		// One statement: a refused file of 10,000 records has 10,000.
+		rowNumbers := make([]int32, len(j.Errors))
+		columns, codes, messages, raws := make([]string, len(j.Errors)), make([]string, len(j.Errors)), make([]string, len(j.Errors)), make([]string, len(j.Errors))
+		for i, e := range j.Errors {
+			rowNumbers[i], columns[i], codes[i], messages[i], raws[i] = e.RowNumber, e.Column, e.ErrorCode, e.Message, e.RawValue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO import.import_error (job_id, row_number, column_name, error_code, message, raw_value)
+			SELECT $1::uuid, r, c, k, m, v
+			FROM unnest($2::int4[], $3::text[], $4::text[], $5::text[], $6::text[]) AS u(r, c, k, m, v)
+		`, id, rowNumbers, columns, codes, messages, raws); err != nil {
+			return "", fmt.Errorf("record the job's errors: %w", err)
+		}
+	}
+	return id, tx.Commit(ctx)
+}
+
+// JobFileName is the name of the person's file as a job keeps it: the base
+// name only (a browser may send a path), at most 255 characters.
+func JobFileName(name string) string {
+	name = strings.TrimSpace(name[strings.LastIndexAny(name, `/\`)+1:])
+	if r := []rune(name); len(r) > 255 {
+		name = string(r[:255])
+	}
+	return name
+}
+
+// spentSince is the seconds since started, 0 when it is not set.
+func spentSince(started time.Time) float64 {
+	if started.IsZero() {
+		return 0
+	}
+	return time.Since(started).Seconds()
 }
 
 func (s *Store) GetImportJob(ctx context.Context, jobID string) (*importpkgv1.ImportJob, error) {

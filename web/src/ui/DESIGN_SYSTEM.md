@@ -87,6 +87,7 @@ colour lives, so:
 - `PageHeader.tsx`: a page's title row with its actions.
 - `RichText.tsx`: the small Markdown subset text widgets render, as React elements (no HTML injection).
 - `WidgetErrorBoundary.tsx`: isolates one dashboard widget's render error from the rest.
+- `PageErrorBoundary.tsx`: the console's page; an error shows on the page (with a reload) instead of blanking the console.
 - `useUnsavedGuard.ts`: guards unsaved edits against navigation and tab close.
 - `tableStyles.ts`: shared inline styles for tables outside `DataTable`.
 

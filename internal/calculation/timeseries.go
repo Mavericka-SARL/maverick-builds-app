@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -653,33 +654,33 @@ func (e *tsEvaluator) finish(res *tsResults) {
 	timeID := e.axis.dim.ID
 
 	// periodValue: the metric at one period with the given non-time pins
-	// (possibly none), non-time dimensions reduced by agg_rule.
+	// (possibly none), non-time dimensions reduced by agg_rule. The leaves
+	// it reduces come from an index built once (leafIndex): each lookup
+	// used to scan every leaf, so a node × day metric's node slices read
+	// its 43,200 leaves 43,200 times over — most of a DDMRP model's
+	// 15-minute recalculation (2026-10-23).
+	var idx *leafIndex
+	subs := map[[2]string]map[string]bool{}
+	subOf := func(dimID, code string) map[string]bool {
+		k := [2]string{dimID, code}
+		sub, ok := subs[k]
+		if !ok {
+			sub = subtreeCodes(e.allDims[dimID], code)
+			subs[k] = sub
+		}
+		return sub
+	}
 	periodValue := func(pins map[string]string, pos int) (float64, bool) {
 		if useEval {
 			v, _, err := e.evalAt(pins, pos)
 			return v, err == nil
 		}
-		// Subtree filter per pinned non-time dimension.
-		subs := map[string]map[string]bool{}
-		for dimID, code := range pins {
-			subs[dimID] = subtreeCodes(e.allDims[dimID], code)
+		if idx == nil {
+			idx = newLeafIndex(res.leaf, e.axis, dimIDs)
 		}
-		code := e.axis.periods[pos].Code
 		var vals []float64
-		for _, r := range res.leaf {
-			if r.DimMembers[timeID] != code {
-				continue
-			}
-			match := true
-			for dimID, sub := range subs {
-				if !sub[r.DimMembers[dimID]] {
-					match = false
-					break
-				}
-			}
-			if match {
-				vals = append(vals, r.Value)
-			}
+		for _, i := range idx.rows(pins, pos, subOf) {
+			vals = append(vals, res.leaf[i].Value)
 		}
 		if len(vals) == 0 {
 			return 0, false
@@ -760,6 +761,100 @@ func (e *tsEvaluator) finish(res *tsResults) {
 			}
 		}
 	}
+}
+
+// leafIndex holds a metric's leaf rows by period, and by period under each
+// member of each of its non-time dimensions, as positions in the leaf
+// slice in ascending order: the order a scan of the leaves met them, so the
+// values reduce exactly as that scan reduced them.
+type leafIndex struct {
+	byPos    [][]int
+	byMember map[string]map[string][][]int // dimension → member code → period → rows
+}
+
+func newLeafIndex(leaf []CalcResultRow, axis *timeAxis, dimIDs []string) *leafIndex {
+	idx := &leafIndex{byPos: make([][]int, len(axis.periods)), byMember: map[string]map[string][][]int{}}
+	var nonTime []string
+	for _, id := range dimIDs {
+		if id != axis.dim.ID {
+			nonTime = append(nonTime, id)
+			idx.byMember[id] = map[string][][]int{}
+		}
+	}
+	for i, r := range leaf {
+		pos, ok := axis.index[r.DimMembers[axis.dim.ID]]
+		if !ok {
+			continue // at no period: no reduction reads it
+		}
+		idx.byPos[pos] = append(idx.byPos[pos], i)
+		for _, id := range nonTime {
+			code := r.DimMembers[id]
+			byPos := idx.byMember[id][code]
+			if byPos == nil {
+				byPos = make([][]int, len(axis.periods))
+				idx.byMember[id][code] = byPos
+			}
+			byPos[pos] = append(byPos[pos], i)
+		}
+	}
+	return idx
+}
+
+// rows are the leaf rows at period pos under every pinned member (the
+// member or one beneath it, sub naming its subtree), in ascending order.
+func (idx *leafIndex) rows(pins map[string]string, pos int, sub func(dimID, code string) map[string]bool) []int {
+	if len(pins) == 0 {
+		return idx.byPos[pos]
+	}
+	// The rows under the first pin (in key order, so the choice is fixed),
+	// then those under every other pin among them.
+	keys := make([]string, 0, len(pins))
+	for id := range pins {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	first := keys[0]
+	var out []int
+	lists := 0
+	for code := range sub(first, pins[first]) {
+		if byPos := idx.byMember[first][code]; byPos != nil && len(byPos[pos]) > 0 {
+			out = append(out, byPos[pos]...)
+			lists++
+		}
+	}
+	if lists > 1 {
+		sort.Ints(out)
+	}
+	if len(keys) == 1 {
+		return out
+	}
+	kept := out[:0:0]
+	for _, i := range out {
+		match := true
+		for _, id := range keys[1:] {
+			if !idx.under(id, pins[id], pos, i, sub) {
+				match = false
+				break
+			}
+		}
+		if match {
+			kept = append(kept, i)
+		}
+	}
+	return kept
+}
+
+// under reports whether leaf row i at period pos is at member code of
+// dimension dimID or beneath it.
+func (idx *leafIndex) under(dimID, code string, pos, i int, sub func(dimID, code string) map[string]bool) bool {
+	for c := range sub(dimID, code) {
+		if byPos := idx.byMember[dimID][c]; byPos != nil {
+			if _, found := slices.BinarySearch(byPos[pos], i); found {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // subtreeCodes returns code and every descendant code within dim.

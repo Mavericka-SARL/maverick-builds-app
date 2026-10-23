@@ -9987,6 +9987,70 @@ func decodeListGridsParams(args [0]string, argsEscaped bool, r *http.Request) (p
 	return params, nil
 }
 
+// ListImportJobsParams is parameters of listImportJobs operation.
+type ListImportJobsParams struct {
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListImportJobsParams(packed middleware.Parameters) (params ListImportJobsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListImportJobsParams(args [0]string, argsEscaped bool, r *http.Request) (params ListImportJobsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ListIntegrationRunsParams is parameters of listIntegrationRuns operation.
 type ListIntegrationRunsParams struct {
 	ID uuid.UUID

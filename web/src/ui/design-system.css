@@ -453,6 +453,11 @@
   animation: spin 1s linear infinite;
 }
 
+/* Button's label wrapper: its content lays out as the button's own. */
+.mvx-button__label {
+  display: contents;
+}
+
 .mvx-icon-button {
   display: inline-flex;
   align-items: center;

@@ -39,7 +39,16 @@ export function Button({
       className={["mvx-button", `mvx-button--${variant}`, `mvx-button--${size}`, className].filter(Boolean).join(" ")}
     >
       {leftIcon}
-      {loading && loadingLabel ? loadingLabel : children}
+      {/* The label sits in an element of its own, replaced whole when the
+          loading label takes its place. A page translator (a browser's
+          "translate this page") swaps a bare text node for <font> elements
+          of its own; the spinner then went in before a text node that was
+          no longer the button's child, and React's NotFoundError blanked the
+          console (Yandex Browser, reported 2026-10-23). display: contents
+          keeps the button's layout as it was. */}
+      <span key={loading && loadingLabel ? "loading" : "idle"} className="mvx-button__label">
+        {loading && loadingLabel ? loadingLabel : children}
+      </span>
       {!loading && trailingIcon}
     </button>
   );

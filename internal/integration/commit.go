@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -107,6 +108,14 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 	job, err := store.CreateImportJob(ctx, def.ModelID, def.RevisionID, "rest_api", runBy, nil)
 	if err != nil {
 		return 0, 0, err
+	}
+	// Its line in Recent Imports names the grid and the mode.
+	var gridName string
+	_ = c.Pool.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id::text = $1`, def.Config.TargetID).Scan(&gridName)
+	if err := store.DescribeJob(ctx, job.Id, importpkg.JobDetails{
+		TargetType: "grid", TargetName: gridName, Mode: string(cmp.Or(def.Config.ImportMode, ModeIncremental)),
+	}); err != nil {
+		c.Log.Warn().Err(err).Msg("describe a connector's import job")
 	}
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
 		return 0, 0, err

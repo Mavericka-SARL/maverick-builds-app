@@ -1195,10 +1195,12 @@ type Invoker interface {
 	ListGrids(ctx context.Context, params ListGridsParams) (ListGridsRes, error)
 	// ListImportJobs invokes listImportJobs operation.
 	//
-	// List the 20 most recent import jobs for the model.
+	// File imports of every kind — a grid's values, a dimension's members, a table's records —
+	// newest first. The model is the one revision_id belongs to; without it, the request's model
+	// (X-Model-Id, else the application's default model).
 	//
 	// GET /api/import/jobs
-	ListImportJobs(ctx context.Context) ([]ImportJob, error)
+	ListImportJobs(ctx context.Context, params ListImportJobsParams) ([]ImportJob, error)
 	// ListIntegrationConnections invokes listIntegrationConnections operation.
 	//
 	// List reusable credential connections (public metadata + has_secret only — secrets are write-only).
@@ -23306,15 +23308,17 @@ func (c *Client) sendListGrids(ctx context.Context, params ListGridsParams) (res
 
 // ListImportJobs invokes listImportJobs operation.
 //
-// List the 20 most recent import jobs for the model.
+// File imports of every kind — a grid's values, a dimension's members, a table's records —
+// newest first. The model is the one revision_id belongs to; without it, the request's model
+// (X-Model-Id, else the application's default model).
 //
 // GET /api/import/jobs
-func (c *Client) ListImportJobs(ctx context.Context) ([]ImportJob, error) {
-	res, err := c.sendListImportJobs(ctx)
+func (c *Client) ListImportJobs(ctx context.Context, params ListImportJobsParams) ([]ImportJob, error) {
+	res, err := c.sendListImportJobs(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListImportJobs(ctx context.Context) (res []ImportJob, err error) {
+func (c *Client) sendListImportJobs(ctx context.Context, params ListImportJobsParams) (res []ImportJob, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listImportJobs"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -23354,6 +23358,27 @@ func (c *Client) sendListImportJobs(ctx context.Context) (res []ImportJob, err e
 	var pathParts [1]string
 	pathParts[0] = "/api/import/jobs"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)

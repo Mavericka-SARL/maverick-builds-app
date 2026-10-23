@@ -1175,10 +1175,12 @@ type Handler interface {
 	ListGrids(ctx context.Context, params ListGridsParams) (ListGridsRes, error)
 	// ListImportJobs implements listImportJobs operation.
 	//
-	// List the 20 most recent import jobs for the model.
+	// File imports of every kind — a grid's values, a dimension's members, a table's records —
+	// newest first. The model is the one revision_id belongs to; without it, the request's model
+	// (X-Model-Id, else the application's default model).
 	//
 	// GET /api/import/jobs
-	ListImportJobs(ctx context.Context) ([]ImportJob, error)
+	ListImportJobs(ctx context.Context, params ListImportJobsParams) ([]ImportJob, error)
 	// ListIntegrationConnections implements listIntegrationConnections operation.
 	//
 	// List reusable credential connections (public metadata + has_secret only — secrets are write-only).

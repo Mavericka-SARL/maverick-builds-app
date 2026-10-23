@@ -2129,6 +2129,8 @@ components:
         revision_id:  { type: string, format: uuid, description: "Defaults to the model's active revision" }
         dry_run:      { type: boolean, description: "Read and check every row and import nothing: the answer lists each row the import would refuse (200, dry_run true). No import job is recorded." }
         row_lines:    { type: array, items: { type: integer }, description: "With csv written out of another file (the Import Wizard's): the line in that file of each data row, in order; every answer and the import's history name a row by it" }
+        grid_id:      { type: string, format: uuid, description: "The grid the file was mapped for, named in Recent Imports when it is one of the revision's own (another is ignored); changes nothing about the import" }
+        file_name:    { type: string, description: "The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing about the import" }
         import_mode:
           type: string
           enum: [incremental, replace, full_reload]
@@ -2176,7 +2178,14 @@ components:
         completed_at:  { $ref: "#/components/schemas/ProtoTimestamp" }
         revision_id:   { type: string, format: uuid }
         revision_name: { type: string, description: The name of the revision the import wrote to }
-        error:         { type: string, description: "A refused import's first problem (\"row 5, product: …\"); its job has status 4" }
+        error:         { type: string, description: "A refused import's first problem (\"row 5, product: …\"); its job has status 4. Someone else's import's only to the model's developers and administrators." }
+        source:        { type: string, description: "How the import came: upload (the Import Wizard or this API), csv_import or google_sheets (a saved integration), rest_api, ai_attachment, ai_values, sample" }
+        target_type:   { type: string, enum: [grid, dimension, table], description: What the import wrote into (none on an import from before 2026-10-23) }
+        target_name:   { type: string, description: "The grid, dimension or table by name as it was then. Someone else's import's only to the model's developers and administrators." }
+        import_mode:   { type: string, enum: [incremental, replace, full_reload], description: A grid import's mode }
+        file_name:     { type: string, description: "The person's file. Someone else's import's only to the model's developers and administrators." }
+        by:            { type: string, description: "Who imported. Someone else's import's only to the model's developers and administrators." }
+        duration_ms:   { type: integer, description: From the import's start to its commit }
 
     ExportSpec:
       type: object
@@ -2209,6 +2218,9 @@ components:
           type: array
           items: { type: integer }
           description: With csv written out of another file (the Import Wizard's) — the line in that file of each data row, in order; every answer and the run's history name a row by it.
+        file_name:
+          type: string
+          description: The person's file, by name, for Recent Imports; changes nothing about the run.
         xlsx_base64:
           type: string
           description: The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB before encoding.
@@ -2513,6 +2525,7 @@ components:
         xlsx_base64: { type: string, description: "Base64-encoded .xlsx workbook; required unless csv is given" }
         dry_run:     { type: boolean, description: "Check every row as the import would and create nothing: 200 with dry_run, rows and errors" }
         row_lines:   { type: array, items: { type: integer }, description: "With csv written out of another file (the Import Wizard's): the line in that file of each data row, in order; every answer names a row by it" }
+        file_name:   { type: string, description: "The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing about the import" }
 
     AutomationRule:
       type: object
@@ -8629,6 +8642,7 @@ paths:
               properties:
                 dimension_id: { type: string, format: uuid }
                 csv:          { type: string }
+                file_name:    { type: string, description: "The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing about the import" }
       responses:
         "200":
           description: Import result
@@ -8880,6 +8894,14 @@ paths:
       operationId: listImportJobs
       tags: [Import & Integrations]
       summary: List the 20 most recent import jobs for the model
+      description: >-
+        File imports of every kind — a grid's values, a dimension's members, a table's records — newest first.
+        The model is the one revision_id belongs to; without it, the request's model (X-Model-Id, else the
+        application's default model).
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Import job list

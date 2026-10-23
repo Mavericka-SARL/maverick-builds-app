@@ -11474,6 +11474,9 @@ type FormImportRequest struct {
 	// With csv written out of another file (the Import Wizard's): the line in that file of each data row,
 	//  in order; every answer names a row by it.
 	RowLines []int `json:"row_lines"`
+	// The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing
+	// about the import.
+	FileName OptString `json:"file_name"`
 }
 
 // GetCsv returns the value of Csv.
@@ -11496,6 +11499,11 @@ func (s *FormImportRequest) GetRowLines() []int {
 	return s.RowLines
 }
 
+// GetFileName returns the value of FileName.
+func (s *FormImportRequest) GetFileName() OptString {
+	return s.FileName
+}
+
 // SetCsv sets the value of Csv.
 func (s *FormImportRequest) SetCsv(val OptString) {
 	s.Csv = val
@@ -11514,6 +11522,11 @@ func (s *FormImportRequest) SetDryRun(val OptBool) {
 // SetRowLines sets the value of RowLines.
 func (s *FormImportRequest) SetRowLines(val []int) {
 	s.RowLines = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *FormImportRequest) SetFileName(val OptString) {
+	s.FileName = val
 }
 
 // Ref: #/components/schemas/FormMetricMapping
@@ -14763,6 +14776,9 @@ func (*ImportDimensionMembersOK) importDimensionMembersRes() {}
 type ImportDimensionMembersReq struct {
 	DimensionID uuid.UUID `json:"dimension_id"`
 	Csv         string    `json:"csv"`
+	// The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing
+	// about the import.
+	FileName OptString `json:"file_name"`
 }
 
 // GetDimensionID returns the value of DimensionID.
@@ -14775,6 +14791,11 @@ func (s *ImportDimensionMembersReq) GetCsv() string {
 	return s.Csv
 }
 
+// GetFileName returns the value of FileName.
+func (s *ImportDimensionMembersReq) GetFileName() OptString {
+	return s.FileName
+}
+
 // SetDimensionID sets the value of DimensionID.
 func (s *ImportDimensionMembersReq) SetDimensionID(val uuid.UUID) {
 	s.DimensionID = val
@@ -14783,6 +14804,11 @@ func (s *ImportDimensionMembersReq) SetDimensionID(val uuid.UUID) {
 // SetCsv sets the value of Csv.
 func (s *ImportDimensionMembersReq) SetCsv(val string) {
 	s.Csv = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *ImportDimensionMembersReq) SetFileName(val OptString) {
+	s.FileName = val
 }
 
 type ImportFormRecordsBadRequest Error
@@ -14994,8 +15020,25 @@ type ImportJob struct {
 	RevisionID  OptUUID            `json:"revision_id"`
 	// The name of the revision the import wrote to.
 	RevisionName OptString `json:"revision_name"`
-	// A refused import's first problem ("row 5, product: …"); its job has status 4.
+	// A refused import's first problem ("row 5, product: …"); its job has status 4. Someone else's
+	// import's only to the model's developers and administrators.
 	Error OptString `json:"error"`
+	// How the import came: upload (the Import Wizard or this API), csv_import or google_sheets (a saved
+	// integration), rest_api, ai_attachment, ai_values, sample.
+	Source OptString `json:"source"`
+	// What the import wrote into (none on an import from before 2026-10-23).
+	TargetType OptImportJobTargetType `json:"target_type"`
+	// The grid, dimension or table by name as it was then. Someone else's import's only to the model's
+	// developers and administrators.
+	TargetName OptString `json:"target_name"`
+	// A grid import's mode.
+	ImportMode OptImportJobImportMode `json:"import_mode"`
+	// The person's file. Someone else's import's only to the model's developers and administrators.
+	FileName OptString `json:"file_name"`
+	// Who imported. Someone else's import's only to the model's developers and administrators.
+	By OptString `json:"by"`
+	// From the import's start to its commit.
+	DurationMs OptInt `json:"duration_ms"`
 }
 
 // GetID returns the value of ID.
@@ -15063,6 +15106,41 @@ func (s *ImportJob) GetError() OptString {
 	return s.Error
 }
 
+// GetSource returns the value of Source.
+func (s *ImportJob) GetSource() OptString {
+	return s.Source
+}
+
+// GetTargetType returns the value of TargetType.
+func (s *ImportJob) GetTargetType() OptImportJobTargetType {
+	return s.TargetType
+}
+
+// GetTargetName returns the value of TargetName.
+func (s *ImportJob) GetTargetName() OptString {
+	return s.TargetName
+}
+
+// GetImportMode returns the value of ImportMode.
+func (s *ImportJob) GetImportMode() OptImportJobImportMode {
+	return s.ImportMode
+}
+
+// GetFileName returns the value of FileName.
+func (s *ImportJob) GetFileName() OptString {
+	return s.FileName
+}
+
+// GetBy returns the value of By.
+func (s *ImportJob) GetBy() OptString {
+	return s.By
+}
+
+// GetDurationMs returns the value of DurationMs.
+func (s *ImportJob) GetDurationMs() OptInt {
+	return s.DurationMs
+}
+
 // SetID sets the value of ID.
 func (s *ImportJob) SetID(val OptUUID) {
 	s.ID = val
@@ -15128,6 +15206,90 @@ func (s *ImportJob) SetError(val OptString) {
 	s.Error = val
 }
 
+// SetSource sets the value of Source.
+func (s *ImportJob) SetSource(val OptString) {
+	s.Source = val
+}
+
+// SetTargetType sets the value of TargetType.
+func (s *ImportJob) SetTargetType(val OptImportJobTargetType) {
+	s.TargetType = val
+}
+
+// SetTargetName sets the value of TargetName.
+func (s *ImportJob) SetTargetName(val OptString) {
+	s.TargetName = val
+}
+
+// SetImportMode sets the value of ImportMode.
+func (s *ImportJob) SetImportMode(val OptImportJobImportMode) {
+	s.ImportMode = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *ImportJob) SetFileName(val OptString) {
+	s.FileName = val
+}
+
+// SetBy sets the value of By.
+func (s *ImportJob) SetBy(val OptString) {
+	s.By = val
+}
+
+// SetDurationMs sets the value of DurationMs.
+func (s *ImportJob) SetDurationMs(val OptInt) {
+	s.DurationMs = val
+}
+
+// A grid import's mode.
+type ImportJobImportMode string
+
+const (
+	ImportJobImportModeIncremental ImportJobImportMode = "incremental"
+	ImportJobImportModeReplace     ImportJobImportMode = "replace"
+	ImportJobImportModeFullReload  ImportJobImportMode = "full_reload"
+)
+
+// AllValues returns all ImportJobImportMode values.
+func (ImportJobImportMode) AllValues() []ImportJobImportMode {
+	return []ImportJobImportMode{
+		ImportJobImportModeIncremental,
+		ImportJobImportModeReplace,
+		ImportJobImportModeFullReload,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ImportJobImportMode) MarshalText() ([]byte, error) {
+	switch s {
+	case ImportJobImportModeIncremental:
+		return []byte(s), nil
+	case ImportJobImportModeReplace:
+		return []byte(s), nil
+	case ImportJobImportModeFullReload:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ImportJobImportMode) UnmarshalText(data []byte) error {
+	switch ImportJobImportMode(data) {
+	case ImportJobImportModeIncremental:
+		*s = ImportJobImportModeIncremental
+		return nil
+	case ImportJobImportModeReplace:
+		*s = ImportJobImportModeReplace
+		return nil
+	case ImportJobImportModeFullReload:
+		*s = ImportJobImportModeFullReload
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type ImportJobStatus int
 
 const (
@@ -15148,6 +15310,55 @@ func (ImportJobStatus) AllValues() []ImportJobStatus {
 		ImportJobStatus3,
 		ImportJobStatus4,
 		ImportJobStatus5,
+	}
+}
+
+// What the import wrote into (none on an import from before 2026-10-23).
+type ImportJobTargetType string
+
+const (
+	ImportJobTargetTypeGrid      ImportJobTargetType = "grid"
+	ImportJobTargetTypeDimension ImportJobTargetType = "dimension"
+	ImportJobTargetTypeTable     ImportJobTargetType = "table"
+)
+
+// AllValues returns all ImportJobTargetType values.
+func (ImportJobTargetType) AllValues() []ImportJobTargetType {
+	return []ImportJobTargetType{
+		ImportJobTargetTypeGrid,
+		ImportJobTargetTypeDimension,
+		ImportJobTargetTypeTable,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ImportJobTargetType) MarshalText() ([]byte, error) {
+	switch s {
+	case ImportJobTargetTypeGrid:
+		return []byte(s), nil
+	case ImportJobTargetTypeDimension:
+		return []byte(s), nil
+	case ImportJobTargetTypeTable:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ImportJobTargetType) UnmarshalText(data []byte) error {
+	switch ImportJobTargetType(data) {
+	case ImportJobTargetTypeGrid:
+		*s = ImportJobTargetTypeGrid
+		return nil
+	case ImportJobTargetTypeDimension:
+		*s = ImportJobTargetTypeDimension
+		return nil
+	case ImportJobTargetTypeTable:
+		*s = ImportJobTargetTypeTable
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
 	}
 }
 
@@ -15629,6 +15840,12 @@ type ImportUploadRequest struct {
 	// With csv written out of another file (the Import Wizard's): the line in that file of each data row,
 	//  in order; every answer and the import's history name a row by it.
 	RowLines []int `json:"row_lines"`
+	// The grid the file was mapped for, named in Recent Imports when it is one of the revision's own
+	// (another is ignored); changes nothing about the import.
+	GridID OptUUID `json:"grid_id"`
+	// The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing
+	// about the import.
+	FileName OptString `json:"file_name"`
 	// Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
 	// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
 	// revision's typed values the caller may write, then sets the file's.
@@ -15660,6 +15877,16 @@ func (s *ImportUploadRequest) GetRowLines() []int {
 	return s.RowLines
 }
 
+// GetGridID returns the value of GridID.
+func (s *ImportUploadRequest) GetGridID() OptUUID {
+	return s.GridID
+}
+
+// GetFileName returns the value of FileName.
+func (s *ImportUploadRequest) GetFileName() OptString {
+	return s.FileName
+}
+
 // GetImportMode returns the value of ImportMode.
 func (s *ImportUploadRequest) GetImportMode() OptImportUploadRequestImportMode {
 	return s.ImportMode
@@ -15688,6 +15915,16 @@ func (s *ImportUploadRequest) SetDryRun(val OptBool) {
 // SetRowLines sets the value of RowLines.
 func (s *ImportUploadRequest) SetRowLines(val []int) {
 	s.RowLines = val
+}
+
+// SetGridID sets the value of GridID.
+func (s *ImportUploadRequest) SetGridID(val OptUUID) {
+	s.GridID = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *ImportUploadRequest) SetFileName(val OptString) {
+	s.FileName = val
 }
 
 // SetImportMode sets the value of ImportMode.
@@ -15940,6 +16177,8 @@ type IntegrationRunRequest struct {
 	// With csv written out of another file (the Import Wizard's) — the line in that file of each data
 	// row, in order; every answer and the run's history name a row by it.
 	RowLines []int `json:"row_lines"`
+	// The person's file, by name, for Recent Imports; changes nothing about the run.
+	FileName OptString `json:"file_name"`
 	// The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB
 	// before encoding.
 	XlsxBase64 OptString `json:"xlsx_base64"`
@@ -15955,6 +16194,11 @@ func (s *IntegrationRunRequest) GetCsv() OptString {
 // GetRowLines returns the value of RowLines.
 func (s *IntegrationRunRequest) GetRowLines() []int {
 	return s.RowLines
+}
+
+// GetFileName returns the value of FileName.
+func (s *IntegrationRunRequest) GetFileName() OptString {
+	return s.FileName
 }
 
 // GetXlsxBase64 returns the value of XlsxBase64.
@@ -15975,6 +16219,11 @@ func (s *IntegrationRunRequest) SetCsv(val OptString) {
 // SetRowLines sets the value of RowLines.
 func (s *IntegrationRunRequest) SetRowLines(val []int) {
 	s.RowLines = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *IntegrationRunRequest) SetFileName(val OptString) {
+	s.FileName = val
 }
 
 // SetXlsxBase64 sets the value of XlsxBase64.
@@ -22298,6 +22547,52 @@ func (o OptHistogramChartDataContext) Or(d HistogramChartDataContext) HistogramC
 	return d
 }
 
+// NewOptImportJobImportMode returns new OptImportJobImportMode with value set to v.
+func NewOptImportJobImportMode(v ImportJobImportMode) OptImportJobImportMode {
+	return OptImportJobImportMode{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptImportJobImportMode is optional ImportJobImportMode.
+type OptImportJobImportMode struct {
+	Value ImportJobImportMode
+	Set   bool
+}
+
+// IsSet returns true if OptImportJobImportMode was set.
+func (o OptImportJobImportMode) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptImportJobImportMode) Reset() {
+	var v ImportJobImportMode
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptImportJobImportMode) SetTo(v ImportJobImportMode) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptImportJobImportMode) Get() (v ImportJobImportMode, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptImportJobImportMode) Or(d ImportJobImportMode) ImportJobImportMode {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptImportJobStatus returns new OptImportJobStatus with value set to v.
 func NewOptImportJobStatus(v ImportJobStatus) OptImportJobStatus {
 	return OptImportJobStatus{
@@ -22338,6 +22633,52 @@ func (o OptImportJobStatus) Get() (v ImportJobStatus, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptImportJobStatus) Or(d ImportJobStatus) ImportJobStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptImportJobTargetType returns new OptImportJobTargetType with value set to v.
+func NewOptImportJobTargetType(v ImportJobTargetType) OptImportJobTargetType {
+	return OptImportJobTargetType{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptImportJobTargetType is optional ImportJobTargetType.
+type OptImportJobTargetType struct {
+	Value ImportJobTargetType
+	Set   bool
+}
+
+// IsSet returns true if OptImportJobTargetType was set.
+func (o OptImportJobTargetType) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptImportJobTargetType) Reset() {
+	var v ImportJobTargetType
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptImportJobTargetType) SetTo(v ImportJobTargetType) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptImportJobTargetType) Get() (v ImportJobTargetType, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptImportJobTargetType) Or(d ImportJobTargetType) ImportJobTargetType {
 	if v, ok := o.Get(); ok {
 		return v
 	}

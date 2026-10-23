@@ -31572,7 +31572,9 @@ func (s *Server) handleListGridsRequest(args [0]string, argsEscaped bool, w http
 
 // handleListImportJobsRequest handles listImportJobs operation.
 //
-// List the 20 most recent import jobs for the model.
+// File imports of every kind — a grid's values, a dimension's members, a table's records —
+// newest first. The model is the one revision_id belongs to; without it, the request's model
+// (X-Model-Id, else the application's default model).
 //
 // GET /api/import/jobs
 func (s *Server) handleListImportJobsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -31690,6 +31692,16 @@ func (s *Server) handleListImportJobsRequest(args [0]string, argsEscaped bool, w
 			return
 		}
 	}
+	params, err := decodeListImportJobsParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -31702,13 +31714,18 @@ func (s *Server) handleListImportJobsRequest(args [0]string, argsEscaped bool, w
 			OperationID:      "listImportJobs",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = ListImportJobsParams
 			Response = []ImportJob
 		)
 		response, err = middleware.HookMiddleware[
@@ -31718,14 +31735,14 @@ func (s *Server) handleListImportJobsRequest(args [0]string, argsEscaped bool, w
 		](
 			m,
 			mreq,
-			nil,
+			unpackListImportJobsParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.ListImportJobs(ctx)
+				response, err = s.h.ListImportJobs(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.ListImportJobs(ctx)
+		response, err = s.h.ListImportJobs(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)

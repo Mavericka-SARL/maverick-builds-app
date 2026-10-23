@@ -1697,10 +1697,12 @@ func (UnimplementedHandler) ListGrids(ctx context.Context, params ListGridsParam
 
 // ListImportJobs implements listImportJobs operation.
 //
-// List the 20 most recent import jobs for the model.
+// File imports of every kind — a grid's values, a dimension's members, a table's records —
+// newest first. The model is the one revision_id belongs to; without it, the request's model
+// (X-Model-Id, else the application's default model).
 //
 // GET /api/import/jobs
-func (UnimplementedHandler) ListImportJobs(ctx context.Context) (r []ImportJob, _ error) {
+func (UnimplementedHandler) ListImportJobs(ctx context.Context, params ListImportJobsParams) (r []ImportJob, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
