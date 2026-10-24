@@ -46,6 +46,10 @@ type criterion struct {
 	isNum     bool
 	pattern   []wildToken
 	wildcards bool
+	// literal is operand with its escapes undone, when it has no wildcards:
+	// what textEqual compares, worked out once rather than per candidate
+	// (a tenth of a SUMIFS-heavy recalculation, 2026-10-24).
+	literal string
 }
 
 // criterionOperators is checked in order: two-character operators first.
@@ -67,7 +71,7 @@ func parseCriterion(v Value) criterion {
 			n = 0 // negative zero is 0, as memberCode renders it
 		}
 		c = criterion{op: opEq, operand: numberText(n), num: n, isNum: true}
-		c.pattern, c.wildcards = compileWildcard(c.operand)
+		c.compile()
 		return c
 	case KindString:
 		s := v.String()
@@ -82,8 +86,15 @@ func parseCriterion(v Value) criterion {
 		c = criterion{op: opEq, operand: v.String()}
 	}
 	c.num, c.isNum = parseCriteriaOperand(c.operand)
-	c.pattern, c.wildcards = compileWildcard(c.operand)
+	c.compile()
 	return c
+}
+
+func (c *criterion) compile() {
+	c.pattern, c.wildcards = compileWildcard(c.operand)
+	if !c.wildcards {
+		c.literal = unescapeWildcard(c.operand)
+	}
 }
 
 // numberText renders n as text without an exponent, on its 15 significant
@@ -159,7 +170,7 @@ func (c criterion) matches(candidate Value) bool {
 
 func (c criterion) textEqual(text string) bool {
 	if !c.wildcards {
-		return strings.EqualFold(text, unescapeWildcard(c.operand))
+		return strings.EqualFold(text, c.literal)
 	}
 	return matchWildcard(c.pattern, []rune(strings.ToUpper(text)))
 }

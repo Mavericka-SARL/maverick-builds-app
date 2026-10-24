@@ -390,8 +390,16 @@ type dimReads struct {
 	// memo is the conditional-aggregation memo for this metric's pass (nil
 	// disables it).
 	memo map[string]formula.Value
+	// pinned holds the pass's reads that pin every dimension of their
+	// source (nil with memo: values may still appear during the pass).
+	pinned map[string]pinnedRead
 	// data is set when a read returns a recorded non-zero value.
 	data bool
+}
+
+type pinnedRead struct {
+	v     float64
+	found bool
 }
 
 func newDimReads(ctx context.Context, meta *DimMetadata, def *MetricDef, allDefs map[string]*MetricDef,
@@ -414,6 +422,7 @@ func newDimReads(ctx context.Context, meta *DimMetadata, def *MetricDef, allDefs
 	}
 	if memo {
 		r.memo = map[string]formula.Value{}
+		r.pinned = map[string]pinnedRead{}
 	}
 	return r
 }
@@ -488,6 +497,22 @@ func (r *dimReads) resolve(combo map[string]string, metric string, overrides map
 		byID[id] = code
 	}
 	srcDims := r.metricDims[depID]
+	// A read that pins every dimension of its source is the same from every
+	// cell (NormalizeCombo keeps nothing of combo then), so a pass makes it
+	// once: a SUMIFS reads its criteria metric so at each candidate member,
+	// for every cell — half of a DDMRP model's recalculation (2026-10-23).
+	pinnedKey := ""
+	if r.pinned != nil {
+		pinnedKey = pinnedKeyOf(depID, srcDims, byID)
+	}
+	if pinnedKey != "" {
+		if p, ok := r.pinned[pinnedKey]; ok {
+			if p.found && p.v != 0 {
+				r.data = true
+			}
+			return p.v, p.found, nil
+		}
+	}
 	norm, err := rollup.NormalizeCombo(r.meta.dims, srcDims, combo, byID)
 	if err != nil {
 		if errors.Is(err, rollup.ErrConflictingOverrides) {
@@ -505,10 +530,37 @@ func (r *dimReads) resolve(combo map[string]string, metric string, overrides map
 	if err != nil {
 		return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
 	}
+	if pinnedKey != "" {
+		r.pinned[pinnedKey] = pinnedRead{v: v, found: found}
+	}
 	if found && v != 0 {
 		r.data = true
 	}
 	return v, found, nil
+}
+
+// pinnedKeyOf is the key of a read of depID that pins exactly its
+// dimensions srcDims (in their order, so no sort), or "" for any other read.
+func pinnedKeyOf(depID string, srcDims []string, byID map[string]string) string {
+	if len(byID) != len(srcDims) {
+		return ""
+	}
+	n := len(depID)
+	for _, id := range srcDims {
+		code, ok := byID[id]
+		if !ok {
+			return ""
+		}
+		n += 1 + len(code)
+	}
+	var b strings.Builder
+	b.Grow(n)
+	b.WriteString(depID)
+	for _, id := range srcDims {
+		b.WriteByte(0)
+		b.WriteString(byID[id])
+	}
+	return b.String()
 }
 
 // plainReferences returns the UPPER-CASE identifiers node reads as plain

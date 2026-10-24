@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type TenantUsage } from "../../api/client";
 import { FeatureGate } from "../../license/FeatureGate";
-import { Card, DataTable, InlineAlert, LoadingState, SegmentedControl, Toolbar, ToolbarGroup, type DataTableColumn } from "../../ui";
+import { Card, DataTable, InlineAlert, LoadingState, SegmentedControl, Toolbar, ToolbarGroup, type DataTableColumn, Txt } from "../../ui";
 
 const PERIODS = [{ id: "7d", label: "7 days" }, { id: "30d", label: "30 days" }, { id: "90d", label: "90 days" }];
 
@@ -40,7 +40,7 @@ const COLUMNS: DataTableColumn<TenantUsage>[] = [
         {/* A tenant that could not be counted is listed with why, not left out. */}
         {t.status && (
           <span className="mvx-admin-muted" style={{ display: "block", fontSize: 11, fontWeight: 400 }}>
-            Not counted: {t.status}{t.error ? ` — ${t.error}` : ""}
+            Not counted: {t.status}<Txt>{t.error ? ` — ${t.error}` : ""}</Txt>
           </span>
         )}
       </span>

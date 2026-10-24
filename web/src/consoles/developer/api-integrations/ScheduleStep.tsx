@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type ApiIntegrationConfig, type ApiSchedule } from "../../../api/client";
-import { Field, InlineAlert, NumberInput, Select, StatusBadge, Switch, TextInput } from "../../../ui";
+import { Field, InlineAlert, NumberInput, Select, StatusBadge, Switch, TextInput, Txt } from "../../../ui";
 
 const COMMON_TIMEZONES = [
   "UTC", "Europe/Berlin", "Europe/London", "Europe/Moscow", "America/New_York",
@@ -124,16 +124,16 @@ export function ScheduleStep({
       <div className="mvx-admin-object" style={{ padding: 12, fontSize: 13, display: "grid", gap: 4 }}>
         <div><strong>{name || "(unnamed)"}</strong> · {config.direction === "pull" ? "Pull into" : "Push from"} {config.target_type} “{targetName}”</div>
         {link
-          ? <div>Model link · grid “{config.model?.grid}”{config.model?.metrics?.length ? ` · ${config.model.metrics.join(", ")}` : " · every metric"}</div>
+          ? <div>Model link · grid “<Txt>{config.model?.grid}</Txt><Txt>”</Txt>{config.model?.metrics?.length ? ` · ${config.model.metrics.join(", ")}` : " · every metric"}</div>
           : sftp
-          ? <div>SFTP {config.sftp?.host} · {config.sftp?.select === "newest"
+          ? <div>SFTP <Txt>{config.sftp?.host}</Txt> <Txt>· </Txt><Txt>{config.sftp?.select === "newest"
             ? `newest ${config.sftp?.pattern ?? ""} in ${config.sftp?.folder || "the login folder"}`
-            : config.sftp?.path}</div>
+            : config.sftp?.path}</Txt></div>
           : <div>{config.request.method} {sanitize(config.request.url)}</div>}
         {link
           ? <div>Reads as the developer who runs it</div>
-          : <div>Auth: {config.auth.type}{connectionName ? ` via “${connectionName}”` : ""}{sftp ? "" : ` · Pagination: ${pag.mode ?? "none"}`}</div>}
-        <div>Schedule: {schedule.kind === "manual" ? "manual only" : schedule.kind === "interval" ? `every ${schedule.interval_seconds}s` : schedule.cron_expr} ({schedule.timezone ?? "UTC"}){schedule.enabled ? "" : " — disabled"}</div>
+          : <div>Auth: {config.auth.type}<Txt>{connectionName ? ` via “${connectionName}”` : ""}</Txt><Txt>{sftp ? "" : ` · Pagination: ${pag.mode ?? "none"}`}</Txt></div>}
+        <div>Schedule: <Txt>{schedule.kind === "manual" ? "manual only" : schedule.kind === "interval" ? `every ${schedule.interval_seconds}s` : schedule.cron_expr}</Txt> <Txt>(</Txt>{schedule.timezone ?? "UTC"})<Txt>{schedule.enabled ? "" : " — disabled"}</Txt></div>
         <div>
           {tested
             ? <StatusBadge tone="success">Request tested ✓</StatusBadge>

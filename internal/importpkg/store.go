@@ -207,14 +207,19 @@ func (s *Store) GetImportJob(ctx context.Context, jobID string) (*importpkgv1.Im
 	return job, nil
 }
 
-func (s *Store) ListImportJobs(ctx context.Context, modelID string, limit int32) ([]*importpkgv1.ImportJob, error) {
+// ListImportJobs answers a model's newest import jobs — with revisionID,
+// that revision's and those of no revision only: Recent Imports listed
+// another revision's imports, and a deleted one's, as the open revision's
+// history (2026-10-23).
+func (s *Store) ListImportJobs(ctx context.Context, modelID, revisionID string, limit int32) ([]*importpkgv1.ImportJob, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, model_id::text, COALESCE(revision_id::text,''), status::text,
 		       total_rows, valid_rows, error_rows, created_at, completed_at
 		FROM import.import_job
 		WHERE model_id = $1::uuid
+		  AND ($3 = '' OR revision_id IS NULL OR revision_id::text = $3)
 		ORDER BY created_at DESC LIMIT $2
-	`, modelID, limit)
+	`, modelID, limit, revisionID)
 	if err != nil {
 		return nil, err
 	}

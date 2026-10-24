@@ -3,7 +3,7 @@ import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
 import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting } from "../../api/client";
-import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm } from "../../ui";
+import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm, Txt } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
 import { ExportSection } from "./ExportSection";
 
@@ -256,7 +256,7 @@ function FormMappingCard({
             <span style={{ marginRight: 12 }}>Table: <b>{form?.label || form?.name || mapping.form_id.slice(0, 8)}</b></span>
             <span style={{ marginRight: 12 }}>Field: <b>{mapping.source_field}</b></span>
             <span style={{ marginRight: 12 }}>→ Metric: <b>{metric?.name || mapping.target_metric_id.slice(0, 8)}</b></span>
-            <span style={{ marginRight: 12 }}>→ {grid ? <><b>{grid.name}</b> grid</> : "all grids using this metric"}</span>
+            <span style={{ marginRight: 12 }}>→ <Txt>{grid ? <><b>{grid.name}</b> grid</> : "all grids using this metric"}</Txt></span>
             <span>Agg: <b>{mapping.aggregation}</b></span>
           </div>
           <div className="mvx-admin-muted" style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>

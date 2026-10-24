@@ -1,5 +1,5 @@
 import { CheckSquare, BadgeCheck, GitFork, Bell, Merge } from "lucide-react";
-import { IconButton, Dialog, Field as UiField, StatusBadge as UiStatusBadge } from "../../ui";
+import { IconButton, Dialog, Field as UiField, StatusBadge as UiStatusBadge, Txt } from "../../ui";
 import type { StepType, TriggerEventCatalogItem } from "../../api/client";
 import {
   STATUS_TONES, TRIGGER_FALLBACK, TRIGGER_CATEGORY_ORDER, TRIGGER_CATEGORY_LABELS,
@@ -59,8 +59,8 @@ export function TriggerEventSelect({
           <optgroup key={cat} label={TRIGGER_CATEGORY_LABELS[cat as TriggerEventCatalogItem["category"]]}>
             {items.map(ev => (
               <option key={ev.key} value={ev.key} disabled={!ev.enabled}>
-                {ev.label}{ev.source_name && ev.source_type !== "system" ? ` — ${ev.source_name}` : ""}
-                {!ev.enabled ? " (disabled)" : ""}
+                {ev.label}<Txt>{ev.source_name && ev.source_type !== "system" ? ` — ${ev.source_name}` : ""}</Txt>
+                <Txt>{!ev.enabled ? " (disabled)" : ""}</Txt>
               </option>
             ))}
           </optgroup>

@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder, Pencil, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DashboardDef, type DashboardFolder } from "../../api/client";
-import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm } from "../../ui";
+import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm, Txt } from "../../ui";
 import { DashboardCanvas } from "./DashboardCanvas";
 import { flattenFolders, UNFILED_LABEL, type FolderNode } from "./folderTree";
 
@@ -261,11 +261,11 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
       )}
 
       <p className="mvx-admin-muted" style={{ margin: "0 0 12px" }}>
-        {filtered.length} of {dashboards.length} dashboard{dashboards.length !== 1 ? "s" : ""}
-        {filterTag ? ` tagged "${filterTag}"` : ""}
-        {filterFolder === ROOT_OPTION ? ` outside any folder` : ""}
-        {filterFolder && filterFolder !== ROOT_OPTION ? ` in "${folderByID.get(filterFolder)?.path ?? "folder"}"` : ""}
-        {" "}— in the order of the Dashboards page's tabs; the first is where everyone lands. Move one with its arrows.
+        {filtered.length} of {dashboards.length} dashboard<Txt>{dashboards.length !== 1 ? "s" : ""}</Txt>
+        <Txt>{filterTag ? ` tagged "${filterTag}"` : ""}</Txt>
+        <Txt>{filterFolder === ROOT_OPTION ? ` outside any folder` : ""}</Txt>
+        <Txt>{filterFolder && filterFolder !== ROOT_OPTION ? ` in "${folderByID.get(filterFolder)?.path ?? "folder"}"` : ""}</Txt>
+        <Txt>{" "}</Txt>— in the order of the Dashboards page's tabs; the first is where everyone lands. Move one with its arrows.
       </p>
 
       {filtered.length === 0 && folders.length === 0 && <EmptyState label="No dashboards match." />}
@@ -278,7 +278,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
               <Folder size={14} aria-hidden="true" style={{ color: "var(--color-text-muted)" }} />
               <span style={{ fontWeight: 600, fontSize: 13 }}>{group.label}</span>
               <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
-                {group.items.length} dashboard{group.items.length !== 1 ? "s" : ""}
+                {group.items.length} dashboard<Txt>{group.items.length !== 1 ? "s" : ""}</Txt>
               </span>
               {group.folder && (
                 <IconButton
@@ -337,7 +337,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                           {t}
                         </FilterChip>
                       ))}
-                      <span className="mvx-admin-muted">{(dash.widgets ?? []).length} widget{(dash.widgets ?? []).length !== 1 ? "s" : ""}</span>
+                      <span className="mvx-admin-muted">{(dash.widgets ?? []).length} widget<Txt>{(dash.widgets ?? []).length !== 1 ? "s" : ""}</Txt></span>
                       <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
                         {hasFolders && (
                         <Select

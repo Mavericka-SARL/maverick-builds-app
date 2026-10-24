@@ -4,7 +4,7 @@ import { Filter, Lock, Plus as PlusIcon } from "lucide-react";
 import {
   api, type BoardColumn, type BoardSettings, type DevDimension, type FormDef, type FormRecord, type Metric, type RecordFilter, type RecordsQuery,
 } from "../../api/client";
-import { Button, FilterBar, FilterBarGroup, FilterChip, InlineAlert, LoadingState, SearchInput, Select } from "../../ui";
+import { Button, FilterBar, FilterBarGroup, FilterChip, InlineAlert, LoadingState, SearchInput, Select, Txt } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
 import { canCreateRecords } from "./formPermissions";
 import { describeFilter, displayValue, listColumns, listQuery, newRecordLabel, recordTitle } from "./recordList";
@@ -152,7 +152,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
               <Lock size={11} aria-hidden="true" />
               {(fixedFilters ?? []).map((f, i) => (
                 <Fragment key={i}>
-                  {i > 0 && " · "}
+                  <Txt>{i > 0 && " · "}</Txt>
                   <span aria-label={`Filter set on this widget: ${describeFilter(f, listCols, dims, metrics)}`}>{describeFilter(f, listCols, dims, metrics)}</span>
                 </Fragment>
               ))}
@@ -211,7 +211,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                 <header className="mvx-board__column-head">
                   <span className="mvx-board__column-title">
                     {col.read_only && <Lock size={11} aria-label="Read-only for you" style={{ marginRight: 4 }} />}
-                    {col.label}
+                    <Txt>{col.label}</Txt>
                   </span>
                   <span className="mvx-board__column-count" aria-label={`${t?.count ?? 0} records`}>{t?.count ?? 0}</span>
                   {sumField && <span className="mvx-board__column-sum" title={`${sumField.label} total: ${fullSum(t?.sum ?? 0)}`}>{fmtSum(t?.sum ?? 0)}</span>}

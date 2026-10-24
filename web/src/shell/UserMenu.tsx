@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { KeyRound, LogOut, MessageSquare } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { RoleBadge } from "../ui";
+import { RoleBadge, Txt } from "../ui";
 import { useAuth } from "../auth/useAuth";
 import { api } from "../api/client";
 import { EDITION_LABELS, licenseDate, useLicense } from "../license/useLicense";
@@ -136,11 +136,11 @@ export function UserMenu() {
                   account menu is the one place every role opens. */}
               <div className="mvx-user-menu__edition" data-testid="edition">
                 {EDITION_LABELS[license.edition]} Edition
-                {license.state === "expired" ? " · license expired"
+                <Txt>{license.state === "expired" ? " · license expired"
                   : license.state === "transition" ? ` · license expired, read-only until ${licenseDate(license.transition_ends_at)}`
                   : license.state === "invalid" ? " · license invalid"
                   : license.renewal_due ? ` · license expires ${licenseDate(license.expires_at)}`
-                  : ""}
+                  : ""}</Txt>
               </div>
             </div>
           )}

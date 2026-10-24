@@ -9,7 +9,7 @@ import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { SelectorBarEditor } from "./SelectorBarEditor";
 import { BoardSettingsEditor, RecordPresetsEditor } from "./RecordWidgetSettings";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
-import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
+import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText, Txt } from "../../ui";
 
 // ── Dashboard widget palette / sizing ───────────────────────────────────────
 
@@ -597,7 +597,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             Dashboards
           </Button>
           <span style={{ fontWeight: 700, fontSize: 17 }}>{dashName}</span>
-          <span className="mvx-admin-muted">{widgets.length} widget{widgets.length !== 1 ? "s" : ""}</span>
+          <span className="mvx-admin-muted">{widgets.length} widget<Txt>{widgets.length !== 1 ? "s" : ""}</Txt></span>
 
           <SegmentedControl
             aria-label="Builder mode"
@@ -634,7 +634,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               })}
               <div style={{ width: 1, height: 20, background: "var(--color-border)", flexShrink: 0 }} />
               <FilterChip active={showBar} onClick={() => { setShowBar(v => !v); setShowAdd(false); }}>
-                Selector bar{(dash?.selector_bar?.length ?? 0) > 0 ? ` (${dash?.selector_bar?.length})` : ""}
+                Selector bar<Txt>{(dash?.selector_bar?.length ?? 0) > 0 ? ` (${dash?.selector_bar?.length})` : ""}</Txt>
               </FilterChip>
             </>
           )}
@@ -752,7 +752,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                 </Select>
                 <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
                   Where its latest run stands: each step, the current one with its roles and how long it has waited.
-                  {workflowDefs.length === 0 && " Publish a workflow first."}
+                  <Txt>{workflowDefs.length === 0 && " Publish a workflow first."}</Txt>
                 </p>
               </Field>
             )}

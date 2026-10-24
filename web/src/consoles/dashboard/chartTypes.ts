@@ -14,7 +14,9 @@ export function formatValue(value: number | null | undefined, format: string | u
   if (value === null || value === undefined) return "—";
   switch (format) {
     case "currency":
-      return `${currencySymbol}${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value)}`;
+      // The sign before the symbol (-$360K), as the KPI tile and the grid
+      // write it — not $-360K.
+      return `${value < 0 ? "-" : ""}${currencySymbol}${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(Math.abs(value))}`;
     case "percent":
       // Percent units, as Percentage metrics are stored (5.6 = 5.6%) and the
       // grid and KPI tiles show them — not a fraction to multiply by 100.

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	importpkgv1 "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
@@ -31,10 +32,11 @@ type DBCommitter struct {
 	Log  zerolog.Logger
 }
 
-func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (written, skipped int, err error) {
+func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, dryRun bool, runBy string) (written, skipped int, err error) {
 	if len(rows) == 0 {
 		return 0, 0, nil
 	}
+	started := time.Now()
 	if runBy == "" && !dryRun {
 		// Every write needs a real principal: manual runs carry the caller,
 		// scheduled runs the developer who enabled the schedule.
@@ -46,9 +48,12 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 	}
 	switch def.Config.TargetType {
 	case TargetGrid:
-		return c.commitGrid(ctx, def, header, rows, dryRun, runBy)
+		return c.commitGrid(ctx, def, header, rows, fileName, started, dryRun, runBy)
 	case TargetDimension:
 		written, skipped, err = c.commitDimension(ctx, def, header, rows, dryRun)
+		if !dryRun {
+			c.recordJob(ctx, def, "dimension", fileName, runBy, started, written, skipped, err)
+		}
 		if err == nil && written > 0 && !dryRun {
 			// Member codes, parents and properties are what LOOKUP, PARENT
 			// and dim.property read; those references have no
@@ -62,12 +67,54 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 		}
 		return written, skipped, err
 	case TargetForm:
-		return c.commitForm(ctx, def, header, rows, dryRun, runBy)
+		written, skipped, err = c.commitForm(ctx, def, header, rows, dryRun, runBy)
+		if !dryRun {
+			c.recordJob(ctx, def, "table", fileName, runBy, started, written, skipped, err)
+		}
+		return written, skipped, err
 	}
 	return 0, 0, fmt.Errorf("unknown target type")
 }
 
-func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (int, int, error) {
+// jobSource is how Recent Imports names a connector's run.
+func jobSource(def *Definition) string {
+	switch def.Config.Protocol {
+	case ProtocolSFTP:
+		return "sftp"
+	case ProtocolModel:
+		return "model_link"
+	default:
+		return "rest_api"
+	}
+}
+
+// recordJob adds a dimension's or a table's sync to Recent Imports, as the
+// gateway's file imports are — best-effort: the line must never fail the run
+// it describes. A grid's sync is its own staged job (commitGrid). These were
+// only in the integration's run history (2026-10-23).
+func (c *DBCommitter) recordJob(ctx context.Context, def *Definition, targetType, fileName, runBy string, started time.Time, written, skipped int, err error) {
+	table := "model.dimension_def"
+	if targetType == "table" {
+		table = "model.form_def"
+	}
+	j := importpkg.FinishedJob{Source: jobSource(def), UserID: runBy, Rows: written, ErrorRows: skipped,
+		Details: importpkg.JobDetails{TargetType: targetType, FileName: fileName, StartedAt: started}}
+	_ = c.Pool.QueryRow(ctx, `
+		SELECT model_id::text, COALESCE(revision_id::text, ''), COALESCE(NULLIF(label, ''), name)
+		FROM `+table+` WHERE id::text = $1`, def.Config.TargetID).Scan(&j.ModelID, &j.RevisionID, &j.Details.TargetName)
+	if j.ModelID == "" {
+		return
+	}
+	if err != nil {
+		j.Failed, j.Rows = true, 0
+		j.Errors = []*importpkgv1.ImportError{{Message: err.Error()}}
+	}
+	if _, rerr := importpkg.NewStore(c.Pool).RecordJob(ctx, j); rerr != nil {
+		c.Log.Warn().Err(rerr).Str("integration", def.ID).Msg("record a connector's import job")
+	}
+}
+
+func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, started time.Time, dryRun bool, runBy string) (int, int, error) {
 	raw := make([]importpkg.RawRow, 0, len(rows))
 	for i, r := range rows {
 		cells := make(map[string]string, len(header))
@@ -105,15 +152,17 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 		return 0, len(importErrs), nil
 	}
 	store := importpkg.NewStore(c.Pool)
-	job, err := store.CreateImportJob(ctx, def.ModelID, def.RevisionID, "rest_api", runBy, nil)
+	job, err := store.CreateImportJob(ctx, def.ModelID, def.RevisionID, jobSource(def), runBy, nil)
 	if err != nil {
 		return 0, 0, err
 	}
-	// Its line in Recent Imports names the grid and the mode.
+	// Its line in Recent Imports names the grid, the mode and an SFTP
+	// source's file.
 	var gridName string
 	_ = c.Pool.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id::text = $1`, def.Config.TargetID).Scan(&gridName)
 	if err := store.DescribeJob(ctx, job.Id, importpkg.JobDetails{
 		TargetType: "grid", TargetName: gridName, Mode: string(cmp.Or(def.Config.ImportMode, ModeIncremental)),
+		FileName: fileName, StartedAt: started,
 	}); err != nil {
 		c.Log.Warn().Err(err).Msg("describe a connector's import job")
 	}

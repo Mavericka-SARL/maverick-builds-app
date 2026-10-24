@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3,
 import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
-import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput } from "../../ui";
+import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput, Txt } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
@@ -679,15 +679,23 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }, [pivotContext, filterSel, gridMeta, multiSel, multiSelect]);
   const scopeKey = JSON.stringify(scope);
 
-  const { data: cellsData, error: cellsError } = useQuery({
+  // While a new scope loads, the last scope's answer is kept for the grid's
+  // layout. Its cells are keyed by the members chosen before, so no cell of
+  // the new scope is in them: read from them, every input showed an editable
+  // 0 until the answer landed — 5 s on the Playground, for values that were
+  // there (2026-10-23) — as it did before the first answer. Until the scope's
+  // own answer is in (cellsLoading), every value reads as not yet known
+  // ("…") and takes no input.
+  const { data: cellsData, error: cellsError, isPlaceholderData } = useQuery({
     queryKey: ["grid-cells", ctx.revision_id, gridDefId ?? "all", scopeKey],
     queryFn: () => api.getGrid(ctx.revision_id, gridDefId, { scope }),
     enabled: pivotContextReady,
     // While a write's dependents are being recalculated the grid asks every
     // 0.4 s instead of every 2 s, so the result shows as soon as it lands.
     refetchInterval: (q) => (q.state.data?.recalc_pending ? 250 : 2000),
-    placeholderData: (prev) => prev, // keep last slice visible while a new scope loads
+    placeholderData: (prev) => prev,
   });
+  const cellsLoading = isPlaceholderData || cellsData === undefined;
 
   // A write answered before its dependents were recalculated: calculated
   // cells show as pending until the grid's poll reports the pass landed.
@@ -956,6 +964,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // too, and — unlike undefined — never counted as 0 by a parent or total:
   // a restricted viewer must not see a partial sum of what they can see).
   function resolveCell(metricId: string, fc: DimMember[], depth = 0): number | null | undefined {
+    if (cellsLoading) return undefined;
     if (dims.length === 0) return withheld.has(metricId) ? null : (g.totals[metricId] ?? 0);
     // A calculated member, at any level of the other dimensions: its formula
     // over its siblings at the same coordinate — the FY Variance % from the
@@ -1144,6 +1153,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // Same return contract as resolveCell: null = withheld (blank, and blanks
   // any total built from it).
   function getVal(metricId: string, fc: DimMember[]): number | null | undefined {
+    if (cellsLoading) return undefined;
     if (dims.length === 0) return withheld.has(metricId) ? null : g.totals[metricId];
     // Parent combos always aggregate from children — stored direct values are
     // stale and ignored; a calculated member is computed from its siblings.
@@ -1317,6 +1327,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   //     root — resolveCell's formula/rate branch — or "—" when the server
   //     has none there.
   function colTotal(metricId: string, cc: DimMember[]): number | null | undefined {
+    if (cellsLoading) return undefined;
     const spansGrid = ctxDims.length === 0 &&
       colDims.every((dim, i) => cc[i] !== undefined && isAggNode(dim, cc[i]) && !cc[i].parent_code);
     if (spansGrid && withheld.has(metricId)) return null;
@@ -1419,7 +1430,15 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }
 
   // ── Shared cell renderers ─────────────────────────────────────────────────
+  function loadingCell(m: Metric, borderLeft?: string) {
+    return (
+      <td className="mvx-cell--loading" aria-busy="true" title="Loading"
+        style={{ ...td, textAlign: isTextMetric(m) ? "left" : "right", borderLeft }}>…</td>
+    );
+  }
+
   function inputCell(m: Metric, fc: DimMember[], borderLeft?: string) {
+    if (cellsLoading) return loadingCell(m, borderLeft);
     const isParent = comboIsAgg(fc);
     const key = getKey(m.id, fc);
     const val = getVal(m.id, fc);
@@ -1558,6 +1577,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }
 
   function calcCell(m: Metric, fc: DimMember[], borderLeft?: string) {
+    if (cellsLoading) return loadingCell(m, borderLeft);
     const isParent = comboIsAgg(fc);
     if (m.format === "text") {
       // A calculated text (an action key, a status): the text its formula
@@ -1651,7 +1671,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {/* ── Grid table ── */}
-        <div ref={scrollRef} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }}>
+        <div ref={scrollRef} aria-busy={cellsLoading || undefined} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }}>
 
           {metricsInRows ? (
             /* Metrics in ROWS */
@@ -1823,7 +1843,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                                   {rowCollapsed(member.code) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                                 </button>
                               )}
-                            {maintainedRowDim && isLeaf && !member.formula ? <MemberLabel dim={maintainedRowDim} member={member} /> : member.label}
+                            <Txt>{maintainedRowDim && isLeaf && !member.formula ? <MemberLabel dim={maintainedRowDim} member={member} /> : member.label}</Txt>
                           </td>
                           {effectiveColCombos.flatMap((cc, ci) => {
                             const fc = fullCombo(rc, cc);

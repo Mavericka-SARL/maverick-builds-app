@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
 import { api, type DemoContext, type GridData, type ImportModeParam, type ImportRowError, type ApiError, type ImportJob } from "../../api/client";
-import { SectionHeader, Button, Field, Select, Textarea, InlineAlert, StatusBadge, type DesignTone } from "../../ui";
+import { SectionHeader, Button, Field, Select, Textarea, InlineAlert, StatusBadge, type DesignTone, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 
 const STATUS_LABEL: Record<number, string> = { 0: "Unknown", 1: "Validating", 2: "Staged", 3: "Committed", 4: "Failed", 5: "Aborted" };
@@ -174,7 +174,7 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
       )}
       {lastResult && !lastError && (
         <div style={{ marginTop: 16 }}>
-          <InlineAlert tone="success">{lastResult.valid_rows} cell{lastResult.valid_rows === 1 ? "" : "s"} imported</InlineAlert>
+          <InlineAlert tone="success">{lastResult.valid_rows} cell<Txt>{lastResult.valid_rows === 1 ? "" : "s"}</Txt> <Txt>imported</Txt></InlineAlert>
         </div>
       )}
 

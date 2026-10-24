@@ -1,4 +1,4 @@
-import { Button } from "../ui";
+import { Button, Txt } from "../ui";
 import type { StepCondition } from "../api/client";
 
 /**
@@ -39,8 +39,8 @@ export function WorkflowStepActions({ stepType, completionLabel, condition, disa
             ? <> (formula: <code>{condition.formula}</code>)</>
             : <>
                 {condition?.left ? <> — the request has no value for <code>{condition.left}</code></> : null}
-                {condition ? <> (rule: <code>{condition.left} {condition.operator} {String(condition.right)}</code>)</> : null}
-              </>}. Choose the branch to continue.
+                {condition ? <> (rule: <code><Txt>{condition.left}</Txt> <Txt>{condition.operator}</Txt> <Txt>{String(condition.right)}</Txt></code>)</> : null}
+              </>}<Txt>. Choose the branch to continue.</Txt>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button variant="primary" size={size} style={{ flex: 1 }} disabled={disabled} onClick={() => onDecide("true")}>Continue as true</Button>

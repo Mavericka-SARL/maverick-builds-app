@@ -1,7 +1,7 @@
 import { useBrand } from "../../../branding/brand";
 import { useEffect, useRef, useState } from "react";
 import { api, type ApiIntegrationConfig, type ApiRun } from "../../../api/client";
-import { Button, Field, InlineAlert, Select, StatusBadge, TextInput, useConfirm } from "../../../ui";
+import { Button, Field, InlineAlert, Select, StatusBadge, TextInput, useConfirm, Txt } from "../../../ui";
 import { inferFields, parsePreviewRecords, type InferredField } from "./integrationMapping";
 
 // "Send test request" ALWAYS executes through the backend worker (202 +
@@ -187,7 +187,7 @@ export function ResponseStep({
             </table>
           </div>
           <p className="mvx-admin-muted" style={{ fontSize: 12 }}>
-            {fields.length} field(s) inferred: {fields.map(f => `${f.path} (${f.types.join("|")})`).slice(0, 6).join(", ")}{fields.length > 6 ? "…" : ""}
+            {fields.length} field(s) inferred: {fields.map(f => `${f.path} (${f.types.join("|")})`).slice(0, 6).join(", ")}<Txt>{fields.length > 6 ? "…" : ""}</Txt>
           </p>
         </div>
       )}

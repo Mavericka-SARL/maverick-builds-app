@@ -27,6 +27,7 @@ import {
   InlineAlert,
   Checkbox,
   type DesignTone,
+  Txt,
 } from "../../ui";
 
 /**
@@ -109,7 +110,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
               <div className="mvx-admin-revision__info">
                 <div className="mvx-admin-revision__name">{s.name}</div>
                 <div className="mvx-admin-revision__meta">
-                  {s.id.slice(0, 8)} · {s.created_at ? s.created_at.slice(0, 16).replace("T", " ") : ""}
+                  {s.id.slice(0, 8)} · <Txt>{s.created_at ? s.created_at.slice(0, 16).replace("T", " ") : ""}</Txt>
                 </div>
               </div>
               {canTransferModels && (
@@ -247,7 +248,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         <div className="mvx-admin-object__title">
           <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
           {app.description && <div className="mvx-admin-object__meta" style={{ whiteSpace: "normal" }}>{app.description}</div>}
-          <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
+          <div className="mvx-admin-object__meta">{app.models.length} model<Txt>{app.models.length !== 1 ? "s" : ""}</Txt></div>
         </div>
         <IconButton aria-label={`Edit application ${app.name}`} title="Rename or describe" onClick={() => setEditing(`app:${app.id}`)}>
           <Pencil size={14} />
@@ -335,7 +336,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
                   {formatMB(m.storage_bytes / MB)}
                 </span>
               )}
-              {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
+              {!modelOpen && <span className="mvx-admin-muted">{revisions} revision<Txt>{revisions !== 1 ? "s" : ""}</Txt><Txt>{m.active_revision ? ` · active: ${m.active_revision}` : ""}</Txt></span>}
               {canTransferModels && revisions > 0 && (
                 <IconButton
                   aria-label={`Export model ${m.name}`}
@@ -541,7 +542,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
           <div className="mvx-admin-object__title">
             <div className="mvx-admin-object__name"><KindTag kind="tenant" />{tenant.name}</div>
             <div className="mvx-admin-object__meta" data-testid={`tenant-meta-${tenant.id}`}>
-              {planLabel(tenant)} · {(tenant.applications ?? []).length} app{(tenant.applications ?? []).length !== 1 ? "s" : ""}
+              {planLabel(tenant)} · {(tenant.applications ?? []).length} app<Txt>{(tenant.applications ?? []).length !== 1 ? "s" : ""}</Txt>
             </div>
             <StorageMeter tenant={tenant} />
           </div>

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { api, type ApiFieldMap, type ApiIntegrationConfig, type ApiRun } from "../../../api/client";
-import { Button, Field, IconButton, InlineAlert, Select, StatusBadge, TextInput } from "../../../ui";
+import { Button, Field, IconButton, InlineAlert, Select, StatusBadge, TextInput, Txt } from "../../../ui";
 import type { InferredField } from "./integrationMapping";
 import { TRANSFORM_KINDS } from "./apiIntegrationTypes";
 
@@ -144,7 +144,7 @@ export function MappingStep({
           <span aria-live="polite" style={{ fontSize: 13 }}>
             <StatusBadge tone={dryRun.status === "success" ? "success" : dryRun.status === "partial" ? "warning" : "danger"}>{dryRun.status}</StatusBadge>
             {" "}found {dryRun.records_read}, valid {dryRun.records_written}, skipped {dryRun.records_skipped}
-            {dryRun.error_code ? ` · ${dryRun.error_code}` : ""}
+            <Txt>{dryRun.error_code ? ` · ${dryRun.error_code}` : ""}</Txt>
           </span>
         )}
       </div>

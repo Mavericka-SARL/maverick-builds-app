@@ -71,17 +71,27 @@ func TestCommitFormChecksAndPostsEachRecord(t *testing.T) {
 		}
 		return n
 	}
-	written, skipped, err := c.CommitPull(ctx, def, header, rows, true, dev)
+	written, skipped, err := c.CommitPull(ctx, def, header, rows, "", true, dev)
 	if err != nil || written != 1 || skipped != 3 {
 		t.Fatalf("dry run: written=%d skipped=%d err=%v, want 1 and 3", written, skipped, err)
 	}
 	if n := count(`SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, form); n != 0 {
 		t.Fatalf("a dry run created %d record(s)", n)
 	}
+	if n := count(`SELECT count(*) FROM import.import_job WHERE model_id=$1::uuid`, modelID); n != 0 {
+		t.Fatalf("a dry run is listed in Recent Imports (%d job(s))", n)
+	}
 
-	written, skipped, err = c.CommitPull(ctx, def, header, rows, false, dev)
+	written, skipped, err = c.CommitPull(ctx, def, header, rows, "", false, dev)
 	if err != nil || written != 1 || skipped != 3 {
 		t.Fatalf("run: written=%d skipped=%d err=%v, want 1 and 3", written, skipped, err)
+	}
+	// The sync is in Recent Imports, as a file of the table's records is: it
+	// was only in the integration's run history (2026-10-23).
+	if n := count(`SELECT count(*) FROM import.import_job WHERE model_id=$1::uuid AND revision_id=$2::uuid AND created_by=$3::uuid
+		AND status='committed' AND file_url='rest_api' AND target_type='table' AND target_name='Spend' AND valid_rows=1 AND error_rows=3`,
+		modelID, revID, dev); n != 1 {
+		t.Errorf("%d Recent Imports line(s) for the sync, want 1", n)
 	}
 	var code string
 	if err := pool.QueryRow(ctx, `SELECT data->>'code' FROM runtime.form_record WHERE form_id=$1::uuid`, form).Scan(&code); err != nil || code != "S-0001" {

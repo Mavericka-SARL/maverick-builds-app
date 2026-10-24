@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Users, UserCog, Sigma, ListTree, GitBranch, Zap, FileText, Table2, LayoutDashboard, Workflow, Plug, Sparkles } from "lucide-react";
-import { api, type AdminTenant, type AdminUser } from "../../api/client";
+import { api, type AdminTenant, type AdminUser, type ApiError } from "../../api/client";
 import { WorkflowsTab } from "./WorkflowsTab";
 import { AIAssistant } from "./AIAssistant";
 import { UsersPanel } from "../admin/UsersPanel";
@@ -16,7 +16,7 @@ import { DepGraph } from "./DependencyGraphTab";
 import { IntegrationsTab } from "./IntegrationsTab";
 import { DashboardsTab } from "./DashboardsTab";
 import { RolesTab } from "../business-admin/BusinessAdminConsole";
-import { PageLayout, LoadingState, ErrorState } from "../../ui";
+import { PageLayout, LoadingState, ErrorState, SELECTED_APP_KEY } from "../../ui";
 import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 
 // ── Section ───────────────────────────────────────────────────────────────────
@@ -41,18 +41,41 @@ const TAB_LABELS: Record<Tab, string> = {
 
 const SECTION: SectionId = "developer";
 
+// The revision being built, kept per application across a reload. Held in
+// memory only, a reload reopened Build on the application's default model,
+// whatever model was being built (2026-10-23).
+function workingRevisionKey(): string {
+  return `working_revision:${localStorage.getItem(SELECTED_APP_KEY) ?? ""}`;
+}
+
+function storedWorkingRevision(): { id: string; name: string } {
+  try {
+    const v = JSON.parse(localStorage.getItem(workingRevisionKey()) ?? "null") as { id?: unknown; name?: unknown } | null;
+    if (v && typeof v.id === "string" && typeof v.name === "string") return { id: v.id, name: v.name };
+  } catch { /* unreadable or unavailable: no revision kept */ }
+  return { id: "", name: "" };
+}
+
 /**
  * The developer section of the console: Developer › (model authoring) and, unless
  * a tenant/platform admin section already supplies it, Govern › Users.
  */
 export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInput): ConsoleSection | null {
   const local = (sectionOf(tab) === SECTION ? localTab(tab) : "") as Tab | "";
-  const [revisionId, setRevisionId] = useState<string>("");
-  const [revisionName, setRevisionName] = useState<string>("");
+  const [revisionId, setRevisionId] = useState<string>(() => storedWorkingRevision().id);
+  const [revisionName, setRevisionName] = useState<string>(() => storedWorkingRevision().name);
+  // The chosen revision when the model read refuses it (a kept one deleted
+  // since, or no longer this person's to build): Build opens on the
+  // application's default instead.
+  const [goneRevisionId, setGoneRevisionId] = useState("");
 
   const handleSelectRevision = (id: string, name: string) => {
     setRevisionId(id);
     setRevisionName(name);
+    setGoneRevisionId("");
+    try {
+      localStorage.setItem(workingRevisionKey(), JSON.stringify({ id, name }));
+    } catch { /* kept for this page only */ }
   };
 
   const { data: autoRevisions, isLoading: autoRevisionsLoading } = useQuery({
@@ -66,12 +89,21 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
     return autoRevisions.find((r: { is_active: boolean }) => r.is_active) ?? autoRevisions[0];
   }, [autoRevisions]);
 
-  const effectiveRevisionId = revisionId || (autoDefaultRevision as { id: string } | null)?.id || "";
-  const effectiveRevisionName = revisionName || (autoDefaultRevision as { name: string } | null)?.name || "";
+  const chosen = revisionId !== "" && revisionId !== goneRevisionId;
+  const effectiveRevisionId = (chosen ? revisionId : "") || (autoDefaultRevision as { id: string } | null)?.id || "";
+  const effectiveRevisionName = (chosen ? revisionName : "") || (autoDefaultRevision as { name: string } | null)?.name || "";
 
   const { data: model, isLoading: modelLoading, error: modelError } = useQuery({
     queryKey: ["dev-model", effectiveRevisionId],
-    queryFn: () => api.getDevModel(effectiveRevisionId || undefined),
+    queryFn: () => api.getDevModel(effectiveRevisionId || undefined).catch((e: Partial<ApiError>) => {
+      if (chosen && effectiveRevisionId === revisionId && (e.status ?? 0) >= 400 && (e.status ?? 0) < 500) {
+        try {
+          localStorage.removeItem(workingRevisionKey());
+        } catch { /* nothing kept */ }
+        setGoneRevisionId(revisionId);
+      }
+      throw e;
+    }),
     enabled,
   });
 

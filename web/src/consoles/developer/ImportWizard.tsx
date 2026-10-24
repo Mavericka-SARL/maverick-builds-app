@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
-import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt } from "../../ui";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
 import { fileToBase64 } from "../business/blobUtils";
 import { ShapeStep, type Shaped, type ShapeSource } from "./ShapeStep";
@@ -544,7 +544,7 @@ function UploadStep({
             >
               <option value="">— select revision —</option>
               {(revisions as DevRevision[]).map(r => (
-                <option key={r.id} value={r.id}>{r.name}{r.is_active ? " (active)" : ""}</option>
+                <option key={r.id} value={r.id}>{r.name}<Txt>{r.is_active ? " (active)" : ""}</Txt></option>
               ))}
             </Select>
           </Field>
@@ -873,7 +873,7 @@ function MapColumnsStep({
                       <option value="">(ignore)</option>
                       {fieldOptions.map(o => (
                         <option key={o.value} value={o.value}>
-                          {o.label}{o.required ? " *" : ""}
+                          {o.label}<Txt>{o.required ? " *" : ""}</Txt>
                         </option>
                       ))}
                       {allowProperties && <option value="property:">new property…</option>}
@@ -1156,6 +1156,8 @@ function CommitStep({
       // the members from before the import until the page was reloaded.
       if (config.targetType === "dimension") {
         for (const key of ["dev-dimensions", "dev-dimensions-all", "dim-props"]) qc.invalidateQueries({ queryKey: [key] });
+        // The grids', KPIs' and selector bars' member lists too.
+        void invalidateModelData(qc);
       } else {
         if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
         void invalidateModelData(qc);
@@ -1179,8 +1181,8 @@ function CommitStep({
             <h3 style={{ margin: "0 0 8px", color: "var(--color-live)" }}>Import Complete</h3>
             <p className="mvx-admin-muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
               {result.rowsImported} rows imported
-              {result.values && result.values !== result.rowsImported ? ` (${result.values} values)` : ""}
-              {result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}
+              <Txt>{result.values && result.values !== result.rowsImported ? ` (${result.values} values)` : ""}</Txt>
+              <Txt>{result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}</Txt>
             </p>
           </>
         ) : (
@@ -1262,8 +1264,8 @@ function CommitStep({
       {config.targetType === "grid" && config.importMode === "full_reload" && (
         <div style={{ marginBottom: 20 }}>
           <InlineAlert tone="danger">
-            Full reload first deletes every value in {config.revisionName ? <>revision <strong>{config.revisionName}</strong></> : "the revision"} —
-            not only the cells in this file — and then imports the file.
+            Full reload first deletes every value in <Txt>{config.revisionName ? <>revision <strong>{config.revisionName}</strong></> : "the revision"}</Txt> <Txt>—
+            not only the cells in this file — and then imports the file.</Txt>
           </InlineAlert>
         </div>
       )}
@@ -1337,7 +1339,10 @@ const SOURCE_LABEL: Record<string, string> = {
   upload: "Import Wizard",
   csv_import: "saved import",
   google_sheets: "Google Sheet",
+  // "rest_api" was an SFTP connector's too before 2026-10-24.
   rest_api: "REST API or SFTP",
+  sftp: "SFTP",
+  model_link: "model link",
   ai_attachment: "AI Developer",
   ai_values: "AI Developer",
   sample: "sample values",
@@ -1395,9 +1400,9 @@ function ImportHistory({ revisionId }: { revisionId?: string }) {
                 <tr key={j.id}>
                   <td className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(j.created_at)}</td>
                   <td>
-                    {j.target_type
+                    <Txt>{j.target_type
                       ? <>{JOB_TARGET_LABEL[j.target_type]}{j.target_name ? <> <strong>{j.target_name}</strong></> : null}</>
-                      : "—"}
+                      : "—"}</Txt>
                     {how && <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>{how}</div>}
                   </td>
                   <td>{j.revision_name || "—"}</td>
@@ -1405,7 +1410,7 @@ function ImportHistory({ revisionId }: { revisionId?: string }) {
                   <td>{j.by || "—"}</td>
                   {/* A row of a wide file is one value per metric. */}
                   <td className="mvx-admin-mono" style={{ whiteSpace: "nowrap" }}>
-                    {j.valid_rows ?? "—"}{j.target_type ? ` ${UNIT[j.target_type]}` : ""}
+                    {j.valid_rows ?? "—"}<Txt>{j.target_type ? ` ${UNIT[j.target_type]}` : ""}</Txt>
                   </td>
                   <td className="mvx-admin-mono" style={{ color: (j.error_rows ?? 0) > 0 ? "var(--color-danger)" : "var(--color-text-subtle)" }}>
                     {j.error_rows ?? 0}
@@ -1825,7 +1830,7 @@ function SavedIntegrationsList({
                 )}
                 {d.target_type === "grid" && (d.type === "csv_import" || d.type === "google_sheets") && (
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-mode-${d.id}`} title="How each run writes the grid; change it with Edit shape and mapping">
-                    Mode: {MODE_LABEL[d.config?.import_mode ?? (d.type === "google_sheets" ? "replace" : "incremental")] ?? d.config?.import_mode}
+                    Mode: <Txt>{MODE_LABEL[d.config?.import_mode ?? (d.type === "google_sheets" ? "replace" : "incremental")] ?? d.config?.import_mode}</Txt>
                   </span>
                 )}
                 {d.config?.reshape && describeReshape(d.config.reshape) && (
@@ -1963,13 +1968,13 @@ function RunReshapedIntegration({ integration }: { integration: IntegrationDef }
       {run.isSuccess && (
         <span className="mvx-admin-muted" style={{ fontSize: 12 }} role="status">
           {run.data.rows_imported} row(s) imported
-          {run.data.values_imported && run.data.values_imported !== run.data.rows_imported ? ` (${run.data.values_imported} values)` : ""}
+          <Txt>{run.data.values_imported && run.data.values_imported !== run.data.rows_imported ? ` (${run.data.values_imported} values)` : ""}</Txt>
         </span>
       )}
       {run.isError && (
         <span className="mvx-admin-error" style={{ fontSize: 12 }}>
           {(run.error as Error).message}
-          {refused[0] ? ` · row ${refused[0].row}${refused[0].column ? `, ${refused[0].column}` : ""}: ${refused[0].message}${refused.length > 1 ? ` (+${refused.length - 1} more)` : ""}` : ""}
+          <Txt>{refused[0] ? ` · row ${refused[0].row}${refused[0].column ? `, ${refused[0].column}` : ""}: ${refused[0].message}${refused.length > 1 ? ` (+${refused.length - 1} more)` : ""}` : ""}</Txt>
         </span>
       )}
     </span>
@@ -1988,10 +1993,10 @@ function IntegrationRunHistory({ integrationId }: { integrationId: string }) {
       {runs.map(r => (
         <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "4px 0", borderTop: "1px solid var(--color-border)" }}>
           <StatusBadge tone={r.status === "success" ? "success" : "danger"}>{r.status}</StatusBadge>
-          <span>{r.rows_imported} row{r.rows_imported !== 1 ? "s" : ""}{r.error_rows > 0 ? ` · ${r.error_rows} failed` : ""}</span>
+          <span>{r.rows_imported} row<Txt>{r.rows_imported !== 1 ? "s" : ""}</Txt><Txt>{r.error_rows > 0 ? ` · ${r.error_rows} failed` : ""}</Txt></span>
           {r.message && <span className="mvx-admin-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{r.message}</span>}
           <span className="mvx-admin-muted" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-            {r.run_by && `${r.run_by} · `}{fmtDate(r.created_at)}
+            <Txt>{r.run_by && `${r.run_by} · `}</Txt><Txt>{fmtDate(r.created_at)}</Txt>
           </span>
         </div>
       ))}

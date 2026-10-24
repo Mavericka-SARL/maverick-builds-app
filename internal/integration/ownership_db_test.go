@@ -167,7 +167,7 @@ func TestDBCommitter_RefusesForeignTarget(t *testing.T) {
 
 	dimDef := &integration.Definition{ModelID: modelID, RevisionID: revID,
 		Config: &integration.Config{TargetType: integration.TargetDimension, TargetID: foreignDim}}
-	written, _, err := c.CommitPull(ctx, dimDef, []string{"code", "label"}, [][]string{{"PWNED", "planted"}}, false, "dev-user")
+	written, _, err := c.CommitPull(ctx, dimDef, []string{"code", "label"}, [][]string{{"PWNED", "planted"}}, "", false, "dev-user")
 	if err == nil || written != 0 {
 		t.Fatalf("CommitPull into a foreign dimension: written=%d err=%v", written, err)
 	}

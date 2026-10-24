@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { invalidateModelData } from "../modelDataQueries";
 import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, RefreshCw } from "lucide-react";
 import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type FormRecord, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
-import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip } from "../../ui";
+import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
 import { cellClass, defaultsOf, describeFilter, filterOps, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
@@ -323,7 +323,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 <Lock size={11} aria-hidden="true" />
                 {(fixedFilters ?? []).map((f, i) => (
                   <React.Fragment key={i}>
-                    {i > 0 && " · "}
+                    <Txt>{i > 0 && " · "}</Txt>
                     <span aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics)}`}>{describeFilter(f, allCols, dims, metrics)}</span>
                   </React.Fragment>
                 ))}

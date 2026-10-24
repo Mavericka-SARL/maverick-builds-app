@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQueries, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
-import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm, CollapseToggle, useExpanded } from "../../ui";
+import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm, CollapseToggle, useExpanded, Txt } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
@@ -74,10 +74,15 @@ function dimMaxDepth(roots: DimMemberNode[]): number {
 // access-rule picker.
 const MEMBER_LIST_QUERY_KEYS = new Set(["dev-dimensions-all", "dimensions", "public-dims", "grid-preview",
   "ba-available-dimension-members"]);
-// Resolves once Build's own member list has refetched, so the move controls
-// stay busy until the new order is on screen; a second move built from the
-// old list would quietly undo the first. Everything else refreshes behind it.
-function refreshMemberOrder(qc: QueryClient): Promise<void> {
+// After any change to a dimension or its members — added, renamed, moved,
+// deleted — every list of them refetches, the dashboards' grid-meta among
+// them: a member added here was missing from a selector bar's cached list
+// for 30 s, so the bar opened on its first member instead of that default
+// (2026-10-23). Resolves once Build's own member list has refetched, so the
+// move controls stay busy until the new order is on screen; a second move
+// built from the old list would quietly undo the first. Everything else
+// refreshes behind it.
+function refreshMembers(qc: QueryClient): Promise<void> {
   void qc.invalidateQueries({ predicate: (q) => MEMBER_LIST_QUERY_KEYS.has(String(q.queryKey[0])) });
   void invalidateModelData(qc);
   return qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
@@ -151,7 +156,7 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
     onSuccess: (data) => {
       // Open, since adding its members comes next.
       if (data?.id) dimsOpen.setAll([data.id], true);
-      qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+      void refreshMembers(qc);
       setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setNewTags([]);
       setNewSourceDim(""); setNewSourceProp(""); setNewDerive(true); setShowAdd(false);
     },
@@ -338,7 +343,7 @@ function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => v
   const canOpen = dim.dimension_type !== "time" && !dim.source_dimension_id;
   const save = useMutation({
     mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); onClose(); },
+    onSuccess: () => { void refreshMembers(qc); onClose(); },
   });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -429,7 +434,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
   const [editMFormula, setEditMFormula] = useState("");
   const [origMFormula, setOrigMFormula] = useState("");
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+  const invalidate = () => refreshMembers(qc);
   // A refused delete (409 DIMENSION_IN_USE / MEMBER_IN_USE) names the
   // metrics whose formulas to change first; show it rather than drop it.
   const [error, setError] = useState<string | null>(null);
@@ -487,11 +492,11 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
     mutationFn: ({ parentId, ids }: { parentId: string | null; ids: string[] }) =>
       api.reorderDimensionMembers(dim.id, parentId, ids, revisionId),
     // Returned, so the move stays pending until the new order is on screen.
-    onSuccess: () => { setError(null); return refreshMemberOrder(qc); },
+    onSuccess: () => { setError(null); return refreshMembers(qc); },
     // A refusal often means the children changed underneath (another
     // developer, the AI Developer): refetch, so the next move is built from
     // the current children rather than refused the same way again.
-    onError: (e) => { fail(e); return qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); },
+    onError: (e) => { fail(e); return refreshMembers(qc); },
   });
   // The move button pressed last, to put keyboard focus back on once the
   // re-rendered rows land (the row may have been moved in the DOM, which
@@ -593,13 +598,13 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
               </span>
             )}
             <span className="mvx-admin-muted">
-              {dim.members.length} member{dim.members.length !== 1 ? "s" : ""}
-              {roots.length > 0 && ` · ${roots.length} root${roots.length !== 1 ? "s" : ""}`}
-              {isHierarchy && ` · depth ${maxDepth + 1}`}
+              {dim.members.length} member<Txt>{dim.members.length !== 1 ? "s" : ""}</Txt>
+              <Txt>{roots.length > 0 && ` · ${roots.length} root${roots.length !== 1 ? "s" : ""}`}</Txt>
+              <Txt>{isHierarchy && ` · depth ${maxDepth + 1}`}</Txt>
             </span>
             {isHierarchy && <StatusBadge tone="success">hierarchy</StatusBadge>}
             {parentDim && <StatusBadge tone="brand">child of {parentDim.name}</StatusBadge>}
-            {sourceDim && <StatusBadge tone="brand">groups {sourceDim.name} by {dim.source_property}</StatusBadge>}
+            {sourceDim && <StatusBadge tone="brand">groups {sourceDim.name} by <Txt>{dim.source_property}</Txt></StatusBadge>}
             {sourceDim && (
               <Button size="sm" variant="ghost" loading={derive.isPending} onClick={() => derive.mutate()}
                 title={`Add a member for every ${dim.source_property} value of ${sourceDim.name} that has none yet`}>
@@ -642,9 +647,9 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
               placeholder="Search members…" width={220} />
             {memberQuery && (
               <span className="mvx-admin-muted">
-                {visibleRows.length} result{visibleRows.length !== 1 ? "s" : ""}
-                {!search && ` for "${memberSearch}"`}
-                {" · clear the search to reorder"}
+                {visibleRows.length} result<Txt>{visibleRows.length !== 1 ? "s" : ""}</Txt>
+                <Txt>{!search && ` for "${memberSearch}"`}</Txt>
+                <Txt>{" · clear the search to reorder"}</Txt>
               </span>
             )}
           </div>
@@ -905,7 +910,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
 // under a leaf) and owns the ordinal.
 function TimeDimensionCard({ dim, activeTag, onTagClick, open, onToggleOpen }: DimCardTagProps & { dim: DevDimension }) {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+  const invalidate = () => refreshMembers(qc);
   const { confirm, confirmElement } = useConfirm();
   const [editDimName, setEditDimName] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -1008,10 +1013,10 @@ function TimeDimensionCard({ dim, activeTag, onTagClick, open, onToggleOpen }: D
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             <StatusBadge tone="brand">time · {(dim.time_granularity ?? "").replace("_", " ")}</StatusBadge>
             <span className="mvx-admin-muted">
-              {leaves.length} period{leaves.length !== 1 ? "s" : ""}
-              {aggregates.length > 0 && ` · ${aggregates.length} aggregate${aggregates.length !== 1 ? "s" : ""}`}
-              {leaves.length > 0 && ` · ${leaves[0].period_start} → ${leaves[leaves.length - 1].period_end}`}
-              {` · fiscal year starts ${fiscalName}`}
+              {leaves.length} period<Txt>{leaves.length !== 1 ? "s" : ""}</Txt>
+              <Txt>{aggregates.length > 0 && ` · ${aggregates.length} aggregate${aggregates.length !== 1 ? "s" : ""}`}</Txt>
+              <Txt>{leaves.length > 0 && ` · ${leaves[0].period_start} → ${leaves[leaves.length - 1].period_end}`}</Txt>
+              <Txt>{` · fiscal year starts ${fiscalName}`}</Txt>
             </span>
             {aggregates.length > 0 && <StatusBadge tone="success">hierarchy</StatusBadge>}
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>

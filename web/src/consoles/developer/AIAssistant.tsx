@@ -11,6 +11,7 @@ import { api, type AIConversion, type AISession, type AIMessage, type AISettings
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
+  Txt,
 } from "../../ui";
 
 // ── Settings panel ────────────────────────────────────────────────────────────
@@ -61,13 +62,13 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {initialSettings?.tenant_enforced ? (
           <InlineAlert tone="info">
-            Your administrator supplies the AI key for this tenant ({initialSettings.tenant_provider}), and it is used for
-            every call. Anything you set here is ignored.
+            Your administrator supplies the AI key for this tenant (<Txt>{initialSettings.tenant_provider}</Txt><Txt>), and it is used for
+            every call. Anything you set here is ignored.</Txt>
           </InlineAlert>
         ) : initialSettings?.tenant_key ? (
           <InlineAlert tone="info">
-            Your administrator supplies an AI key for this tenant ({initialSettings.tenant_provider}). You only need a key
-            here if you want your calls billed to your own account instead.
+            Your administrator supplies an AI key for this tenant (<Txt>{initialSettings.tenant_provider}</Txt><Txt>). You only need a key
+            here if you want your calls billed to your own account instead.</Txt>
           </InlineAlert>
         ) : null}
 
@@ -331,7 +332,7 @@ function ProposalStepGroup({ tool, shape, items }: {
       <div style={{ flex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <ToolIcon tool={tool} />
-          <span>{items.length}× {friendlyTool(tool)}{shape ? ` — ${shape}` : ""}</span>
+          <span>{items.length}× {friendlyTool(tool)}<Txt>{shape ? ` — ${shape}` : ""}</Txt></span>
         </div>
         <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
           {shown.map(it => (
@@ -409,8 +410,8 @@ function ProposalPanel({
           {isPending ? "Action plan" : isExecuted ? "Executed" : "Rejected"}
         </StatusBadge>
         <span className="mvx-admin-muted">
-          {steps.length} step{steps.length !== 1 ? "s" : ""}
-          {proposal.status !== "pending" && ` · ${proposal.status}`}
+          {steps.length} step<Txt>{steps.length !== 1 ? "s" : ""}</Txt>
+          <Txt>{proposal.status !== "pending" && ` · ${proposal.status}`}</Txt>
         </span>
       </div>
 
@@ -553,7 +554,7 @@ function SessionConversions({ sessionId }: { sessionId: string }) {
       {conversions.map(c => (
         <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={c.columns.join(", ")}>
           <span style={{ fontSize: 13 }}>{c.filename}</span>
-          <span className="mvx-admin-muted" style={{ fontSize: 12 }}>{c.row_count} row{c.row_count !== 1 ? "s" : ""}</span>
+          <span className="mvx-admin-muted" style={{ fontSize: 12 }}>{c.row_count} row<Txt>{c.row_count !== 1 ? "s" : ""}</Txt></span>
           <Button size="sm" leadingIcon={<Download size={13} />} loading={busy === c.id + "csv"} loadingLabel="Preparing…"
             onClick={() => download(c, "csv")} aria-label={`Download ${c.filename} as CSV`}>CSV</Button>
           <Button size="sm" leadingIcon={<Download size={13} />} loading={busy === c.id + "xlsx"} loadingLabel="Preparing…"
@@ -605,7 +606,7 @@ function ActivityPanel({ sessionId, onClose }: { sessionId: string; onClose: () 
           <div style={{ flex: 1, fontSize: 12 }}>
             <div>{p.summary}</div>
             <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>
-              {p.steps.length} step{p.steps.length !== 1 ? "s" : ""} · {p.created_at.slice(0, 16).replace("T", " ")}
+              {p.steps.length} step<Txt>{p.steps.length !== 1 ? "s" : ""}</Txt> <Txt>· </Txt>{p.created_at.slice(0, 16).replace("T", " ")}
             </div>
             {/* Kept with the proposal, so a reopened session still shows them. */}
             {(p.warnings?.length ?? 0) > 0 && (
@@ -1261,8 +1262,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                     : `${d.char_count.toLocaleString()} chars extracted${d.truncated ? " (truncated)" : ""}`}
                   onClear={() => removeDocument(d.id)}
                 >
-                  {d.importable ? <FileSpreadsheet size={11} aria-hidden="true" /> : <FileText size={11} aria-hidden="true" />}{" "}
-                  {d.filename}{d.truncated && !d.importable ? " ⚠" : ""}
+                  {d.importable ? <FileSpreadsheet size={11} aria-hidden="true" /> : <FileText size={11} aria-hidden="true" />}<Txt>{" "}</Txt>
+                  {d.filename}<Txt>{d.truncated && !d.importable ? " ⚠" : ""}</Txt>
                 </FilterChip>
               ))}
               {uploading && (

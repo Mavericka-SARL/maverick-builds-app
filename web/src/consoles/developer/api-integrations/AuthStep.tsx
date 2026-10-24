@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiAuthType, type ApiIntegrationConfig, type IntegrationConnection } from "../../../api/client";
-import { Button, Field, InlineAlert, Select, StatusBadge, TextInput, Textarea } from "../../../ui";
+import { Button, Field, InlineAlert, Select, StatusBadge, TextInput, Textarea, Txt } from "../../../ui";
 
 // Credentials are reusable named connections stored server-side; secret
 // fields here are WRITE-ONLY. An existing credential renders as
@@ -213,7 +213,7 @@ function OAuthConnectControls({ conn, onChanged }: { conn: IntegrationConnection
     <div style={{ marginTop: 8, display: "grid", gap: 6 }} data-testid="oauth-connect">
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {connectedAt
-          ? <StatusBadge tone="success">Connected {new Date(connectedAt).toLocaleString()}{connectedBy ? ` by ${connectedBy}` : ""}</StatusBadge>
+          ? <StatusBadge tone="success">Connected {new Date(connectedAt).toLocaleString()}<Txt>{connectedBy ? ` by ${connectedBy}` : ""}</Txt></StatusBadge>
           : <StatusBadge tone="warning">Not connected</StatusBadge>}
         <Button variant="primary" size="sm" loading={start.isPending} onClick={() => start.mutate()}>
           {connectedAt ? "Connect again" : "Connect"}

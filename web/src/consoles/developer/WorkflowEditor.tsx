@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { StatusBadge as UiStatusBadge, useConfirm } from "../../ui";
+import { StatusBadge as UiStatusBadge, useConfirm, Txt } from "../../ui";
 import { api } from "../../api/client";
 import type { WorkflowDef, WorkflowStepDef, StepType, WorkflowDefUsage, WorkflowSubjectType } from "../../api/client";
 import { StepTypeIcon, StatusBadge, Modal, Field, IconBtn } from "./WorkflowShared";
@@ -264,7 +264,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
           ) : (
             usage.map(u => (
               <UiStatusBadge key={u.rule_id} tone={u.enabled ? "info" : "warning"}>
-                ⚡ {u.rule_name}{!u.enabled && " (disabled)"}
+                ⚡ {u.rule_name}<Txt>{!u.enabled && " (disabled)"}</Txt>
               </UiStatusBadge>
             ))
           )}

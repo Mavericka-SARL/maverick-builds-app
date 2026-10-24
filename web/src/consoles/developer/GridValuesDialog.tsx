@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type DevDimension, type DevMetric, type GridDef, type SampleSpec } from "../../api/client";
 import { downloadBlob } from "../business/blobUtils";
 import { invalidateModelData } from "../modelDataQueries";
-import { Button, Checkbox, Dialog, Field, InlineAlert, Tabs, TextInput, useConfirm } from "../../ui";
+import { Button, Checkbox, Dialog, Field, InlineAlert, Tabs, TextInput, useConfirm, Txt } from "../../ui";
 
 /**
  * A grid's typed values in bulk (Grids › Values): fill its input metrics
@@ -109,8 +109,8 @@ export function GridValuesDialog({ grid, metrics, dims, open, onClose }: {
             <Checkbox label="Only cells holding no value" checked={onlyEmpty} onChange={e => setOnlyEmpty(e.target.checked)} />
             {preview.data && (
               <p className="mvx-admin-muted" role="status" style={{ margin: 0 }}>
-                {preview.data.cells} cell{preview.data.cells === 1 ? "" : "s"} would be filled
-                {preview.data.withheld > 0 ? `; ${preview.data.withheld} left that you may not write` : ""}.
+                {preview.data.cells} cell<Txt>{preview.data.cells === 1 ? "" : "s"}</Txt> <Txt>would be filled</Txt>
+                <Txt>{preview.data.withheld > 0 ? `; ${preview.data.withheld} left that you may not write` : ""}</Txt><Txt>.</Txt>
               </p>
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -126,9 +126,9 @@ export function GridValuesDialog({ grid, metrics, dims, open, onClose }: {
           <>
             {count.data && (
               <p className="mvx-admin-muted" role="status" style={{ margin: 0 }}>
-                {count.data.cells} cell{count.data.cells === 1 ? "" : "s"} would be cleared
-                {count.data.withheld > 0 ? `; ${count.data.withheld} left that you may not write` : ""}
-                {count.data.posted > 0 ? `; ${count.data.posted} left that records post` : ""}.
+                {count.data.cells} cell<Txt>{count.data.cells === 1 ? "" : "s"}</Txt> <Txt>would be cleared</Txt>
+                <Txt>{count.data.withheld > 0 ? `; ${count.data.withheld} left that you may not write` : ""}</Txt>
+                <Txt>{count.data.posted > 0 ? `; ${count.data.posted} left that records post` : ""}</Txt><Txt>.</Txt>
               </p>
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

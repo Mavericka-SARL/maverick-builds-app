@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import type { WorkflowDef, WorkflowDefSummary } from "../../api/client";
 import { Modal, Field } from "./WorkflowShared";
 import { inputStyle, btnPrimary, btnSecondary, ruleTriggerFromWorkflow, useTriggerEvents } from "./workflowConstants";
+import { Txt } from "../../ui";
 
 // ── CreateAutomationModal ─────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
         <div style={{ background: "var(--color-diagram-calc-bg)", border: "1px solid var(--color-success-border)", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "var(--color-success-chip-text)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Workflow: <strong>{workflow.name}</strong></span>
           <span style={{ background: "var(--color-success-chip-bg)", color: "var(--color-live)", borderRadius: 4, padding: "1px 7px", fontSize: 11, fontWeight: 600 }}>
-            {triggerType}{sourceName && !trigger.unresolved ? ` · ${sourceName}` : ""}
+            {triggerType}<Txt>{sourceName && !trigger.unresolved ? ` · ${sourceName}` : ""}</Txt>
           </span>
         </div>
         {trigger.unresolved && !catalogLoading && (

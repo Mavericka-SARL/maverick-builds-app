@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Pencil, Copy, History, Power, Trash2 } from "lucide-react";
 import { api, type ApiIntegrationDetail, type ApiRun, type IntegrationDef } from "../../../api/client";
-import { EmptyState, IconButton, LoadingState, StatusBadge, useConfirm } from "../../../ui";
+import { EmptyState, IconButton, LoadingState, StatusBadge, useConfirm, Txt } from "../../../ui";
 import { ApiRunHistory } from "./ApiRunHistory";
 
 // Saved connector cards: status, method, sanitized host, direction, target,
@@ -115,12 +115,12 @@ function ApiCard({
         {cfg && <span className="mvx-admin-muted">{link ? "Model link" : sftp ? "SFTP" : cfg.request.method} {host}</span>}
         {det && <StatusBadge tone="neutral">{det.direction}</StatusBadge>}
         <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
-          {cfg?.target_type ?? item.target_type}{revisionId ? ` · rev ${revisionId.slice(0, 8)}` : ""}
+          {cfg?.target_type ?? item.target_type}<Txt>{revisionId ? ` · rev ${revisionId.slice(0, 8)}` : ""}</Txt>
         </span>
         {sched && sched.kind !== "manual" && (
           <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
-            {sched.kind === "interval" ? `every ${sched.interval_seconds}s` : sched.cron_expr} ({sched.timezone})
-            {sched.enabled ? "" : " · off"}
+            <Txt>{sched.kind === "interval" ? `every ${sched.interval_seconds}s` : sched.cron_expr}</Txt> <Txt>(</Txt><Txt>{sched.timezone}</Txt><Txt>)</Txt>
+            <Txt>{sched.enabled ? "" : " · off"}</Txt>
           </span>
         )}
         {(item.tags ?? []).map(t => <StatusBadge key={t} tone="neutral">{t}</StatusBadge>)}

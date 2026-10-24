@@ -104,3 +104,92 @@ test("selector bar: one selector for the dashboard, followed by every widget", a
   await expect(cellOf(2)).toHaveValue("100");
   await expect(kpi).toHaveText("100");
 });
+
+// A member list read before the default member was added (a page opened
+// earlier, a member added in Developer › Dimensions since) opened the bar on
+// the first leaf, and it stayed there once the fresh list arrived
+// (2026-10-23: Budget vs actual on France, not All regions). The member the
+// bar fell back to gives way to the default; one the viewer chose does not.
+// The list is read again as when the person comes back to the tab past its
+// 30-second freshness.
+async function rereadMembers(page: Page) {
+  await page.clock.fastForward(31_000);
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+}
+
+for (const viewerChose of [false, true]) {
+  test(`selector bar: a default added after the members were read ${viewerChose ? "leaves the viewer's choice" : "is applied once they are read again"}`, async ({ page }) => {
+    await page.clock.install();
+    await mockApi(page);
+    await mockBarDashboard(page);
+    const withMarch = { ...dimensions[1], members: [...dimensions[1].members, { id: "per-mar", code: "MAR", label: "March", parent_code: "Q1" }] };
+    let marchAdded = false;
+    let readsWithMarch = 0;
+    await page.route(`**/api/dashboards/${DASH_ID}`, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...dashboard, selector_bar: [{ dimension_id: "period", default: "MAR" }] }) })
+    );
+    await page.route("**/api/grid*meta_only*", (route) => {
+      if (marchAdded) readsWithMarch++;
+      return route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ ...gridData, dimensions: marchAdded ? [dimensions[0], withMarch] : dimensions }) });
+    });
+    await loadAs(page, "dept_head");
+
+    const barPeriod = page.getByRole("toolbar", { name: "Dashboard selectors" }).getByRole("button", { name: "Period", exact: true });
+    await expect(barPeriod).toHaveText("January", { timeout: 15_000 });
+    if (viewerChose) {
+      await barPeriod.click();
+      await page.getByRole("option", { name: "January" }).click();
+    }
+    marchAdded = true;
+    await rereadMembers(page);
+    if (viewerChose) {
+      await expect.poll(() => readsWithMarch).toBeGreaterThan(0);
+      await expect(page.getByRole("toolbar", { name: "Dashboard selectors" })).toBeVisible();
+      await expect(barPeriod).toHaveText("January");
+    } else {
+      await expect(barPeriod).toHaveText("March");
+    }
+  });
+}
+
+// While a new selection's cells load, the grid keeps its layout but shows no
+// value and takes no input: it read the new cells from the last slice, and
+// every input showed an editable 0 until the answer landed (2026-10-23,
+// 5 s on the Playground for imported values).
+test("selector bar: a grid shows no value and takes no input while the new selection loads", async ({ page }) => {
+  await mockApi(page);
+  await mockBarDashboard(page);
+  // March: a member no widget has read yet, so nothing of it is cached.
+  const withMarch = { ...dimensions[1], members: [...dimensions[1].members, { id: "per-mar", code: "MAR", label: "March", parent_code: "Q1" }] };
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/grid*", async (route) => {
+    const url = new URL(route.request().url());
+    const scope = JSON.parse(url.searchParams.get("scope") ?? "{}") as Record<string, string>;
+    if (scope.period === "MAR") {
+      await held;
+      return route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ ...gridData, dimensions: [dimensions[0], withMarch], cells: { "m-cost:ENG:MAR": 18 }, totals: { "m-cost": 18 } }) });
+    }
+    if (url.searchParams.has("meta_only")) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...gridData, dimensions: [dimensions[0], withMarch] }) });
+    }
+    return route.fallback();
+  });
+  await loadAs(page, "dept_head");
+
+  const grid = page.locator("table").first();
+  await expect(grid.locator("tbody input").first()).toHaveValue("200", { timeout: 15_000 });
+  const barPeriod = page.getByRole("toolbar", { name: "Dashboard selectors" }).getByRole("button", { name: "Period", exact: true });
+  await barPeriod.click();
+  await page.getByRole("listbox").getByRole("option", { name: "March" }).click();
+
+  await expect(grid.locator("tbody .mvx-cell--loading").first()).toHaveText("…");
+  await expect(grid.locator("tbody input")).toHaveCount(0);
+  await expect(grid.locator("tbody")).not.toContainText("0");
+
+  release();
+  await expect(grid.locator("tbody input").first()).toHaveValue("18");
+  await expect(grid.locator("tbody .mvx-cell--loading")).toHaveCount(0);
+});

@@ -255,6 +255,12 @@ func TestRunner_SFTPPull(t *testing.T) {
 	if sum != 30 {
 		t.Fatalf("fact sum %v, want 30", sum)
 	}
+	// Its line in Recent Imports names the file and SFTP.
+	var source, fileName string
+	if err := st.Pool().QueryRow(ctx, `SELECT file_url, file_name FROM import.import_job WHERE model_id=$1::uuid AND target_type='grid'`, modelID).Scan(&source, &fileName); err != nil ||
+		source != "sftp" || fileName != "sales.xlsx" {
+		t.Fatalf("the run's import job: source %q, file %q (%v), want sftp and sales.xlsx", source, fileName, err)
+	}
 
 	// 4. A scheduled run over the same file writes nothing; a manual run
 	// would (it always imports), a changed file does. Only an active

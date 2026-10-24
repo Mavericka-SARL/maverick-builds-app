@@ -5,7 +5,7 @@ import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
 import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, TIME_SUMMARIES } from "../../api/client";
 import { HighlightRulesEditor } from "./HighlightRulesEditor";
 import { ClosedRulesEditor } from "./ClosedRulesEditor";
-import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter } from "../../ui";
+import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter, Txt } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
 // meaningful for a metric on a grid that carries a time dimension, so the
@@ -460,7 +460,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
             <StatusBadge>{(m.agg_rule ?? "sum").toUpperCase()}</StatusBadge>
             {onTimeGrid && (m.time_summary ?? "sum") !== "sum" && (
               <span title={`Time summary: ${TIME_SUMMARY_HELP[m.time_summary ?? "sum"]}`}>
-                <StatusBadge tone="brand">time: {m.time_summary}</StatusBadge>
+                <StatusBadge tone="brand">time: <Txt>{m.time_summary}</Txt></StatusBadge>
               </span>
             )}
             <StatusBadge tone="warning">{fmtBadge(m.format ?? "number", m.format_decimals ?? 0, m.format_currency ?? "$")}</StatusBadge>

@@ -128,3 +128,62 @@ func TestRecentImportsDescribesEveryFileImportOfTheWorkingModel(t *testing.T) {
 		}
 	}
 }
+
+// Recent Imports lists the open revision's imports: a copy's imports were
+// listed on the original's Integrations page, and once the copy was deleted
+// they stayed there with Revision "—" (2026-10-23, a how-to video's
+// rehearsal revision). Deleting a revision deletes its import jobs.
+func TestRecentImportsListsTheOpenRevisionsImportsOnly(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, &multiScriptProvider{})
+	status, body := do(f.devSub, "POST", "/api/developer/revisions", map[string]any{"name": "Rehearsal", "source_revision_id": f.revID})
+	var created struct {
+		ID string `json:"id"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &created) != nil || created.ID == "" {
+		t.Fatalf("copy the revision: %d %s", status, body)
+	}
+	rehearsal := created.ID
+	var rehearsalGrid string
+	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM model.grid_def WHERE revision_id = $1::uuid AND name = 'Sales'`, rehearsal).Scan(&rehearsalGrid); err != nil {
+		t.Fatal(err)
+	}
+	for _, imp := range []map[string]any{
+		{"csv": "geography,period,revenue\nCA,Q1,10\n", "revision_id": f.revID, "grid_id": f.grid, "file_name": "working.csv"},
+		{"csv": "geography,period,revenue\nCA,Q1,24\n", "revision_id": rehearsal, "grid_id": rehearsalGrid, "file_name": "rehearsal.csv"},
+	} {
+		if status, body := do(f.devSub, "POST", "/api/import/upload", imp); status != http.StatusOK {
+			t.Fatalf("import %s: %d %s", imp["file_name"], status, body)
+		}
+	}
+
+	files := func(revisionID string) []string {
+		t.Helper()
+		status, body := do(f.devSub, "GET", "/api/import/jobs?revision_id="+revisionID, nil)
+		var lines []historyLine
+		if status != http.StatusOK || json.Unmarshal(body, &lines) != nil {
+			t.Fatalf("GET /api/import/jobs: %d %s", status, body)
+		}
+		var out []string
+		for _, l := range lines {
+			out = append(out, l.FileName)
+		}
+		return out
+	}
+	if got := files(f.revID); len(got) != 1 || got[0] != "working.csv" {
+		t.Errorf("the working revision's Recent Imports list %v, want [working.csv]", got)
+	}
+	if got := files(rehearsal); len(got) != 1 || got[0] != "rehearsal.csv" {
+		t.Errorf("the rehearsal's Recent Imports list %v, want [rehearsal.csv]", got)
+	}
+
+	if status, body := do(f.devSub, "DELETE", "/api/developer/revisions/"+rehearsal, nil); status != http.StatusOK {
+		t.Fatalf("delete the rehearsal: %d %s", status, body)
+	}
+	if n := f.count(t, `SELECT count(*) FROM import.import_job WHERE revision_id = $1::uuid`, rehearsal); n != 0 {
+		t.Errorf("%d import job(s) of the deleted revision are left, want 0", n)
+	}
+	if got := files(f.revID); len(got) != 1 || got[0] != "working.csv" {
+		t.Errorf("after the delete the working revision's Recent Imports list %v, want [working.csv]", got)
+	}
+}

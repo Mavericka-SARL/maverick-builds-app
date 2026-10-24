@@ -24,6 +24,7 @@ import { CHART_COLORS, formatValue, CHART_TYPE_LABELS, isChartConfigComplete } f
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { defaultLeafCode } from "../dashboardLayout";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync, DashboardContextSyncContext } from "../dashboardContextSync";
+import { Txt } from "../../ui";
 
 // ── Category labels ───────────────────────────────────────────────────────────
 
@@ -555,7 +556,7 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
         <p className="sr-only" aria-live="polite">
           {chartLabel}, {CHART_TYPE_LABELS[chartConfig.chart_type]}.
           Context: {Object.entries(context).map(([k, v]) => `${dims.find(d => d.id === k)?.name ?? k}=${v}`).join(", ")}.
-          {onCategoryClick && " Click a category to select it in synced widgets."}
+          <Txt>{onCategoryClick && " Click a category to select it in synced widgets."}</Txt>
         </p>
       )}
     </div>

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiRun } from "../../../api/client";
-import { Button, EmptyState, LoadingState, StatusBadge } from "../../../ui";
+import { Button, EmptyState, LoadingState, StatusBadge, Txt } from "../../../ui";
 
 const TONE: Record<ApiRun["status"], "brand" | "success" | "warning" | "danger"> = {
   queued: "brand", running: "brand", success: "success",
@@ -36,7 +36,7 @@ export function ApiRunHistory({ integrationId }: { integrationId: string }) {
         <tbody>
           {runs.map(r => (
             <tr key={r.id}>
-              <td><StatusBadge tone={TONE[r.status]}>{r.status}{r.dry_run ? " (dry)" : ""}</StatusBadge></td>
+              <td><StatusBadge tone={TONE[r.status]}>{r.status}<Txt>{r.dry_run ? " (dry)" : ""}</Txt></StatusBadge></td>
               <td>{r.trigger_type}</td>
               <td>{r.started_at ? new Date(r.started_at).toLocaleString() : new Date(r.created_at).toLocaleString()}</td>
               <td>{r.duration_ms} ms</td>

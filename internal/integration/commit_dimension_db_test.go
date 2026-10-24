@@ -68,7 +68,7 @@ func TestCommitDimensionRecalculatesMetricsReadingIt(t *testing.T) {
 	c := &integration.DBCommitter{Pool: pool, Log: log}
 	def := &integration.Definition{ModelID: modelID, RevisionID: revID,
 		Config: &integration.Config{TargetType: integration.TargetDimension, TargetID: region}}
-	written, _, err := c.CommitPull(ctx, def, []string{"code", "property:factor"}, [][]string{{"EMEA", "7"}}, false, "dev-user")
+	written, _, err := c.CommitPull(ctx, def, []string{"code", "property:factor"}, [][]string{{"EMEA", "7"}}, "", false, "dev-user")
 	if err != nil || written != 1 {
 		t.Fatalf("commit pull: written=%d err=%v", written, err)
 	}

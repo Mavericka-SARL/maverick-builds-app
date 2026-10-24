@@ -1,6 +1,7 @@
 import type { WorkflowStepDef } from "../../api/client";
 import { StepTypeIcon } from "./WorkflowShared";
 import { STEP_TYPE_LABELS } from "./workflowConstants";
+import { Txt } from "../../ui";
 
 // ── ProcessCanvas ─────────────────────────────────────────────────────────────
 
@@ -177,9 +178,9 @@ function ProcessStepCard({ step, selected, onClick }: { step: WorkflowStepDef; s
           Assigned to: {step.assignee_roles.join(", ")}
         </div>
       )}
-      {step.sla_hours && (
+      <Txt>{step.sla_hours && (
         <div style={{ fontSize: 12, color: "var(--color-text-quiet)" }}>SLA: {step.sla_hours}h</div>
-      )}
+      )}</Txt>
     </div>
   );
 }

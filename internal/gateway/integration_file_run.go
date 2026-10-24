@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"strings"
 
+	importpkgv1 "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -162,12 +163,18 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 // runGridIntegration runs a file integration into its grid's revision: the
 // file whole, or — when a row has a problem — none of it, every such row
 // detailed (row, column, message). The run is recorded in the integration's
-// history either way; a dry run (the Import Wizard's Validate step) only
-// answers what the run would do.
+// history either way, and a refused one in Recent Imports as the Import
+// Wizard's is; a dry run (the Import Wizard's Validate step) only answers
+// what the run would do.
 func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails, dryRun bool) {
+	refused := func(errorRows int, errs []*importpkgv1.ImportError) {
+		h.recordImportJob(ctx, importpkg.FinishedJob{ModelID: modelID, RevisionID: revisionID, Source: source, UserID: act.UserID,
+			Details: details, ErrorRows: errorRows, Failed: true, Errors: errs})
+	}
 	fail := func(status int, err error) {
 		if !dryRun {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", err.Error())
+			refused(0, []*importpkgv1.ImportError{{Message: err.Error()}})
 		}
 		var le *plan.LimitError
 		if errors.As(err, &le) {
@@ -212,6 +219,7 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 	if len(importErrs) > 0 {
 		h.recordIntegrationRun(ctx, intID, act.UserID, 0, failedRows, "error",
 			fmt.Sprintf("%d row(s) failed validation, nothing was imported — %s", failedRows, firstRowProblem(importErrs)))
+		refused(failedRows, importErrs)
 		jsonGridRowErrs(w, staged, importErrs)
 		return
 	}

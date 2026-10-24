@@ -23,6 +23,7 @@ import {
   useUnsavedGuard,
   useConfirm,
   type DesignTone,
+  Txt,
 } from "../../ui";
 
 // ── Workflow Inbox ─────────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ export function WorkflowInbox() {
             <TaskContextSummary contextDisplay={t.context_display} context={t.context} />
             <div className="mvx-admin-muted">
               {t.requested_by && <span>Requested by <strong>{t.requested_by}</strong> · </span>}
-              Instance: {t.instance_id.slice(0, 8)} · {new Date(t.created_at).toLocaleString()}
+              <Txt>Instance: </Txt>{t.instance_id.slice(0, 8)} · {new Date(t.created_at).toLocaleString()}
             </div>
 
             <TextInput
@@ -440,8 +441,8 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                   <div className="mvx-admin-object__title">
                     <span className="mvx-admin-object__name">{role.name}</span>
                     <div className="mvx-admin-object__meta">
-                      {role.member_count} user{role.member_count !== 1 ? "s" : ""}
-                      {developer && " · members are managed by a business admin"}
+                      {role.member_count} user<Txt>{role.member_count !== 1 ? "s" : ""}</Txt>
+                      <Txt>{developer && " · members are managed by a business admin"}</Txt>
                     </div>
                   </div>
                   <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} onClick={() => { setEditingId(role.id); setEditName(role.name); }}>
@@ -795,7 +796,7 @@ export function AccessRulesTab() {
                           <CollapseToggle expanded={open} onToggle={() => groupsOpen.toggle(g.key)} label={g.name} />
                           {g.name}
                           <span className="mvx-admin-muted" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
-                            {g.items.length}{restricted > 0 ? ` · ${restricted} restricted` : ""}
+                            {g.items.length}<Txt>{restricted > 0 ? ` · ${restricted} restricted` : ""}</Txt>
                           </span>
                         </span>
                       </td>

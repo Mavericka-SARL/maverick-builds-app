@@ -795,6 +795,14 @@ var errAccessDenied = errors.New("access denied")
 // and retries (apiFetch).
 var errModelNotOpen = errors.New("the selected model is not one you can open in this application")
 
+// errNotSignedIn marks a request whose caller could not be resolved (no
+// token, an invalid one, an account the platform does not know) on its way
+// through a resolver that picks the request's application or model:
+// jsonAccessErr answers it 401, as a handler calling resolveActor itself
+// does. It answered 500 "resolve model: missing Bearer token" on the routes
+// open to any role (2026-10-23).
+var errNotSignedIn = errors.New("unauthorized")
+
 func (a *actor) hasRole(role string) bool {
 	if a == nil {
 		return false
@@ -1129,16 +1137,10 @@ func (h *handler) requireRole(w http.ResponseWriter, r *http.Request, roles ...s
 	return nil, false
 }
 
-// validateAggRule rejects aggregation rules the calculation engine does not
-// implement. There was no check at all before: rollup.combineAgg falls through
-// to "sum" for anything it does not recognise, so a typo — or a value the UI
-// offered but the engine never implemented — did not fail, it silently
-// computed a wrong total that looked like a real number everywhere.
-//
-// "rate" is in this list only because it is already selectable in the console
-// and may be stored against existing metrics; the engine has no case for it,
-// so it currently behaves as sum. Rejecting it here would break saving those
-// metrics, which is a product decision rather than a validation one.
+// jsonAccessErr answers the error of a resolver that picks the request's
+// model or application: 404 MODEL_NOT_OPEN for a model the caller may not
+// open, 403 for an application it may not reach, 401 for a caller not
+// signed in, and 500 for anything else.
 func jsonAccessErr(w http.ResponseWriter, err error, label string) {
 	if errors.Is(err, errModelNotOpen) {
 		jsonCodeErr(w, http.StatusNotFound, "MODEL_NOT_OPEN", err.Error())
@@ -1146,6 +1148,10 @@ func jsonAccessErr(w http.ResponseWriter, err error, label string) {
 	}
 	if errors.Is(err, errAccessDenied) {
 		jsonErr(w, fmt.Errorf("forbidden: %s", label), http.StatusForbidden)
+		return
+	}
+	if errors.Is(err, errNotSignedIn) {
+		jsonErr(w, errNotSignedIn, http.StatusUnauthorized)
 		return
 	}
 	jsonErr(w, fmt.Errorf("%s: %w", label, err), http.StatusInternalServerError)
@@ -1904,7 +1910,7 @@ func (h *handler) demo(w http.ResponseWriter, r *http.Request) {
 
 	a, err := h.resolveActor(ctx, r)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
 
@@ -7293,9 +7299,9 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 					if b, ok := sizes[m.ID]; ok {
 						m.StorageBytes = &b
 					}
-					rRows, _ := h.db.Query(ctx,
+					rRows, rErr := h.db.Query(ctx,
 						`SELECT id::text, name, created_at::text FROM model.revision WHERE model_id=$1::uuid ORDER BY created_at`, m.ID)
-					if rRows != nil {
+					if rErr == nil {
 						for rRows.Next() {
 							var r adminRevisionItem
 							_ = rRows.Scan(&r.ID, &r.Name, &r.CreatedAt)
@@ -8029,7 +8035,8 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 
 	// ?revision_id= names the model (resolveDemoModelID): the Integrations
 	// page asks for the history of the model it builds, which listed the
-	// application's default model's instead when that was another.
+	// application's default model's instead when that was another. The list
+	// is that revision's (ListImportJobs).
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve model")
@@ -8042,7 +8049,7 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := importpkg.NewStore(h.db.For(ctx))
-	jobs, err := store.ListImportJobs(ctx, modelID, 20)
+	jobs, err := store.ListImportJobs(ctx, modelID, r.URL.Query().Get("revision_id"), 20)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -9457,11 +9464,13 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
+			h.recordImportJob(ctx, h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, nil, iErr))
 			h.jsonLimitErr(w, iErr)
 			return
 		}
 		if len(rowErrs) > 0 {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, len(rowErrs), "error", "rows failed validation, nothing was imported")
+			h.recordImportJob(ctx, h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, rowErrs, nil))
 			jsonFormRowErrs(w, rowErrs)
 			return
 		}
@@ -9478,6 +9487,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
 		if importErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", importErr.Error())
+			h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, 0, importErr))
 			if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
 				h.jsonLimitErr(w, importErr)
 				return
@@ -10189,7 +10199,7 @@ func (h *handler) pinModelForBodyRevision(ctx context.Context, r *http.Request, 
 func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (string, error) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", errNotSignedIn, err)
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
 		var modelID string
@@ -10409,7 +10419,7 @@ func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, 
 func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string, error) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", errNotSignedIn, err)
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
 		ok, err := h.actorCanAccessApp(ctx, act, appID)
@@ -14830,10 +14840,10 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		for i, g := range grids {
 			// Ties broken as /api/grid breaks them, so the Grids tab lists a
 			// grid's metrics in the order the grid shows them.
-			mRows, _ := h.db.Query(ctx, `
+			mRows, mErr := h.db.Query(ctx, `
 				SELECT gm.metric_id::text FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id
 				WHERE gm.grid_id=$1::uuid ORDER BY gm.sort_order, m.is_input DESC, m.name`, g.ID)
-			if mRows != nil {
+			if mErr == nil {
 				for mRows.Next() {
 					var id string
 					_ = mRows.Scan(&id)
@@ -14845,8 +14855,8 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 				grids[i].MetricIDs = []string{}
 			}
 			grids[i].DimensionLevels = map[string]*int{}
-			dRows, _ := h.db.Query(ctx, `SELECT dimension_id::text, display_level FROM model.grid_dimension WHERE grid_id=$1::uuid`, g.ID)
-			if dRows != nil {
+			dRows, dErr := h.db.Query(ctx, `SELECT dimension_id::text, display_level FROM model.grid_dimension WHERE grid_id=$1::uuid`, g.ID)
+			if dErr == nil {
 				for dRows.Next() {
 					var id string
 					var lvl *int
@@ -15443,9 +15453,9 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 		for i, d := range dashboards {
-			wRows, _ := h.db.Query(ctx,
+			wRows, wErr := h.db.Query(ctx,
 				`SELECT id::text, widget_type, ref_id, content, title, show_title, widget_props, sort_order, col_start, col_span, pos_x, pos_y, size_w, size_h FROM model.dashboard_widget WHERE dashboard_id=$1::uuid ORDER BY pos_y, pos_x`, d.ID)
-			if wRows != nil {
+			if wErr == nil {
 				for wRows.Next() {
 					var w dashboardWidget
 					_ = wRows.Scan(&w.ID, &w.WidgetType, &w.RefID, &w.Content, &w.Title, &w.ShowTitle, &w.WidgetProps, &w.SortOrder, &w.ColStart, &w.ColSpan, &w.PosX, &w.PosY, &w.SizeW, &w.SizeH)
@@ -16725,7 +16735,7 @@ func (h *handler) baOrDevWorkspaceModel(ctx context.Context, r *http.Request) (w
 func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allowDeveloper bool) (wsID, modelID string, err error) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("%w: %w", errNotSignedIn, err)
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
 		// actorCanAccessApp keeps user_app_access/user_model_access

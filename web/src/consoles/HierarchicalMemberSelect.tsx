@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { SearchInput } from "../ui";
+import { SearchInput, Txt } from "../ui";
 import { buildMemberTree, type MemberTreeNode } from "./dashboardLayout";
 
 interface HierarchicalMember {
@@ -279,7 +279,7 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
                 {chosen.includes(n.member.code) ? "✓" : ""}
               </span>
             )}
-            {n.member.label}
+            <Txt>{n.member.label}</Txt>
           </div>
           {n.children.length > 0 && renderNodes(n.children)}
         </React.Fragment>

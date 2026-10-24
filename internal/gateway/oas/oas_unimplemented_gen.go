@@ -1698,8 +1698,10 @@ func (UnimplementedHandler) ListGrids(ctx context.Context, params ListGridsParam
 // ListImportJobs implements listImportJobs operation.
 //
 // File imports of every kind — a grid's values, a dimension's members, a table's records —
-// newest first. The model is the one revision_id belongs to; without it, the request's model
-// (X-Model-Id, else the application's default model).
+// newest first, from the wizard, a saved integration (refused runs too), a connector or the AI
+// Developer. The model is the one revision_id belongs to, and the list is that revision's imports
+// (and any of no revision); without it, the whole model's — the request's model (X-Model-Id, else
+// the application's default model). Deleting a revision deletes its import jobs.
 //
 // GET /api/import/jobs
 func (UnimplementedHandler) ListImportJobs(ctx context.Context, params ListImportJobsParams) (r []ImportJob, _ error) {

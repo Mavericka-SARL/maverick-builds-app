@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type AppInfo, type AppModelInfo } from "../../api/client";
-import { Button, LoadingState, EmptyState, StatusBadge } from "../../ui";
+import { Button, LoadingState, EmptyState, StatusBadge, Txt } from "../../ui";
 import { SELECTED_APP_KEY, SELECTED_MODEL_KEY, selectModel } from "./modelSelection";
 
 export function AppsTab() {
@@ -37,7 +37,7 @@ export function AppsTab() {
     <div className="mvx-admin-stack" style={{ maxWidth: 700 }}>
       {/* Working banner */}
       <div className="mvx-context-banner">
-        Working in: <strong>{active.name}{activeModel ? ` · ${activeModel.name}` : ""}</strong>
+        Working in: <strong>{active.name}<Txt>{activeModel ? ` · ${activeModel.name}` : ""}</Txt></strong>
         <span style={{ marginLeft: 8, color: "var(--color-text-muted)" }}>
           · revision <strong>{(activeModel ? activeModel.active_revision : active.active_revision) || "—"}</strong>
         </span>

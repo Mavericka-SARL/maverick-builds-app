@@ -1,5 +1,5 @@
 import { Check, Lock } from "lucide-react";
-import { Card, InlineAlert, StatusBadge } from "../../ui";
+import { Card, InlineAlert, StatusBadge, Txt } from "../../ui";
 import { EDITION_LABELS, licenseDate as fmtDate, useLicense } from "../../license/useLicense";
 
 const STATE_TONE = { community: "neutral", active: "success", transition: "warning", expired: "warning", invalid: "danger" } as const;
@@ -48,7 +48,7 @@ export function LicenseTab() {
           <StatusBadge tone={STATE_TONE[lic.state]}>{STATE_LABEL[lic.state]}</StatusBadge>
         </div>
         {lic.state === "invalid" && (
-          <InlineAlert tone="danger">The configured license key could not be verified: {lic.error}. The deployment runs the Community Edition until a valid key is installed.</InlineAlert>
+          <InlineAlert tone="danger">The configured license key could not be verified: <Txt>{lic.error}</Txt><Txt>. The deployment runs the Community Edition until a valid key is installed.</Txt></InlineAlert>
         )}
         {lic.state === "active" && lic.renewal_due && (
           <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the enterprise features are read and export only for 30 days, then the deployment runs the Community Edition.</InlineAlert>

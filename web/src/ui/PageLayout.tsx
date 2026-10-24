@@ -1,4 +1,5 @@
 import type React from "react";
+import { Txt } from "./Txt";
 
 type PageWidth = "full" | "wide" | "narrow";
 
@@ -38,7 +39,7 @@ export function PageLayout({
             {(subtitle || meta) && (
               <div className="mvx-page__subtitle">
                 {subtitle}
-                {subtitle && meta ? " " : null}
+                <Txt>{subtitle && meta ? " " : null}</Txt>
                 {meta}
               </div>
             )}

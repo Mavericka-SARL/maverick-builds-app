@@ -7,6 +7,7 @@ import {
 import {
   Button, Checkbox, Dialog, EmptyState, Field, FilterChip, IconButton, InlineAlert, SectionHeader, SegmentedControl,
   Select, StatusBadge, TagInput, TextInput, useConfirm,
+  Txt,
 } from "../../ui";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { ExportDownloadButton } from "../ExportDownloadButton";
@@ -384,7 +385,7 @@ function ExportEditor({ revisionId, grids, existing, onClose, onSaved }: {
         {preview && (
           <div>
             <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 6 }}>
-              Preview of <b>{preview.file_name}</b> — {preview.total_rows.toLocaleString()} row(s){preview.total_rows > preview.rows.length ? `, first ${preview.rows.length} shown` : ""}, from your own view of the grid
+              Preview of <b>{preview.file_name}</b> — {preview.total_rows.toLocaleString()} row(s)<Txt>{preview.total_rows > preview.rows.length ? `, first ${preview.rows.length} shown` : ""}</Txt><Txt>, from your own view of the grid</Txt>
             </div>
             {preview.warnings.map(w => <InlineAlert key={w} tone="warning">{w}</InlineAlert>)}
             <div className="mvx-table-wrap" style={{ maxHeight: 260, overflow: "auto" }}>

@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, Check, ArrowUp, ArrowDown, SlidersHorizontal } from "lucide-react";
 import { api, type FormField, type DevDimension, type DevMetric, type FormDef, type EditAccess } from "../../api/client";
-import { TextInput, NumberInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, SearchInput, useConfirm } from "../../ui";
+import { TextInput, NumberInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, SearchInput, useConfirm, Txt } from "../../ui";
 
 const blankField = (): FormField => ({ name: "", label: "", type: "text", required: false });
 
@@ -209,7 +209,7 @@ function FormFieldsEditor({
                   onChange={e => update(i, { code_digits: Math.min(12, Math.max(1, parseInt(e.target.value, 10) || 4)) })}
                   style={{ width: 64 }} aria-label="Code digits" />
                 <span className="mvx-admin-muted">
-                  Each new record gets the next code: {f.code_prefix ?? ""}{"1".padStart(f.code_digits ?? 4, "0")}. Records already saved get codes too.
+                  Each new record gets the next code: <Txt>{f.code_prefix ?? ""}</Txt><Txt>{"1".padStart(f.code_digits ?? 4, "0")}</Txt>. Records already saved get codes too.
                 </span>
               </div>
             )}

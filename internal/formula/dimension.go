@@ -672,11 +672,16 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 // pick-list as its member's code, nothing recorded as a blank.
 func metricCriteriaMatch(d *DimEvalContext, crits []evaluatedCriterion, overrides map[string]string) (bool, *FormulaError) {
 	for _, c := range crits {
-		own := make(map[string]string, len(c.metricDims))
-		for _, dim := range c.metricDims {
-			for k, code := range overrides {
-				if strings.EqualFold(k, dim) {
-					own[k] = code
+		// The metric's dimensions are among the ranges'; all of them, it
+		// reads at the combination itself.
+		own := overrides
+		if len(c.metricDims) != len(overrides) {
+			own = make(map[string]string, len(c.metricDims))
+			for _, dim := range c.metricDims {
+				for k, code := range overrides {
+					if strings.EqualFold(k, dim) {
+						own[k] = code
+					}
 				}
 			}
 		}

@@ -47,9 +47,9 @@ type Runner struct {
 type Committer interface {
 	// CommitPull applies header+rows to the integration's target as the run's
 	// acting principal (runBy — the manual runner, or the developer who
-	// enabled the schedule). Returns written/skipped counts. Dry runs must
-	// not write.
-	CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (written, skipped int, err error)
+	// enabled the schedule). fileName is an SFTP source's file, for Recent
+	// Imports. Returns written/skipped counts. Dry runs must not write.
+	CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, dryRun bool, runBy string) (written, skipped int, err error)
 	// LoadPushRows returns the source rows for a push, each keyed by the
 	// mapped Source field names.
 	LoadPushRows(ctx context.Context, def *Definition) ([]map[string]string, error)
@@ -644,7 +644,7 @@ func (rn *Runner) finishPull(ctx context.Context, run *Run, def *Definition, hea
 		return res
 	}
 
-	written, skipped, cerr := rn.Committer.CommitPull(ctx, def, header, allRows, run.DryRun, run.RunBy)
+	written, skipped, cerr := rn.Committer.CommitPull(ctx, def, header, allRows, res.Meta["file"], run.DryRun, run.RunBy)
 	if cerr != nil {
 		res.ErrorCode, res.Message = ErrCodeInvalidData, cerr.Error()
 		return res

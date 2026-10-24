@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ModelLink } from "../api/client";
-import { DataTable, InlineAlert, StatusBadge, Switch } from "../ui";
+import { DataTable, InlineAlert, StatusBadge, Switch, Txt } from "../ui";
 
 export type ModelLinkSide = "target" | "source";
 
@@ -43,14 +43,14 @@ export function ModelLinksTable({ links, loading, sides, onSwitch, emptyTitle }:
     },
     {
       id: "source", header: "Reads",
-      cell: (l: ModelLink) => <span>{l.source.application_name} › {l.source.model_name} · grid “{l.source.grid}”</span>,
+      cell: (l: ModelLink) => <span>{l.source.application_name} › {l.source.model_name} · grid “<Txt>{l.source.grid}</Txt><Txt>”</Txt></span>,
     },
     {
       id: "target", header: "Into",
       cell: (l: ModelLink) => (
         <span>
           {l.target.application_name} › {l.target.model_name}
-          <span className="mvx-admin-muted"> · {l.target.revision}{l.target.active_revision ? " (active)" : ""}</span>
+          <span className="mvx-admin-muted"> · <Txt>{l.target.revision}</Txt><Txt>{l.target.active_revision ? " (active)" : ""}</Txt></span>
         </span>
       ),
     },

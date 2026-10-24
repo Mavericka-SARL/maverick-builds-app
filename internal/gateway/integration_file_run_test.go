@@ -79,6 +79,17 @@ func TestBusinessUserRunsANameMappedFileIntegration(t *testing.T) {
 	if _, ok := value("CA", "Q1", "cost"); ok {
 		t.Error("a refused file wrote its valid rows")
 	}
+	// Refused, it is in Recent Imports with its row, as the Import Wizard's
+	// is: it was only in the integration's run history (2026-10-23).
+	var jobStatus, firstProblem string
+	var errorRows int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT j.status::text, j.error_rows, e.message FROM import.import_job j
+		JOIN import.import_error e ON e.job_id = j.id
+		WHERE j.revision_id = $1::uuid AND j.file_url = 'csv_import'`, f.revID).Scan(&jobStatus, &errorRows, &firstProblem); err != nil ||
+		jobStatus != "failed" || errorRows != 1 || !strings.Contains(firstProblem, `"FR"`) {
+		t.Errorf("the refused run's import job: %s, %d error row(s), %q (%v)", jobStatus, errorRows, firstProblem, err)
+	}
 	status, res, raw = run(map[string]any{"csv": longCSV})
 	if status != http.StatusOK || res.RowsImported != 3 || res.ErrorRows != 0 {
 		t.Fatalf("long csv run: %d %s", status, raw)

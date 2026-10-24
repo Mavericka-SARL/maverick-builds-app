@@ -248,3 +248,34 @@ test("the metric recalc banner names each revision, or shows a short id when it 
   await expect(banner).toContainText(`${WHAT_IF.name} → revenue = 7`);
   await expect(banner).toContainText(`${UNNAMED.slice(0, 8)} → revenue = —`);
 });
+
+// The revision being built is kept across a reload: it was held in memory,
+// so a reload reopened Build on the application's default model whatever
+// was being built (2026-10-23). A kept revision the server no longer opens
+// (deleted since) gives way to the default.
+test("the working revision is kept across a reload, and a deleted one gives way to the default", async ({ page }) => {
+  await mockTwoModels(page);
+  await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ ...DEFAULT_REV, is_active: true }])));
+  let draftDeleted = false;
+  await page.route(
+    (url) => url.pathname === "/api/developer/model" && url.searchParams.get("revision_id") === OTHER_DRAFT.id,
+    (route) => draftDeleted
+      ? route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "revision not found" }) })
+      : route.fallback(),
+  );
+
+  await loadAs(page, "developer");
+  const draftRow = page.locator(".mvx-admin-revision", { hasText: OTHER_DRAFT.name });
+  const defaultRow = page.locator(".mvx-admin-revision", { hasText: DEFAULT_REV.name });
+  await draftRow.click();
+  await expect(draftRow.getByText("Working")).toBeVisible({ timeout: 15_000 });
+
+  await page.reload();
+  await expect(draftRow.getByText("Working")).toBeVisible({ timeout: 15_000 });
+  await expect(defaultRow.getByText("Working")).toHaveCount(0);
+
+  draftDeleted = true;
+  await page.reload();
+  await expect(defaultRow.getByText("Working")).toBeVisible({ timeout: 15_000 });
+  await expect(draftRow.getByText("Working")).toHaveCount(0);
+});

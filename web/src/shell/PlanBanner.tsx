@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { InlineAlert } from "../ui";
+import { InlineAlert, Txt } from "../ui";
 
 /**
  * One line at the top of the console for a workspace that has become
@@ -18,7 +18,7 @@ export function PlanBanner() {
   if (st.read_only) {
     return (
       <div data-testid="plan-banner" data-state={st.code} style={{ marginBottom: 12 }}>
-        <InlineAlert tone="danger">{st.reason}{change}</InlineAlert>
+        <InlineAlert tone="danger"><Txt>{st.reason}</Txt>{change}</InlineAlert>
       </div>
     );
   }

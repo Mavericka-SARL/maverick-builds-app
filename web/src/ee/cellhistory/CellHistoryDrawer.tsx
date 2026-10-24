@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { FeatureGate } from "../../license/FeatureGate";
-import { Drawer, InlineAlert, LoadingState, StatusBadge } from "../../ui";
+import { Drawer, InlineAlert, LoadingState, StatusBadge, Txt } from "../../ui";
 
 export interface CellRef {
   model_id: string;
@@ -55,8 +55,8 @@ function HistoryList({ cell }: { cell: CellRef }) {
             </td>
             <td>{e.entered_by.name || e.entered_by.email || "—"}</td>
             <td className="mvx-admin-muted">
-              {e.source.kind === "form" ? `records: ${e.source.label}` : e.source.kind === "copied" ? e.source.label : "typed"}
-              {e.deleted_at && <div>Removed {when(e.deleted_at)} — {e.delete_reason}</div>}
+              <Txt>{e.source.kind === "form" ? `records: ${e.source.label}` : e.source.kind === "copied" ? e.source.label : "typed"}</Txt>
+              {e.deleted_at && <div>Removed {when(e.deleted_at)} — <Txt>{e.delete_reason}</Txt></div>}
             </td>
           </tr>
         ))}

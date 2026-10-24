@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
-import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle, Txt } from "../../ui";
 
 function DevModelRevisions({
   model,
@@ -102,7 +102,7 @@ function DevModelRevisions({
                   {s.name}
                 </div>
                 <div className="mvx-admin-revision__meta">
-                  {isDeleting ? "Deleting…" : <>{s.id.slice(0, 8)} · {s.created_at ? s.created_at.slice(0, 10) : ""}</>}
+                  {isDeleting ? "Deleting…" : <>{s.id.slice(0, 8)} · <Txt>{s.created_at ? s.created_at.slice(0, 10) : ""}</Txt></>}
                 </div>
               </div>
               {s.name === model.active_revision && <RevisionBadge status="live" />}
@@ -386,7 +386,7 @@ export function DevApplicationsTab({
             <div className="mvx-admin-object__title">
               <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
               {app.description && <div className="mvx-admin-object__meta" style={{ whiteSpace: "normal" }}>{app.description}</div>}
-              <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
+              <div className="mvx-admin-object__meta">{app.models.length} model<Txt>{app.models.length !== 1 ? "s" : ""}</Txt></div>
             </div>
             {canEdit(tenantOfApp.get(app.id) ?? "") && editing !== `app:${app.id}` && (
               <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} aria-label={`Edit application ${app.name}`} onClick={() => setEditing(`app:${app.id}`)}>
@@ -409,7 +409,7 @@ export function DevApplicationsTab({
                 <div className="mvx-admin-model__header" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
                   <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
-                  {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
+                  {!modelOpen && <span className="mvx-admin-muted">{revisions} revision<Txt>{revisions !== 1 ? "s" : ""}</Txt><Txt>{m.active_revision ? ` · active: ${m.active_revision}` : ""}</Txt></span>}
                   {canEdit(tenantOfApp.get(app.id) ?? "") && editing !== `model:${m.id}` && (
                     <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} aria-label={`Edit model ${m.name}`} onClick={() => setEditing(`model:${m.id}`)}>
                       Edit

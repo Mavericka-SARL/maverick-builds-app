@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, GitFork, Bell, CheckSquare, ChevronUp, ChevronDown, AlertTriangle, Play } from "lucide-react";
 import { api, type Task, type WorkflowDefPublic, type DevDimension } from "../../api/client";
-import { LoadingState, EmptyState, StatusBadge, Textarea, TextInput, Button, Dialog, Field, InlineAlert } from "../../ui";
+import { LoadingState, EmptyState, StatusBadge, Textarea, TextInput, Button, Dialog, Field, InlineAlert, Txt } from "../../ui";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { WorkflowStepActions } from "../WorkflowStepActions";
@@ -344,7 +344,7 @@ export function WorkflowInbox() {
                 {t.due_at && (
                   <StatusBadge tone={overdue ? "danger" : isDueSoon(t.due_at) ? "warning" : "neutral"}>
                     {overdue && <AlertTriangle size={11} aria-hidden="true" style={{ marginRight: 3, verticalAlign: -1 }} />}
-                    {overdue ? "Overdue" : "Due"} {new Date(t.due_at).toLocaleDateString()}
+                    <Txt>{overdue ? "Overdue" : "Due"}</Txt> {new Date(t.due_at).toLocaleDateString()}
                   </StatusBadge>
                 )}
                 <span className="mvx-admin-muted">{new Date(t.created_at).toLocaleDateString()}</span>
@@ -358,7 +358,7 @@ export function WorkflowInbox() {
             {isOpen && (
               <div className="mvx-admin-object__body">
                 {t.rework_count ? (
-                  <InlineAlert tone="warning"><strong>Sent back for rework ({t.rework_count})</strong> {t.rework_note?.replace(/^Sent back for rework \(\d+\) /, "")}</InlineAlert>
+                  <InlineAlert tone="warning"><strong>Sent back for rework ({t.rework_count})</strong> <Txt>{t.rework_note?.replace(/^Sent back for rework \(\d+\) /, "")}</Txt></InlineAlert>
                 ) : null}
                 {t.instructions && (
                   <p style={{ fontSize: 13, margin: 0, lineHeight: 1.5 }}>{t.instructions}</p>

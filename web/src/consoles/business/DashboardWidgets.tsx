@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { serialToISO } from "../dateSerial";
 import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -6,7 +6,7 @@ import { Check as CheckIcon } from "lucide-react";
 import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
-import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
+import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
@@ -130,17 +130,26 @@ function DashboardSelectorBar({ entries, ctx }: { entries: SelectorBarEntry[]; c
 
   // Open on the developer's default when this viewer can see it, else on the
   // dimension's first member — a default hidden from the viewer must not
-  // become the dashboard's selection.
+  // become the dashboard's selection. A first member the bar fell back to
+  // gives way to the default once a fresher member list has it: a list
+  // cached from before the default was added opened the page on France
+  // for good (2026-10-23). A member the viewer chose stays.
   const values = sync?.values;
   const setValue = sync?.setValue;
+  const fellBackTo = useRef<Record<string, string>>({});
   useEffect(() => {
     if (!setValue) return;
     for (const d of dims) {
       const current = values?.[d.id];
-      if (current && d.members.some(mm => mm.code === current)) continue;
       const def = entries.find(e => e.dimension_id === d.id)?.default;
-      const code = def && d.members.some(mm => mm.code === def) ? def : defaultLeafCode(d);
-      if (code && code !== current) setValue(d.id, code);
+      const defVisible = !!def && d.members.some(mm => mm.code === def);
+      const fellBack = !!current && fellBackTo.current[d.id] === current;
+      if (current && d.members.some(mm => mm.code === current) && !(fellBack && defVisible)) continue;
+      const code = defVisible ? def : defaultLeafCode(d);
+      if (!code || code === current) continue;
+      if (defVisible) delete fellBackTo.current[d.id];
+      else fellBackTo.current[d.id] = code;
+      setValue(d.id, code);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims.map(d => `${d.id}:${d.members.length}`).join(","), values, setValue]);
@@ -151,7 +160,7 @@ function DashboardSelectorBar({ entries, ctx }: { entries: SelectorBarEntry[]; c
       <ContextSelectors
         dims={dims as unknown as ChartContextDim[]}
         context={sync.values}
-        onChange={sync.setValue}
+        onChange={(dimId, code) => { delete fellBackTo.current[dimId]; sync.setValue(dimId, code); }}
       />
     </div>
   );
@@ -399,7 +408,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
     compareLine = (
       <span className="mvx-kpi__compare" title={`${memberLabel}: ${fmtValue(compareValue, compareValue)}`}>
         vs {memberLabel} {fmtValue(compareValue, scaleBy)} · <span className={["mvx-kpi__delta", tone].filter(Boolean).join(" ")}>
-          {deltaText}{pct !== null ? ` (${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(1)}%)` : ""}
+          {deltaText}<Txt>{pct !== null ? ` (${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(1)}%)` : ""}</Txt>
         </span>
       </span>
     );
@@ -527,7 +536,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
         disabled={run.isPending}
       >
         {run.isSuccess && <CheckIcon size={15} aria-hidden="true" />}
-        {run.isPending ? (isSheets ? "Syncing…" : "Importing…") : run.isSuccess ? "Done" : label}
+        <Txt>{run.isPending ? (isSheets ? "Syncing…" : "Importing…") : run.isSuccess ? "Done" : label}</Txt>
       </CommandButton>
       {result && !run.isPending && (
         <div style={{ fontSize: 12, color: result.message ? "var(--color-danger)" : "var(--color-live)" }}>
@@ -536,7 +545,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
             : `${result.rows_imported ?? 0} rows imported${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
           {result.errors && result.errors.length > 0 && (
             <div style={{ color: "var(--color-danger)" }}>
-              Row {result.errors[0].row}: {result.errors[0].message}{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}
+              Row {result.errors[0].row}: {result.errors[0].message}<Txt>{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}</Txt>
             </div>
           )}
         </div>
@@ -611,7 +620,7 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, corners, ct
         disabled={trigger.isPending || rulesLoading}
       >
         {trigger.isSuccess && <CheckIcon size={15} aria-hidden="true" />}
-        {trigger.isPending ? "Running…" : trigger.isSuccess ? "Started" : label}
+        <Txt>{trigger.isPending ? "Running…" : trigger.isSuccess ? "Started" : label}</Txt>
       </CommandButton>
       {trigger.isSuccess && (
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>

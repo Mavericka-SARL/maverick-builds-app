@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Eye, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { api, cleanReshape, isEmptyReshape, type ApiError, type FileReshape } from "../../api/client";
-import { Button, IconButton, TextInput, Select, Field, InlineAlert } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, InlineAlert, Txt } from "../../ui";
 
 // The Import Wizard's Shape step: turns a sheet laid out for people — a
 // title above the header, months across the columns, a label written once
@@ -271,7 +271,7 @@ export function ShapeStep({
       {preview?.error && <div style={{ marginBottom: 12 }}><InlineAlert tone="danger">{preview.error}</InlineAlert></div>}
       <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
         <div>
-          <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>The file as read (first rows, numbered as Header row counts them){!preview && " — Preview to read it as the import will"}</div>
+          <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>The file as read (first rows, numbered as Header row counts them)<Txt>{!preview && " — Preview to read it as the import will"}</Txt></div>
           {rows(rawGrid.slice(0, 8), undefined, true)}
         </div>
         {preview?.header && preview.rows && (
