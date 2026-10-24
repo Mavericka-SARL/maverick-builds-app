@@ -1207,6 +1207,9 @@ type CreateAiSessionParams struct {
 	// Names the model the session belongs to (the revision's model). Without it, the application's
 	// selected or default model.
 	RevisionID OptUUID `json:",omitempty,omitzero"`
+	// Start the next draft instead of continuing the open one — the session's first confirmed proposal
+	// copies the working revision into a new draft.
+	NewDraft OptCreateAiSessionNewDraft `json:",omitempty,omitzero"`
 }
 
 func unpackCreateAiSessionParams(packed middleware.Parameters) (params CreateAiSessionParams) {
@@ -1217,6 +1220,15 @@ func unpackCreateAiSessionParams(packed middleware.Parameters) (params CreateAiS
 		}
 		if v, ok := packed[key]; ok {
 			params.RevisionID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "new_draft",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.NewDraft = v.(OptCreateAiSessionNewDraft)
 		}
 	}
 	return params
@@ -1261,6 +1273,62 @@ func decodeCreateAiSessionParams(args [0]string, argsEscaped bool, r *http.Reque
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: new_draft.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "new_draft",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotNewDraftVal CreateAiSessionNewDraft
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotNewDraftVal = CreateAiSessionNewDraft(c)
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.NewDraft.SetTo(paramsDotNewDraftVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.NewDraft.Get(); ok {
+					if err := func() error {
+						if err := value.Validate(); err != nil {
+							return err
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "new_draft",
 			In:   "query",
 			Err:  err,
 		}

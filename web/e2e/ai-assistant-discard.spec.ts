@@ -86,7 +86,7 @@ test("Discard draft calls the real discard-draft endpoint and the banner disappe
   await openAiAssistantSession(page);
 
   // Draft banner visible before discard.
-  await expect(page.getByText("AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("AI draft", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Discard" })).toBeVisible();
 
   await page.getByRole("button", { name: "Discard" }).click();
@@ -98,7 +98,7 @@ test("Discard draft calls the real discard-draft endpoint and the banner disappe
   expect(discardCalls[0]).toBe("POST");
 
   // Banner gone — driven by the server response, not local guesswork.
-  await expect(page.getByText("AI draft")).not.toBeVisible();
+  await expect(page.getByText("AI draft", { exact: true })).not.toBeVisible();
   await expect(page.getByText("Discarded the draft")).toBeVisible();
 });
 
@@ -137,7 +137,7 @@ test("Use as working revision switches the console to the draft without activati
   });
 
   await openAiAssistantSession(page);
-  await expect(page.getByText("AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("AI draft", { exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: "Use as working revision" }).click();
 
   await expect(page.getByText("AI Draft 2026-08-01 09:05:00.000").first()).toBeVisible();

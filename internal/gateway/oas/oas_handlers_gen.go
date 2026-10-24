@@ -3654,7 +3654,8 @@ func (s *Server) handleCompleteTaskRequest(args [1]string, argsEscaped bool, w h
 
 // handleConfirmAiProposalRequest handles confirmAiProposal operation.
 //
-// Execute a pending proposal's write steps (lazily creates the session's draft revision on first use).
+// Execute a pending proposal's write steps (creates the session's draft on first use when it has
+// none; a start_new_draft step moves the session to a new draft for the steps after it).
 //
 // POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -3790,7 +3791,7 @@ func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ConfirmAiProposalOperation,
-			OperationSummary: "Execute a pending proposal's write steps (lazily creates the session's draft revision on first use)",
+			OperationSummary: "Execute a pending proposal's write steps (creates the session's draft on first use when it has none; a start_new_draft step moves the session to a new draft for the steps after it)",
 			OperationID:      "confirmAiProposal",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -4997,7 +4998,9 @@ func (s *Server) handleCreateAdminUserTrailingSlashRequest(args [0]string, argsE
 // handleCreateAiSessionRequest handles createAiSession operation.
 //
 // A session belongs to the model it is created in; requests on it that resolve another model are
-// refused with 409.
+// refused with 409. It continues the caller's open AI draft in that model (the newest draft a
+// session of theirs works in that was not promoted, discarded or made active), so its reads and
+// writes use it from the first message.
 //
 // POST /api/ai/sessions
 func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -5142,6 +5145,10 @@ func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, 
 					Name: "revision_id",
 					In:   "query",
 				}: params.RevisionID,
+				{
+					Name: "new_draft",
+					In:   "query",
+				}: params.NewDraft,
 			},
 			Raw: r,
 		}
@@ -35783,9 +35790,9 @@ func (s *Server) handlePreviewImportReshapeRequest(args [0]string, argsEscaped b
 
 // handlePromoteAiDraftRequest handles promoteAiDraft operation.
 //
-// Hand the session's isolated draft revision to the developer as their working revision (not the
-// active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear
-// its draft; the response names the revision.
+// Hand the session's AI draft to the developer as their working revision (not the active one —
+// that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of
+// theirs working in the draft, and clear their draft; the response names the revision.
 //
 // POST /api/ai/sessions/{id}/promote-draft
 func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -35921,7 +35928,7 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    PromoteAiDraftOperation,
-			OperationSummary: "Hand the session's isolated draft revision to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear its draft; the response names the revision",
+			OperationSummary: "Hand the session's AI draft to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of theirs working in the draft, and clear their draft; the response names the revision",
 			OperationID:      "promoteAiDraft",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -43434,7 +43441,7 @@ func (s *Server) handleScimServiceProviderConfigRequest(args [0]string, argsEsca
 // and a proposal is created instead of executing immediately — warnings are the plan check's (a
 // Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 // "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-// limit AI_TURN_TIMEOUT — 10 minutes by default — or the request closed by Stop, each also saved
+// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
 // as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
 // completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
 // Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any

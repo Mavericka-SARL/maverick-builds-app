@@ -1759,6 +1759,15 @@ func (s *CreateAdminUserTrailingSlashReq) Validate() error {
 	return nil
 }
 
+func (s CreateAiSessionNewDraft) Validate() error {
+	switch s {
+	case "1":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s *CreateApplicationRequest) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer

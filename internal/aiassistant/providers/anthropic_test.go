@@ -334,3 +334,54 @@ func TestAnthropicProvider_ChatStream_ErrorWrappedWithLabel(t *testing.T) {
 		t.Fatalf("expected error prefixed with 'anthropic:', got: %v", err)
 	}
 }
+
+// Every round of a turn sends the tools, the system prompt and the
+// conversation again: each must end in a cache breakpoint, or a session on
+// a large model is billed the whole prompt per round.
+func TestAnthropicProvider_CachesToolsSystemAndConversation(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-x",
+			"content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn", "stop_sequence": null,
+			"usage": {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 40}
+		}`))
+	}))
+	defer server.Close()
+
+	tool := func(name string) ToolDef {
+		return ToolDef{Name: name, Description: name, Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}
+	}
+	resp, err := newTestAnthropicProvider(server.URL).Chat(t.Context(), ChatRequest{
+		Model: "claude-x", SystemPrompt: "system",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		Tools:    []ToolDef{tool("a"), tool("b")},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	ephemeral := func(v any) bool {
+		m, _ := v.(map[string]any)
+		cc, _ := m["cache_control"].(map[string]any)
+		return cc["type"] == "ephemeral"
+	}
+	if !ephemeral(captured) {
+		t.Error("the request has no top-level cache_control: the conversation is not cached")
+	}
+	system, _ := captured["system"].([]any)
+	if len(system) != 1 || !ephemeral(system[0]) {
+		t.Errorf("the system prompt does not end in a breakpoint: %v", captured["system"])
+	}
+	tools, _ := captured["tools"].([]any)
+	if len(tools) != 2 || ephemeral(tools[0]) || !ephemeral(tools[1]) {
+		t.Errorf("only the last tool should carry the breakpoint: %v", tools)
+	}
+	if u := resp.Usage; u.InputTokens != 7 || u.OutputTokens != 3 || u.CacheReadTokens != 900 || u.CacheWriteTokens != 40 {
+		t.Errorf("usage = %+v", u)
+	}
+}

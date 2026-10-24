@@ -551,6 +551,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.runIntegration(ctx, params)
 	case "trigger_automation_rule":
 		return e.triggerAutomationRule(ctx, params)
+	case StartNewDraftTool:
+		return e.startNewDraft(params)
 	case "recalculate_revision":
 		return e.recalculateRevision(ctx, params)
 	case "clear_input_values":
@@ -4165,4 +4167,20 @@ func widgetShowTitle(title *string, show *bool) bool {
 		return *show
 	}
 	return title != nil && strings.TrimSpace(*title) != ""
+}
+
+// StartNewDraftTool is the step that moves the session to a new AI draft,
+// copied from the developer's working revision, when the developer asks for
+// one. Confirming runs it (aiConfirmProposal): the steps after it and every
+// later proposal write there. Here — a plan's dry run — it changes nothing.
+const StartNewDraftTool = "start_new_draft"
+
+func (e *WriteExecutor) startNewDraft(params json.RawMessage) (string, string, error) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := decodeParams(params, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	return "A new draft is started when the developer confirms", "", nil
 }

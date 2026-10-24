@@ -366,3 +366,110 @@ func TestPromoteDraftRejectsWrongOwnerAndMissingDraft(t *testing.T) {
 		}
 	})
 }
+
+// One AI draft per developer and model until they are done with it: a new
+// session continues it, a new draft is made only when asked — New session
+// with ?new_draft=1, or a plan's start_new_draft step — and promoting
+// finishes every session working in the draft (owner decision, 2026-10-24,
+// after a tester's three sessions left three drafts, the third without the
+// second's clearing).
+func TestNewSessionsContinueTheOpenDraft(t *testing.T) {
+	f := setupPromoteFixture(t)
+	ctx := context.Background()
+	pStore := aiassistant.NewProposalStore(f.pool)
+	type session struct {
+		ID              string `json:"id"`
+		DraftRevisionID string `json:"draft_revision_id"`
+	}
+	newSession := func(sub, query string) session {
+		t.Helper()
+		status, body := f.do(t, "POST", "/api/ai/sessions"+query, sub, nil)
+		var s session
+		if status != http.StatusOK || json.Unmarshal(body, &s) != nil {
+			t.Fatalf("new session%s: %d %s", query, status, body)
+		}
+		return s
+	}
+	confirm := func(sessionID string, steps ...aiassistant.ProposalStep) session {
+		t.Helper()
+		p, err := pStore.CreateProposal(ctx, sessionID, steps, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, body := f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/proposals/"+p.ID+"/confirm", f.devSub, nil)
+		var resp struct {
+			Proposal aiassistant.Proposal `json:"proposal"`
+			Session  session              `json:"session"`
+		}
+		if status != http.StatusOK || json.Unmarshal(body, &resp) != nil || resp.Proposal.Status != "executed" {
+			t.Fatalf("confirm: %d %s", status, body)
+		}
+		return resp.Session
+	}
+	dim := func(name string) aiassistant.ProposalStep {
+		params, _ := json.Marshal(map[string]string{"name": name})
+		return aiassistant.ProposalStep{Tool: "create_dimension", Description: "Create '" + name + "'", Params: params}
+	}
+	drafts := func() int {
+		var n int
+		_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM model.revision WHERE model_id = $1::uuid AND id <> $2::uuid`, f.modelID, f.workingRevID).Scan(&n)
+		return n
+	}
+
+	s1 := newSession(f.devSub, "")
+	if s1.DraftRevisionID != "" {
+		t.Fatalf("the first session starts with draft %s", s1.DraftRevisionID)
+	}
+	d1 := confirm(s1.ID, dim("First")).DraftRevisionID
+
+	s2 := newSession(f.devSub, "")
+	if s2.DraftRevisionID != d1 {
+		t.Fatalf("a new session works in %q, want the open draft %s", s2.DraftRevisionID, d1)
+	}
+	if got := confirm(s2.ID, dim("Second")).DraftRevisionID; got != d1 || !dimensionExists(t, f.pool, f.modelID, d1, "Second") || drafts() != 1 {
+		t.Fatalf("the second session wrote into %s; %d draft(s)", got, drafts())
+	}
+	if other := newSession(f.otherSub, ""); other.DraftRevisionID != "" {
+		t.Fatalf("another developer's session continues my draft %s", other.DraftRevisionID)
+	}
+
+	// Asked for on New session: the next draft, a copy of the working revision.
+	s3 := newSession(f.devSub, "?new_draft=1")
+	if s3.DraftRevisionID != "" {
+		t.Fatalf("a session asking for a new draft starts in %s", s3.DraftRevisionID)
+	}
+	d3 := confirm(s3.ID, dim("Third")).DraftRevisionID
+	if d3 == d1 || dimensionExists(t, f.pool, f.modelID, d3, "Second") || !dimensionExists(t, f.pool, f.modelID, d3, "Third") {
+		t.Fatalf("draft %s is not a new copy of the working revision", d3)
+	}
+
+	// Asked for in chat: start_new_draft moves the session on mid-plan.
+	named, _ := json.Marshal(map[string]string{"name": "Separate"})
+	sep := confirm(s2.ID, aiassistant.ProposalStep{Tool: aiassistant.StartNewDraftTool, Description: "New draft", Params: named}, dim("Fourth")).DraftRevisionID
+	var sepName string
+	_ = f.pool.QueryRow(ctx, `SELECT name FROM model.revision WHERE id = $1::uuid`, sep).Scan(&sepName)
+	if sep == d1 || sepName != "Separate" || !dimensionExists(t, f.pool, f.modelID, sep, "Fourth") || dimensionExists(t, f.pool, f.modelID, d1, "Fourth") {
+		t.Fatalf("start_new_draft: session on %s (%q); Fourth in the old draft: %v", sep, sepName, dimensionExists(t, f.pool, f.modelID, d1, "Fourth"))
+	}
+
+	// The newest open draft is the one a new session continues; promoting it
+	// finishes the other session working in it, and no other.
+	s4 := newSession(f.devSub, "")
+	if s4.DraftRevisionID != sep {
+		t.Fatalf("a new session continues %s, want the newest draft %s", s4.DraftRevisionID, sep)
+	}
+	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s4.ID+"/promote-draft", f.devSub, nil); status != http.StatusOK {
+		t.Fatalf("promote: %d %s", status, body)
+	}
+	finished := func(id string) bool {
+		var promoted bool
+		_ = f.pool.QueryRow(ctx, `SELECT promoted_at IS NOT NULL AND draft_revision_id IS NULL FROM ai_assistant.session WHERE id = $1::uuid`, id).Scan(&promoted)
+		return promoted
+	}
+	if !finished(s2.ID) || finished(s1.ID) || finished(s3.ID) {
+		t.Fatalf("finished after promoting: s1 %v, s2 %v, s3 %v — want s2 alone", finished(s1.ID), finished(s2.ID), finished(s3.ID))
+	}
+	if status, _ := f.do(t, "POST", "/api/ai/sessions/"+s2.ID+"/messages", f.devSub, map[string]string{"content": "more"}); status != http.StatusConflict {
+		t.Fatalf("a message to a session whose draft was promoted from another: %d, want 409", status)
+	}
+}

@@ -25,6 +25,9 @@ func TestAIDeveloperClearsFillsAndWritesFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = chat.SetTitleIfEmpty(ctx, sess.ID, "values")
+	// A grid without input metrics, before the session's draft copies the
+	// revision: clearing "everything" must step over it.
+	calendar := f.ok("POST", "/api/developer/grids", linkDev, f.tgtApp, f.tgtRev, map[string]any{"name": "Calendar", "revision_id": f.tgtRev})
 	proposals := aiassistant.NewProposalStore(f.pool)
 	turn := func(content string, resps ...providers.ChatResponse) {
 		t.Helper()
@@ -92,9 +95,12 @@ func TestAIDeveloperClearsFillsAndWritesFiles(t *testing.T) {
 
 	var regionDim string
 	_ = f.pool.QueryRow(ctx, `SELECT dimension_id::text FROM model.grid_dimension WHERE grid_id=$1::uuid`, f.inbound).Scan(&regionDim)
-	turn("clear the UK values", proposeResp("p3", map[string]any{"tool": "clear_input_values", "description": "Clear UK",
-		"params": map[string]any{"grid_id": f.inbound, "members": map[string][]string{regionDim: {"UK"}}}}))
-	if p := confirmLatest(); p.Status != "executed" || !strings.Contains(p.Steps[0].Result, "Cleared 2 cell(s)") {
+	turn("clear the UK values", proposeResp("p3",
+		map[string]any{"tool": "clear_input_values", "description": "Clear Calendar", "params": map[string]any{"grid_id": calendar}},
+		map[string]any{"tool": "clear_input_values", "description": "Clear UK",
+			"params": map[string]any{"grid_id": f.inbound, "members": map[string][]string{regionDim: {"UK"}}}}))
+	if p := confirmLatest(); p.Status != "executed" || !strings.HasPrefix(p.Steps[0].Result, "Nothing to clear: this grid has no input metric") ||
+		!strings.Contains(p.Steps[1].Result, "Cleared 2 cell(s)") {
 		t.Fatalf("clear: %+v", p.Steps)
 	}
 	if got := values(f.tgtMetric["rev_in"]); got["UK"] != 0 || got["DE"] != 7 {

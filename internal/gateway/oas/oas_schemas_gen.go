@@ -2434,7 +2434,8 @@ type AiSession struct {
 	LlmModel    string    `json:"llm_model"`
 	// Human name; auto-generated from the first request, renameable. Empty = unnamed.
 	Title OptString `json:"title"`
-	// Set once this session's first confirmed proposal lazily creates an isolated draft revision.
+	// The developer's AI draft the session works in: set at creation when they have one open in the
+	// model, else by the first confirmed proposal; a start_new_draft step moves it to a new one.
 	DraftRevisionID OptUUID   `json:"draft_revision_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	// Set once its draft was promoted: the session is finished and refuses messages (409
@@ -5812,6 +5813,40 @@ func (s *CreateAdminUserTrailingSlashReq) SetDisplayName(val string) {
 // SetRole sets the value of Role.
 func (s *CreateAdminUserTrailingSlashReq) SetRole(val OptString) {
 	s.Role = val
+}
+
+type CreateAiSessionNewDraft string
+
+const (
+	CreateAiSessionNewDraft1 CreateAiSessionNewDraft = "1"
+)
+
+// AllValues returns all CreateAiSessionNewDraft values.
+func (CreateAiSessionNewDraft) AllValues() []CreateAiSessionNewDraft {
+	return []CreateAiSessionNewDraft{
+		CreateAiSessionNewDraft1,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateAiSessionNewDraft) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateAiSessionNewDraft1:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateAiSessionNewDraft) UnmarshalText(data []byte) error {
+	switch CreateAiSessionNewDraft(data) {
+	case CreateAiSessionNewDraft1:
+		*s = CreateAiSessionNewDraft1
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/CreateApplicationRequest
@@ -20471,6 +20506,52 @@ func (o OptConnectorSettingsScope) Get() (v ConnectorSettingsScope, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptConnectorSettingsScope) Or(d ConnectorSettingsScope) ConnectorSettingsScope {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateAiSessionNewDraft returns new OptCreateAiSessionNewDraft with value set to v.
+func NewOptCreateAiSessionNewDraft(v CreateAiSessionNewDraft) OptCreateAiSessionNewDraft {
+	return OptCreateAiSessionNewDraft{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateAiSessionNewDraft is optional CreateAiSessionNewDraft.
+type OptCreateAiSessionNewDraft struct {
+	Value CreateAiSessionNewDraft
+	Set   bool
+}
+
+// IsSet returns true if OptCreateAiSessionNewDraft was set.
+func (o OptCreateAiSessionNewDraft) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateAiSessionNewDraft) Reset() {
+	var v CreateAiSessionNewDraft
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateAiSessionNewDraft) SetTo(v CreateAiSessionNewDraft) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateAiSessionNewDraft) Get() (v CreateAiSessionNewDraft, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateAiSessionNewDraft) Or(d CreateAiSessionNewDraft) CreateAiSessionNewDraft {
 	if v, ok := o.Get(); ok {
 		return v
 	}

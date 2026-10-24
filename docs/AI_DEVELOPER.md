@@ -10,12 +10,23 @@ that it leaves to people. It reads through **read tools** it calls freely, and
 writes only by **proposing** an ordered plan that the developer confirms.
 Nothing is written until then.
 
-**Where its writes land.** Model changes land in an isolated draft revision,
-created on the session's first confirmed proposal as a copy of the developer's
+**Where its writes land.** Model changes land in the developer's AI draft
+revision, created by a first confirmed proposal as a copy of the developer's
 working revision (else the active one), and promoted or discarded by the
-developer. Promoting makes the draft the developer's **working** revision, not
-the live one: making a revision active is a separate step (**Set active** in
-Developer › Models; owner decision, 2026-10-10). Data the assistant imports from a spreadsheet
+developer. Until then every new session of that developer in that model
+continues the same draft, reading and writing it from its first message
+(`ChatStore.OpenDraft`: the newest draft a session of theirs works in, not
+promoted, discarded or made active; owner decision, 2026-10-24 — each session
+used to copy the working revision again, so a tester's three sessions left
+three drafts, the third without the second's clearing). A new draft is made
+only when the developer asks: **Start a new draft** in the session list
+(`POST /api/ai/sessions?new_draft=1`, a session whose first confirmed proposal
+makes one), or in chat, where the assistant makes `start_new_draft` the
+first step of its plan and the steps after it go into the new draft; the
+previous draft stays in Developer › Models. Promoting makes the draft the
+developer's **working** revision, not the live one: making a revision active
+is a separate step (**Set active** in Developer › Models; owner decision,
+2026-10-10). Data the assistant imports from a spreadsheet
 attached to the chat lands in the draft too. Three kinds of write are not revision-scoped, exactly as in the
 console, so they take effect on confirmation and discarding the draft does not
 undo them:
@@ -63,7 +74,7 @@ posting runs the gateway's own posting code the same way.
 | `list_form_integrations` | which field of a table posts into which metric |
 | `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
 | `preview_file_import` | a dry run of importing an attached spreadsheet: its first rows as read, its columns and first rows after the reshape and column map, every row that would fail and why, what would be imported. Writes nothing |
-| `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments. Writes nothing |
+| `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments; or any lines of an attached CSV file, with its line count. Writes nothing |
 | `prepare_converted_file` | saves an attached spreadsheet reshaped and column-mapped into the import layout, for the developer to download as CSV or Excel from the chat. Imports nothing |
 | `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
 | `get_integration`, `list_integration_runs` | a REST API connector in full (typed config, connection, schedule, switches, tested state) and run history with error codes |
@@ -87,7 +98,7 @@ on it.
 | Grids | `create_grid`, `update_grid`, `delete_grid`, `add_grid_metric`, `remove_grid_metric`, `reorder_grid_metrics`, `add_grid_dimension`, `update_grid_dimension`, `remove_grid_dimension` | the Grids screen, including a dimension's display level |
 | Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer; `selector_bar` on `create_dashboard` and `update_dashboard` is the designer's **Selector bar**; a `board` widget (`widget_props.board`) and a records widget's `record_filters` / `record_columns` / `record_sort` are checked against the table's fields as the designer's are; a KPI tile in `bar` mode may also carry a `kpi_scope` |
 | Integrations | `create_file_integration`, `import_file_data`, `create_export_integration`, `update_integration`, `delete_integration` | the Integrations tab: the Import Wizard's file import and **Save as integration**, the **Data Export** editor, an integration's rename, tags and delete (REST API connectors are configured only in their wizard) |
-| Other | `set_tags`, `create_revision`, `set_user_access_rules` | tag editors, **New revision**, the exception above |
+| Other | `set_tags`, `create_revision`, `start_new_draft`, `set_user_access_rules` | tag editors, **New revision**, **Start a new draft** (only when the developer asks; see above), the exception above |
 
 What an edit does to stored data is the developer's own code, not a copy:
 `internal/modeledit` holds the member delete (input values to history, time
@@ -244,24 +255,39 @@ over 1,500 characters is cut to its first 400 with a note
 (`aiassistant.CompactHistory`). A long build otherwise passed the provider's
 input limit (gpt-5-mini: 272,000 tokens) at its sixth stage.
 
-**A turn** runs at most `AI_TURN_TIMEOUT` (10 minutes); the console streams
-"progress" while the model writes a tool call (the providers report its
-arguments as they arrive) and offers Stop, which closes the request; both end
-with a saved message. Promoting a session's draft finishes the session: its
-next message is refused with 409 `SESSION_PROMOTED`, and a new session works on
-the developer's working revision — the promoted draft, which the console has
-switched to.
+**A turn** runs at most `AI_TURN_TIMEOUT` (30 minutes; 10 until 2026-10-24,
+which stopped a check of a large model's loaded data half-way); the console
+streams "progress" while the model writes a tool call (the providers report
+its arguments as they arrive) and offers Stop, which closes the request; both
+end with a saved message. Each round of a turn sends the model the tools, the
+system prompt and the conversation again; with Anthropic models all three end
+in a prompt-cache breakpoint, so a round pays full price only for what the
+round before it added (uncached, a tester's four sessions on a large model
+cost $23). The gateway logs each call's `input`, `cache_read`, `cache_write`
+and `output` tokens. Promoting a session's draft finishes it and every other
+session of the developer working in that draft: their next message is refused
+with 409 `SESSION_PROMOTED`, and a new session works on the developer's
+working revision — the promoted draft, which the console has switched to.
 
 Confirming runs the steps in order and **stops at the first failure**: the
 steps after it are marked *not run*, because they are usually built on it.
-What ran before it stays in the draft.
+What ran before it stays in the draft. Clearing a grid without input metrics
+is not a failure: it has nothing to clear, so "clear all the data" goes on to
+the next grid.
 
 ## Attached spreadsheets and data exports
 
 A `.xlsx`, `.xlsm` or `.csv` file attached to the chat (up to 16 MB) keeps its
 original bytes (`ai_assistant.document.raw_data`) next to the text the
-language model reads, so the assistant imports the **whole** file. That text
-(60,000 characters at most) lists every sheet first, then each sheet's rows,
+language model reads, so the assistant imports the **whole** file. Files are
+attached with the paperclip — several at a time — or dropped on the message
+box; once sent with a message they leave the box and stay in the session
+(*Show the session's files*). The upload has ten minutes to arrive, as an
+import has: a file of a few megabytes over a slow link took longer than the
+server's one-minute read limit and was cut off. A CSV file's text is its
+first 31 lines and how many lines it has — `read_attached_sheet` reads any
+lines of it (500 a call); its first 60,000 characters used to go to the model
+on every call. A workbook's text (60,000 characters at most) lists every sheet first, then each sheet's rows,
 layout, formulas, lists and highlights; when the whole workbook does not fit,
 each large sheet shows fewer rows and clipped formulas (a sheet of 30 rows or
 fewer is always whole) and says which `read_attached_sheet` call shows the

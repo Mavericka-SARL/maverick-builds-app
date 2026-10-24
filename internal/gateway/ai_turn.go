@@ -42,12 +42,14 @@ func jsonCodeErr(w http.ResponseWriter, status int, code, msg string) {
 var errTurnTimeLimit = errors.New("turn time limit")
 
 // aiTurnTimeout is how long one turn may run: AI_TURN_TIMEOUT (a Go
-// duration, e.g. "15m"), else 10 minutes.
+// duration, e.g. "15m"), else 30 minutes. Ten minutes stopped a tester's
+// check of a large model's loaded data mid-way (2026-10-24); a long turn
+// shows its progress and the developer can Stop it.
 func aiTurnTimeout() time.Duration {
 	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("AI_TURN_TIMEOUT"))); err == nil && d > 0 {
 		return d
 	}
-	return 10 * time.Minute
+	return 30 * time.Minute
 }
 
 // stoppedTurn says why a turn's context ended, or "" while it runs: the

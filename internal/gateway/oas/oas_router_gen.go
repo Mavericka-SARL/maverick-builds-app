@@ -10027,7 +10027,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 												switch method {
 												case "POST":
 													r.name = PromoteAiDraftOperation
-													r.summary = "Hand the session's isolated draft revision to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear its draft; the response names the revision"
+													r.summary = "Hand the session's AI draft to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of theirs working in the draft, and clear their draft; the response names the revision"
 													r.operationID = "promoteAiDraft"
 													r.operationGroup = ""
 													r.pathPattern = "/api/ai/sessions/{id}/promote-draft"
@@ -10109,7 +10109,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 															switch method {
 															case "POST":
 																r.name = ConfirmAiProposalOperation
-																r.summary = "Execute a pending proposal's write steps (lazily creates the session's draft revision on first use)"
+																r.summary = "Execute a pending proposal's write steps (creates the session's draft on first use when it has none; a start_new_draft step moves the session to a new draft for the steps after it)"
 																r.operationID = "confirmAiProposal"
 																r.operationGroup = ""
 																r.pathPattern = "/api/ai/sessions/{id}/proposals/{pid}/confirm"

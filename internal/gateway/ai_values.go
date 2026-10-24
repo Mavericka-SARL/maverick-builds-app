@@ -21,17 +21,30 @@ import (
 // aiClearValues is clear_input_values.
 func (h *handler) aiClearValues(ctx context.Context, r *http.Request, kind, id string, body json.RawMessage) (string, error) {
 	status, out := h.callAsCaller(ctx, r, http.MethodPost, "/api/developer/"+kind+"s/"+url.PathEscape(id)+"/clear-values", nil, body)
+	// A grid of calculated metrics only holds nothing to clear. Refused, it
+	// stopped "clear all data" at the model's second grid (reported live,
+	// 2026-10-24: step 2 of 22, a day calendar).
+	var refusal struct{ Code, Error string }
+	if status == http.StatusBadRequest && json.Unmarshal(out, &refusal) == nil && refusal.Code == nothingToClearCode {
+		return "Nothing to clear: " + refusal.Error + ".", nil
+	}
 	if status >= 300 {
 		return "", routeError(status, out)
 	}
 	var res struct{ Cells, Withheld, Posted int }
 	_ = json.Unmarshal(out, &res)
+	if res.Cells == 0 && res.Withheld == 0 && res.Posted == 0 {
+		return "Nothing to clear: no typed values.", nil
+	}
 	msg := fmt.Sprintf("Cleared %d cell(s)", res.Cells)
 	if res.Withheld > 0 {
 		msg += fmt.Sprintf("; %d left that the developer may not write", res.Withheld)
 	}
 	if res.Posted > 0 {
 		msg += fmt.Sprintf("; %d left that tables of records post (clear those records instead)", res.Posted)
+	}
+	if res.Cells == 0 {
+		return msg + ".", nil
 	}
 	return msg + ". Calculated metrics are recalculating.", nil
 }

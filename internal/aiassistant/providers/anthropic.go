@@ -91,15 +91,25 @@ func (p *AnthropicProvider) buildParams(req ChatRequest) anthropic.MessageNewPar
 		})
 	}
 
+	// Prompt caching. A turn calls the model once per tool round, each time
+	// sending the same tools, system prompt and growing conversation again;
+	// uncached, a session of a few turns on a large model with attached files
+	// cost a tester $23 (2026-10-24). The tools and the system prompt each
+	// end with a breakpoint (the system prompt changes when the model does,
+	// the tools only with a release), and the request's own breakpoint
+	// follows the conversation's end, so every round reads what the round
+	// before it wrote.
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(req.Model),
-		MaxTokens: 16000,
-		Messages:  msgs,
+		Model:        anthropic.Model(req.Model),
+		MaxTokens:    16000,
+		Messages:     msgs,
+		CacheControl: anthropic.NewCacheControlEphemeralParam(),
 	}
 	if req.SystemPrompt != "" {
-		params.System = []anthropic.TextBlockParam{{Text: req.SystemPrompt}}
+		params.System = []anthropic.TextBlockParam{{Text: req.SystemPrompt, CacheControl: anthropic.NewCacheControlEphemeralParam()}}
 	}
 	if len(tools) > 0 {
+		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
 	}
 	return params
@@ -111,6 +121,12 @@ func messageToChatResponse(msg anthropic.Message) ChatResponse {
 	out := ChatResponse{
 		FinishReason: "stop",
 		Message:      Message{Role: "assistant"},
+		Usage: Usage{
+			InputTokens:      msg.Usage.InputTokens,
+			OutputTokens:     msg.Usage.OutputTokens,
+			CacheReadTokens:  msg.Usage.CacheReadInputTokens,
+			CacheWriteTokens: msg.Usage.CacheCreationInputTokens,
+		},
 	}
 	if msg.StopReason == anthropic.StopReasonToolUse {
 		out.FinishReason = "tool_calls"

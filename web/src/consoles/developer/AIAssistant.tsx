@@ -135,6 +135,9 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   );
 }
 
+// The files the AI Developer takes as attachments.
+const ATTACHABLE = ".pdf,.xlsx,.xlsm,.docx,.csv,.txt,.md,.json,.log";
+
 // ── Message bubble ────────────────────────────────────────────────────────────
 
 function MessageBubble({ msg }: { msg: AIMessage }) {
@@ -229,6 +232,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
   create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",
   create_revision: "Create revision",
+  start_new_draft: "Start a new draft",
   delete_dimension: "Delete dimension", delete_dimension_member: "Delete dimension member",
   generate_time_members: "Generate time periods", update_grid: "Rename grid", delete_grid: "Delete grid",
   remove_grid_metric: "Remove grid metric", reorder_grid_metrics: "Reorder grid metrics", reorder_dashboards: "Reorder dashboards", remove_grid_dimension: "Remove grid dimension",
@@ -664,6 +668,12 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [documents, setDocuments]   = useState<AIDocument[]>([]);
+  // Files already sent with a message: they stay in the session for the
+  // assistant to read and import, but leave the composer (they looked
+  // attached to the next message — reported live, 2026-10-24).
+  const [sentDocIds, setSentDocIds] = useState<Set<string>>(() => new Set());
+  const [showSessionFiles, setShowSessionFiles] = useState(false);
+  const [dragOver, setDragOver]     = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [draftBusy, setDraftBusy]   = useState(false);
   const [showActivity, setShowActivity] = useState(false);
@@ -701,6 +711,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     queryKey: ["ai-sessions", revisionId ?? ""],
     queryFn: () => api.aiListSessions(revisionId),
   });
+  // The developer's open AI draft in this model, which New session continues.
+  const openDraft = sessions.find(s => s.draft_revision_id && !s.promoted_at)?.draft_revision_id;
 
   const { data: settings } = useQuery<AISettings>({
     queryKey: ["ai-settings"],
@@ -729,11 +741,14 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     setCurrentSession(data.session);
     setMessages(data.messages ?? []);
     setDocuments(data.documents ?? []);
+    const lastSent = (data.messages ?? []).filter(m => m.role === "user").at(-1)?.created_at;
+    setSentDocIds(new Set((data.documents ?? []).filter(d => lastSent && d.created_at <= lastSent).map(d => d.id)));
   };
 
-  // Create a new session.
+  // Create a new session: it continues the developer's open AI draft, or
+  // with newDraft makes the next draft on its first confirmed proposal.
   const newSession = useMutation({
-    mutationFn: () => api.aiCreateSession(revisionId),
+    mutationFn: (newDraft?: boolean) => api.aiCreateSession(revisionId, newDraft),
     onSuccess: (sess) => {
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
       setSessionId(sess.id);
@@ -822,8 +837,10 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     });
   };
 
-  // Upload a document into the current session (creates a session if needed).
-  const uploadDocument = async (file: File) => {
+  // Upload documents into the current session, one after another (creates
+  // a session if needed — once, for all of them).
+  const uploadDocuments = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploading(true);
     setError(null);
     try {
@@ -833,10 +850,13 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         qc.invalidateQueries({ queryKey: ["ai-sessions"] });
         sid = sess.id;
         setSessionId(sid);
+        setCurrentSession(sess);
         setMessages([]);
       }
-      const doc = await api.aiUploadDocument(sid, file);
-      setDocuments(prev => [...prev, doc]);
+      for (const file of files) {
+        const doc = await api.aiUploadDocument(sid, file);
+        setDocuments(prev => [...prev, doc]);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -886,6 +906,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         qc.invalidateQueries({ queryKey: ["ai-sessions"] });
         sid = sess.id;
         setSessionId(sid);
+        setCurrentSession(sess);
       } catch (e) {
         setError((e as Error).message);
         return;
@@ -893,6 +914,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     }
 
     setInput("");
+    setSentDocIds(new Set(documents.map(d => d.id)));
     await sendContent(sid, content);
   };
 
@@ -1036,11 +1058,25 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           variant="ghost"
           leadingIcon={<Plus size={13} />}
           disabled={newSession.isPending}
-          onClick={() => newSession.mutate()}
+          onClick={() => newSession.mutate(false)}
+          title={openDraft ? "Continues your open AI draft" : undefined}
           style={{ marginBottom: 4 }}
         >
           New session
         </Button>
+        {openDraft && (
+          <Button
+            size="sm"
+            variant="ghost"
+            leadingIcon={<Plus size={13} />}
+            disabled={newSession.isPending}
+            onClick={() => newSession.mutate(true)}
+            title="A new session whose first confirmed proposal makes a new AI draft from your working revision; your open draft stays in Models"
+            style={{ marginBottom: 4 }}
+          >
+            Start a new draft
+          </Button>
+        )}
 
         {sessions.map(s => (
           <div
@@ -1134,7 +1170,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <strong style={{ color: "var(--color-text)" }}>{sessionModel?.model_name ?? "…"}</strong>
             <span>· revision:</span>
             <strong style={{ color: "var(--color-text)" }}>{revisionName || demo?.revision || "active"}</strong>
-            {currentSession?.draft_revision_id && <span>· writes go to this session's isolated draft revision</span>}
+            {currentSession?.draft_revision_id && <span>· writes go to your AI draft revision</span>}
           </div>
         )}
 
@@ -1142,15 +1178,16 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           <ActivityPanel sessionId={sessionId} onClose={() => setShowActivity(false)} />
         )}
 
-        {/* Draft revision banner — shown once the session's first confirmed
-            proposal has created an isolated draft. AI writes always land here,
-            never in an existing revision; promoting makes it the working revision,
-            never the live one. */}
+        {/* Draft revision banner — shown while the session works in the
+            developer's AI draft (made by a first confirmed proposal, continued
+            by every new session). AI writes always land here, never in an
+            existing revision; promoting makes it the working revision, never
+            the live one. */}
         {currentSession?.draft_revision_id && (
           <div className="mvx-context-banner" style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 0, borderLeft: "none", borderRight: "none", borderTop: "none" }}>
             <RevisionBadge status="draft" label="AI draft" />
             <span style={{ flex: 1, fontSize: 12 }}>
-              Working in an isolated draft revision — use it as your working revision to look it through; it goes live only when you Set active in Models.
+              Working in your AI draft — every new session continues it until you use it as your working revision or discard it. It goes live only when you Set active in Models.
             </span>
             <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
               Use as working revision
@@ -1240,21 +1277,55 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input bar */}
-        <div style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)" }}>
+        {/* Input bar — files can be dropped on it as well as attached. */}
+        <div
+          style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)",
+            outline: dragOver ? "2px dashed var(--color-brand-500)" : undefined, outlineOffset: -6 }}
+          onDragOver={e => {
+            if (!e.dataTransfer.types.includes("Files") || promoted || thinking) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setDragOver(true);
+          }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false); }}
+          onDrop={e => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDragOver(false);
+            if (promoted || thinking || uploading) return;
+            const files = Array.from(e.dataTransfer.files);
+            const accepted = files.filter(f => ATTACHABLE.split(",").some(ext => f.name.toLowerCase().endsWith(ext)));
+            const refused = files.filter(f => !accepted.includes(f)).map(f => f.name);
+            void uploadDocuments(accepted).then(() => {
+              if (refused.length === 0) return;
+              const note = `Not attached: ${refused.join(", ")} — attach pdf, xlsx, xlsm, docx, csv, txt, md, json or log files.`;
+              setError(prev => (prev ? `${prev} ${note}` : note));
+            });
+          }}
+        >
           {promoted && (
             <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
               border: "1px solid var(--color-info-border)", background: "var(--color-info-bg)" }}>
               <span style={{ flex: 1 }}>This session's draft is now your working revision, so the session is finished. Start a new session to keep building — it works on your working revision.</span>
-              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate()}>New session</Button>
+              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate(false)}>New session</Button>
             </div>
           )}
           {sessionId && <SessionExports sessionId={sessionId} />}
           {sessionId && <SessionConversions sessionId={sessionId} />}
-          {/* Attached document chips */}
-          {(documents.length > 0 || uploading) && (
+          {/* Files sent earlier stay in the session, out of the way. */}
+          {documents.some(d => sentDocIds.has(d.id)) && (
+            <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              <button type="button" className="mvx-link-button" aria-expanded={showSessionFiles} onClick={() => setShowSessionFiles(v => !v)}>
+                {showSessionFiles ? "Hide" : "Show"} the session's files ({documents.filter(d => sentDocIds.has(d.id)).length})
+              </button>
+              <Txt>{" — the assistant can still read and import them."}</Txt>
+            </div>
+          )}
+          {/* Attached document chips: files for the next message, and the
+              session's earlier files when shown. */}
+          {(documents.some(d => showSessionFiles || !sentDocIds.has(d.id)) || uploading) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-              {documents.map(d => (
+              {documents.filter(d => showSessionFiles || !sentDocIds.has(d.id)).map(d => (
                 <FilterChip
                   key={d.id}
                   title={d.importable
@@ -1275,13 +1346,14 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf,.xlsx,.xlsm,.docx,.csv,.txt,.md,.json,.log"
+              multiple
+              accept={ATTACHABLE}
               style={{ display: "none" }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) uploadDocument(f); }}
+              onChange={e => { void uploadDocuments(Array.from(e.target.files ?? [])); }}
             />
             <IconButton
-              aria-label="Attach a document"
-              title="Attach a document (pdf, xlsx, docx, csv, txt, md)"
+              aria-label="Attach documents"
+              title="Attach documents (pdf, xlsx, docx, csv, txt, md) — or drop them here"
               size={42}
               disabled={uploading || thinking}
               onClick={() => fileRef.current?.click()}

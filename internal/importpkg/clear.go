@@ -107,11 +107,19 @@ func ClearValues(ctx context.Context, pool *pgxpool.Pool, req ClearRequest) (*Cl
 	if err != nil {
 		return nil, fmt.Errorf("resolve restricted members: %w", err)
 	}
-	args = append(args, restrictedMembers)
-	writable := fmt.Sprintf(`NOT EXISTS (
+	// The member is found by its dimension's uuid, as a full reload finds
+	// it: compared as text, every value scanned every member of every
+	// revision — clearing a 116,000-cell grid of a tester's model ran past
+	// ten minutes and was cut off (2026-10-24). A caller with nothing
+	// restricted needs no check at all.
+	writable := "TRUE"
+	if len(restrictedMembers) > 0 {
+		args = append(args, restrictedMembers)
+		writable = fmt.Sprintf(`NOT EXISTS (
 		SELECT 1 FROM jsonb_each_text(fi.dim_members) AS dm(dim_id, code)
-		JOIN model.dimension_member m ON m.dimension_id::text = dm.dim_id AND m.code = dm.code
+		JOIN model.dimension_member m ON m.dimension_id = dm.dim_id::uuid AND m.code = dm.code
 		WHERE m.id::text = ANY($%d::text[]))`, len(args))
+	}
 
 	out := &ClearResult{MetricIDs: req.MetricIDs}
 	if err := pool.QueryRow(ctx, `
@@ -205,10 +213,11 @@ func codesUnder(ctx context.Context, pool *pgxpool.Pool, dimID string, codes []s
 func clearedMemberIDs(ctx context.Context, pool *pgxpool.Pool, where string, args []any) ([]string, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT DISTINCT m.id::text
-		FROM runtime.fact_input fi
-		CROSS JOIN LATERAL jsonb_each_text(fi.dim_members) AS dm(dim_id, code)
-		JOIN model.dimension_member m ON m.dimension_id::text = dm.dim_id AND m.code = dm.code
-		WHERE `+where, args...)
+		FROM (SELECT DISTINCT dm.dim_id, dm.code
+		      FROM runtime.fact_input fi
+		      CROSS JOIN LATERAL jsonb_each_text(fi.dim_members) AS dm(dim_id, code)
+		      WHERE `+where+`) dm
+		JOIN model.dimension_member m ON m.dimension_id = dm.dim_id::uuid AND m.code = dm.code`, args...)
 	if err != nil {
 		return nil, err
 	}

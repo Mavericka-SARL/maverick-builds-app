@@ -142,7 +142,7 @@ var WriteToolNames = []string{
 	"create_dashboard_folder", "update_dashboard_folder", "delete_dashboard_folder",
 	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
-	"set_tags", "create_revision",
+	"set_tags", "create_revision", StartNewDraftTool,
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
 	"archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
 	"create_form_def", "update_form_def", "delete_form_def",

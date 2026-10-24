@@ -581,16 +581,22 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 	}
 }
 
-// aiReadAttachedSheet renders rows of one sheet of a workbook attached to
-// the chat (read_attached_sheet).
+// aiReadAttachedSheet renders rows of one sheet of a workbook, or lines of
+// a CSV file, attached to the chat (read_attached_sheet).
 func (h *handler) aiReadAttachedSheet(ctx context.Context, sessionID, file, sheet string, fromRow, toRow int) (string, error) {
 	doc, raw, err := aiassistant.NewDocumentStore(h.db.For(ctx)).GetRaw(ctx, sessionID, strings.TrimSpace(file))
 	if err != nil {
 		return "", fmt.Errorf("no file named %q is attached to this chat", file)
 	}
 	name := strings.ToLower(doc.Filename)
+	if raw != nil && strings.HasSuffix(name, ".csv") {
+		return aiassistant.ExtractCSVLines(raw, fromRow, toRow)
+	}
 	if raw == nil || (!strings.HasSuffix(name, ".xlsx") && !strings.HasSuffix(name, ".xlsm")) {
-		return "", fmt.Errorf("%s is not a workbook kept whole (.xlsx or .xlsm attached since file import was added) — its text is under Attached documents", doc.Filename)
+		return "", fmt.Errorf("%s is not a workbook or CSV file kept whole (attached since file import was added) — its text is under Attached documents", doc.Filename)
+	}
+	if strings.TrimSpace(sheet) == "" {
+		return "", fmt.Errorf("sheet is required for a workbook — the worksheet's name")
 	}
 	return aiassistant.ExtractXLSXSheet(raw, sheet, fromRow, toRow)
 }

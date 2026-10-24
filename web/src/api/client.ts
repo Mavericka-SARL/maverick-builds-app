@@ -1951,8 +1951,9 @@ export interface AISession {
   model_id: string;
   llm_provider: string;
   llm_model: string;
-  // Set once the session's first confirmed proposal creates an isolated
-  // draft revision — AI writes land here, never directly in the active one.
+  // The developer's AI draft the session works in: made by a first
+  // confirmed proposal, continued by every new session until it is promoted
+  // or discarded. AI writes land here, never directly in another revision.
   draft_revision_id?: string;
   // Auto-generated from the first request; renameable. Empty = unnamed.
   title?: string;
@@ -2205,6 +2206,16 @@ function exportQuery(revisionId?: string, includeData = true): string {
   return str ? `?${str}` : "";
 }
 
+// noAnswer explains an error response that carries no JSON: a proxy's own
+// page, which over HTTP/2 has no status text either — the AI Developer
+// showed "502:" and nothing else (reported live, 2026-10-24).
+function noAnswer(res: Response): string {
+  if (res.statusText) return res.statusText;
+  return res.status >= 500
+    ? "the server's answer did not arrive — the connection was cut on the way. What was asked may still have finished: reload to see."
+    : "no details";
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): Promise<T> {
   const appId = localStorage.getItem("selected_app_id") ?? "";
   const modelId = localStorage.getItem("selected_model_id") ?? "";
@@ -2221,7 +2232,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body = await res.json().catch(() => ({ error: noAnswer(res) }));
     // A stale selected_app_id (e.g. after the database was reseeded) makes the
     // backend fail app/model scoping on every request. Drop it and retry once
     // without the header so the app re-resolves the user's primary application.
@@ -2272,7 +2283,7 @@ async function apiFetchBlob(path: string, body?: unknown): Promise<{ blob: Blob;
     },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body = await res.json().catch(() => ({ error: noAnswer(res) }));
     throw Object.assign(new Error(`${res.status}: ${body.error ?? res.statusText}`), { status: res.status, body });
   }
   const match = /filename="?([^"]+)"?/.exec(res.headers.get("Content-Disposition") ?? "");
@@ -2319,7 +2330,7 @@ async function streamSSE(
     signal,
   });
   if (!res.ok) {
-    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    const errBody = await res.json().catch(() => ({ error: noAnswer(res) }));
     throw Object.assign(new Error(`${res.status}: ${errBody.error ?? res.statusText}`), { code: errBody.code as string | undefined });
   }
   if (!res.body) {
@@ -3084,8 +3095,15 @@ export const api = {
   // A session belongs to one model: the console's revision names it.
   aiListSessions: (revisionId?: string) =>
     apiFetch<AISession[]>(`/api/ai/sessions${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  aiCreateSession: (revisionId?: string) =>
-    apiFetch<AISession>(`/api/ai/sessions${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST" }),
+  // A new session continues the developer's open AI draft; newDraft starts
+  // the next one instead.
+  aiCreateSession: (revisionId?: string, newDraft?: boolean) => {
+    const q = new URLSearchParams();
+    if (revisionId) q.set("revision_id", revisionId);
+    if (newDraft) q.set("new_draft", "1");
+    const qs = q.toString();
+    return apiFetch<AISession>(`/api/ai/sessions${qs ? `?${qs}` : ""}`, { method: "POST" });
+  },
   aiDeleteSession: (id: string) =>
     apiFetch<{ status: string }>(`/api/ai/sessions/${id}`, { method: "DELETE" }),
   aiRenameSession: (id: string, title: string) =>
@@ -3113,7 +3131,7 @@ export const api = {
       body: form,
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }));
+      const body = await res.json().catch(() => ({ error: noAnswer(res) }));
       throw new Error(`${res.status}: ${body.error ?? res.statusText}`);
     }
     return res.json() as Promise<AIDocument>;

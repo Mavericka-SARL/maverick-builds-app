@@ -111,13 +111,13 @@ func integrationToolDefs() []toolDef {
 		},
 		{
 			Name:        "read_attached_sheet",
-			Description: "Reads one sheet of a workbook the developer attached (.xlsx/.xlsm): its rows as stored (a percentage is a fraction), the WHOLE formulas of those rows (compressed into ranges that share a formula), its layout, drop-down lists, highlights and comments. The workbook text under Attached documents shows every sheet but only the first rows and clipped formulas of a large one, and says which call shows the rest. Read-only: call it whenever you need a sheet's rows or formulas — no permission needed.",
+			Description: "Reads one sheet of a workbook the developer attached (.xlsx/.xlsm): its rows as stored (a percentage is a fraction), the WHOLE formulas of those rows (compressed into ranges that share a formula), its layout, drop-down lists, highlights and comments. The workbook text under Attached documents shows every sheet but only the first rows and clipped formulas of a large one, and says which call shows the rest. For an attached CSV file it reads lines as they are (line 1 the header, at most 500 per call) and says how many lines the file has; Attached documents shows only its first lines. Read-only: call it whenever you need a sheet's rows or formulas — no permission needed.",
 			Parameters: `{"type":"object","properties":{
 				"file":{"type":"string","description":"The attached file's name, as listed under Attached documents"},
-				"sheet":{"type":"string","description":"Worksheet name"},
+				"sheet":{"type":"string","description":"Worksheet name; omit for a CSV file"},
 				"from_row":{"type":"integer","description":"First row (1-based); omit for row 1"},
 				"to_row":{"type":"integer","description":"Last row; omit for the sheet's last"}
-			},"required":["file","sheet"]}`,
+			},"required":["file"]}`,
 		},
 		{
 			Name:        "prepare_converted_file",
@@ -321,8 +321,8 @@ func (e *ToolExecutor) readAttachedSheet(ctx context.Context, raw json.RawMessag
 	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
 	}
-	if strings.TrimSpace(p.File) == "" || strings.TrimSpace(p.Sheet) == "" {
-		return "", fmt.Errorf("file and sheet are required — the attached file's name and the worksheet's")
+	if strings.TrimSpace(p.File) == "" {
+		return "", fmt.Errorf("file is required — the attached file's name")
 	}
 	return e.hooks.ReadAttachedSheet(ctx, p.File, p.Sheet, p.FromRow, p.ToRow)
 }

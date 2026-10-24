@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -223,6 +224,21 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
+	}
+	// A new session continues the developer's open AI draft, reading and
+	// writing it from its first message; ?new_draft=1 leaves the session
+	// to start the next draft on its first confirmed proposal (owner
+	// decision, 2026-10-24: a new draft only when the developer asks).
+	if r.URL.Query().Get("new_draft") == "" {
+		draft, dErr := store.OpenDraft(ctx, modelID, a.UserID)
+		if dErr == nil && draft != "" {
+			dErr = store.SetDraftRevisionID(ctx, sess.ID, draft)
+		}
+		if dErr != nil {
+			jsonErr(w, fmt.Errorf("continue the open draft: %w", dErr), http.StatusInternalServerError)
+			return
+		}
+		sess.DraftRevisionID = draft
 	}
 	jsonOK(w, sess)
 }
@@ -583,6 +599,10 @@ turn:
 			sendSSE("error", map[string]string{"error": fmt.Sprintf("LLM request failed: %v", err)})
 			return
 		}
+		if u := llmResp.Usage; u.InputTokens+u.CacheReadTokens+u.CacheWriteTokens > 0 {
+			log.Printf("AI call: session=%s input=%d cache_read=%d cache_write=%d output=%d",
+				sessionID, u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens)
+		}
 
 		if llmResp.FinishReason != "tool_calls" || len(llmResp.Message.ToolCalls) == 0 {
 			if sentBack && !nudged && asksToPropose(llmResp.Message.Content) {
@@ -914,30 +934,37 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("revision does not belong to this model"), http.StatusForbidden)
 		return
 	}
-	revID := sess.DraftRevisionID
-	if revID == "" {
+	// newDraft copies the base into a new draft, named name or after the
+	// time, and makes it the session's.
+	newDraft := func(name string) (string, error) {
 		// Millisecond precision: minute-granularity previously collided with
 		// model.revision's UNIQUE(model_id, name) whenever a second draft
 		// was created within the same clock-minute (e.g. promote, then
 		// immediately confirm another proposal) — confirm would fail with a
 		// raw constraint-violation 500 instead of quietly creating the next
 		// draft.
-		draftParams, _ := json.Marshal(map[string]string{
-			"name":               fmt.Sprintf("AI Draft %s", time.Now().Format("2006-01-02 15:04:05.000")),
-			"source_revision_id": baseRevID,
-		})
+		if strings.TrimSpace(name) == "" {
+			name = fmt.Sprintf("AI Draft %s", time.Now().Format("2006-01-02 15:04:05.000"))
+		}
+		draftParams, _ := json.Marshal(map[string]string{"name": name, "source_revision_id": baseRevID})
 		draftExecutor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, "", a.UserID).WithHooks(h.aiWriteHooks(modelID, a.UserID))
 		_, newRevID, dErr := draftExecutor.Execute(ctx, "create_revision", draftParams)
 		if dErr != nil {
-			jsonErr(w, fmt.Errorf("create draft revision: %w", dErr), http.StatusInternalServerError)
-			return
+			return "", fmt.Errorf("create draft revision: %w", dErr)
 		}
 		if dErr := h.aiChatStore(ctx).SetDraftRevisionID(ctx, sessionID, newRevID); dErr != nil {
-			jsonErr(w, fmt.Errorf("save draft revision: %w", dErr), http.StatusInternalServerError)
+			return "", fmt.Errorf("save draft revision: %w", dErr)
+		}
+		sess.DraftRevisionID = newRevID
+		return newRevID, nil
+	}
+	revID := sess.DraftRevisionID
+	// A plan starting with start_new_draft makes its own draft below.
+	if revID == "" && (len(proposal.Steps) == 0 || proposal.Steps[0].Tool != aiassistant.StartNewDraftTool) {
+		if revID, err = newDraft(""); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		revID = newRevID
-		sess.DraftRevisionID = newRevID
 	}
 
 	// WithActor: create_workflow_def/update_workflow_def cast created_by/
@@ -995,6 +1022,26 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resolved := resolveParamRefs(step.Params, created[:i])
+		if step.Tool == aiassistant.StartNewDraftTool {
+			// The developer asked for a new draft: this step and every
+			// later proposal work in it; the previous one stays in Models.
+			var p struct {
+				Name string `json:"name"`
+			}
+			_ = json.Unmarshal(resolved, &p)
+			newRevID, dErr := newDraft(p.Name)
+			if dErr != nil {
+				steps[i].Status, steps[i].Result, anyFailed = "failed", dErr.Error(), true
+				continue
+			}
+			revID = newRevID
+			executor = aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
+			var name string
+			_ = h.db.QueryRow(ctx, `SELECT name FROM model.revision WHERE id = $1::uuid`, revID).Scan(&name)
+			steps[i].Status, steps[i].Result, steps[i].CreatedID = "success", fmt.Sprintf("Started the new draft '%s': the rest of this plan and every later proposal work in it", name), revID
+			created[i] = revID
+			continue
+		}
 		stepCard = card.Secrets[strconv.Itoa(i+1)]
 		result, createdID, execErr := executor.Execute(ctx, step.Tool, resolved)
 		stepCard = nil
@@ -1226,6 +1273,17 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	sess.PromotedAt = &promotedAt
 
 	chatStore := h.aiChatStore(ctx)
+	// The developer's other sessions continued the same draft: they are
+	// finished too, or their next proposal would write into the revision
+	// the developer now builds by hand.
+	others, err := chatStore.FinishDraftSessions(ctx, draftRevID, a.UserID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	for _, id := range others {
+		_, _ = chatStore.SaveMessage(ctx, id, "assistant", promotedMessage, nil, "", "")
+	}
 	_, _ = chatStore.SaveMessage(ctx, sessionID, "assistant", promotedMessage, nil, "", "")
 	allMsgs, _ := chatStore.ListMessages(ctx, sessionID)
 	if allMsgs == nil {
@@ -1532,8 +1590,10 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 // ── POST /api/ai/sessions/{sid}/documents ────────────────────────────────────
 //
 // Multipart upload. The file is parsed to plain text server-side (pdf, xlsx,
-// docx, csv, txt, md, json); only the extracted text is stored, and it is
-// injected into the system prompt on every subsequent chat call in the session.
+// docx, csv, txt, md, json), and that text is injected into the system
+// prompt on every subsequent chat call in the session; a spreadsheet is also
+// kept whole for the import tools (a CSV file's text is then only its first
+// lines).
 func (h *handler) aiUploadDocument(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
@@ -1550,6 +1610,12 @@ func (h *handler) aiUploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The file has as long to arrive as an import's: a few megabytes over a
+	// slow link took longer than the server's one-minute ReadTimeout, and,
+	// cut off mid-file, reached a tester as a 502 while the same rows in
+	// files of 20,000 went through (2026-10-24). A normal upload still takes
+	// seconds; this is the ceiling for the 20 MB the form reads.
+	extendImportDeadlines(w)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		jsonErr(w, fmt.Errorf("invalid upload: %w", err), http.StatusBadRequest)
 		return
@@ -1646,6 +1712,9 @@ func buildDocumentContext(docs []aiassistant.Document) string {
 		}
 		content := d.Content
 		clipped := d.Truncated
+		if d.Importable && strings.EqualFold(filepath.Ext(d.Filename), ".csv") {
+			content, clipped = aiassistant.ClipCSVOverview(content), false
+		}
 		if len(content) > remaining {
 			content = content[:remaining]
 			clipped = true
@@ -2067,11 +2136,14 @@ func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
 }
 
 // aiTurnWriteDeadline bounds one AI Developer turn or confirmation, in place
-// of the server's general WriteTimeout (120 s).
-const aiTurnWriteDeadline = 15 * time.Minute
+// of the server's general WriteTimeout (120 s): past the turn's own time
+// limit, so a stopped turn can still say so.
+func aiTurnWriteDeadline() time.Duration {
+	return max(aiTurnTimeout(), 15*time.Minute) + 5*time.Minute
+}
 
 // extendAIWriteDeadline lets a long AI turn finish writing its response. A
 // writer that cannot take a deadline (a test recorder) is left as it is.
 func extendAIWriteDeadline(w http.ResponseWriter) {
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiTurnWriteDeadline))
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiTurnWriteDeadline()))
 }

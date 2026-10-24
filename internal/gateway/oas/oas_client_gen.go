@@ -157,7 +157,8 @@ type Invoker interface {
 	CompleteTask(ctx context.Context, request *TaskActionRequest, params CompleteTaskParams) (CompleteTaskRes, error)
 	// ConfirmAiProposal invokes confirmAiProposal operation.
 	//
-	// Execute a pending proposal's write steps (lazily creates the session's draft revision on first use).
+	// Execute a pending proposal's write steps (creates the session's draft on first use when it has
+	// none; a start_new_draft step moves the session to a new draft for the steps after it).
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
@@ -225,7 +226,9 @@ type Invoker interface {
 	// CreateAiSession invokes createAiSession operation.
 	//
 	// A session belongs to the model it is created in; requests on it that resolve another model are
-	// refused with 409.
+	// refused with 409. It continues the caller's open AI draft in that model (the newest draft a
+	// session of theirs works in that was not promoted, discarded or made active), so its reads and
+	// writes use it from the first message.
 	//
 	// POST /api/ai/sessions
 	CreateAiSession(ctx context.Context, params CreateAiSessionParams) (*AiSession, error)
@@ -1351,9 +1354,9 @@ type Invoker interface {
 	PreviewImportReshape(ctx context.Context, request *PreviewImportReshapeReq) (PreviewImportReshapeRes, error)
 	// PromoteAiDraft invokes promoteAiDraft operation.
 	//
-	// Hand the session's isolated draft revision to the developer as their working revision (not the
-	// active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear
-	// its draft; the response names the revision.
+	// Hand the session's AI draft to the developer as their working revision (not the active one —
+	// that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of
+	// theirs working in the draft, and clear their draft; the response names the revision.
 	//
 	// POST /api/ai/sessions/{id}/promote-draft
 	PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
@@ -1648,7 +1651,7 @@ type Invoker interface {
 	// and a proposal is created instead of executing immediately — warnings are the plan check's (a
 	// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 	// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-	// limit AI_TURN_TIMEOUT — 10 minutes by default — or the request closed by Stop, each also saved
+	// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
 	// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
 	// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
 	// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
@@ -4470,7 +4473,8 @@ func (c *Client) sendCompleteTask(ctx context.Context, request *TaskActionReques
 
 // ConfirmAiProposal invokes confirmAiProposal operation.
 //
-// Execute a pending proposal's write steps (lazily creates the session's draft revision on first use).
+// Execute a pending proposal's write steps (creates the session's draft on first use when it has
+// none; a start_new_draft step moves the session to a new draft for the steps after it).
 //
 // POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 func (c *Client) ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error) {
@@ -5322,7 +5326,9 @@ func (c *Client) sendCreateAdminUserTrailingSlash(ctx context.Context, request *
 // CreateAiSession invokes createAiSession operation.
 //
 // A session belongs to the model it is created in; requests on it that resolve another model are
-// refused with 409.
+// refused with 409. It continues the caller's open AI draft in that model (the newest draft a
+// session of theirs works in that was not promoted, discarded or made active), so its reads and
+// writes use it from the first message.
 //
 // POST /api/ai/sessions
 func (c *Client) CreateAiSession(ctx context.Context, params CreateAiSessionParams) (*AiSession, error) {
@@ -5384,6 +5390,23 @@ func (c *Client) sendCreateAiSession(ctx context.Context, params CreateAiSession
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.RevisionID.Get(); ok {
 				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "new_draft" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "new_draft",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.NewDraft.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
 			}
 			return nil
 		}); err != nil {
@@ -26089,9 +26112,9 @@ func (c *Client) sendPreviewImportReshape(ctx context.Context, request *PreviewI
 
 // PromoteAiDraft invokes promoteAiDraft operation.
 //
-// Hand the session's isolated draft revision to the developer as their working revision (not the
-// active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear
-// its draft; the response names the revision.
+// Hand the session's AI draft to the developer as their working revision (not the active one —
+// that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of
+// theirs working in the draft, and clear their draft; the response names the revision.
 //
 // POST /api/ai/sessions/{id}/promote-draft
 func (c *Client) PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (PromoteAiDraftRes, error) {
@@ -31270,7 +31293,7 @@ func (c *Client) sendScimServiceProviderConfig(ctx context.Context) (res ScimSer
 // and a proposal is created instead of executing immediately — warnings are the plan check's (a
 // Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 // "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-// limit AI_TURN_TIMEOUT — 10 minutes by default — or the request closed by Stop, each also saved
+// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
 // as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
 // completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
 // Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any

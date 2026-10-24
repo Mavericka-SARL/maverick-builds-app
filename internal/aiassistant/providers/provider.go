@@ -44,6 +44,14 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Message      Message
 	FinishReason string // "stop" | "tool_calls"
+	Usage        Usage
+}
+
+// Usage is the tokens one call was billed for, where the provider reports
+// them (zero otherwise). InputTokens excludes the cached ones.
+type Usage struct {
+	InputTokens, OutputTokens         int64
+	CacheReadTokens, CacheWriteTokens int64
 }
 
 // Provider is the single interface every LLM backend must implement.

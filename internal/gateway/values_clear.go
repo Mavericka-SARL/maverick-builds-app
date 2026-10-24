@@ -19,6 +19,10 @@ import (
 // Metrics › Clear values and the AI Developer's clear_input_values. The only
 // bulk clear was a full reload, which empties the whole revision.
 
+// nothingToClearCode marks the refusal of a grid or metric with no input
+// metric: a clear of everything has nothing to do there (ai_values.go).
+const nothingToClearCode = "nothing_to_clear"
+
 type clearBody struct {
 	// MetricIDs narrows a grid's clear to some of its input metrics.
 	MetricIDs []string        `json:"metric_ids"`
@@ -136,7 +140,7 @@ func (h *handler) clearValues(w http.ResponseWriter, r *http.Request, modelID, r
 		jsonErr(w, err, http.StatusForbidden)
 		return
 	case errors.Is(err, importpkg.ErrNothingToClear):
-		jsonErr(w, fmt.Errorf("this %s has no input metric: only typed values are cleared", kind), http.StatusBadRequest)
+		jsonCodeErr(w, http.StatusBadRequest, nothingToClearCode, fmt.Sprintf("this %s has no input metric: only typed values are cleared", kind))
 		return
 	case err != nil && (strings.Contains(err.Error(), "has no member") || strings.Contains(err.Error(), "name at least one") ||
 		strings.Contains(err.Error(), "is calculated") || strings.Contains(err.Error(), "is not in this model")):

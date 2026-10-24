@@ -2,7 +2,10 @@ package aiassistant
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -38,6 +41,11 @@ func NewDocumentStore(pool *pgxpool.Pool) *DocumentStore {
 // CreateDocument stores a document's extracted text and, for a spreadsheet,
 // its original bytes (raw; nil for any other file).
 func (s *DocumentStore) CreateDocument(ctx context.Context, sessionID, filename, mimeType, content string, truncated bool, raw []byte) (Document, error) {
+	// A CSV file kept whole is read by the tools; the prompt needs its first
+	// lines (document_csv.go).
+	if raw != nil && strings.EqualFold(filepath.Ext(filename), ".csv") && utf8.Valid(raw) {
+		content, truncated = CSVOverview(string(raw)), false
+	}
 	var d Document
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO ai_assistant.document (session_id, filename, mime_type, char_count, truncated, content, raw_data)

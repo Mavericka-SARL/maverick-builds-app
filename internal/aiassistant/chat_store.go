@@ -3,6 +3,7 @@ package aiassistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -122,6 +123,42 @@ func (s *ChatStore) MarkPromoted(ctx context.Context, sessionID string) (time.Ti
 	var at time.Time
 	err := s.pool.QueryRow(ctx, `UPDATE ai_assistant.session SET promoted_at=now() WHERE id=$1::uuid RETURNING promoted_at`, sessionID).Scan(&at)
 	return at, err
+}
+
+// OpenDraft is userID's AI draft in modelID that a session still works in
+// — not taken as the working revision (promoting clears the column), not
+// discarded (deleting the revision clears it), not made the active revision
+// since — the newest such draft; "" when there is none. A new session
+// continues it: one draft until the developer is done with it, where each
+// session used to copy the working revision again (a tester's three
+// sessions left three drafts, the third without the second's clearing,
+// 2026-10-24).
+func (s *ChatStore) OpenDraft(ctx context.Context, modelID, userID string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		SELECT r.id::text FROM ai_assistant.session s JOIN model.revision r ON r.id = s.draft_revision_id
+		WHERE s.model_id = $1::uuid AND s.user_id = $2::uuid AND s.promoted_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM core.model m WHERE m.active_revision_id = r.id)
+		ORDER BY r.created_at DESC, r.id LIMIT 1`, modelID, userID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+// FinishDraftSessions finishes userID's other sessions working in
+// revisionID, a draft just taken as the working revision: each is marked
+// promoted and loses its draft, as the promoting session does. It returns
+// their ids.
+func (s *ChatStore) FinishDraftSessions(ctx context.Context, revisionID, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		UPDATE ai_assistant.session SET draft_revision_id = NULL, promoted_at = now()
+		WHERE draft_revision_id = $1::uuid AND user_id = $2::uuid AND promoted_at IS NULL
+		RETURNING id::text`, revisionID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // RenameSession sets the session's title (owner-scoped, like delete).
