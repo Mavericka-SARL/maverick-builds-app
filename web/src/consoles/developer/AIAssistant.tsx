@@ -8,6 +8,7 @@ import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
 import { credentialSteps, credentialsComplete } from "./proposalCredentials";
 import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
@@ -683,7 +684,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const { confirm, confirmElement } = useConfirm();
 
   // App/model/revision the assistant is scoped to (see banner in chat area).
-  const { data: demo } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo });
+  const { data: demo } = useDemo(revisionId);
   const { data: sessionModel } = useQuery({
     queryKey: ["dev-model", revisionId ?? ""],
     queryFn: () => api.getDevModel(revisionId || undefined),

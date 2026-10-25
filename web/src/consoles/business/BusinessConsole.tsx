@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
-import { api } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import { LayoutDashboard, Inbox, History as HistoryIcon, Boxes } from "lucide-react";
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
@@ -24,7 +24,7 @@ const SECTION: SectionId = "business";
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
   const qc = useQueryClient();
-  const { data: ctx, isLoading, error } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
+  const { data: ctx, isLoading, error } = useDemo(undefined, { enabled });
   const modelLabel = useModelLabel(ctx, enabled);
 
   // Sync the user's primary app into localStorage so X-App-Id is always sent.

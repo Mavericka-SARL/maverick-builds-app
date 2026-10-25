@@ -4,6 +4,7 @@ import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
 import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
@@ -678,7 +679,7 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, 
     queryFn: () => api.listForms(hostCtx?.revision_id),
     refetchInterval: 20_000,
   });
-  const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled: !hostCtx });
+  const { data: demoCtx } = useDemo(undefined, { enabled: !hostCtx });
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
@@ -699,7 +700,7 @@ export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButt
     queryFn: () => api.listForms(hostCtx?.revision_id),
     refetchInterval: 20_000,
   });
-  const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled: !hostCtx });
+  const { data: demoCtx } = useDemo(undefined, { enabled: !hostCtx });
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;

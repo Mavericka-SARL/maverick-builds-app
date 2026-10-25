@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pause, Play, Pencil, Trash2 } from "lucide-react";
 import { api, type AutomationRule, type Execution, type FormDef, type GridDef, type WorkflowDefSummary , type IntegrationDef, type TriggerEventCatalogItem } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import { SectionHeader, Button, EmptyState, StatusBadge, IconButton, Field, TextInput, Select, useConfirm, type DesignTone } from "../../ui";
 import { triggerTypeFromWorkflow, ruleTriggerFromWorkflow, useTriggerEvents } from "./workflowConstants";
 import { useCancelRun } from "./useCancelRun";
@@ -24,7 +25,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
   const [editId, setEditId] = useState<string | null>(null);
   const [editRule, setEditRule] = useState<RuleState>(empty);
 
-  const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, staleTime: 60_000 });
+  const { data: demoCtx } = useDemo(revisionId, { staleTime: 60_000 });
   const appId = demoCtx?.app_id ?? "";
 
   // Everything here belongs to the working revision, like the other Build

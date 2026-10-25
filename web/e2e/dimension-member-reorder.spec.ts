@@ -252,7 +252,7 @@ test("a grid opened before a reorder shows the new order when you return to it",
   // Someone who both runs and builds the app: Run and Build in one console.
   const actor = { user_id: "u-1", email: "alex@example.com", display_name: "Alex", roles: ["business_user", "developer"] };
   await page.route("**/api/me", (route) => route.fulfill({ json: actor }));
-  await page.route("**/api/demo", (route) => route.fulfill({ json: {
+  await page.route("**/api/demo*", (route) => route.fulfill({ json: {
     app_id: "app-1", model_id: "model-1", revision_id: "rev-1", revision: "FY2026 Budget", scenario: "FY2026 Budget", version: "draft", actor,
   } }));
   await loadAs(page, "developer");
@@ -380,7 +380,7 @@ test("the access-rule member picker shows the new order when a developer who is 
   // Builds the app and administers its access: both sidebar groups, one console.
   const actor = { user_id: "u-1", email: "alex@example.com", display_name: "Alex", roles: ["developer", "business_admin"] };
   await page.route("**/api/me", (route) => route.fulfill({ json: actor }));
-  await page.route("**/api/demo", (route) => route.fulfill({ json: {
+  await page.route("**/api/demo*", (route) => route.fulfill({ json: {
     app_id: "app-1", model_id: "model-1", revision_id: "rev-1", revision: "FY2026 Budget", scenario: "FY2026 Budget", version: "draft", actor,
   } }));
   await loadAs(page, "developer");

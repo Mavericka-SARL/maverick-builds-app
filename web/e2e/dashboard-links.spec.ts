@@ -51,7 +51,7 @@ async function twoModels(page: Page) {
     return route.fulfill({ json: all.find(d => d.id === id) ?? all[0] });
   });
   // The console works in whichever model the client asks for.
-  await page.route("**/api/demo", route => route.fulfill({
+  await page.route("**/api/demo*", route => route.fulfill({
     json: {
       app_id: "app-1", model_id: modelOf(route.request().headers()), revision_id: "rev-1", revision: "FY2026 Budget",
       actor: { user_id: "u-1", email: "alex@example.com", display_name: "Alex", roles: ["business_user"] },

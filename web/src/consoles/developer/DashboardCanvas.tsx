@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useReducer, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
 import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
@@ -283,7 +284,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const { data: integrations = [] }= useQuery({ queryKey: ["dev-integrations", revisionId], queryFn: () => api.listDevIntegrations(revisionId) });
   const { data: metrics = [] }     = useQuery({ queryKey: ["metrics", revisionId], queryFn: () => revisionId ? api.getMetrics(revisionId) : Promise.resolve([]) });
   const { data: kpiScopeDims = [] } = useQuery({ queryKey: ["dev-dimensions-all", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
-  const { data: demoCtx }          = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, staleTime: 60_000 });
+  const { data: demoCtx }          = useDemo(revisionId, { staleTime: 60_000 });
   const { data: devRevisions = [] } = useQuery({ queryKey: ["dev-revisions-auto"], queryFn: () => api.getDevRevisions() });
   // Preview renders the widgets in the revision being DESIGNED. The demo
   // context is the active revision's — using it made every KPI/grid/chart

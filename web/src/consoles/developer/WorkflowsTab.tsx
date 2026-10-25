@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { Button, SearchInput, Select as UiSelect, SectionHeader, LoadingState, EmptyState } from "../../ui";
 import { api } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import type { WorkflowStepDef, WorkflowDefSummary, TriggerEventCatalogItem } from "../../api/client";
 import { TriggerEventSelect, StatusBadge, Modal, Field } from "./WorkflowShared";
 import { TRIGGER_FALLBACK, useTriggerEvents, inputStyle, btnPrimary, btnSecondary } from "./workflowConstants";
@@ -384,11 +385,7 @@ function WorkflowRow({ workflow, revisionId, onOpen, onDuplicate, onArchive, onR
 export function WorkflowsTab({ revisionId }: { revisionId?: string } = {}) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { data: demoCtx } = useQuery({
-    queryKey: ["demo"],
-    queryFn: api.getDemo,
-    staleTime: 60_000,
-  });
+  const { data: demoCtx } = useDemo(revisionId, { staleTime: 60_000 });
 
   const applicationId = demoCtx?.app_id ?? "";
 

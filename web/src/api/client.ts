@@ -2371,7 +2371,10 @@ async function streamSSE(
 export const api = {
   getApps: () => apiFetch<AppInfo[]>("/api/apps"),
 
-  getDemo: () => apiFetch<DemoContext>("/api/demo"),
+  // revisionId: the server answers for that revision's model (a developer
+  // tab's working revision); without it, the selection's default.
+  getDemo: (revisionId?: string) =>
+    apiFetch<DemoContext>(`/api/demo${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
 
   getMetrics: (revisionId?: string) =>
     apiFetch<Metric[]>(revisionId ? `/api/metrics?revision_id=${encodeURIComponent(revisionId)}` : "/api/metrics"),

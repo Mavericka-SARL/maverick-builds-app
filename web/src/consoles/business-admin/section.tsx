@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Inbox, History, Shield, KeyRound, Boxes } from "lucide-react";
-import { api } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
 import { AppsTab } from "../business/AppsTab";
 import { useModelLabel } from "../business/modelLabel";
 import { PageLayout } from "../../ui";
@@ -30,7 +29,7 @@ const SECTION: SectionId = "business-admin";
  */
 export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
-  const { data: ctx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
+  const { data: ctx } = useDemo(undefined, { enabled });
   const modelLabel = useModelLabel(ctx, enabled);
 
   if (!enabled) return null;
