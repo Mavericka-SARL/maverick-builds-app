@@ -3102,9 +3102,13 @@ type gridResponse struct {
 	// totals. Such a value exists but reads a member the caller cannot see;
 	// it is absent from cells/totals, and a client must never rebuild a
 	// parent from children when one of them is withheld. Omitted when empty.
-	Withheld           []string        `json:"withheld,omitempty"`
-	AccessRules        gridAccessRules `json:"access_rules"`
-	RollupSourceGridID *string         `json:"rollup_source_grid_id,omitempty"` // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
+	Withheld    []string        `json:"withheld,omitempty"`
+	AccessRules gridAccessRules `json:"access_rules"`
+	// WorkflowLocks are the workflow locks in force over the grid's input
+	// metrics, for the grid to draw those cells read-only: a business user
+	// learned a region was locked only by a refused save (2026-10-25).
+	WorkflowLocks      []writeguard.LockScope `json:"workflow_locks,omitempty"`
+	RollupSourceGridID *string                `json:"rollup_source_grid_id,omitempty"` // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
 	// RecalcPending: a write answered before its dependents were
 	// recalculated and that pass has not landed — the calculated cells are
 	// about to change (recalc_state.go).
@@ -4242,6 +4246,20 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var lockMetrics []writeguard.LockMetric
+	for _, m := range metrics {
+		if m.IsInput {
+			lockMetrics = append(lockMetrics, writeguard.LockMetric{ID: m.ID, Name: m.Name})
+		}
+	}
+	var workflowLocks []writeguard.LockScope
+	if len(lockMetrics) > 0 {
+		if workflowLocks, err = writeguard.WorkflowLockScopes(ctx, h.db.For(ctx), modelID, lockMetrics); err != nil {
+			h.log.Warn().Err(err).Str("model", modelID).Msg("grid: read workflow locks")
+			workflowLocks = nil
+		}
+	}
+
 	jsonOK(w, gridResponse{
 		RevisionID:         revisionID,
 		Metrics:            metrics,
@@ -4254,6 +4272,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		Totals:             totals,
 		Withheld:           withheld,
 		AccessRules:        gridAccessRules{DimMembers: dimRules, Metrics: metricRules},
+		WorkflowLocks:      workflowLocks,
 		RollupSourceGridID: rollupSourceGridID,
 		RecalcPending:      h.recalcPending(ctx, revisionID),
 	})

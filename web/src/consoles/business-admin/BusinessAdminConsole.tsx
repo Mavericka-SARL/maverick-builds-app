@@ -481,15 +481,22 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                   {allDashboards.length === 0 && <p className="mvx-admin-muted">No dashboards yet</p>}
                   {(() => {
                     const hasGroups = allDashboards.some(d => d.group);
+                    // One dashboard per line: inline, a label ran into the
+                    // next box ("☑ Budget entry☐ Budget vs actual").
+                    const oneEach: React.CSSProperties = { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 };
                     if (!hasGroups) {
-                      return allDashboards.map(d => (
-                        <Checkbox
-                          key={d.id}
-                          label={d.name}
-                          checked={assignedDashboards(role).includes(d.id)}
-                          onChange={() => toggleDashboard(role, d.id)}
-                        />
-                      ));
+                      return (
+                        <div style={oneEach}>
+                          {allDashboards.map(d => (
+                            <Checkbox
+                              key={d.id}
+                              label={d.name}
+                              checked={assignedDashboards(role).includes(d.id)}
+                              onChange={() => toggleDashboard(role, d.id)}
+                            />
+                          ))}
+                        </div>
+                      );
                     }
                     // Group by category
                     const groups = new Map<string, BAAvailableItem[]>();
@@ -510,7 +517,7 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                             {cat}
                           </div>
                         )}
-                        <div style={{ paddingLeft: cat ? 8 : 0 }}>
+                        <div style={{ ...oneEach, paddingLeft: cat ? 8 : 0 }}>
                           {(groups.get(cat) ?? []).map(d => (
                             <Checkbox
                               key={d.id}

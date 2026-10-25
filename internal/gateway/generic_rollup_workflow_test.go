@@ -525,6 +525,23 @@ func TestCellsWriteLockDistinguishesApproveFromReject(t *testing.T) {
 	if resp, body := f.do(t, "POST", "/api/cells", "rollup-test-manager", writeBody); resp != http.StatusForbidden {
 		t.Errorf("write after approve status = %d, want 403 (permanently locked), body = %v", resp, body)
 	}
+	// The grid says so before anyone types: its locks cover STAFF_A1's
+	// amount, with the reason a refused write gives.
+	_, grid := f.do(t, "GET", fmt.Sprintf("/api/grid?revision_id=%s&grid_def_id=%s", f.workingRevID, f.gridStaffID), "rollup-test-manager", nil)
+	locks, _ := grid["workflow_locks"].([]any)
+	covered := false
+	for _, l := range locks {
+		lock, _ := l.(map[string]any)
+		ids := fmt.Sprint(lock["metric_ids"])
+		fields := fmt.Sprint(lock["fields"])
+		reason, _ := lock["reason"].(string)
+		if strings.Contains(ids, f.amountMetricID) && strings.Contains(fields, "STAFF_A1") && strings.Contains(reason, " is locked: a workflow about it is awaiting approval or was approved") {
+			covered = true
+		}
+	}
+	if !covered {
+		t.Errorf("the grid's workflow_locks do not cover STAFF_A1's amount after the approval: %v", grid["workflow_locks"])
+	}
 
 	// system_managed revision is always rejected, workflow state aside.
 	annualWrite := map[string]any{

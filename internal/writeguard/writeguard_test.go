@@ -461,3 +461,95 @@ func TestCompanyWideRoundLocksRevisionWhileAwaitingApproval(t *testing.T) {
 		t.Errorf("still locked after approval: %s", r)
 	}
 }
+
+// TestWorkflowLockIsTheCrossingOfItsFields: an approval with a Region and a
+// Version field locks Europe's budget — not France's actuals (refused until
+// 2026-10-25: the fields were OR-ed, so a budget approval stopped the
+// monthly actuals), nor another region's budget. A field left empty does
+// not narrow; a write without the Version dimension (a France driver) is
+// inside Europe's budget; a write with neither dimension is outside. The
+// grid gets the same scope (WorkflowLockScopes), with the reason by label.
+func TestWorkflowLockIsTheCrossingOfItsFields(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	member := func(dimID, code, label, parentID string) string {
+		if parentID == "" {
+			return q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, $2, $3) RETURNING id::text`, dimID, code, label)
+		}
+		return q(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text`, dimID, code, label, parentID)
+	}
+	regionID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'region') RETURNING id::text`, f.modelID, f.revisionID)
+	versionID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'version') RETURNING id::text`, f.modelID, f.revisionID)
+	europe := member(regionID, "EUROPE", "Europe", "")
+	france := member(regionID, "FR", "France", europe)
+	member(regionID, "DE", "Germany", europe)
+	us := member(regionID, "US", "United States", member(regionID, "AMER", "Americas", ""))
+	budget := member(versionID, "BUDGET", "Budget", "")
+	actual := member(versionID, "ACTUAL", "Actual", "")
+	unitsID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'units', true) RETURNING id::text`, f.modelID, f.revisionID)
+
+	var appID string
+	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	schema := `[{"key":"region","data_type":"Dimension member","dimension_id":"` + regionID + `"},{"key":"version","data_type":"Dimension member","dimension_id":"` + versionID + `"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'Budget approval', 'manual', '[]', $2::jsonb, 'published') RETURNING id::text`, appID, schema)
+	instID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by)
+	             VALUES ($1::uuid, 'completed', '{"region":"EUROPE","version":"BUDGET"}'::jsonb, $2::uuid) RETURNING id::text`, defID, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, completed_at)
+	   VALUES ($1::uuid, 'a1', 'completed', 'approve', now()) RETURNING id::text`, instID)
+
+	check := func(members ...string) (bool, string) {
+		t.Helper()
+		locked, reason, err := WorkflowLockReasonForMetrics(ctx, pool, f.modelID, members, []string{unitsID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return locked, reason
+	}
+	if locked, reason := check(france, actual); locked {
+		t.Errorf("France · Actual refused by Europe's budget approval: %s", reason)
+	}
+	if locked, reason := check(france, budget); !locked || reason != "Europe · Budget is locked: a workflow about it is awaiting approval or was approved" {
+		t.Errorf("France · Budget: locked=%v %q, want locked as Europe · Budget", locked, reason)
+	}
+	if locked, _ := check(us, budget); locked {
+		t.Error("United States · Budget refused by Europe's approval")
+	}
+	if locked, _ := check(france); !locked {
+		t.Error("a France value without a version is part of Europe's budget, and must be locked")
+	}
+	if locked, _ := check(); locked {
+		t.Error("a value with neither region nor version is locked by a regional approval")
+	}
+
+	scopes, err := WorkflowLockScopes(ctx, pool, f.modelID, []LockMetric{{ID: unitsID, Name: "units"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scopes) != 1 || len(scopes[0].Fields) != 2 || len(scopes[0].MetricIDs) != 1 ||
+		strings.Join(scopes[0].Fields[0][regionID], ",") != "DE,EUROPE,FR" || strings.Join(scopes[0].Fields[1][versionID], ",") != "BUDGET" ||
+		!strings.HasPrefix(scopes[0].Reason, "Europe · Budget is locked") {
+		t.Errorf("scopes = %+v", scopes)
+	}
+
+	// A newer instance with the Version field left empty locks every
+	// version in Europe: an empty field does not narrow.
+	q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_at, started_by, steps_snapshot)
+	   VALUES ($1::uuid, 'running', '{"region":"EUROPE","version":""}'::jsonb, now() + interval '1 minute', $2::uuid, '[{"id":"r1","type":"approval"}]'::jsonb) RETURNING id::text`, defID, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) SELECT id, 'r1', 'in_progress' FROM workflow.workflow_instance WHERE context->>'version' = '' RETURNING id::text`)
+	if locked, reason := check(france, actual); !locked || !strings.HasPrefix(reason, "Europe is locked") {
+		t.Errorf("France · Actual with Europe's all-version review open: locked=%v %q", locked, reason)
+	}
+}

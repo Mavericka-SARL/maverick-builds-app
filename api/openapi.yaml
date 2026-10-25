@@ -706,6 +706,25 @@ components:
             They are absent from cells and totals; a client must not rebuild a parent value from
             children when any of them is withheld. Omitted when nothing is withheld.
         access_rules: { $ref: "#/components/schemas/GridAccessRules" }
+        workflow_locks:
+          type: array
+          description: >-
+            Workflow locks in force over this grid's input metrics (writes into them are refused). A cell
+            is locked when its metric is in metric_ids and, for every field whose dimensions the cell has,
+            its member on one of them is listed, with at least one field's dimensions in the cell.
+            Omitted when there is none.
+          items:
+            type: object
+            required: [fields, metric_ids, reason]
+            properties:
+              fields:
+                type: array
+                description: "Per Dimension member field of the instance: dimension id to the member codes it covers (the named member and every member under it)"
+                items:
+                  type: object
+                  additionalProperties: { type: array, items: { type: string } }
+              metric_ids: { type: array, items: { type: string, format: uuid } }
+              reason: { type: string, description: "As a refused write says it, members by label: \"Europe · Budget is locked: …\"" }
         rollup_source_grid_id:
           type: string
           format: uuid

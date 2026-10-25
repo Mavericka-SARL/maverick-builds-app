@@ -180,3 +180,18 @@ test("the import wizard's targets, saved integrations and new integration are th
   await expect.poll(() => created.length).toBe(1);
   expect(created[0].searchParams.get("revision_id")).toBe(OTHER_DRAFT.id);
 });
+
+// Visible Dashboards lists one dashboard per line: side by side, a label ran
+// into the next box ("☑ Budget entry☐ Budget vs actual"), easy to mis-tick
+// (found preparing a how-to video, 2026-10-25).
+test("Business Admin › Roles › Configure lists each dashboard on its own line", async ({ page }) => {
+  await mockApi(page);
+  await loadAs(page, "finance");
+  await page.getByRole("button", { name: "Roles", exact: true }).click();
+  const role = page.locator(".mvx-admin-object", { hasText: "Finance Editors" }).first();
+  await role.getByRole("button", { name: "Configure" }).click();
+  const first = await role.getByLabel("OPEX 2", { exact: true }).boundingBox();
+  const second = await role.getByLabel("OPEX Dashboard", { exact: true }).boundingBox();
+  expect(first && second).toBeTruthy();
+  expect(second!.y).toBeGreaterThan(first!.y + first!.height / 2);
+});

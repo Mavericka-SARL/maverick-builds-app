@@ -250,7 +250,10 @@ func WorkflowLockReason(ctx context.Context, pool *pgxpool.Pool, modelID string,
 }
 
 // WorkflowLockReasonForMetrics is WorkflowLockReason with the written
-// metrics known: an instance whose context declares "Metric" vars locks
+// metrics known. An instance's member scope is the crossing of its
+// "Dimension member" fields (workflowlocks.go): Region = Europe and Version
+// = Budget locks Europe's budget, not Europe's actuals nor every budget. An
+// instance whose context declares "Metric" vars locks
 // only the CROSSING of its member scope and those metrics — approving
 // "revenue for Canada" freezes exactly revenue×Canada, leaving cost×Canada
 // editable. An instance with no Metric vars keeps locking every metric at
@@ -259,128 +262,9 @@ func WorkflowLockReason(ctx context.Context, pool *pgxpool.Pool, modelID string,
 // because names are the identity that survives revision copies re-minting
 // ids. metricIDs nil/empty = metrics unknown = conservative (see wrapper).
 func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, modelID string, memberIDs []string, metricIDs []string) (locked bool, reason string, err error) {
-	var appID string
-	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID); err != nil {
+	locks, err := loadWorkflowLocks(ctx, pool, modelID)
+	if err != nil || len(locks) == 0 {
 		return false, "", err
-	}
-
-	// awaiting_approval: an approval step of the instance is open, read
-	// from the definition the instance started with (steps_snapshot, else
-	// the definition's steps). A step's type is spelled as the workflow
-	// store reads it (workflowStepTypeFromJSON): "approval",
-	// "STEP_TYPE_APPROVAL", or the enum's number, 2.
-	rows, err := pool.Query(ctx, `
-		SELECT wi.context, wd.context_schema, wi.status::text, ws.decision,
-		       EXISTS (
-		           SELECT 1 FROM workflow.workflow_step s,
-		                jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
-		                                          THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
-		           WHERE s.instance_id = wi.id AND s.status = 'in_progress'
-		             AND d->>'id' = s.step_def_id AND lower(d->>'type') IN ('approval', 'step_type_approval', '2')
-		       ) AS awaiting_approval
-		FROM workflow.workflow_instance wi
-		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-		LEFT JOIN LATERAL (
-			SELECT decision FROM workflow.workflow_step
-			WHERE instance_id = wi.id AND decision IS NOT NULL AND completed_at IS NOT NULL
-			ORDER BY completed_at DESC LIMIT 1
-		) ws ON true
-		WHERE wd.application_id = $1::uuid
-		ORDER BY wi.started_at DESC
-	`, appID)
-	if err != nil {
-		return false, "", err
-	}
-	defer rows.Close()
-
-	type scopedInstance struct {
-		context     map[string]string
-		dimBindings map[string]string // context key -> dimension_id, for "Dimension member" vars
-		metricNames map[string]bool   // lowercased metric names from "Metric" vars; empty = all metrics
-		locked      bool
-	}
-	var instances []scopedInstance
-	// Metric context values may be ids — collect them for one batched
-	// id→name resolution below.
-	metricValueIsRaw := map[string]bool{}
-	for rows.Next() {
-		var ctxJSON, schemaJSON []byte
-		var status string
-		var decision *string
-		var awaitingApproval bool
-		if scanErr := rows.Scan(&ctxJSON, &schemaJSON, &status, &decision, &awaitingApproval); scanErr != nil {
-			return false, "", fmt.Errorf("scan workflow instance: %w", scanErr)
-		}
-		var inst scopedInstance
-		_ = json.Unmarshal(ctxJSON, &inst.context)
-		var vars []contextVarDef
-		_ = json.Unmarshal(schemaJSON, &vars)
-		inst.dimBindings = map[string]string{}
-		inst.metricNames = map[string]bool{}
-		for _, v := range vars {
-			if v.DataType == "Dimension member" && v.DimensionID != "" {
-				inst.dimBindings[v.Key] = v.DimensionID
-			}
-			if v.DataType == "Metric" {
-				if raw := strings.TrimSpace(inst.context[v.Key]); raw != "" {
-					inst.metricNames[strings.ToLower(raw)] = true
-					metricValueIsRaw[raw] = true
-				}
-			}
-		}
-		// A running instance locks its scope only while one of its approval
-		// steps is open: the approver decides on numbers that cannot move
-		// under them, while its tasks — a correction round's "enter
-		// regional corrections" — can change the data they are about. Until
-		// 2026-10-05 a running instance locked for its whole run, so a round
-		// scoped to a region refused every correction its own tasks asked
-		// for. A terminal instance is locked only if its last decision was
-		// approve AND it wasn't later cancelled/failed. The status guard is
-		// what the doc comment above always promised ("cancelled =
-		// unlocked") but the code omitted: an admin cancelling an
-		// already-approved instance left the approve decision on the step,
-		// so the lock persisted forever (found live — a cancelled approval
-		// kept blocking writes to its scope).
-		terminalApproved := status != "running" && status != "cancelled" && status != "failed" && decision != nil && *decision == "approve"
-		inst.locked = (status == "running" && awaitingApproval) || terminalApproved
-		instances = append(instances, inst)
-	}
-	if err := rows.Err(); err != nil {
-		return false, "", err
-	}
-	if len(instances) == 0 {
-		return false, "", nil
-	}
-
-	// Resolve any id-shaped metric context values to names, so instance
-	// scopes are uniformly name-keyed no matter what the start path stored.
-	if len(metricValueIsRaw) > 0 {
-		rawVals := make([]string, 0, len(metricValueIsRaw))
-		for v := range metricValueIsRaw {
-			rawVals = append(rawVals, v)
-		}
-		idName, rErr := pool.Query(ctx,
-			`SELECT id::text, lower(name) FROM model.metric_def WHERE id::text = ANY($1)`, rawVals)
-		if rErr == nil {
-			resolved := map[string]string{}
-			for idName.Next() {
-				var id, name string
-				if idName.Scan(&id, &name) == nil {
-					resolved[strings.ToLower(id)] = name
-				}
-			}
-			idName.Close()
-			if len(resolved) > 0 {
-				for i := range instances {
-					for key := range instances[i].metricNames {
-						if name, ok := resolved[key]; ok {
-							delete(instances[i].metricNames, key)
-							instances[i].metricNames[name] = true
-						}
-					}
-				}
-			}
-		}
 	}
 
 	// The metrics being written, as lowercased names. nil written list =
@@ -406,41 +290,39 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 		written = []writtenMetric{{name: "", display: ""}} // wildcard
 	}
 
+	// The write's members and their ancestors, by dimension: a write on
+	// France is inside Europe.
+	covered := map[string]map[string]bool{}
 	for _, memberID := range memberIDs {
 		chain, chainErr := AncestorChain(ctx, pool, memberID)
 		if chainErr != nil {
 			return false, "", fmt.Errorf("check ancestor chain: %w", chainErr)
 		}
 		for _, anc := range chain {
-			// Per (member, metric) crossing: instances are ordered
-			// most-recent-first, and the first instance whose member scope
-			// AND metric scope both cover this crossing is authoritative —
-			// older instances for the same crossing are superseded, while a
-			// revenue-only instance never supersedes (nor unlocks) a cost
-			// crossing it doesn't cover.
-			for _, wm := range written {
-				for _, inst := range instances {
-					matched := false
-					for key, dimID := range inst.dimBindings {
-						if dimID == anc.DimensionID && inst.context[key] == anc.Code {
-							matched = true
-							break
-						}
-					}
-					if !matched {
-						continue
-					}
-					if len(inst.metricNames) > 0 && wm.name != "" && !inst.metricNames[wm.name] {
-						continue // instance is metric-scoped and doesn't cover this metric
-					}
-					if inst.locked {
-						if len(inst.metricNames) > 0 && wm.display != "" {
-							return true, fmt.Sprintf("%s · %s is locked: a workflow about it is awaiting approval or was approved", anc.Code, wm.display), nil
-						}
-						return true, fmt.Sprintf("%s is locked: a workflow about it is awaiting approval or was approved", anc.Code), nil
-					}
-					break
-				}
+			if covered[anc.DimensionID] == nil {
+				covered[anc.DimensionID] = map[string]bool{}
+			}
+			covered[anc.DimensionID][anc.Code] = true
+		}
+	}
+
+	// Per written metric, instances newest first: the first instance of
+	// each member scope that covers the write and the metric decides —
+	// older instances of that scope are superseded, while a revenue-only
+	// instance never supersedes (nor unlocks) a cost write it doesn't cover.
+	for _, wm := range written {
+		seen := map[string]bool{}
+		for _, l := range locks {
+			if !l.covers(covered) || !l.coversMetric(wm.name) {
+				continue
+			}
+			key := l.scopeKey()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if l.locked {
+				return true, lockReason(ctx, pool, l, wm.display), nil
 			}
 		}
 	}

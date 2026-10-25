@@ -81,6 +81,18 @@ export interface Department {
   label: string;
 }
 
+/**
+ * A workflow lock over some of a grid's metrics. A cell is inside it when its
+ * metric is in metric_ids and, for every field whose dimensions the cell has,
+ * its member on one of them is listed — with at least one field's dimensions
+ * in the cell.
+ */
+export interface WorkflowLock {
+  fields: Record<string, string[]>[]; // per Dimension member field: dimension id → the codes it covers
+  metric_ids: string[];
+  reason: string; // as a refused write says it: "Europe · Budget is locked: …"
+}
+
 export interface DimMember {
   id: string;
   code: string;
@@ -144,6 +156,8 @@ export interface GridData {
   };
   rollup_source_grid_id?: string | null; // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
   recalc_pending?: boolean; // a write's dependents are still being recalculated: calculated cells are about to change
+  /** Workflow locks in force over the grid's input metrics: a cell inside one is read-only (writeguard refuses it). */
+  workflow_locks?: WorkflowLock[];
 }
 
 export interface Actor {

@@ -1429,6 +1429,32 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     });
   }
 
+  // Workflow locks: the reason a cell's write would be refused, or "". The
+  // grid drew such cells editable, and a business user learned a region was
+  // locked only when the save failed (2026-10-25).
+  function cellLock(m: Metric, fc: DimMember[]): string {
+    for (const lock of g.workflow_locks ?? []) {
+      if (!lock.metric_ids.includes(m.id)) continue;
+      let present = false;
+      let inside = true;
+      for (const field of lock.fields) {
+        let fieldPresent = false;
+        let fieldMatch = false;
+        for (const [dimId, codes] of Object.entries(field)) {
+          const i = dims.findIndex(d => d.id === dimId);
+          if (i < 0) continue;
+          fieldPresent = true;
+          if (codes.includes(fc[i]?.code ?? "")) fieldMatch = true;
+        }
+        if (!fieldPresent) continue;
+        present = true;
+        if (!fieldMatch) { inside = false; break; }
+      }
+      if (present && inside) return lock.reason;
+    }
+    return "";
+  }
+
   // ── Shared cell renderers ─────────────────────────────────────────────────
   function loadingCell(m: Metric, borderLeft?: string) {
     return (
@@ -1449,7 +1475,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // (e.g. a cost center's summed salary) isn't a real fact cell, so
     // there's nothing meaningful to write back.
     const closed = cellClosed(m, fc);
-    const isReadOnly = isParent || closed || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
+    const lockReason = isParent ? "" : cellLock(m, fc);
+    const isReadOnly = isParent || closed || !!lockReason || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
 
     const isText = isTextMetric(m);
     const note = isText ? (g.texts?.[key] ?? "") : "";
@@ -1460,7 +1487,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
           style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
-          title={isParent ? undefined : closed ? "Closed: this cell takes no input. Right-click for history" : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
+          title={isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
           {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val, gridScale)}
         </td>

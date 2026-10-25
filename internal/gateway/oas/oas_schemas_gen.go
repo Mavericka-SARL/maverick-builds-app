@@ -13769,6 +13769,11 @@ type GridData struct {
 	// Omitted when nothing is withheld.
 	Withheld    []string           `json:"withheld"`
 	AccessRules OptGridAccessRules `json:"access_rules"`
+	// Workflow locks in force over this grid's input metrics (writes into them are refused). A cell is
+	// locked when its metric is in metric_ids and, for every field whose dimensions the cell has, its
+	// member on one of them is listed, with at least one field's dimensions in the cell. Omitted when
+	// there is none.
+	WorkflowLocks []GridDataWorkflowLocksItem `json:"workflow_locks"`
 	// Set when this grid mirrors another grid's metrics by rollup; its cells are read-only.
 	RollupSourceGridID OptNilUUID `json:"rollup_source_grid_id"`
 }
@@ -13831,6 +13836,11 @@ func (s *GridData) GetWithheld() []string {
 // GetAccessRules returns the value of AccessRules.
 func (s *GridData) GetAccessRules() OptGridAccessRules {
 	return s.AccessRules
+}
+
+// GetWorkflowLocks returns the value of WorkflowLocks.
+func (s *GridData) GetWorkflowLocks() []GridDataWorkflowLocksItem {
+	return s.WorkflowLocks
 }
 
 // GetRollupSourceGridID returns the value of RollupSourceGridID.
@@ -13898,6 +13908,11 @@ func (s *GridData) SetAccessRules(val OptGridAccessRules) {
 	s.AccessRules = val
 }
 
+// SetWorkflowLocks sets the value of WorkflowLocks.
+func (s *GridData) SetWorkflowLocks(val []GridDataWorkflowLocksItem) {
+	s.WorkflowLocks = val
+}
+
 // SetRollupSourceGridID sets the value of RollupSourceGridID.
 func (s *GridData) SetRollupSourceGridID(val OptNilUUID) {
 	s.RollupSourceGridID = val
@@ -13938,6 +13953,56 @@ func (s *GridDataTotals) init() GridDataTotals {
 	m := *s
 	if m == nil {
 		m = map[string]float64{}
+		*s = m
+	}
+	return m
+}
+
+type GridDataWorkflowLocksItem struct {
+	// Per Dimension member field of the instance: dimension id to the member codes it covers (the named
+	// member and every member under it).
+	Fields    []GridDataWorkflowLocksItemFieldsItem `json:"fields"`
+	MetricIds []uuid.UUID                           `json:"metric_ids"`
+	// As a refused write says it, members by label: "Europe · Budget is locked: …".
+	Reason string `json:"reason"`
+}
+
+// GetFields returns the value of Fields.
+func (s *GridDataWorkflowLocksItem) GetFields() []GridDataWorkflowLocksItemFieldsItem {
+	return s.Fields
+}
+
+// GetMetricIds returns the value of MetricIds.
+func (s *GridDataWorkflowLocksItem) GetMetricIds() []uuid.UUID {
+	return s.MetricIds
+}
+
+// GetReason returns the value of Reason.
+func (s *GridDataWorkflowLocksItem) GetReason() string {
+	return s.Reason
+}
+
+// SetFields sets the value of Fields.
+func (s *GridDataWorkflowLocksItem) SetFields(val []GridDataWorkflowLocksItemFieldsItem) {
+	s.Fields = val
+}
+
+// SetMetricIds sets the value of MetricIds.
+func (s *GridDataWorkflowLocksItem) SetMetricIds(val []uuid.UUID) {
+	s.MetricIds = val
+}
+
+// SetReason sets the value of Reason.
+func (s *GridDataWorkflowLocksItem) SetReason(val string) {
+	s.Reason = val
+}
+
+type GridDataWorkflowLocksItemFieldsItem map[string][]string
+
+func (s *GridDataWorkflowLocksItemFieldsItem) init() GridDataWorkflowLocksItemFieldsItem {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
 		*s = m
 	}
 	return m

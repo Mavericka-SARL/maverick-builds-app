@@ -34257,6 +34257,16 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.WorkflowLocks != nil {
+			e.FieldStart("workflow_locks")
+			e.ArrStart()
+			for _, elem := range s.WorkflowLocks {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.RollupSourceGridID.Set {
 			e.FieldStart("rollup_source_grid_id")
 			s.RollupSourceGridID.Encode(e)
@@ -34264,7 +34274,7 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGridData = [13]string{
+var jsonFieldsNameOfGridData = [14]string{
 	0:  "revision_id",
 	1:  "metrics",
 	2:  "all_metrics",
@@ -34277,7 +34287,8 @@ var jsonFieldsNameOfGridData = [13]string{
 	9:  "totals",
 	10: "withheld",
 	11: "access_rules",
-	12: "rollup_source_grid_id",
+	12: "workflow_locks",
+	13: "rollup_source_grid_id",
 }
 
 // Decode decodes GridData from json.
@@ -34457,6 +34468,23 @@ func (s *GridData) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"access_rules\"")
+			}
+		case "workflow_locks":
+			if err := func() error {
+				s.WorkflowLocks = make([]GridDataWorkflowLocksItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GridDataWorkflowLocksItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.WorkflowLocks = append(s.WorkflowLocks, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"workflow_locks\"")
 			}
 		case "rollup_source_grid_id":
 			if err := func() error {
@@ -34689,6 +34717,226 @@ func (s GridDataTotals) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *GridDataTotals) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GridDataWorkflowLocksItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GridDataWorkflowLocksItem) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("fields")
+		e.ArrStart()
+		for _, elem := range s.Fields {
+			elem.Encode(e)
+		}
+		e.ArrEnd()
+	}
+	{
+		e.FieldStart("metric_ids")
+		e.ArrStart()
+		for _, elem := range s.MetricIds {
+			json.EncodeUUID(e, elem)
+		}
+		e.ArrEnd()
+	}
+	{
+		e.FieldStart("reason")
+		e.Str(s.Reason)
+	}
+}
+
+var jsonFieldsNameOfGridDataWorkflowLocksItem = [3]string{
+	0: "fields",
+	1: "metric_ids",
+	2: "reason",
+}
+
+// Decode decodes GridDataWorkflowLocksItem from json.
+func (s *GridDataWorkflowLocksItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GridDataWorkflowLocksItem to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "fields":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				s.Fields = make([]GridDataWorkflowLocksItemFieldsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GridDataWorkflowLocksItemFieldsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Fields = append(s.Fields, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"fields\"")
+			}
+		case "metric_ids":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				s.MetricIds = make([]uuid.UUID, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem uuid.UUID
+					v, err := json.DecodeUUID(d)
+					elem = v
+					if err != nil {
+						return err
+					}
+					s.MetricIds = append(s.MetricIds, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"metric_ids\"")
+			}
+		case "reason":
+			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				v, err := d.Str()
+				s.Reason = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reason\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GridDataWorkflowLocksItem")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000111,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfGridDataWorkflowLocksItem) {
+					name = jsonFieldsNameOfGridDataWorkflowLocksItem[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GridDataWorkflowLocksItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GridDataWorkflowLocksItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GridDataWorkflowLocksItemFieldsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GridDataWorkflowLocksItemFieldsItem) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.ArrStart()
+		for _, elem := range elem {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+}
+
+// Decode decodes GridDataWorkflowLocksItemFieldsItem from json.
+func (s *GridDataWorkflowLocksItemFieldsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GridDataWorkflowLocksItemFieldsItem to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem []string
+		if err := func() error {
+			elem = make([]string, 0)
+			if err := d.Arr(func(d *jx.Decoder) error {
+				var elemElem string
+				v, err := d.Str()
+				elemElem = string(v)
+				if err != nil {
+					return err
+				}
+				elem = append(elem, elemElem)
+				return nil
+			}); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GridDataWorkflowLocksItemFieldsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GridDataWorkflowLocksItemFieldsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GridDataWorkflowLocksItemFieldsItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
