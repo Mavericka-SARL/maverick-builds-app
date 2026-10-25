@@ -95,7 +95,7 @@ func TestSliceTotalsAddLeavesInTheirOrder(t *testing.T) {
 	for _, r := range leaf {
 		inOrder += r.Value
 	}
-	rows := oneDimSliceRows("sum", false, []string{"region", "product"}, dims, leaf, nil, nil, "")
+	rows := oneDimSliceRows("sum", false, []string{"region", "product"}, dims, resultRows(leaf), nil, nil, "")
 	found := false
 	for _, r := range rows {
 		if r.DimMembers["region"] == "EU" {

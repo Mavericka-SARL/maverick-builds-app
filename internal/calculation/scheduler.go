@@ -271,7 +271,7 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 	inc := s.newIncremental(ctx, modelID, revisionID, timePartition, req, allDims, metricDimIDs, dimIDToName, defs)
 	defer s.prefetchHeld(ctx, components, inc, modelID, revisionID)()
 
-	s.runComponents(ctx, components, defs, func(comp metricformula.Component) {
+	s.runComponents(ctx, components, defs, largeComponent(defs, allDims, metricDimIDs), func(comp metricformula.Component) {
 		incs, run := inc.plan(comp)
 		if !run {
 			return
@@ -318,7 +318,11 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 // failed or not, as the sequential order did. On a transaction (no pool:
 // the AI plan check's dry run) the components run in order on this
 // goroutine — a transaction serves one statement at a time.
-func (s *Scheduler) runComponents(ctx context.Context, components []metricformula.Component, defs map[string]*MetricDef, fn func(metricformula.Component)) {
+//
+// A large component (largeComponent) runs alone: each holds a metric of
+// very many cells, or the values of one it reads, and four of them at once
+// took the gateway past its memory limit (2026-10-22).
+func (s *Scheduler) runComponents(ctx context.Context, components []metricformula.Component, defs map[string]*MetricDef, large func(metricformula.Component) bool, fn func(metricformula.Component)) {
 	workers := passWorkers(s.store.pool)
 	if workers <= 1 || len(components) < 2 {
 		for _, comp := range components {
@@ -361,13 +365,22 @@ func (s *Scheduler) runComponents(ctx context.Context, components []metricformul
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	var alone sync.RWMutex // a large component holds it to itself
 	left := len(components)
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range ready {
-				fn(components[i])
+				if large != nil && large(components[i]) {
+					alone.Lock()
+					fn(components[i])
+					alone.Unlock()
+				} else {
+					alone.RLock()
+					fn(components[i])
+					alone.RUnlock()
+				}
 				mu.Lock()
 				for _, d := range dependents[i] {
 					if waiting[d]--; waiting[d] == 0 {
@@ -422,6 +435,21 @@ func (s *Scheduler) runRecurrence(
 		keys = append(keys, pk)
 	}
 	calcErr := s.guarded("recurrence", func() error {
+		// One member too large refuses the recurrence, which is calculated
+		// as a unit: every member is then refused for its dependents.
+		c := passCacheFrom(ctx)
+		for _, id := range comp.Members {
+			if def, ok := defs[id]; ok && !def.IsInput {
+				if err := s.checkSize(c, def, allDims, metricDimIDs[id], dimIDToName); err != nil {
+					for _, other := range comp.Members {
+						if d, ok := defs[other]; ok && c != nil {
+							c.refuse(other, d.Name)
+						}
+					}
+					return err
+				}
+			}
+		}
 		return s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs, incs)
 	})
 	for _, pk := range keys {
@@ -455,6 +483,17 @@ func (s *Scheduler) executePartition(
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
 	inc *increment,
 ) error {
+	if err := s.checkSize(passCacheFrom(ctx), def, allDims, metricDimIDs[def.ID], dimIDToName); err != nil {
+		return err
+	}
+	// A metric with very many cells is evaluated whole on the lean path
+	// (lean.go): it keeps no old values to compare with, so to a pass
+	// following written cells everything it holds may have changed.
+	lean := !def.Text && len(metricDimIDs[def.ID]) > 0 && rollup.LeafComboCount(allDims, metricDimIDs[def.ID]) >= leanCellsAt
+	if lean && inc != nil {
+		inc.out = everywhere()
+		inc = nil
+	}
 	if inc != nil {
 		if err := s.loadHeld(ctx, def, modelID, revisionID, inc); err != nil {
 			return err
@@ -483,6 +522,9 @@ func (s *Scheduler) executePartition(
 	evalOne, err := env.cellEvaluator(ctx, def)
 	if err != nil {
 		return err
+	}
+	if lean {
+		return s.executeLean(ctx, def, modelID, revisionID, allDims, metricDimIDs, dimIDToName, allDefs, axis, evalOne)
 	}
 
 	leafCombos := rollup.LeafCombos(allDims, metricDimIDs[def.ID])
@@ -638,7 +680,7 @@ func (s *Scheduler) executePartition(
 	// stays total_margin / total_revenue rather than a sum of quarterly
 	// percentages.
 	if axis != nil && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
-		aggregate, writeAggregate = summarizeOverTime(results, axis, rule, def.TimeSummary, nil)
+		aggregate, writeAggregate = summarizeOverTime(resultRows(results), axis, rule, def.TimeSummary, nil)
 	}
 	if rule == string(rollup.AggFormula) {
 		total, _, totalErr := evalOne(map[string]string{})
@@ -686,8 +728,8 @@ func (s *Scheduler) executePartition(
 	// leaf: there time still totals by the time summary (a closing balance
 	// typed per scenario has its FY value).
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	perComboRows = append(perComboRows, oneDimSliceRows(rule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
-	perComboRows = append(perComboRows, aggregatePeriodRows(rule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, oneDimSliceRows(rule, dimConditional, metricDimIDs[def.ID], allDims, resultRows(results), evalOne, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, aggregatePeriodRows(rule, metricDimIDs[def.ID], resultRows(results), axis, def.TimeSummary)...)
 
 	// Replace the metric's result set in one transaction: the '{}' total
 	// (none when this pass has none — time_summary 'none', a blank total)
@@ -792,7 +834,7 @@ func oneDimSliceRows(
 	dimConditional bool,
 	dimIDs []string,
 	dims map[string]*rollup.Dimension,
-	leafResults []CalcResultRow,
+	leafResults leafRows,
 	evalOne func(map[string]string) (float64, bool, error),
 	axis *timeAxis,
 	timeSummaryRule string,
@@ -815,8 +857,8 @@ func oneDimSliceRows(
 			continue
 		}
 		rowsOf := map[string][]int{}
-		for i, r := range leafResults {
-			if code, ok := r.DimMembers[dimID]; ok {
+		for i, n := 0, leafResults.Len(); i < n; i++ {
+			if code, ok := leafResults.Member(i, dimID); ok {
 				rowsOf[code] = append(rowsOf[code], i)
 			}
 		}
@@ -863,10 +905,7 @@ func oneDimSliceRows(
 			if lists > 1 {
 				sort.Ints(picked)
 			}
-			sliceLeaves := make([]CalcResultRow, len(picked))
-			for k, i := range picked {
-				sliceLeaves[k] = leafResults[i]
-			}
+			sliceLeaves := subRows{base: leafResults, idx: picked}
 			if axis != nil && (dimID != axis.dim.ID || !m.IsLeafPeriod()) {
 				// A non-time member reduces time by the summary; so does an
 				// AGGREGATE period (H1 = its quarters reduced). A leaf period
@@ -876,9 +915,9 @@ func oneDimSliceRows(
 				}
 				continue
 			}
-			vals := make([]float64, 0, len(sliceLeaves))
-			for _, r := range sliceLeaves {
-				vals = append(vals, r.Value)
+			vals := make([]float64, 0, sliceLeaves.Len())
+			for k := range sliceLeaves.idx {
+				vals = append(vals, sliceLeaves.Value(k))
 			}
 			if len(vals) == 0 {
 				continue
@@ -894,7 +933,7 @@ func oneDimSliceRows(
 // case): each aggregate period is its leaves reduced by the time summary,
 // except under formula/rate rules, whose aggregate rows come from
 // RollupCombos (formula re-evaluated at the aggregate).
-func aggregatePeriodRows(aggRule string, dimIDs []string, leafResults []CalcResultRow, axis *timeAxis, timeSummaryRule string) []CalcResultRow {
+func aggregatePeriodRows(aggRule string, dimIDs []string, leafResults leafRows, axis *timeAxis, timeSummaryRule string) []CalcResultRow {
 	if axis == nil || len(dimIDs) != 1 || aggRule == string(rollup.AggFormula) || aggRule == string(rollup.AggRate) {
 		return nil
 	}

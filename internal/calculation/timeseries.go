@@ -175,23 +175,24 @@ func usesTimeSeries(formulaText string) bool {
 // to reduce or the time summary is 'none'. agg_rule none never combines
 // members: a period with more than one value gives no total (callers pass
 // one non-time leaf, rollup.LeafCombo), but time still totals by the summary.
-func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSummaryRule string, subtrees map[string]map[string]bool) (float64, bool) {
+func summarizeOverTime(leaves leafRows, axis *timeAxis, aggRule, timeSummaryRule string, subtrees map[string]map[string]bool) (float64, bool) {
 	none := !rollup.Aggregates(rollup.AggRule(aggRule))
 	perPeriod := map[int][]float64{}
-	for _, r := range leaves {
-		pos, ok := axis.index[r.DimMembers[axis.dim.ID]]
+	for i, n := 0, leaves.Len(); i < n; i++ {
+		code, _ := leaves.Member(i, axis.dim.ID)
+		pos, ok := axis.index[code]
 		if !ok {
 			continue
 		}
 		match := true
 		for dimID, sub := range subtrees {
-			if !sub[r.DimMembers[dimID]] {
+			if code, _ := leaves.Member(i, dimID); !sub[code] {
 				match = false
 				break
 			}
 		}
 		if match {
-			perPeriod[pos] = append(perPeriod[pos], r.Value)
+			perPeriod[pos] = append(perPeriod[pos], leaves.Value(i))
 		}
 	}
 	if len(perPeriod) == 0 {

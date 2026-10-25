@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -380,6 +381,24 @@ func LeafCombos(dims map[string]*Dimension, dimIDs []string) []map[string]string
 		codeSets[i] = allLeafCodes(dims[id])
 	}
 	return cartesianProduct(dimIDs, codeSets)
+}
+
+// LeafComboCount is how many combos LeafCombos would return, without
+// building them: 1 for no dimensions, 0 when one has no leaf. It stops
+// growing past math.MaxInt64 / 2, so a count over a limit compares as such.
+func LeafComboCount(dims map[string]*Dimension, dimIDs []string) int64 {
+	n := int64(1)
+	for _, id := range dimIDs {
+		leaves := int64(len(allLeafCodes(dims[id])))
+		if leaves == 0 {
+			return 0
+		}
+		if n > math.MaxInt64/2/leaves {
+			return math.MaxInt64 / 2
+		}
+		n *= leaves
+	}
+	return n
 }
 
 // RollupCombos returns every combo over dimIDs in which at least one member

@@ -524,11 +524,18 @@ func conditional(ctx *EvalContext, fn string, args []Node) Value {
 		}
 	}
 	v := conditionalCompute(d, fn, source, dimOrder, crits)
-	if memoKey != "" {
+	if memoKey != "" && len(d.Memo) < conditionalMemoCap {
 		d.Memo[memoKey] = v
 	}
 	return v
 }
+
+// conditionalMemoCap bounds the conditional aggregations' memo of one
+// metric's evaluation (about 250 MB at the cap). Its key carries the
+// coordinates of the dimensions the criteria range over; over a model's
+// metrics of 2.5 million cells it grew past a gigabyte (2026-10-25). Past
+// the cap a result is computed and not remembered.
+const conditionalMemoCap = 1 << 20
 
 func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string, crits []evaluatedCriterion) Value {
 	if _, ok := d.picklist(source); ok {

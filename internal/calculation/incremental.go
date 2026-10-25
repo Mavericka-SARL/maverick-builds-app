@@ -283,6 +283,11 @@ func (s *Scheduler) prefetchHeld(ctx context.Context, components []metricformula
 				if def == nil || def.IsInput || !inc.requested[id] {
 					continue
 				}
+				// A metric of very many cells is evaluated whole and not
+				// kept (lean.go): nothing to prefetch.
+				if rollup.LeafComboCount(inc.allDims, inc.metricDimIDs[id]) >= leanCellsAt {
+					continue
+				}
 				_, _ = s.valueMap(ctx, def, modelID, revisionID)
 				if def.Text {
 					_, _ = s.textMap(ctx, def, modelID, revisionID)

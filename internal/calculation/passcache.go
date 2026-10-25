@@ -22,6 +22,30 @@ type passCache struct {
 	mu     sync.Mutex
 	values map[string]map[string]float64 // metric ID → dimKey → value
 	texts  map[string]map[string]string  // metric ID → dimKey → text
+	// refused holds the metrics this pass did not calculate for their size
+	// (limits.go), ID → name: a metric reading one is refused too.
+	refused map[string]string
+}
+
+// refuse records metricID as refused for its size.
+func (c *passCache) refuse(metricID, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.refused == nil {
+		c.refused = map[string]string{}
+	}
+	c.refused[metricID] = name
+}
+
+// refusedName reports whether this pass refused metricID, and its name.
+func (c *passCache) refusedName(metricID string) (string, bool) {
+	if metricID == "" {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name, ok := c.refused[metricID]
+	return name, ok
 }
 
 type passCacheKey struct{}
@@ -58,7 +82,10 @@ func (s *Scheduler) valueMap(ctx context.Context, dep *MetricDef, modelID, revis
 	} else {
 		m, err = s.store.LoadCalcValueMap(ctx, modelID, revisionID, dep.ID)
 	}
-	if err != nil || c == nil {
+	// A metric of very many cells is not kept: held for the whole pass,
+	// a model's ten metrics of 2.5 million cells filled the gateway
+	// (2026-10-25). A metric reading it loads it for its own evaluation.
+	if err != nil || c == nil || int64(len(m)) >= leanCellsAt {
 		return m, err
 	}
 	c.mu.Lock()
@@ -108,6 +135,10 @@ func (s *Scheduler) textMap(ctx context.Context, dep *MetricDef, modelID, revisi
 func (s *Scheduler) remember(ctx context.Context, metricID string, rows []CalcResultRow) {
 	c := passCacheFrom(ctx)
 	if c == nil {
+		return
+	}
+	if int64(len(rows)) >= leanCellsAt {
+		s.forget(ctx, metricID) // too large to keep, as valueMap
 		return
 	}
 	values := make(map[string]float64, len(rows))

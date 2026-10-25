@@ -67,14 +67,24 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	// The sweep's VACUUM runs without parallel workers: they share their
+	// work through /dev/shm, which a container gets at 64 MB, and a VACUUM
+	// of a large table asked for maintenance_work_mem there and failed —
+	// on the Playground calc_result was not vacuumed, and the sweep stopped
+	// at it, for days (2026-10-25). A table that fails no longer stops the
+	// sweep: the others are still compacted, and the first error returned.
 	var freed int64
+	var firstErr error
 	for _, t := range tables {
-		stmt := `VACUUM (SKIP_LOCKED) `
+		stmt := `VACUUM (SKIP_LOCKED, PARALLEL 0) `
 		if force {
 			stmt = `VACUUM (FULL, SKIP_LOCKED) `
 		}
 		if _, err := db.Exec(ctx, stmt+t.name); err != nil {
-			return freed, err
+			if firstErr == nil {
+				firstErr = fmt.Errorf("compact %s: %w", t.name, err)
+			}
+			continue
 		}
 		// A rewritten table has a new file; a skipped one is tried again.
 		var filenode uint32
@@ -98,7 +108,7 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 			return freed, err
 		}
 	}
-	return freed, nil
+	return freed, firstErr
 }
 
 // CompactTenant is Compact for customerID's own database, and nothing in a

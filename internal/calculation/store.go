@@ -917,6 +917,9 @@ type CalcResultRow struct {
 // calc_result was mostly rows nobody would read again: one tenant held
 // 260 MB for 200,000 live rows after 7.3 million deletes.
 func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string, rows []CalcResultRow) error {
+	if len(rows) >= copyRowsAt {
+		return replaceResultsByCopy(ctx, tx, modelID, revisionID, metricID, rowsSource(rows))
+	}
 	dims := make([]string, len(rows))
 	values := make([]float64, len(rows))
 	texts := make([]*string, len(rows))
@@ -959,6 +962,118 @@ func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisi
 		FROM new n WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.dim_members = n.dims)
 	`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, dims, values, texts)
 	return err
+}
+
+// resultSource is a result set read one row at a time: rows already built
+// (rowsSource), or a metric's leaves held as member indices (lean.go),
+// whose rows are built only as they are written.
+type resultSource interface {
+	Len() int
+	Row(i int) (dims map[string]string, value float64, text *string)
+}
+
+// rowsSource is resultSource over rows.
+type rowsSource []CalcResultRow
+
+func (r rowsSource) Len() int { return len(r) }
+func (r rowsSource) Row(i int) (map[string]string, float64, *string) {
+	return r[i].DimMembers, r[i].Value, r[i].Text
+}
+
+// sources is several result sets read as one, in order.
+type sources []resultSource
+
+func (ss sources) Len() int {
+	n := 0
+	for _, s := range ss {
+		n += s.Len()
+	}
+	return n
+}
+func (ss sources) Row(i int) (map[string]string, float64, *string) {
+	for _, s := range ss {
+		if i < s.Len() {
+			return s.Row(i)
+		}
+		i -= s.Len()
+	}
+	panic("sources: row out of range")
+}
+
+// ReplaceResultSourceTx is ReplaceResultsTx for a result set read row by
+// row: always written through COPY.
+func (s *Store) ReplaceResultSourceTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string, rows resultSource) error {
+	return replaceResultsByCopy(ctx, tx, modelID, revisionID, metricID, rows)
+}
+
+// copyRowsAt is the result set size from which ReplaceResultsTx streams
+// the rows with COPY instead of sending them as array parameters.
+var copyRowsAt = 20_000
+
+// replaceResultsByCopy is ReplaceResultsTx for a large set. As one
+// statement, the set went as array parameters: every row JSON-encoded, then
+// encoded again by the driver — 2.2 GB of the gateway for two metrics of
+// 2.5 million cells, and a Postgres backend that grew past 5 GB unnesting
+// them (a tester's model, 2026-10-25). Here the rows are encoded one at a
+// time into COPY, and the replace runs from temporary tables Postgres has
+// statistics for, so its joins spill to disk instead of holding the set in
+// memory. Same result as the statement: unchanged cells keep their row,
+// every other row of the metric goes, new and changed cells are inserted.
+func replaceResultsByCopy(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string, rows resultSource) error {
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE calc_result_new (dims jsonb NOT NULL, value numeric NOT NULL, text text) ON COMMIT DROP;
+		CREATE TEMP TABLE calc_result_old (id uuid NOT NULL, calc_at timestamptz NOT NULL, dims jsonb NOT NULL, value numeric, text text) ON COMMIT DROP;
+		CREATE TEMP TABLE calc_result_keep (id uuid NOT NULL, calc_at timestamptz NOT NULL, dims jsonb NOT NULL) ON COMMIT DROP`); err != nil {
+		return err
+	}
+	var dimJSON []byte
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"calc_result_new"}, []string{"dims", "value", "text"},
+		pgx.CopyFromSlice(rows.Len(), func(i int) ([]any, error) {
+			dims, value, text := rows.Row(i)
+			var err error
+			if dimJSON, err = json.Marshal(dims); err != nil {
+				return nil, err
+			}
+			return []any{string(dimJSON), value, text}, nil
+		})); err != nil {
+		return fmt.Errorf("copy the results: %w", err)
+	}
+	// Every join is between temporary tables just analyzed: the metric's
+	// rows read straight from calc_result were estimated at one row (its
+	// statistics lag a pass's writes), and the anti join against the kept
+	// rows ran as a nested loop — 7 s for 20,000 cells, quadratic.
+	for _, stmt := range []string{
+		`ANALYZE calc_result_new`,
+		`INSERT INTO calc_result_old (id, calc_at, dims, value, text)
+		 SELECT c.id, c.calc_at, c.dim_members, c.value, c.text_value FROM runtime.calc_result c
+		 WHERE c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid`,
+		`ANALYZE calc_result_old`,
+		`INSERT INTO calc_result_keep (id, calc_at, dims)
+		 SELECT DISTINCT ON (o.dims) o.id, o.calc_at, o.dims
+		 FROM calc_result_old o JOIN calc_result_new n ON n.dims = o.dims
+		 WHERE o.value = n.value AND o.text IS NOT DISTINCT FROM n.text
+		 ORDER BY o.dims, o.calc_at DESC`,
+		`ANALYZE calc_result_keep`,
+		`DELETE FROM runtime.calc_result c USING calc_result_old o
+		 WHERE c.id = o.id AND c.calc_at = o.calc_at
+		   AND c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid
+		   AND NOT EXISTS (SELECT 1 FROM calc_result_keep k WHERE k.id = o.id AND k.calc_at = o.calc_at)`,
+		`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, text_value)
+		 SELECT $1::uuid, $2::uuid, n.dims, $3::uuid, n.value, n.text
+		 FROM calc_result_new n WHERE NOT EXISTS (SELECT 1 FROM calc_result_keep k WHERE k.dims = n.dims)`,
+		`DROP TABLE calc_result_new, calc_result_old, calc_result_keep`,
+	} {
+		var err error
+		if strings.Contains(stmt, "$1") {
+			_, err = tx.Exec(ctx, stmt, modelID, revisionID, metricID)
+		} else {
+			_, err = tx.Exec(ctx, stmt)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ApplyResultsDiffTx changes a metric's result set by a difference: it

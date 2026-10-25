@@ -246,7 +246,8 @@
 <h3 id="concepts-metrics-formulas-and-calculation">Metrics, formulas and calculation</h3>
 <ul>
   <li><b>Input</b> metrics hold typed, imported or posted values. <b>Calculated</b> metrics are defined by a formula over other metrics and are never typed into.</li>
-  <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a record and committing an import all recalculate every dependent metric before the screen refreshes. There is no "recalculate" button.</li>
+  <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a record and committing an import all recalculate every dependent metric; the grid shows calculated cells as pending until the new values land. A revision can also be recalculated whole from its <b>Recalculate</b> icon in <b>Developer › Models</b>.</li>
+  <li><b>A calculated metric has at most a million cells.</b> Its cells are its dimensions' leaf members multiplied: 21 customers × 1,858 days × 64 SKUs is 2.5 million. A larger metric is not calculated — its cells show the error naming its size, and so do the metrics that read it. Fewer members or dimensions, or a coarser time dimension (weeks instead of days), bring it under. A self-hosted server sets the limit with <code>CALC_MAX_METRIC_CELLS</code>.</li>
   <li><b>Dependency graph.</b> The server derives which metrics depend on which from the formulas, orders them, refuses cycles and self-references, and shows the result in the Metrics "Used by" column and the Dependency Graph screen.</li>
   <li><b>Aggregation rules</b> decide totals: Sum, Average, Count, Rate (numerator ÷ denominator), Formula (evaluate the formula on the aggregated inputs, for ratios and percentages).</li>
   <li><b>A missing input</b> leaves the calculated cell blank at that intersection; totals are computed over the intersections that exist.</li>

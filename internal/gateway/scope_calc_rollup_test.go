@@ -97,3 +97,43 @@ func TestScopeCalcCellsFormulaTotalReadsRuleNoneDependencyAtThePin(t *testing.T)
 		t.Errorf("formula total = %v, want 15 ((230 - 200) / 200)", got)
 	}
 }
+
+// A live read does not enumerate a metric with more visible cells than a
+// pass may calculate (calculation.MaxMetricCells) — enumerating 2.5
+// million took a gateway down — nor read a metric that reads it as if its
+// values were zero; a smaller metric is read as before.
+func TestScopeCalcCellsSkipsAMetricWithTooManyCells(t *testing.T) {
+	t.Setenv("CALC_MAX_METRIC_CELLS", "3")
+	geoID, skuID := "dim-geo", "dim-sku"
+	rollupDims := map[string]*rollup.Dimension{
+		geoID: {ID: geoID, Members: []rollup.Member{{ID: "g-a", Code: "A"}, {ID: "g-b", Code: "B"}}},
+		skuID: {ID: skuID, Members: []rollup.Member{{ID: "s-x", Code: "X"}, {ID: "s-y", Code: "Y"}}},
+	}
+	big, reader, small := "{revenue} * 2", "{big} + 1", "{price} * 2"
+	universe := []metricRow{
+		{ID: "rev", Name: "revenue", IsInput: true, AggRule: "sum"},
+		{ID: "price", Name: "price", IsInput: true, AggRule: "sum"},
+		{ID: "big", Name: "big", AggRule: "sum", Formula: &big},
+		{ID: "reader", Name: "reader", AggRule: "sum", Formula: &reader},
+		{ID: "small", Name: "small", AggRule: "sum", Formula: &small},
+	}
+	metricDims := map[string][]string{"rev": {geoID, skuID}, "big": {geoID, skuID}, "price": {geoID}, "reader": {geoID}, "small": {geoID}}
+	scoped := map[string]float64{"rev:A:X": 1, "price:A": 5}
+
+	cells, totals, _ := scopeCalcCells(context.Background(), rollupDims, metricDims, map[string]string{geoID: "geography", skuID: "sku"}, universe, scoped, nil)
+
+	for k := range cells {
+		if len(k) >= 4 && (k[:4] == "big:" || k[:7] == "reader:") {
+			t.Errorf("cell %s read for a metric over the limit or reading one", k)
+		}
+	}
+	if _, ok := totals["big"]; ok {
+		t.Error("big has a total")
+	}
+	if _, ok := totals["reader"]; ok {
+		t.Error("reader has a total though big was not read")
+	}
+	if got := cells["small:A"]; got != 10 {
+		t.Errorf("small @ A = %v, want 10", got)
+	}
+}

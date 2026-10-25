@@ -530,6 +530,13 @@ func scopeCalcCells(
 		var unresolved []metricRow
 		for _, m := range remaining {
 			ownDims := metricDimIDs[m.ID]
+			// More visible cells than a pass may calculate
+			// (calculation.MaxMetricCells): none are read — enumerating
+			// them is what took a gateway down — and a metric reading it
+			// stays unresolved instead of reading zeros.
+			if rollup.LeafComboCount(rollupDims, ownDims) > calculation.MaxMetricCells() {
+				continue
+			}
 			if sm := sr.served(m.ID); sm != nil {
 				res := sr.serve(m, sm, ownDims, rollupDims, dimIDToName)
 				for k, v := range res.cells {

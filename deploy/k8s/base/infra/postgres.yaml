@@ -121,6 +121,14 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            # Parallel work (a VACUUM's index passes, parallel scans) keeps
+            # its shared state in /dev/shm, which a container gets at 64 MB.
+            # A parallel VACUUM asks for maintenance_work_mem (64 MB) there
+            # and failed: on the Playground calc_result was not vacuumed for
+            # days ("could not resize shared memory segment … No space left
+            # on device", 286 times in 72 hours, 2026-10-25).
+            - name: dshm
+              mountPath: /dev/shm
           # Memory, measured 2026-10-11: a connection that has touched every
           # table of the schema holds ~5 MB of its own. At the 100-connection
           # limit that is ~510 MB, plus 128 MB of shared buffers, up to three
@@ -277,6 +285,13 @@ spec:
       # storage, which is why it surfaced only on the first cloud deploy.
       securityContext:
         fsGroup: 70
+      volumes:
+        # Memory-backed and counted in the postgres container's limit; used
+        # only while parallel work runs (see its mount).
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
 
   volumeClaimTemplates:
     - metadata:

@@ -19,6 +19,14 @@ import (
 // to delete and re-insert every cell and to add a '{}' total per pass, so a
 // busy workspace's calc_result was mostly dead rows.
 func TestReplaceResultsWritesOnlyWhatChanged(t *testing.T) {
+	t.Run("one statement", testReplaceResultsWritesOnlyWhatChanged)
+	t.Run("by copy", func(t *testing.T) {
+		defer calculation.SetCopyRowsAt(1)()
+		testReplaceResultsWritesOnlyWhatChanged(t)
+	})
+}
+
+func testReplaceResultsWritesOnlyWhatChanged(t *testing.T) {
 	store, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -113,6 +121,13 @@ func TestReplaceResultsWritesOnlyWhatChanged(t *testing.T) {
 	var got string
 	if err := store.Pool().QueryRow(ctx, `SELECT text_value FROM runtime.calc_result WHERE metric_id = $1::uuid`, metricID).Scan(&got); err != nil || got != text {
 		t.Fatalf("text = %q err=%v", got, err)
+	}
+
+	// Every digit of a value is kept: a pick-list option's code is a
+	// 16-digit number.
+	replace(cell("north", 1234567890123456), cell("", 0.1))
+	if left, _ := state(); strings.Join(left, " ") != `{"region": "north"}=1234567890123456 {}=0.1` {
+		t.Fatalf("after 16-digit and fractional values: %v", left)
 	}
 }
 

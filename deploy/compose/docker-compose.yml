@@ -28,12 +28,17 @@ x-app-env: &app-env
   INTEGRATION_CRED_KEY: ${INTEGRATION_CRED_KEY:?set INTEGRATION_CRED_KEY in .env}
   SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  CALC_MAX_METRIC_CELLS: ${CALC_MAX_METRIC_CELLS:-}
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     logging: *logging
+    # Parallel work (a VACUUM's index passes) keeps its shared state in
+    # /dev/shm, 64 MB by default: a parallel VACUUM of a large table asked
+    # for 64 MB there and failed, so the table was never vacuumed.
+    shm_size: 512mb
     environment:
       POSTGRES_USER: mavericks
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
