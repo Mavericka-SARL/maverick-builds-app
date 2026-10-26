@@ -231,8 +231,8 @@ type contextVarDef struct {
 // workflow by name, so it's a no-op for any model/workflow that doesn't use
 // that pattern.
 //
-// A terminal instance's lock state is derived from its last decided step's
-// decision, not just the instance status, because the workflow engine always
+// A terminal instance's lock state is derived from its last decided approval
+// step's decision, not just the instance status, because the workflow engine always
 // leaves a completed instance at status "completed" regardless of decision:
 // a running instance with an approval step open = locked (awaiting the
 // decision), a running instance at a task, condition or notification =

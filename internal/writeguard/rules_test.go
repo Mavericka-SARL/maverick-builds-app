@@ -342,3 +342,42 @@ func TestReplaceUserMemberRulesInRevisionScope(t *testing.T) {
 		t.Errorf("UK (in B, not re-listed) = %q, %v; want unrestricted", a, err)
 	}
 }
+
+// TestRuleMapsHidesWhatAHiddenMetricFlowsInto: a metric hidden from a
+// reader hides every calculated metric that reads it, directly, through a
+// chain or by a differently cased name, and nothing else (2026-10-26:
+// `hidden_cost * 1` showed the hidden metric's values).
+func TestRuleMapsHidesWhatAHiddenMetricFlowsInto(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	lf := newLineageFixture(t, pool)
+	calc := func(name, f string) string {
+		return lf.q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, formula, revision_id) VALUES ($1::uuid, $2, false, 'sum', $3, $4::uuid) RETURNING id::text`,
+			lf.f.modelID, name, f, lf.revA)
+	}
+	cost := lf.metric(lf.revA, "hidden_cost", "cost")
+	revenue := lf.metric(lf.revA, "revenue", "revenue")
+	copyOf := calc("cost_copy", "hidden_cost * 1")
+	chain := calc("margin", "revenue - COST_COPY")
+	mixed := calc("ratio", "SUMIFS(Hidden_Cost, revenue, \">0\")")
+	clean := calc("revenue_x2", "revenue * 2")
+
+	_, before, err := RuleMaps(context.Background(), pool, lf.f.userID, lf.revA)
+	if err != nil || len(before) != 0 {
+		t.Fatalf("no rules: %v %v", before, err)
+	}
+	lf.setRules(RuleInput{Type: "metric", RefID: cost, Access: "hidden"}, RuleInput{Type: "metric", RefID: revenue, Access: "read"})
+	_, rules, err := RuleMaps(context.Background(), pool, lf.f.userID, lf.revA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ id, want string }{
+		"the hidden metric": {cost, "hidden"}, "a read-only input": {revenue, "read"},
+		"a direct reader": {copyOf, "hidden"}, "a chain": {chain, "hidden"}, "another case": {mixed, "hidden"},
+		"an unrelated formula": {clean, ""},
+	} {
+		if got := rules[c.id]; got != c.want {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+}

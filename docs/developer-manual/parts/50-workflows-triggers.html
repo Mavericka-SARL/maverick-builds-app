@@ -94,7 +94,7 @@
 <figure><img src="img/32-trigger-new-rule.png" width="1140" height="900" alt="New rule form with name, workflow, trigger type and description"><figcaption>The rule form. The trigger type follows the chosen workflow's event.</figcaption></figure>
 <h3 id="triggers-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
-  <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. A schedule is an event like any other: it starts a manual workflow at the times it names.</li>
+  <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. A schedule is an event like any other: it starts a manual workflow at the times it names. Only the live revision's schedule rules run: a new revision carries its rules with their schedules, and they start running when that revision is made live, while the previous revision's stop.</li>
   <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A user sees a disabled button with the reason when that stops being true.</li>
   <li><b>A failed start</b> (for example a duplicate refused by "one active instance per scope") produces a "Workflow could not start" notification for the person who triggered it.</li>
   <li>Rules are per revision and are copied with it.</li>

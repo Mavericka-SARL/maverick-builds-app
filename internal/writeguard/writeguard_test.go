@@ -553,3 +553,58 @@ func TestWorkflowLockIsTheCrossingOfItsFields(t *testing.T) {
 		t.Errorf("France · Actual with Europe's all-version review open: locked=%v %q", locked, reason)
 	}
 }
+
+// An approved instance stays locked whatever steps follow its approval: a
+// notification step after it records "sent", a task "complete", and either
+// used to be read as the instance's last decision, releasing the agreed
+// numbers (decided 2026-10-06). A rejection after an approval — a second
+// approval step — still releases them.
+func TestApprovedInstanceStaysLockedAfterLaterSteps(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'sales_region') RETURNING id::text`, f.modelID, f.revisionID)
+	euID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'EU', 'Europe') RETURNING id::text`, dimID)
+	var appID string
+	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	schema := `[{"key":"region","data_type":"Dimension member","dimension_id":"` + dimID + `"}]`
+	steps := `[{"id":"review","type":"approval"},{"id":"tell","type":"notification"},{"id":"file","type":"task"},{"id":"board","type":"STEP_TYPE_APPROVAL"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'Budget approval', 'manual', $2::jsonb, $3::jsonb, 'published') RETURNING id::text`, appID, steps, schema)
+	inst := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by, steps_snapshot)
+	           VALUES ($1::uuid, 'completed', '{"region":"EU"}'::jsonb, $2::uuid, $3::jsonb) RETURNING id::text`, defID, f.userID, steps)
+	step := func(id, decision string, after int) {
+		t.Helper()
+		q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, completed_at)
+		   VALUES ($1::uuid, $2, 'completed', $3, now() + make_interval(secs => $4)) RETURNING id::text`, inst, id, decision, after)
+	}
+	locked := func() bool {
+		t.Helper()
+		l, _, err := WorkflowLockReason(ctx, pool, f.modelID, []string{euID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	step("review", "approve", 1)
+	step("tell", "sent", 2)
+	step("file", "complete", 3)
+	if !locked() {
+		t.Error("EU is released by the notification and task steps after its approval")
+	}
+	step("board", "reject", 4)
+	if locked() {
+		t.Error("EU is still locked after a later approval step rejected it")
+	}
+}

@@ -201,6 +201,17 @@ func TestCheckOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = pool.QueryRow(ctx, `SELECT a.id::text FROM core.application a WHERE a.name='App2'`).Scan(&foreignApp)
+	// Another revision of the same model, and a grid of no revision.
+	var otherRev, otherRevGrid, revisionlessGrid string
+	if err := pool.QueryRow(ctx, `INSERT INTO model.revision (model_id, name) VALUES ($1::uuid,'Live') RETURNING id::text`, modelID).Scan(&otherRev); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO model.grid_def (model_id, name, revision_id) VALUES ($1::uuid,'G',$2::uuid) RETURNING id::text`, modelID, otherRev).Scan(&otherRevGrid); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid,'Shared') RETURNING id::text`, modelID).Scan(&revisionlessGrid); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("INTEGRATION_CRED_KEY", "0123456789abcdef0123456789abcdef")
 	ownConn, err := st.CreateConnection(ctx, appID, "own", "none", nil, nil, "")
 	if err != nil {
@@ -225,8 +236,11 @@ func TestCheckOwnership(t *testing.T) {
 		{"unknown type", "sheet", ownGrid, "", "unknown target type", false},
 		{"foreign connection", "grid", ownGrid, foreignConn.ID, "different application", true},
 		{"missing connection", "grid", ownGrid, "00000000-0000-0000-0000-000000000000", "connection not found", false},
+		// A connector reads and writes its own revision only (2026-10-26).
+		{"another revision's grid", "grid", otherRevGrid, "", "another revision", true},
+		{"a grid of no revision", "grid", revisionlessGrid, "", "", false},
 	} {
-		err := integration.CheckOwnership(ctx, pool, modelID, tc.targetType, tc.target, tc.cn)
+		err := integration.CheckOwnership(ctx, pool, modelID, revID, tc.targetType, tc.target, tc.cn)
 		switch {
 		case tc.wantErr == "" && err != nil:
 			t.Errorf("%s: unexpected error %v", tc.name, err)

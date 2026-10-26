@@ -451,11 +451,8 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		audit(imported)
 		var dimName string
 		_ = h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id=$1::uuid`, req.TargetID).Scan(&dimName)
-		msg := fmt.Sprintf("Imported %d member(s) from %s into dimension '%s'", imported, f.describe(), dimName)
-		if errs > 0 {
-			msg += fmt.Sprintf(" (%d row(s) skipped: no code or label)", errs)
-		}
-		return msg, nil
+		// A dimension file imports whole or not at all: errs is 0 here.
+		return fmt.Sprintf("Imported %d member(s) from %s into dimension '%s'", imported, f.describe(), dimName), nil
 	}
 
 	// Grid: the same checks and commit as POST /api/import/upload, into

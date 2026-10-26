@@ -64693,8 +64693,6 @@ func (s *SsoSettingsDefaultRole) Decode(d *jx.Decoder) error {
 		*s = SsoSettingsDefaultRoleBusinessAdmin
 	case SsoSettingsDefaultRoleDeveloper:
 		*s = SsoSettingsDefaultRoleDeveloper
-	case SsoSettingsDefaultRoleTenantAdmin:
-		*s = SsoSettingsDefaultRoleTenantAdmin
 	default:
 		*s = SsoSettingsDefaultRole(v)
 	}

@@ -137,3 +137,49 @@ func TestScopeCalcCellsSkipsAMetricWithTooManyCells(t *testing.T) {
 		t.Errorf("small @ A = %v, want 10", got)
 	}
 }
+
+// A formula-aggregated ratio read by another formula above its leaves — at
+// the pinned year, a quarter, the total — is the ratio evaluated there, as
+// the scheduler reads it, never its months' ratios summed by its time
+// summary: the CPG dashboard's "EBITDA margin vs LY" read 63.8 points where
+// the change was 5.9 (2026-10-18).
+func TestScopeCalcCellsReadsARatioAtAnAggregatePeriodByItsFormula(t *testing.T) {
+	timeID := "t"
+	rollupDims := map[string]*rollup.Dimension{timeID: {ID: timeID, IsTime: true, TimeGranularity: "month", Members: []rollup.Member{
+		{Code: "2026-01", ParentCode: "Q1", TimeIndex: 0}, {Code: "2026-02", ParentCode: "Q1", TimeIndex: 1},
+		{Code: "2026-03", ParentCode: "Q1", TimeIndex: 2}, {Code: "Q1", ParentCode: "FY26", TimeIndex: -1}, {Code: "FY26", TimeIndex: -1},
+	}}}
+	margin, ly, change := "ebitda / sales", "ly_ebitda / ly_sales", "margin - ly_margin"
+	universe := []metricRow{
+		{ID: "e", Name: "ebitda", IsInput: true, AggRule: "sum", TimeSummary: "sum"},
+		{ID: "s", Name: "sales", IsInput: true, AggRule: "sum", TimeSummary: "sum"},
+		{ID: "le", Name: "ly_ebitda", IsInput: true, AggRule: "sum", TimeSummary: "sum"},
+		{ID: "ls", Name: "ly_sales", IsInput: true, AggRule: "sum", TimeSummary: "sum"},
+		{ID: "m", Name: "margin", AggRule: "formula", TimeSummary: "sum", Formula: &margin},
+		{ID: "l", Name: "ly_margin", AggRule: "formula", TimeSummary: "sum", Formula: &ly},
+		{ID: "v", Name: "var_margin", AggRule: "formula", TimeSummary: "sum", Formula: &change},
+	}
+	metricDims := map[string][]string{}
+	for _, m := range universe {
+		metricDims[m.ID] = []string{timeID}
+	}
+	scoped := map[string]float64{}
+	for i, mo := range []string{"2026-01", "2026-02", "2026-03"} {
+		scoped["e:"+mo], scoped["s:"+mo] = float64(10*(i+1)), 100
+		scoped["le:"+mo], scoped["ls:"+mo] = 5, 100
+	}
+	sr := &scopedReads{Pinned: map[string]string{timeID: "FY26"}}
+
+	cells, totals, _ := scopeCalcCells(context.Background(), rollupDims, metricDims, map[string]string{timeID: "month"}, universe, scoped, sr)
+
+	want := 60.0/300 - 15.0/300
+	if got := totals["v"]; math.Abs(got-want) > 1e-9 {
+		t.Errorf("change at the pinned year = %v, want %v (not its months' margins summed, 0.45)", got, want)
+	}
+	if got := cells["v:Q1"]; math.Abs(got-want) > 1e-9 {
+		t.Errorf("change at Q1 = %v, want %v", got, want)
+	}
+	if got := cells["v:2026-02"]; math.Abs(got-(0.2-0.05)) > 1e-9 {
+		t.Errorf("change in February = %v, want 0.15", got)
+	}
+}

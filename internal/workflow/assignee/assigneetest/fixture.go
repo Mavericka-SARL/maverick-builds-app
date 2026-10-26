@@ -53,7 +53,11 @@ import (
 //	                     developer held in ws2: a developer of tenant 2 only
 //	ta_ws2_nt_grant1     no tenant, tenant_admin held in ws2, business_user in
 //	                     ws1b and granted App1: tenant 2's administrator, and
-//	                     in tenant 1 only what ws1b opens
+//	                     in tenant 1 nothing (its grant narrows it to App1,
+//	                     which none of its roles opens)
+//	ba_nar_2             business_admin in ws1a and ws1b, granted App2 only
+//	dev_nar_2            developer held in ws1b, granted App2 only
+//	bu_1a_model3         business_user in ws1a, granted a model of App3 only
 type Fixture struct {
 	Pool                   *pgxpool.Pool
 	Cust1, Cust2           string
@@ -182,6 +186,18 @@ func Seed(t *testing.T, pool *pgxpool.Pool) *Fixture {
 	role(nt, "tenant_admin", f.WS2)
 	role(nt, "business_user", f.WS1b)
 	ex(`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, nt, f.App1)
+	// Narrowed by grants (2026-10-26): what their roles open elsewhere is
+	// not theirs to decide.
+	baNar := user("ba_nar_2", f.Cust1)
+	role(baNar, "business_admin", f.WS1a)
+	role(baNar, "business_admin", f.WS1b)
+	ex(`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, baNar, f.App2)
+	devNar := user("dev_nar_2", f.Cust1)
+	role(devNar, "developer", f.WS1b)
+	ex(`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, devNar, f.App2)
+	buModel := user("bu_1a_model3", f.Cust1)
+	role(buModel, "business_user", f.WS1a)
+	ex(`INSERT INTO identity.user_model_access (user_id, model_id) VALUES ($1::uuid, $2::uuid)`, buModel, model)
 	return f
 }
 
@@ -268,6 +284,11 @@ var Cases = []Case{
 	// administrator of tenant 1 no administrator here (ta_home1_dev2).
 	{"named tenant_admin, tenant 2", func(f *Fixture) string { return f.App3 }, []string{"tenant_admin"},
 		[]string{"ta_2", "ta_ws2_nt_grant1"}},
+	// Narrowed to App2: ba_nar_2 and dev_nar_2 count here, and only here.
+	{"named business_admin, narrowed app", func(f *Fixture) string { return f.App2 }, []string{"business_admin"},
+		[]string{"ba_1b", "ba_nar_2"}},
+	{"named developer, narrowed app", func(f *Fixture) string { return f.App2 }, []string{"developer"},
+		[]string{"ba_dev_global", "dev_global", "dev_home1", "dev_nar_2", "dev_ws1b", "owner_1"}},
 	{"named platform_admin", func(f *Fixture) string { return f.App3 }, []string{"platform_admin"},
 		[]string{"pa", "pa_ws1a"}},
 	{"named platform_admin, workspace app", func(f *Fixture) string { return f.App1 }, []string{"platform_admin"},
@@ -277,10 +298,11 @@ var Cases = []Case{
 	{"no role named, workspace app", func(f *Fixture) string { return f.App1 }, nil,
 		[]string{"appr_1a", "ba_1a", "ba_dev_global", "bu_1a", "dev_global", "dev_home1", "dev_ws1b", "imp_1a",
 			"owner_1", "pa", "pa_ws1a", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b"}},
+	// ta_ws2_nt_grant1's business_user role in ws1b would open AppT, but its
+	// App1 grant narrows it to App1.
 	{"no role named, tenant-level app", func(f *Fixture) string { return f.AppT }, nil,
 		[]string{"appr_1a", "appr_1b", "ba_1a", "ba_1b", "ba_dev_global", "bu_1a", "dev_global", "dev_home1", "dev_ws1b",
-			"imp_1a", "owner_1", "pa", "pa_ws1a", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b",
-			"ta_ws2_nt_grant1"}},
+			"imp_1a", "owner_1", "pa", "pa_ws1a", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b"}},
 	// ta_grant2 and ta_model2 reach App3 through their grants (they have no
 	// tenant); ta_home1_grant3, which has one, does not: its grant narrows,
 	// it opens nothing.

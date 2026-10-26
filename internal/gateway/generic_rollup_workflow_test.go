@@ -1966,8 +1966,11 @@ func TestDimensionMemberRenameReKeysFactAndCalcRows(t *testing.T) {
 // applied to the final `metrics` list — never to all_metrics, cells, or
 // totals — so a "hidden" metric's real value was still present in the
 // /api/grid response a metric_kpi widget reads directly. amount is
-// hidden from the bystander; deptTotal (a calc metric with no direct
-// dependency on amount) must be completely unaffected.
+// hidden from the bystander, and so are deptTotal (=amount) and
+// deptTotalCapped (built on deptTotal): a metric calculated from a hidden
+// one would show its values (decided 2026-10-26; deptTotal used to be
+// asserted "unaffected", which was the leak). A metric that does not read
+// amount is unaffected.
 func TestGridHidesRestrictedMetricEverywhere(t *testing.T) {
 	f := setupRollupFixture(t)
 	ctx := context.Background()
@@ -2007,18 +2010,18 @@ func TestGridHidesRestrictedMetricEverywhere(t *testing.T) {
 		}
 	}
 
-	// An unrestricted calc metric with no dependency on the hidden metric
-	// must be entirely unaffected — compare against its own unscoped
-	// calc_result aggregate rather than a hand-derived expected number.
-	var wantTotal float64
-	if err := f.pool.QueryRow(ctx,
-		`SELECT value::float8 FROM runtime.calc_result WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND dim_members='{}' ORDER BY calc_at DESC LIMIT 1`,
-		f.modelID, f.workingRevID, f.deptTotalMetricID,
-	).Scan(&wantTotal); err != nil {
-		t.Fatalf("query deptTotal's own calc_result aggregate: %v", err)
+	// What amount flows into is hidden too; what does not read it is not.
+	listed := map[string]bool{}
+	for _, raw := range allMetrics {
+		listed[raw.(map[string]any)["id"].(string)] = true
 	}
-	if v, ok := totals[f.deptTotalMetricID]; !ok || v != wantTotal {
-		t.Errorf("deptTotal total = %v (ok=%v), want %v (unaffected by amount's hidden rule)", v, ok, wantTotal)
+	for name, id := range map[string]string{"deptTotal": f.deptTotalMetricID, "deptTotalCapped": f.deptTotalCappedMetricID} {
+		if _, has := totals[id]; has || listed[id] {
+			t.Errorf("%s, calculated from the hidden amount, is served (total %v, listed %v)", name, totals[id], listed[id])
+		}
+	}
+	if !listed[f.quotaMetricID] {
+		t.Error("quota, which does not read amount, is no longer listed")
 	}
 }
 

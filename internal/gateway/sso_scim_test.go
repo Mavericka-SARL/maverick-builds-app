@@ -348,6 +348,9 @@ func TestSsoRegisterDiscoverAndFirstLogin(t *testing.T) {
 		"no client id": {"protocol": "oidc", "metadata_url": "https://idp.acme.test/x", "client_secret": "s", "allowed_domains": []string{"acme.test"}},
 		"no secret":    {"protocol": "oidc", "metadata_url": "https://idp.acme.test/x", "client_id": "mvx", "allowed_domains": []string{"acme.test"}},
 		"unreadable":   {"protocol": "oidc", "metadata_url": "https://unreachable.test/x", "client_id": "mvx", "client_secret": "s", "allowed_domains": []string{"acme.test"}},
+		// The Users screen never lets a tenant admin grant tenant_admin.
+		"tenant_admin default": {"protocol": "oidc", "metadata_url": "https://idp.acme.test/.well-known/openid-configuration", "client_id": "mvx", "client_secret": "s",
+			"allowed_domains": []string{"acme.test"}, "default_role": "tenant_admin"},
 	} {
 		if code, body := f.do(t, f.srv, http.MethodPut, "/api/admin/sso", in, nil); code == http.StatusOK {
 			t.Errorf("%s: accepted: %s", name, body)
@@ -453,6 +456,21 @@ func TestSsoRegisterDiscoverAndFirstLogin(t *testing.T) {
 	again, err := f.h.jitProvision(ctx, claims("kc-new", "new@acme.test", "New Person"))
 	if err != nil || again.UserID != a.UserID {
 		t.Fatalf("second login: %v %+v", err, again)
+	}
+	// A row saved while tenant_admin was still accepted gives a new account
+	// business_user, not tenant_admin.
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.sso_provider SET default_role = 'tenant_admin'`); err != nil {
+		t.Fatal(err)
+	}
+	f.broker.mu.Lock()
+	f.broker.federated["kc-older"] = []map[string]string{{"identityProvider": alias, "userId": "ext-11", "userName": "older@acme.test"}}
+	f.broker.mu.Unlock()
+	older, err := f.h.jitProvision(ctx, claims("kc-older", "older@acme.test", "Older Row"))
+	if err != nil || older.hasRole("tenant_admin") || !older.hasRole("business_user") {
+		t.Errorf("first login under a stored tenant_admin default: %v %+v", err, older)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.sso_provider SET default_role = 'business_user'`); err != nil {
+		t.Fatal(err)
 	}
 
 	// Refusals carry a reason a person can read.

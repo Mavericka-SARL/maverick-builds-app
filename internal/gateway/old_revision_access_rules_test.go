@@ -117,6 +117,39 @@ type oldRevGrid struct {
 	Cells       map[string]float64 `json:"cells"`
 	Totals      map[string]float64 `json:"totals"`
 	AccessRules gridAccessRules    `json:"access_rules"`
+	AllMetrics  []struct {
+		ID string `json:"id"`
+	} `json:"all_metrics"`
+	AllDimensions []struct {
+		Members []struct {
+			ID string `json:"id"`
+		} `json:"members"`
+	} `json:"all_dimensions"`
+}
+
+// access is what the grid applies to a member or metric id: "hidden" when
+// the grid leaves it out (the echoed rules no longer list hidden ones —
+// they named what was hidden), else its echoed rule ("" for none).
+func (g oldRevGrid) access(id string, metric bool) string {
+	listed := false
+	if metric {
+		for _, m := range g.AllMetrics {
+			listed = listed || m.ID == id
+		}
+		if !listed {
+			return "hidden"
+		}
+		return g.AccessRules.Metrics[id]
+	}
+	for _, d := range g.AllDimensions {
+		for _, m := range d.Members {
+			listed = listed || m.ID == id
+		}
+	}
+	if !listed {
+		return "hidden"
+	}
+	return g.AccessRules.DimMembers[id]
 }
 
 func (f *restrictedFixture) gridAt(persona, query string) oldRevGrid {
@@ -160,11 +193,16 @@ func assertRestrictedGrid(f *restrictedFixture, label string, g oldRevGrid, memb
 		f.t.Errorf("%s: dbl total = %v, want withheld or 600 (never the 1200 that includes US)", label, v)
 	}
 	if !totalsOnly {
-		if got := g.AccessRules.DimMembers[memberIDs["DE"]]; got != "read" {
+		if got := g.access(memberIDs["DE"], false); got != "read" {
 			f.t.Errorf("%s: DE access = %q in this revision, want read", label, got)
 		}
-		if got := g.AccessRules.Metrics[metricIDs["cost"]]; got != "hidden" {
+		if got := g.access(metricIDs["cost"], true); got != "hidden" {
 			f.t.Errorf("%s: cost access = %q in this revision, want hidden", label, got)
+		}
+		for id, access := range g.AccessRules.Metrics {
+			if access == "hidden" {
+				f.t.Errorf("%s: the grid echoes a hidden rule for metric %s", label, id)
+			}
 		}
 	}
 }

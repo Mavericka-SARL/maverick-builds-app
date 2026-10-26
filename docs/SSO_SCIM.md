@@ -45,7 +45,10 @@ identity provider authenticated the person (`federated-identity`), reads the
 tenant from the alias, and — if the tenant allows it and the address is in
 an allowed domain — creates the `identity.user` row with the default role in
 the tenant's first workspace, and the directory entry that routes their
-requests. A refused first login answers 403 with the reason, which the
+requests. The default role is `business_user`, `business_admin` or
+`developer` — what a tenant admin may grant on the Users screen, as a SCIM
+token's is; `tenant_admin` is refused on save, and a setting saved before
+2026-10-26 that names it gives a first sign-in `business_user`. A refused first login answers 403 with the reason, which the
 console shows.
 
 **What needs to exist on the deployment.** The gateway's Keycloak service

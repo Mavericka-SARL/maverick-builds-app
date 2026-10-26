@@ -2376,9 +2376,13 @@ var (
 	ErrNoRACIScope          = errors.New("you have no RACI-responsible scope to start this workflow with")
 	ErrDuplicateInstance    = errors.New("a matching workflow instance is already running")
 	ErrHiddenScope          = errors.New("access denied: you don't have access to the dimension member this workflow would be scoped to")
-	ErrUnknownMetric        = errors.New("the metric this workflow would be scoped to does not exist in the model")
-	ErrMissingContext       = errors.New("a required context value is missing")
-	ErrUnknownMember        = errors.New("the dimension member this workflow would be scoped to does not exist")
+	// ErrReadOnlyScope: the instance would lock a member the caller may not
+	// write — read-only for them, or under the scope and hidden from them —
+	// so one person could freeze numbers another owns.
+	ErrReadOnlyScope  = errors.New("access denied: the workflow would lock members you may not write")
+	ErrUnknownMetric  = errors.New("the metric this workflow would be scoped to does not exist in the model")
+	ErrMissingContext = errors.New("a required context value is missing")
+	ErrUnknownMember  = errors.New("the dimension member this workflow would be scoped to does not exist")
 	// ErrWorkflowDefNotEditable: the definition is archived (or gone) — edits
 	// are refused rather than silently dropped; restore it to a draft first.
 	ErrWorkflowDefNotEditable = errors.New("workflow definition is archived or does not exist; restore it before editing")
@@ -2458,7 +2462,55 @@ func (s *Store) checkDimMemberAccess(ctx context.Context, userID, dimensionID, c
 			return ErrHiddenScope
 		}
 	}
-	return nil
+	return s.checkScopeWritable(ctx, userID, memberID)
+}
+
+// checkScopeWritable refuses a start scope the caller may not write as a
+// whole. An instance locks its member and every member under it (the lock
+// matches a written member by itself or an ancestor), so a "read" rule on
+// the member, or a "read" or "hidden" rule on any member under it, would
+// let the caller freeze numbers another person owns: a regional manager
+// with Read on AMERICAS started its budget approval, and the Americas
+// owner's own writes were refused until the controller decided
+// (2026-10-25). Rules match by id or lineage, as writeguard's do.
+func (s *Store) checkScopeWritable(ctx context.Context, userID, memberID string) error {
+	var dimName, code, access string
+	var depth int
+	err := s.db.QueryRow(ctx, `
+		WITH RECURSIVE sub AS (
+			SELECT m.id, m.lineage_id, 0 AS depth FROM model.dimension_member m WHERE m.id = $2::uuid
+			UNION ALL
+			SELECT c.id, c.lineage_id, sub.depth + 1
+			FROM model.dimension_member c JOIN sub ON c.parent_member_id = sub.id
+			WHERE sub.depth < 64
+		)
+		SELECT COALESCE(NULLIF(d.name, ''), 'a dimension'), m.code, r.access, sub.depth
+		FROM sub
+		JOIN model.dimension_member m ON m.id = sub.id
+		JOIN model.dimension_def d ON d.id = m.dimension_id
+		JOIN identity.user_access_rule r
+		  ON r.user_id = $1::uuid AND r.rule_type = 'dimension_member'
+		 AND (r.access = 'hidden' OR r.access = 'read')
+		 AND (r.ref_id = sub.id::text
+		      OR COALESCE(r.ref_lineage_id, (SELECT x.lineage_id FROM model.dimension_member x
+		             WHERE x.id = CASE WHEN r.ref_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN r.ref_id::uuid END)) = sub.lineage_id)
+		ORDER BY sub.depth, CASE r.access WHEN 'hidden' THEN 0 ELSE 1 END
+		LIMIT 1`, userID, memberID).Scan(&dimName, &code, &access, &depth)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check scope access: %w", err)
+	}
+	switch {
+	case depth == 0:
+		return fmt.Errorf("%w: %s %s is read-only for you", ErrReadOnlyScope, dimName, code)
+	case access == "read":
+		return fmt.Errorf("%w: %s %s, inside this scope, is read-only for you", ErrReadOnlyScope, dimName, code)
+	default:
+		// Named only by its dimension: confirming nothing about a hidden member.
+		return fmt.Errorf("%w: a member of %s inside this scope is hidden from you", ErrReadOnlyScope, dimName)
+	}
 }
 
 // ResolveStartContext is the one implementation of "is this workflow

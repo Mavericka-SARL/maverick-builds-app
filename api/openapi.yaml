@@ -272,7 +272,10 @@ components:
         client_secret: { type: string, writeOnly: true }
         allowed_domains: { type: array, items: { type: string } }
         jit_provisioning: { type: boolean, description: Create an account on first sign-in. }
-        default_role: { type: string, enum: [business_user, business_admin, developer, tenant_admin] }
+        default_role:
+          type: string
+          enum: [business_user, business_admin, developer]
+          description: The role a first sign-in gets; only roles a tenant admin may grant on the Users screen.
         enabled: { type: boolean }
         configured: { type: boolean, readOnly: true }
         broker_endpoint: { type: string, readOnly: true }

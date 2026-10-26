@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
+	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
@@ -854,6 +855,7 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 	}
 	formulaSent := has("formula") && p.Formula != ""
+	storedIsInput := metricIsInput
 	switchKind := p.IsInput != nil && *p.IsInput != metricIsInput
 	if switchKind {
 		if *p.IsInput {
@@ -976,6 +978,23 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if switchKind {
 		if err := modeledit.SwitchMetricKind(ctx, e.pool, p.MetricID, metricIsInput, p.DropValues); err != nil {
+			return "", "", err
+		}
+	}
+	// A text input moving to another format converts its notes, as the
+	// console's metric save does (modeledit.ConvertTextNotes).
+	if storedIsInput && metricIsInput && st.Format == metricformula.FormatText && p.Format != "" && p.Format != metricformula.FormatText {
+		// All of a metric's notes convert, or none: a transaction of its own
+		// (a savepoint inside a proposal's dry run).
+		tx, err := e.pool.Begin(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		if err := modeledit.ConvertTextNotes(ctx, tx, p.MetricID, p.Format, p.PicklistDimension, e.userID, p.DropValues); err != nil {
+			_ = tx.Rollback(ctx)
+			return "", "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return "", "", err
 		}
 	}
@@ -3102,7 +3121,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at, link_owner)
 			SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 				COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
-				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
+				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1),
+				         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text")+` THEN i.target_id END),
 				CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
 					SELECT jsonb_object_agg(e.key, COALESCE((
 						SELECT to_jsonb(m.new_id::text) FROM idmap m
@@ -3111,7 +3131,10 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 						 ORDER BY m.kind = CASE WHEN e.key = 'target_id'
 						                        THEN COALESCE(NULLIF(i.config->>'target_type',''), NULLIF(i.target_type,''), 'grid')
 						                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
-						 LIMIT 1), e.value))
+						 LIMIT 1),
+					CASE WHEN e.key = 'target_id' AND jsonb_typeof(e.value) = 'string'
+					          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')")+`
+					     THEN 'null'::jsonb ELSE e.value END))
 					FROM jsonb_each(i.config) e), i.config)
 				ELSE i.config END,
 				i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
@@ -3121,6 +3144,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy integrations into new revision: %w", err)
+		}
+		if _, err := tx.Exec(ctx, integration.CopySchedulesSQL, e.modelID, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("copy connector schedules into new revision: %w", err)
 		}
 
 		// Copy workflow definitions and automation rules — the same

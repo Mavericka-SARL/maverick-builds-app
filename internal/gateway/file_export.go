@@ -147,7 +147,7 @@ func writeSpecProblems(w http.ResponseWriter, problems []string) {
 // model's — and, when a revision is given, that revision's.
 func (h *handler) exportGridInModel(r *http.Request, modelID, revisionID, gridID string) (dataexport.Grid, string, error) {
 	ctx := r.Context()
-	if err := h.checkIntegrationTarget(ctx, modelID, "grid", gridID); err != nil {
+	if err := h.checkIntegrationTarget(ctx, modelID, revisionID, "grid", gridID); err != nil {
 		return dataexport.Grid{}, "", err
 	}
 	g, _, gridRev, err := dataexport.LoadGrid(ctx, h.db.For(ctx), gridID)
@@ -206,7 +206,7 @@ func (h *handler) fileExportCreate(w http.ResponseWriter, r *http.Request, model
 		VALUES ($1::uuid, $2, 'file_export', 'grid', $3::uuid, NULLIF($4,'')::uuid, $5, $6, $7::jsonb) RETURNING id::text`,
 		modelID, body.Name, body.TargetID, revisionID, body.Status, body.Tags, string(cfg),
 	).Scan(&newID); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		writeIntegrationErr(w, err, body.Name)
 		return
 	}
 	if a, e := h.resolveActor(ctx, r); e == nil {

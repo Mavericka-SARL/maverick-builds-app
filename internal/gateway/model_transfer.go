@@ -258,7 +258,7 @@ func (h *handler) recalcRevisionFromInputs(ctx context.Context, modelID, revisio
 		return nil
 	}
 	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
-	return sched.RecalcAffected(ctx, modelID, revisionID, inputIDs)
+	return sched.RecalcFromAllInputs(ctx, modelID, revisionID, inputIDs)
 }
 
 // recalcRevisionCalculated recomputes every calculated metric of one

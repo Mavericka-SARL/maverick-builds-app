@@ -512,6 +512,10 @@ func scopeCalcCells(
 	cells = make(map[string]float64)
 	totals = make(map[string]float64)
 	done := map[string]bool{}
+	// formulaAt reads a formula/rate metric resolved earlier in this pass at
+	// any combination above its leaves: its formula there, never a
+	// combination of its leaves (see aggregateReader).
+	formulaAt := map[string]aggregateReader{}
 
 	var remaining []metricRow
 	for _, m := range universe {
@@ -550,6 +554,9 @@ func scopeCalcCells(
 					totals[m.ID] = res.total
 					working[m.ID] = res.total
 				}
+				if m.Formula != nil && isFormulaRule(calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)) {
+					formulaAt[m.ID] = servedAggregate(m.ID, sm, sr)
+				}
 				done[m.ID] = true
 				continue
 			}
@@ -572,7 +579,7 @@ func scopeCalcCells(
 				continue
 			}
 			scopeOrdinaryMetric(ctx, m, ownDims, refs, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor,
-				cells, totals, working, withheld)
+				formulaAt, cells, totals, working, withheld)
 			done[m.ID] = true
 		}
 		if len(unresolved) == len(remaining) {
@@ -585,6 +592,48 @@ func scopeCalcCells(
 	}
 	sort.Strings(withheldKeys)
 	return cells, totals, withheldKeys
+}
+
+// aggregateReader reads a formula/rate metric at a combination: its value
+// there, or the evaluation's error.
+type aggregateReader func(combo map[string]string) (float64, error)
+
+// servedAggregate reads a served formula/rate metric above its leaves from
+// the scheduler's persisted rows; a combination with no row has no value,
+// and one whose read set touches a hidden member is withheld.
+func servedAggregate(metricID string, sm *servedMetric, sr *scopedReads) aggregateReader {
+	return func(combo map[string]string) (float64, error) {
+		if sr.withheld(metricID, combo) {
+			return 0, errWithheld
+		}
+		if v, ok := sm.Rows[comboKey(combo)]; ok {
+			return v, nil
+		}
+		return 0, errNoAggregateValue
+	}
+}
+
+type onceResult struct {
+	v   float64
+	err error
+}
+
+// errNoAggregateValue: a formula/rate dependency has no value at the
+// combination read; the reading cell has none either, as in the scheduler.
+var errNoAggregateValue = errors.New("no value at this combination")
+
+// pinsLeaves reports whether combo pins every one of ownDims at a leaf.
+func pinsLeaves(dims map[string]*rollup.Dimension, ownDims []string, combo map[string]string) bool {
+	for _, d := range ownDims {
+		code, ok := combo[d]
+		if !ok || dims[d] == nil {
+			return false
+		}
+		if leaves := rollup.LeafDescendants(dims[d], code); len(leaves) != 1 || leaves[0] != code {
+			return false
+		}
+	}
+	return true
 }
 
 // scopeOrdinaryMetric recomputes one ordinary calculated metric per combo.
@@ -600,7 +649,7 @@ func scopeCalcCells(
 func scopeOrdinaryMetric(
 	ctx context.Context, m metricRow, ownDims, refs []string, byName map[string]metricRow,
 	rollupDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string,
-	sr *scopedReads, fetchFor func(string) rollup.RawValue,
+	sr *scopedReads, fetchFor func(string) rollup.RawValue, formulaAt map[string]aggregateReader,
 	cells, totals, working map[string]float64, withheld map[string]bool,
 ) {
 	combos := rollup.LeafCombos(rollupDims, ownDims)
@@ -628,6 +677,19 @@ func scopeOrdinaryMetric(
 			if norm, nErr := rollup.NormalizeCombo(rollupDims, metricDimIDs[refM.ID], combo, nil); nErr == nil {
 				at = norm
 			}
+			// A formula/rate dependency above its leaves — a parent, an
+			// aggregate period, the total — is its formula evaluated there,
+			// as the scheduler reads it (resolveDependency's exact source):
+			// a margin read at FY by `margin - ly_margin` summed its months'
+			// margins by its time summary (2026-10-18, the CPG dashboard).
+			if read := formulaAt[refM.ID]; read != nil && !pinsLeaves(rollupDims, metricDimIDs[refM.ID], at) {
+				v, err := read(at)
+				if err != nil {
+					return 0, err
+				}
+				values[refM.Name] = v
+				continue
+			}
 			v, _, err := rollup.ResolveTime(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
 				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 			if err != nil {
@@ -644,6 +706,20 @@ func scopeOrdinaryMetric(
 		// The member-metadata context (UNFILTERED): dim.property and PARENT
 		// compute exactly as in the scheduler.
 		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, namedDims, sr.cellContext(combo))
+	}
+	if isFormulaRule(rule) {
+		// Its readers evaluate it above its leaves (see evalCombo); each
+		// combination once.
+		memo := map[string]onceResult{}
+		formulaAt[m.ID] = func(combo map[string]string) (float64, error) {
+			key := comboKey(combo)
+			if r, ok := memo[key]; ok {
+				return r.v, r.err
+			}
+			v, err := evalCombo(combo)
+			memo[key] = onceResult{v, err}
+			return v, err
+		}
 	}
 
 	var leaves []leafValue

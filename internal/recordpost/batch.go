@@ -221,6 +221,10 @@ func (ps *Poster) guard(ctx context.Context, tp *tablePosting, i int, guardUser 
 	var reason string
 	if err := RetryTransient(ctx, 3, func() error {
 		r, e := writeguard.CheckWriteMetrics(gctx, ps.db(ctx), m.modelID, revisionID, guardUser, g.memberIDs, []string{m.targetMetricID})
+		if e == nil && r == "" {
+			// A closed cell takes no posting either (PostingRefusal).
+			r, e = writeguard.ClosedReason(gctx, ps.db(ctx), revisionID, []writeguard.Cell{{MetricID: m.targetMetricID, DimCodes: members}})
+		}
 		reason = r
 		return e
 	}); err != nil {

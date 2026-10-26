@@ -107,12 +107,12 @@ func assertActiveAccess(f *restrictedFixture, label, gridID string, members, met
 	f.t.Helper()
 	g := f.gridAt(f.viewer, "grid_def_id="+gridID)
 	for id, want := range members {
-		if got := g.AccessRules.DimMembers[id]; got != want {
+		if got := g.access(id, false); got != want {
 			f.errf(label, "member %s access = %q, want %q", id, got, want)
 		}
 	}
 	for id, want := range metrics {
-		if got := g.AccessRules.Metrics[id]; got != want {
+		if got := g.access(id, true); got != want {
 			f.errf(label, "metric %s access = %q, want %q", id, got, want)
 		}
 	}
@@ -196,7 +196,7 @@ func TestAccessRulesFollowRenameBeforeActivation(t *testing.T) {
 			t.Errorf("old A serves UK after a rule on its renamed copy GB hid it: %s = %v", k, v)
 		}
 	}
-	if got := g.AccessRules.DimMembers[f.members["UK"]]; got != "hidden" {
+	if got := g.access(f.members["UK"], false); got != "hidden" {
 		t.Errorf("old A: UK access = %q, want hidden (rule written on renamed GB)", got)
 	}
 }

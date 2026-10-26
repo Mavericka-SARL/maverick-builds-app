@@ -184,15 +184,12 @@ spec:
     # would also supersede the caller list above, silently making the whole
     # namespace able to reach the identity provider.
     #
-    # Traefik, installed in "traefik" (bootstrap/traefik-values.yaml). The
-    # "ingress-nginx" entry is for a cluster moving off that controller: both
-    # serve the same Ingress until DNS points at Traefik, and sign-in must work
-    # through either. A namespace that does not exist admits nothing.
+    # Traefik, installed in "traefik" (bootstrap/traefik-values.yaml). An
+    # "ingress-nginx" entry admitted the old controller while both served the
+    # same Ingress; it went with step 8 of the move off ingress-nginx.
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: traefik}
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
       ports: [{protocol: TCP, port: 8080}]
   egress:
     # KC_DB=dev-mem (embedded H2, confirmed in infra/keycloak.yaml) — no

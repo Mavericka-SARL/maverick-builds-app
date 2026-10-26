@@ -238,3 +238,68 @@ func TestQueueClaimLeaseAndScheduleDedup(t *testing.T) {
 		t.Fatal("bad timezone accepted")
 	}
 }
+
+// Only the live revision's connector schedules run (decided 2026-10-06):
+// a revision copy carries a connector's schedule unarmed, the next tick
+// disarms the schedule of a revision that is not live and arms the live
+// one's, and a model with no live revision runs its schedules as before.
+func TestOnlyTheLiveRevisionsConnectorSchedulesRun(t *testing.T) {
+	s, _, modelID, working := setupStore(t)
+	ctx := context.Background()
+	pool := s.Pool()
+	one := func(sql string, args ...any) string {
+		t.Helper()
+		var v string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return v
+	}
+	def, err := s.CreateDefinition(ctx, modelID, working, "Nightly", "", nil, "draft", "", baseConfig("11111111-1111-1111-1111-111111111111"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertSchedule(ctx, &integration.Schedule{IntegrationID: def.ID, Kind: "interval", IntervalSeconds: 60, Enabled: true, Timezone: "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	due := func() map[string]bool {
+		t.Helper()
+		list, err := s.DueSchedules(ctx, time.Now().Add(2*time.Minute), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, sc := range list {
+			ids[sc.IntegrationID] = true
+		}
+		return ids
+	}
+	// No live revision: nothing supersedes the working one.
+	if !due()[def.ID] {
+		t.Fatal("a model with no live revision does not run its connector's schedule")
+	}
+
+	// A copy into a new revision carries the schedule, unarmed.
+	copyRev := one(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Copy') RETURNING id::text`, modelID)
+	copyID := one(`INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, target_id, config, status)
+		SELECT model_id, $2::uuid, name, type, target_type, target_id, config, status FROM model.integration_def WHERE id = $1::uuid
+		RETURNING id::text`, def.ID, copyRev)
+	if _, err := pool.Exec(ctx, integration.CopySchedulesSQL, modelID, copyRev, working); err != nil {
+		t.Fatalf("copy schedules: %v", err)
+	}
+	if got := one(`SELECT kind || ':' || interval_seconds || ':' || (next_fire_at IS NULL) FROM model.integration_schedule WHERE integration_id = $1::uuid`, copyID); got != "interval:60:true" {
+		t.Errorf("copied schedule = %s, want interval:60:true (unarmed)", got)
+	}
+
+	// The copy goes live: armed for its next tick, the old one disarmed.
+	one(`UPDATE core.model SET active_revision_id = $2::uuid WHERE id = $1::uuid RETURNING id::text`, modelID, copyRev)
+	if err := s.ArmActiveSchedules(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if d := due(); d[def.ID] || !d[copyID] {
+		t.Errorf("due after go-live = %v, want only the copy %s", d, copyID)
+	}
+	if got := one(`SELECT (next_fire_at IS NULL)::text FROM model.integration_schedule WHERE integration_id = $1::uuid`, def.ID); got != "true" {
+		t.Errorf("the superseded revision's schedule is still armed")
+	}
+}

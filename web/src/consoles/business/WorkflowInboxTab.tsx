@@ -17,7 +17,7 @@ import { WorkflowStepActions } from "../WorkflowStepActions";
 // business user DEFINES what they are submitting for approval, instead of
 // depending on a per-scope dashboard button frozen at design time. The
 // server re-validates everything (ResolveStartContext rejects hidden
-// members), so the picker filtering is UX, not the security boundary.
+// and read-only members), so the picker filtering is UX, not the security boundary.
 function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; dims: DevDimension[]; onClose: () => void }) {
   const qc = useQueryClient();
   // Dimension-member fields hold a LIST of selected codes; other fields a
@@ -67,10 +67,23 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
     const dim = dims.find(d => d.id === dimensionID);
     if (!dim) return null;
     const codeByID = new Map(dim.members.map(m => [m.id, m.code]));
+    // An instance locks its member and everything under it, so a member is
+    // offered only when the caller may write all of that: neither it nor a
+    // member under it is read-only for them (hidden ones are not listed at
+    // all, and the server refuses both).
+    const parentByID = new Map(dim.members.map(m => [m.id, m.parent_member_id]));
+    const readOnly = new Set<string>();
+    for (const m of dim.members) {
+      if (m.access !== "read") continue;
+      for (let id: string | null | undefined = m.id; id && !readOnly.has(id); id = parentByID.get(id)) {
+        readOnly.add(id);
+      }
+    }
     return dim.members.map(m => ({
       code: m.code,
       label: m.label,
       parent_code: m.parent_member_id ? codeByID.get(m.parent_member_id) : undefined,
+      startable: !readOnly.has(m.id),
     }));
   };
   const labelFor = (dimensionID: string | undefined, code: string) =>
@@ -145,7 +158,7 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
                         // Leaves only: selecting a parent already covers its
                         // whole subtree via the lock's ancestor cascade, so
                         // "all" means every leaf, without redundant combos.
-                        const leaves = members.filter(m => !members.some(x => x.parent_code === m.code)).map(m => m.code);
+                        const leaves = members.filter(m => m.startable && !members.some(x => x.parent_code === m.code)).map(m => m.code);
                         return (
                           <Button
                             size="sm"
@@ -186,7 +199,7 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
                       members={members}
                       value=""
                       placeholder={chosen.length ? "Add another…" : "Select…"}
-                      isSelectable={m => !chosen.includes(m.code)}
+                      isSelectable={m => m.startable && !chosen.includes(m.code)}
                       onChange={code => {
                         if (!code) return;
                         setMulti(s => ({ ...s, [v.key]: [...(s[v.key] ?? []), code] }));

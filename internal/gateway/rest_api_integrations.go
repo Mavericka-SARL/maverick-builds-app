@@ -63,19 +63,19 @@ func (h *handler) resolveIntegrationApp(w http.ResponseWriter, r *http.Request, 
 // integration.CheckOwnership again immediately before it reads or writes.
 // A nil config or an empty target or connection is a draft still being
 // filled in, and passes.
-func (h *handler) checkRestAPITargets(r *http.Request, modelID string, cfg *integration.Config, connectionID string) error {
+func (h *handler) checkRestAPITargets(r *http.Request, modelID, revisionID string, cfg *integration.Config, connectionID string) error {
 	var targetType, targetID string
 	if cfg != nil {
 		targetType, targetID = string(cfg.TargetType), cfg.TargetID
 	}
-	return integration.CheckOwnership(r.Context(), h.db, modelID, targetType, targetID, connectionID)
+	return integration.CheckOwnership(r.Context(), h.db, modelID, revisionID, targetType, targetID, connectionID)
 }
 
 // checkIntegrationTarget is the same check for a legacy csv_import /
 // google_sheets row, whose target lives in the target_type/target_id
 // columns rather than in a typed config.
-func (h *handler) checkIntegrationTarget(ctx context.Context, modelID, targetType, targetID string) error {
-	return integration.CheckOwnership(ctx, h.db, modelID, targetType, targetID, "")
+func (h *handler) checkIntegrationTarget(ctx context.Context, modelID, revisionID, targetType, targetID string) error {
+	return integration.CheckOwnership(ctx, h.db, modelID, revisionID, targetType, targetID, "")
 }
 
 // integrationRefs are the ids an integration row stores: its target and
@@ -99,7 +99,7 @@ func refsOf(cfg *integration.Config, connectionID string) integrationRefs {
 // dimension is deleted, and that must not block a rename, a tag, a
 // connection change or a copy. Every use re-checks and fails on it anyway.
 // Activation is strict for both: an active integration must be runnable.
-func (h *handler) checkIntegrationSave(ctx context.Context, q integration.RowQuerier, modelID string, stored, next integrationRefs, activating bool) error {
+func (h *handler) checkIntegrationSave(ctx context.Context, q integration.RowQuerier, modelID, revisionID string, stored, next integrationRefs, activating bool) error {
 	kept := func(changed bool, err error) error {
 		if err == nil || changed || activating || integration.IsForeign(err) {
 			return err
@@ -107,10 +107,10 @@ func (h *handler) checkIntegrationSave(ctx context.Context, q integration.RowQue
 		return nil
 	}
 	targetChanged := stored.TargetType != next.TargetType || stored.TargetID != next.TargetID
-	if err := kept(targetChanged, integration.CheckOwnership(ctx, q, modelID, next.TargetType, next.TargetID, "")); err != nil {
+	if err := kept(targetChanged, integration.CheckOwnership(ctx, q, modelID, revisionID, next.TargetType, next.TargetID, "")); err != nil {
 		return err
 	}
-	return kept(stored.ConnectionID != next.ConnectionID, integration.CheckOwnership(ctx, q, modelID, "", "", next.ConnectionID))
+	return kept(stored.ConnectionID != next.ConnectionID, integration.CheckOwnership(ctx, q, modelID, revisionID, "", "", next.ConnectionID))
 }
 
 // restAPIDetail is the typed GET/PATCH response: definition + schedule.
@@ -183,7 +183,7 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 		}
 		// A draft is refused a foreign target too: a draft can be tested and
 		// dry-run, and it can be activated later.
-		if err := integration.CheckOwnership(ctx, db, modelID, string(body.Config.TargetType), body.Config.TargetID, connID); err != nil {
+		if err := integration.CheckOwnership(ctx, db, modelID, revisionID, string(body.Config.TargetType), body.Config.TargetID, connID); err != nil {
 			return "", err
 		}
 		if err := h.checkModelLink(ctx, a, modelID, body.Config, connID, status == "active"); err != nil {
@@ -233,7 +233,7 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 		if body.ConnectionID != nil {
 			connID = *body.ConnectionID
 		}
-		if err := h.checkIntegrationSave(ctx, db, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
+		if err := h.checkIntegrationSave(ctx, db, modelID, cur.RevisionID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
 			return "", err
 		}
 		if err := h.checkModelLink(ctx, a, modelID, cfg, connID, body.Status == "active"); err != nil {
@@ -287,7 +287,21 @@ func writeSaveErr(w http.ResponseWriter, err error) {
 		jsonErr(w, err, http.StatusNotFound)
 		return
 	}
+	if integration.IsNameTaken(err) {
+		jsonErr(w, err, http.StatusConflict)
+		return
+	}
 	jsonErr(w, err, http.StatusBadRequest)
+}
+
+// writeIntegrationErr answers a failed connector INSERT or UPDATE of a path
+// that writes the row itself: 409 when its revision already has the name.
+func writeIntegrationErr(w http.ResponseWriter, err error, name string) {
+	if err = integration.NameTaken(err, name); integration.IsNameTaken(err) {
+		jsonErr(w, err, http.StatusConflict)
+		return
+	}
+	jsonErr(w, err, http.StatusInternalServerError)
 }
 
 // restAPICreate handles POST /api/developer/integrations with type=rest_api —
@@ -384,7 +398,7 @@ func (h *handler) restAPIDuplicate(w http.ResponseWriter, r *http.Request, model
 	// model's is refused (a stored row may predate the check), a deleted
 	// one is kept for the copy to be retargeted.
 	refs := refsOf(src.Config, src.ConnectionID)
-	if terr := h.checkIntegrationSave(ctx, h.db, modelID, refs, refs, false); terr != nil {
+	if terr := h.checkIntegrationSave(ctx, h.db, modelID, src.RevisionID, refs, refs, false); terr != nil {
 		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}
@@ -393,9 +407,15 @@ func (h *handler) restAPIDuplicate(w http.ResponseWriter, r *http.Request, model
 		jsonErr(w, lerr, http.StatusBadRequest)
 		return
 	}
-	dup, err := st.CreateDefinition(ctx, modelID, src.RevisionID, src.Name+" (copy)", src.Description, src.Tags, "draft", src.ConnectionID, src.Config, h.integrationAllowInsecure())
+	// Names are unique in a revision: a second copy is "X (copy 2)".
+	dupName, err := st.FreeName(ctx, modelID, src.RevisionID, src.Name+" (copy)")
 	if err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	dup, err := st.CreateDefinition(ctx, modelID, src.RevisionID, dupName, src.Description, src.Tags, "draft", src.ConnectionID, src.Config, h.integrationAllowInsecure())
+	if err != nil {
+		writeSaveErr(w, err)
 		return
 	}
 	if src.Config != nil && src.Config.Protocol == integration.ProtocolModel {
@@ -430,7 +450,7 @@ func (h *handler) restAPIValidate(w http.ResponseWriter, r *http.Request, modelI
 	if verr := def.Config.Validate(h.integrationAllowInsecure()); verr != nil {
 		errs = append(errs, verr.Error())
 	}
-	if terr := h.checkRestAPITargets(r, modelID, def.Config, def.ConnectionID); terr != nil {
+	if terr := h.checkRestAPITargets(r, modelID, def.RevisionID, def.Config, def.ConnectionID); terr != nil {
 		errs = append(errs, terr.Error())
 	}
 	if lerr := h.checkModelLinkRequest(r, modelID, def.Config, def.ConnectionID, true); lerr != nil {
@@ -462,7 +482,7 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 	// /test, dry-run and run all read or write the target: a stored config
 	// may predate the save-time check, so it is re-checked before queueing
 	// (and the worker checks once more before it reads or writes).
-	if terr := h.checkRestAPITargets(r, modelID, def.Config, def.ConnectionID); terr != nil {
+	if terr := h.checkRestAPITargets(r, modelID, def.RevisionID, def.Config, def.ConnectionID); terr != nil {
 		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}

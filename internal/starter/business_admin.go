@@ -164,7 +164,7 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 
 		baText(`## Three layers decide what someone can do
 
-Each one narrows the one before. **Roles** decide which dashboards a person can open. **Access rules** decide which numbers on them the person can change, only read, or not see at all. And an open request locks the numbers it is about; once it is approved, they stay locked if the approval was its last step.`, 132),
+Each one narrows the one before. **Roles** decide which dashboards a person can open. **Access rules** decide which numbers on them the person can change, only read, or not see at all. And an open request locks the numbers it is about; once it is approved, they stay locked.`, 132),
 
 		baPicture(baLayers(), "Roles decide which dashboards, access rules decide which numbers, open requests lock the numbers they are about", 880, 255),
 
@@ -266,7 +266,7 @@ Roles decide which pages a person opens. **Access rules** decide, person by pers
 - **Read** — they see the numbers but cannot change them. It applies to that member alone: *Read* on *Nordics* leaves Oslo and Stockholm open.
 - **Hidden** — gone from grids, charts and selectors, and so is everything under it: hide *Iberia*, and Lisbon and Madrid go with it.
 
-A metric takes the same three levels: *Read* on *spent* makes it read-only for that person in every grid.`, 196),
+A metric takes the same three levels: *Read* on *spent* makes it read-only for that person in every grid. *Hidden* on a metric hides every metric calculated from it as well — *remaining*, built on *spent*, would otherwise show it.`, 216),
 
 		baText(`## Totals for someone who cannot see everything
 
@@ -324,11 +324,11 @@ A developer designs the workflows; users submit requests through them; you decid
 
 You decide requests; you do not submit them — users do. An account that is also a developer or tenant admin, like the one that signed up, can submit as well.`, 296),
 
-		baPicture(baRequest(), "A user submits, you decide in the Workflow Inbox; approved numbers stay locked if the approval is its last step, rejected or cancelled ones are released", 860, 232),
+		baPicture(baRequest(), "A user submits, you decide in the Workflow Inbox; approved numbers stay locked, rejected or cancelled ones are released", 860, 232),
 
 		baText(`## Locks keep agreed numbers still
 
-A request about part of the model — Oslo's budget, say — locks those numbers while it waits for your approval; while it is at a task (a planner correcting Oslo, say), they stay editable. Once approved, it keeps them locked so an agreed figure does not drift, but only if the approval is its last step: a step after it, such as a notification, releases them when it finishes. Anyone who types there while it is locked, you included, sees **Save failed** with the reason: the cell is locked because a workflow about it is awaiting approval or was approved. A rejected or cancelled request releases them.
+A request about part of the model — Oslo's budget, say — locks those numbers while it waits for your approval; while it is at a task (a planner correcting Oslo, say), they stay editable. Once approved, it keeps them locked so an agreed figure does not drift, whatever steps follow the approval, a notification to the requester included. Anyone who types there while it is locked, you included, sees **Save failed** with the reason: the cell is locked because a workflow about it is awaiting approval or was approved. A rejected or cancelled request releases them.
 
 A company-wide round — one about no particular member or record, such as a planning round started from a dashboard button — locks every number of its revision while its approval waits; approving or rejecting it opens them again.`, 200),
 
@@ -378,7 +378,7 @@ func baLayers() string {
 	rows := []struct{ name, where, what, how, note string }{
 		{"Roles", "Business Admin › Roles", "Which dashboards", "a person can open", "admins and developers see all"},
 		{"Access rules", "Business Admin › Access Rules", "Which numbers", "Write · Read · Hidden", "set per person, you included"},
-		{"Open requests", "running or approved workflows", "Which numbers are locked", "while it waits, and once approved", "after approval, if that is the last step"},
+		{"Open requests", "running or approved workflows", "Which numbers are locked", "while it waits, and once approved", "released by reject or cancel"},
 	}
 	for i, r := range rows {
 		y := 10 + i*84
@@ -425,7 +425,7 @@ func baRequest() string {
 	s += `<line x1="512" y1="45" x2="512" y2="187" stroke="` + muted + `" stroke-width="1.5"/>`
 	s += arrow(512, 45, 40)
 	s += arrow(512, 187, 40)
-	s += box(560, 13, 290, 64, "Approved", "stay locked if approval is the last step", false)
+	s += box(560, 13, 290, 64, "Approved", "stay locked", false)
 	s += box(560, 155, 290, 64, "Rejected or cancelled", "numbers are released", false)
 	return s + `</svg>`
 }

@@ -15,12 +15,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/xuri/excelize/v2"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -323,6 +325,82 @@ func TestGridExport_XLSXParsesAndRoundTripsThroughImport(t *testing.T) {
 	}
 }
 
+// A note, a pick-list member and a date leave the export as the import reads
+// them — the note's text, the member's code, yyyy-mm-dd — and come back
+// unchanged through /api/import/upload. A note used to leave as 0 and a
+// pick-list cell as its stored key (2026-10-16).
+func TestGridExport_TextPicklistAndDateRoundTrip(t *testing.T) {
+	f := setupTransferFixture(t)
+	ctx := context.Background()
+	one := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	note := one(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, format, agg_rule) VALUES ($1::uuid, $2::uuid, 'note', true, 'text', 'none') RETURNING id::text`, f.modelID, f.revID)
+	owner := one(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, format, agg_rule, picklist_dimension_id) VALUES ($1::uuid, $2::uuid, 'owner_dept', true, 'picklist', 'none', $3::uuid) RETURNING id::text`, f.modelID, f.revID, f.deptsDimID)
+	start := one(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, format, agg_rule) VALUES ($1::uuid, $2::uuid, 'start', true, 'date', 'none') RETURNING id::text`, f.modelID, f.revID)
+	for i, m := range []string{note, owner, start} {
+		one(`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) VALUES ($1::uuid, $2::uuid, $3) RETURNING metric_id::text`, f.gridID, m, i+1)
+	}
+	at := fmt.Sprintf(`{"%s":"DEPT_A"}`, f.deptsDimID)
+	for _, c := range []struct {
+		metric string
+		value  float64
+		text   *string
+	}{
+		{note, 0, strPtr("Hello, world")},
+		{owner, formula.PicklistKey("DEPT_B"), nil},
+		{start, 46357, nil}, // 2026-12-01
+	} {
+		one(`INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, text_value) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5, $6) RETURNING id::text`,
+			f.modelID, f.revID, c.metric, at, c.value, c.text)
+	}
+
+	resp := f.request(t, "GET", fmt.Sprintf("/api/grid/export?grid_def_id=%s&revision_id=%s", f.gridID, f.revID), f.exporterSub, nil)
+	defer resp.Body.Close() //nolint:errcheck
+	rows := readCSV(t, resp)
+	if got := fmt.Sprint(rows[0]); got != "[departments amount note owner_dept start]" {
+		t.Fatalf("header = %s", got)
+	}
+	var deptA []string
+	for _, r := range rows[1:] {
+		if r[0] == "DEPT_A" {
+			deptA = r
+		}
+	}
+	if got := fmt.Sprint(deptA); got != "[DEPT_A 100 Hello, world DEPT_B 2026-12-01]" {
+		t.Fatalf("DEPT_A row = %q", deptA)
+	}
+
+	// Cleared, then imported back from the export: the same values.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM runtime.fact_input WHERE metric_id = ANY($1::uuid[])`, []string{note, owner, start}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cw := csv.NewWriter(&out)
+	_ = cw.WriteAll(rows)
+	if status, body := f.jsonRequest(t, "POST", "/api/import/upload", f.exporterSub, map[string]any{
+		"csv": out.String(), "revision_id": f.revID, "import_mode": "replace",
+	}); status != http.StatusOK {
+		t.Fatalf("import status = %d, body = %v", status, body)
+	}
+	for _, c := range []struct{ metric, want string }{
+		{note, "0|Hello, world"},
+		{owner, fmt.Sprintf("%v|", formula.PicklistKey("DEPT_B"))},
+		{start, "46357|"},
+	} {
+		got := one(`SELECT value::float8::text || '|' || COALESCE(text_value, '') FROM runtime.fact_input
+			WHERE metric_id = $1::uuid AND dim_members = $2::jsonb ORDER BY entered_at DESC, id DESC LIMIT 1`, c.metric, at)
+		if got != c.want {
+			t.Errorf("re-imported %s = %q, want %q", c.metric, got, c.want)
+		}
+	}
+}
+
 // ── form export/import ──────────────────────────────────────────────────────
 
 func TestFormExport_CSV(t *testing.T) {
@@ -470,5 +548,36 @@ func TestFormImport_RoundTripAndValidation(t *testing.T) {
 	_ = json.NewDecoder(resp2.Body).Decode(&records2)
 	if len(records2) != 2 {
 		t.Errorf("records after rejected import = %d, want still 2", len(records2))
+	}
+}
+
+// A business user's /api/grid and /api/metrics carry no formula text — a
+// formula names the metrics it reads, hidden ones included — and the
+// access rules /api/grid echoes leave out the hidden ones, which listed the
+// ids of the members hidden from them (2026-10-02).
+func TestGridReadHidesFormulasAndHiddenRulesFromBusinessUsers(t *testing.T) {
+	f := setupTransferFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.metric_def (model_id, revision_id, name, is_input, formula) VALUES ($1::uuid, $2::uuid, 'amount_x2', false, 'amount * 2')`, f.modelID, f.revID); err != nil {
+		t.Fatal(err)
+	}
+	status, body := f.jsonRequest(t, "GET", fmt.Sprintf("/api/grid?grid_def_id=%s&revision_id=%s", f.gridID, f.revID), f.restrictedSub, nil)
+	if status != http.StatusOK {
+		t.Fatalf("grid: %d %v", status, body)
+	}
+	raw, _ := json.Marshal(body)
+	if strings.Contains(string(raw), `"formula"`) || strings.Contains(string(raw), "amount * 2") {
+		t.Errorf("a business user's grid carries formula text: %.300s", raw)
+	}
+	rules, _ := body["access_rules"].(map[string]any)
+	members, _ := rules["dim_members"].(map[string]any)
+	if _, listed := members[f.deptBID]; listed {
+		t.Errorf("the grid echoes the rule hiding DEPT_B: %v", members)
+	}
+	resp := f.request(t, "GET", "/api/metrics?revision_id="+f.revID, f.restrictedSub, nil)
+	defer resp.Body.Close() //nolint:errcheck
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "amount * 2") {
+		t.Errorf("a business user's /api/metrics carries formula text: %.300s", b)
 	}
 }

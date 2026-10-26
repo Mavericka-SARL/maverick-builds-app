@@ -11,6 +11,7 @@ package gateway
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"strings"
 	"testing"
 
@@ -148,5 +149,38 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 	`, dimID).Scan(&parentOK)
 	if !parentOK {
 		t.Error("explicit parent_code was not linked")
+	}
+
+	// A parent listed after its child is found once every row is in.
+	if imported, errs = run("code,label,parent_code\nKID,Kid,LATE\nLATE,Late Parent,\n"); imported != 2 || errs != 0 {
+		t.Fatalf("parent listed after its child: %d/%d, want 2/0", imported, errs)
+	}
+	_ = pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM model.dimension_member c JOIN model.dimension_member p ON p.id = c.parent_member_id
+		              WHERE c.dimension_id=$1::uuid AND c.code='KID' AND p.code='LATE')`, dimID).Scan(&parentOK)
+	if !parentOK {
+		t.Error("a parent listed after its child was not linked")
+	}
+
+	// A file with a failing row imports nothing, and names each such row by
+	// its line: an unknown parent, a row with neither code nor label.
+	cr := csv.NewReader(strings.NewReader("code,label,parent_code\nA1,A one,\nB1,B one,NOPE\n,,\n"))
+	header, _ := cr.Read()
+	colIdx := map[string]int{}
+	for i, c := range header {
+		colIdx[c] = i
+	}
+	_, _, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
+	var fe *dimensionFileError
+	if !errors.As(fatal, &fe) || len(fe.rows) != 2 {
+		t.Fatalf("a file with failing rows: %v, want both rows refused", fatal)
+	}
+	if fe.rows[0].RowNumber != 3 || fe.rows[0].ErrorCode != "UNKNOWN_PARENT" || fe.rows[1].RowNumber != 4 || fe.rows[1].ErrorCode != "MISSING_CODE" {
+		t.Errorf("refused rows = %v, want line 3 UNKNOWN_PARENT and line 4 MISSING_CODE", fe.rows)
+	}
+	var kept int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.dimension_member WHERE dimension_id=$1::uuid AND code IN ('A1','B1')`, dimID).Scan(&kept)
+	if kept != 0 {
+		t.Errorf("%d member(s) of the refused file were kept", kept)
 	}
 }

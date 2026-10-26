@@ -12,6 +12,7 @@ package workflow_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mavericks-engine/mavericks/internal/workflow"
@@ -69,5 +70,62 @@ func TestResolveStartContextRejectsHiddenDimensionMember(t *testing.T) {
 	}
 	if result["scope"] != "DEPT_A" {
 		t.Errorf("resolved scope = %q, want DEPT_A", result["scope"])
+	}
+}
+
+// An instance locks its member and everything under it, so a start is
+// refused when the caller may not write all of that: a Read rule on the
+// member itself, or a Read or Hidden rule on a member under it
+// (2026-10-25: a regional manager with Read on AMERICAS started its
+// budget approval, and the Americas owner's writes were refused).
+func TestResolveStartContextRejectsScopeTheCallerMayNotWrite(t *testing.T) {
+	f := setupOnApproveFixture(t)
+	ctx := context.Background()
+	if _, err := f.store.PublishWorkflowDef(ctx, f.wfDefID, f.userID); err != nil {
+		t.Fatalf("publish workflow def: %v", err)
+	}
+	memberID := func(code string) string {
+		var id string
+		if err := f.pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_member WHERE code=$1`, code).Scan(&id); err != nil {
+			t.Fatalf("find %s: %v", code, err)
+		}
+		return id
+	}
+	start := func(userID string) error {
+		_, err := f.store.ResolveStartContext(ctx, f.wfDefID, userID, map[string]string{
+			"model_id":           f.modelID,
+			"revision_id":        f.workingRevID,
+			"target_revision_id": f.targetRevID,
+			"scope":              "DEPT_A",
+		})
+		return err
+	}
+	for _, tc := range []struct{ name, code, access, want string }{
+		{"read on the scope", "DEPT_A", "read", "departments DEPT_A is read-only for you"},
+		{"read under the scope", "STAFF_A1", "read", "STAFF_A1, inside this scope, is read-only for you"},
+		{"hidden under the scope", "STAFF_A1", "hidden", "inside this scope is hidden from you"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var userID string
+			if err := f.pool.QueryRow(ctx,
+				`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ($1, $1 || '@t.com', $1) RETURNING id::text`,
+				"scope-"+tc.access+"-"+tc.code,
+			).Scan(&userID); err != nil {
+				t.Fatalf("seed user: %v", err)
+			}
+			if _, err := f.pool.Exec(ctx,
+				`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'dimension_member', $2, $3)`,
+				userID, memberID(tc.code), tc.access,
+			); err != nil {
+				t.Fatalf("seed rule: %v", err)
+			}
+			err := start(userID)
+			if !errors.Is(err, workflow.ErrReadOnlyScope) {
+				t.Fatalf("ResolveStartContext error = %v, want workflow.ErrReadOnlyScope", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not say %q", err, tc.want)
+			}
+		})
 	}
 }

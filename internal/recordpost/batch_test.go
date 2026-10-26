@@ -224,3 +224,50 @@ func TestASyncChecksEachCreatorsOwnAccess(t *testing.T) {
 		}
 	}
 }
+
+// A record posts into no closed cell, as a typed value goes into none: the
+// file's row for a closed region is refused, saying why, and nothing of the
+// file is created; a sync re-posting records leaves a closed cell's posting
+// as it was (2026-10-26: a closed month still took a form's value).
+func TestRecordsPostIntoNoClosedCell(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	ps := recordpost.OnPool(f.pool, logger.New("test"))
+	var modelID, revID, gridID string
+	if err := f.pool.QueryRow(ctx, `SELECT md.model_id::text, md.revision_id::text, gm.grid_id::text FROM model.metric_def md
+		JOIN model.grid_metric gm ON gm.metric_id = md.id WHERE md.id=$1::uuid`, f.metricID).Scan(&modelID, &revID, &gridID); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs, err := ps.ImportRows(ctx, recordpost.ImportRequest{
+		Form: f.form, CreatorID: f.userID, Header: []string{"region", "amount"}, Rows: spendRows("10", "20"), Inline: true,
+	}); err != nil || len(errs) != 0 {
+		t.Fatalf("import before closing: errs=%v err=%v", errs, err)
+	}
+	// US is closed: closed_flag, a calculated metric of the grid, is 1 there.
+	var flag string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.metric_def (model_id, revision_id, name, is_input, formula) VALUES ($1::uuid,$2::uuid,'closed_flag',false,'1') RETURNING id::text`, modelID, revID).Scan(&flag); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid,$2::uuid)`, gridID, flag)
+	f.exec(t, `INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value) VALUES ($1::uuid,$2::uuid,$3::uuid,jsonb_build_object($4::text,'US'),1)`,
+		modelID, revID, flag, f.regionDim)
+	f.exec(t, `UPDATE model.metric_def SET closed_when = '[{"metric":"closed_flag","op":"=","value":1}]'::jsonb WHERE id=$1::uuid`, f.metricID)
+
+	_, errs, err := ps.ImportRows(ctx, recordpost.ImportRequest{
+		Form: f.form, CreatorID: f.userID, Header: []string{"region", "amount"}, Rows: spendRows("5", "7"), Inline: true,
+	})
+	if err != nil || len(errs) != 1 || errs[0].Row != 3 {
+		t.Fatalf("import into a closed region: errs=%+v err=%v, want row 3 refused", errs, err)
+	}
+
+	// A sync re-posting the records: US's posting stays at 20, EU's moves.
+	f.exec(t, `UPDATE runtime.form_record SET data = jsonb_set(data, '{amount}', to_jsonb((data->>'amount')::numeric + 1)), updated_at = now()
+		WHERE form_id=$1::uuid`, f.form.ID)
+	ps.RepostTable(ctx, f.form.ID, f.userID)
+	for region, want := range map[string]float64{"EU": 11, "US": 20} {
+		if got := f.count(t, `SELECT COALESCE(sum(value), 0) FROM runtime.fact_input WHERE source_ref=$1::uuid AND dim_members->>$2 = $3`,
+			f.mapping, f.regionDim, region); got != want {
+			t.Errorf("%s holds %v after the sync, want %v", region, got, want)
+		}
+	}
+}

@@ -61,3 +61,69 @@ func TestDateMetrics(t *testing.T) {
 		t.Errorf("a date metric's default rule is none:\n%.400s", raw)
 	}
 }
+
+// A text input switched to another format takes its notes with it,
+// converted: Hire Date imported as text and switched to Date kept its dates.
+// A note that does not convert refuses the change (409) until it is
+// corrected, or drop_values clears it.
+func TestTextInputFormatChangeConvertsItsNotes(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	dev := "rollup-test-approver"
+	rev := f.workingRevID
+	call := func(method, path string, body any) (int, string) {
+		t.Helper()
+		return doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+	}
+	must := func(method, path string, body any) string {
+		t.Helper()
+		status, raw := call(method, path, body)
+		if status != http.StatusOK && status != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, status, raw)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out.ID
+	}
+	hired := must("POST", "/api/developer/metrics", map[string]any{"name": "hire_text", "is_input": true, "format": "text", "revision_id": rev})
+	note := must("POST", "/api/developer/metrics", map[string]any{"name": "headcount_text", "is_input": true, "format": "text", "revision_id": rev})
+	grid := must("POST", "/api/developer/grids", map[string]any{"name": "Notes", "revision_id": rev})
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+hired, nil)
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+note, nil)
+	write := func(metric, text string) {
+		t.Helper()
+		if status, raw := call("POST", "/api/cells", map[string]any{"model_id": f.modelID, "revision_id": rev, "metric_id": metric, "text": text}); status != http.StatusOK {
+			t.Fatalf("write %q: %d %s", text, status, raw)
+		}
+	}
+	totals := func() map[string]float64 {
+		t.Helper()
+		_, raw := call("GET", "/api/grid?grid_def_id="+grid+"&model_id="+f.modelID+"&revision_id="+rev, nil)
+		var g struct {
+			Totals map[string]float64 `json:"totals"`
+		}
+		_ = json.Unmarshal([]byte(raw), &g)
+		return g.Totals
+	}
+
+	write(hired, "1st of May")
+	if status, raw := call("PATCH", "/api/developer/metrics/"+hired, map[string]any{"format": "date"}); status != http.StatusConflict || !strings.Contains(raw, "1st of May") {
+		t.Fatalf("a note that is no date: %d %s, want 409 naming it", status, raw)
+	}
+	write(hired, "2026-12-01")
+	if status, raw := call("PATCH", "/api/developer/metrics/"+hired, map[string]any{"format": "date"}); status != http.StatusOK {
+		t.Fatalf("switch to date: %d %s", status, raw)
+	}
+	if v, ok := totals()[hired]; !ok || v != 46357 {
+		t.Errorf("hire date after the switch = %v (present %v), want the serial 46357", v, ok)
+	}
+
+	write(note, "about forty")
+	if status, raw := call("PATCH", "/api/developer/metrics/"+note, map[string]any{"format": "number", "drop_values": true}); status != http.StatusOK {
+		t.Fatalf("switch to number dropping what does not convert: %d %s", status, raw)
+	}
+	if v, ok := totals()[note]; ok && v != 0 {
+		t.Errorf("a dropped note left %v", v)
+	}
+}

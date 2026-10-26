@@ -228,6 +228,25 @@ func TestRestAPIIntegrationEndpoints(t *testing.T) {
 		t.Fatalf("duplicate shape: %s", raw)
 	}
 
+	// ── Names are unique in a revision (migration 151) ──
+	// A second duplicate takes the next free name; a create or rename to a
+	// taken name is refused with 409.
+	status, raw = do(devSub, "POST", "/api/developer/integrations/"+created.ID+"/duplicate", nil)
+	var dup2 struct {
+		Name string `json:"name"`
+	}
+	if _ = json.Unmarshal(raw, &dup2); status != 200 || dup2.Name != "Billing pull (copy 2)" {
+		t.Errorf("second duplicate: %d %q, want 200 \"Billing pull (copy 2)\"", status, dup2.Name)
+	}
+	if status, raw = do(devSub, "POST", "/api/developer/integrations", map[string]any{
+		"type": "rest_api", "name": "Billing pull", "config": cfg, "connection_id": conn.ID,
+	}); status != http.StatusConflict || !strings.Contains(string(raw), "already has a connector named") {
+		t.Errorf("create with a taken name: %d %s, want 409", status, raw)
+	}
+	if status, raw = do(devSub, "PATCH", "/api/developer/integrations/"+dup.ID, map[string]any{"name": "Billing pull"}); status != http.StatusConflict {
+		t.Errorf("rename to a taken name: %d %s, want 409", status, raw)
+	}
+
 	// ── Guards ──
 	// Business role cannot touch developer endpoints.
 	if status, _ = do(bizSub, "GET", "/api/developer/integration-connections", nil); status != http.StatusForbidden && status != http.StatusUnauthorized {

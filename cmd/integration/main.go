@@ -160,6 +160,9 @@ func heartbeat(ctx context.Context, store *integration.Store, runID, workerID st
 // enqueue while a run is queued/running; the unique tick index deduplicates
 // racing replicas.
 func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, now time.Time) int {
+	if err := store.ArmActiveSchedules(ctx, now); err != nil {
+		log.Warn().Err(err).Msg("arm the live revision's schedules")
+	}
 	due, err := store.DueSchedules(ctx, now, 50)
 	if err != nil {
 		return 0

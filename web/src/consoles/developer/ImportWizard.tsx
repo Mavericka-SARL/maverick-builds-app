@@ -1116,7 +1116,7 @@ function CommitStep({
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
         // ("label matches no metric or dimension", reported live).
-        out = await api.importDimensionMembers(config.targetId, csv, about);
+        out = await api.importDimensionMembers(config.targetId, csv, about, rowLines);
       } else if (config.targetType === "form") {
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.

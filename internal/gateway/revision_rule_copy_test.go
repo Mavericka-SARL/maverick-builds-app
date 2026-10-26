@@ -13,9 +13,10 @@ import (
 // scoped to the copy's connector — the copy used to leave it NULL, which the
 // dispatcher reads as "any connector". A schedule rule carries its cron
 // settings — without cron_expr the copy broke automation_rule_schedule_cron_chk
-// and the whole duplication failed — and comes unarmed (next_fire_at NULL).
-// A rule scoped to a connector whose name has twins keeps its reference:
-// scoped, never widened, and the duplication does not fail.
+// and the whole duplication failed — and comes unarmed (next_fire_at NULL),
+// as does a connector's schedule (migration 151 made connector names unique
+// in a revision, so every connector maps to its copy by name; twins are
+// refused).
 func TestDuplicateRevisionCopiesRuleScopeAndSchedule(t *testing.T) {
 	f := setupRollupFixture(t)
 	ctx := context.Background()
@@ -36,7 +37,12 @@ func TestDuplicateRevisionCopiesRuleScopeAndSchedule(t *testing.T) {
 	feed := newConnector("Feed")
 	newConnector("Other")
 	twin := newConnector("Twin")
-	newConnector("Twin")
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, config)
+		VALUES ($1::uuid, $2::uuid, 'Twin', 'csv_import', 'grid', '{}'::jsonb)`, f.modelID, f.workingRevID); err == nil {
+		t.Error("a second connector named Twin in one revision was accepted")
+	}
+	q(`INSERT INTO model.integration_schedule (integration_id, kind, interval_seconds, timezone, enabled, next_fire_at)
+		VALUES ($1::uuid, 'interval', 3600, 'UTC', true, now()) RETURNING integration_id::text`, feed)
 	for name, integ := range map[string]string{"OnFeed": feed, "OnTwin": twin} {
 		q(`INSERT INTO workflow.automation_rule (application_id, name, trigger_type, workflow_name, revision_id, source_integration_id)
 			VALUES ($1::uuid, $2, 'integration_completed', 'wf', $3::uuid, $4::uuid) RETURNING id::text`,
@@ -65,8 +71,14 @@ func TestDuplicateRevisionCopiesRuleScopeAndSchedule(t *testing.T) {
 	if got != want {
 		t.Errorf("copied OnFeed rule scope = %s, want the copy's Feed connector %s (source Feed %s; NULL fires for ANY connector)", got, want, feed)
 	}
-	if got := q(`SELECT COALESCE(source_integration_id::text,'NULL') FROM workflow.automation_rule WHERE revision_id=$1::uuid AND name='OnTwin'`, copyRev); got != twin {
-		t.Errorf("copied OnTwin rule scope = %s, want the unchanged %s (two copies share the name)", got, twin)
+	if got, want := q(`SELECT COALESCE(source_integration_id::text,'NULL') FROM workflow.automation_rule WHERE revision_id=$1::uuid AND name='OnTwin'`, copyRev),
+		q(`SELECT id::text FROM model.integration_def WHERE revision_id=$1::uuid AND name='Twin'`, copyRev); got != want {
+		t.Errorf("copied OnTwin rule scope = %s, want the copy's Twin %s (source %s)", got, want, twin)
+	}
+	if got := q(`SELECT sc.kind || ':' || sc.interval_seconds || ':' || COALESCE(sc.next_fire_at::text, 'unarmed')
+		FROM model.integration_schedule sc JOIN model.integration_def i ON i.id = sc.integration_id
+		WHERE i.revision_id=$1::uuid AND i.name='Feed'`, copyRev); got != "interval:3600:unarmed" {
+		t.Errorf("copied Feed schedule = %s, want interval:3600:unarmed", got)
 	}
 	q(`INSERT INTO workflow.automation_rule (application_id, name, trigger_type, workflow_name, revision_id,
 		                                     cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, next_fire_at)

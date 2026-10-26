@@ -32,14 +32,14 @@ function pruneTree<T extends HierarchicalMember>(
   return out;
 }
 
-// flattenSelectable returns every selectable node (i.e. not a leafOnly
-// group header) in the same depth-first order they render, for keyboard
-// navigation — the flat sequence Arrow Up/Down step through.
-function flattenSelectable<T extends HierarchicalMember>(nodes: MemberTreeNode<T>[], leafOnly: boolean | undefined): MemberTreeNode<T>[] {
+// flattenSelectable returns every selectable node (not a group header — see
+// isGroup in the component) in the same depth-first order they render, for
+// keyboard navigation — the flat sequence Arrow Up/Down step through.
+function flattenSelectable<T extends HierarchicalMember>(nodes: MemberTreeNode<T>[], isGroup: (n: MemberTreeNode<T>) => boolean): MemberTreeNode<T>[] {
   const out: MemberTreeNode<T>[] = [];
   for (const n of nodes) {
-    if (!(leafOnly && n.children.length > 0)) out.push(n);
-    if (n.children.length > 0) out.push(...flattenSelectable(n.children, leafOnly));
+    if (!isGroup(n)) out.push(n);
+    if (n.children.length > 0) out.push(...flattenSelectable(n.children, isGroup));
   }
   return out;
 }
@@ -132,7 +132,13 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
     });
   }
   const visibleTree = filterTree(tree, search);
-  const flatOptions = flattenSelectable(visibleTree, leafOnly);
+  // A header, not an option: a parent under leafOnly, or a member
+  // isSelectable rejects that stays only for its selectable descendants —
+  // it used to be drawn, and picked, as an option (a Start dialog's
+  // read-only Americas, kept for its United States).
+  const isGroup = (n: MemberTreeNode<T>) =>
+    (!!leafOnly && n.children.length > 0) || (!!isSelectable && !isSelectable(n.member));
+  const flatOptions = flattenSelectable(visibleTree, isGroup);
   // Ref mirrors so the keydown listener (registered once per `open` toggle,
   // not re-registered on every keystroke) always reads the current, not
   // stale-at-registration-time, option list/active code — search narrows
@@ -256,25 +262,25 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
 
   function renderNodes(nodes: MemberTreeNode<T>[]): React.ReactNode {
     return nodes.map(n => {
-      const isGroup = leafOnly && n.children.length > 0;
+      const group = isGroup(n);
       return (
         <React.Fragment key={n.member.code}>
           <div
-            id={isGroup ? undefined : optionId(n.member.code)}
-            role={isGroup ? undefined : "option"}
-            aria-selected={isGroup ? undefined : chosen.includes(n.member.code)}
-            aria-disabled={isGroup ? true : undefined}
+            id={group ? undefined : optionId(n.member.code)}
+            role={group ? undefined : "option"}
+            aria-selected={group ? undefined : chosen.includes(n.member.code)}
+            aria-disabled={group ? true : undefined}
             className={[
               "mvx-hier-select__option",
-              isGroup ? "mvx-hier-select__option--group" : "",
-              !isGroup && chosen.includes(n.member.code) ? "mvx-hier-select__option--selected" : "",
-              !isGroup && n.member.code === activeCode ? "mvx-hier-select__option--active" : "",
+              group ? "mvx-hier-select__option--group" : "",
+              !group && chosen.includes(n.member.code) ? "mvx-hier-select__option--selected" : "",
+              !group && n.member.code === activeCode ? "mvx-hier-select__option--active" : "",
             ].filter(Boolean).join(" ")}
             style={{ paddingLeft: 10 + n.level * 16 }}
-            onClick={isGroup ? undefined : () => pick(n.member.code)}
-            onMouseEnter={isGroup ? undefined : () => setActiveCode(n.member.code)}
+            onClick={group ? undefined : () => pick(n.member.code)}
+            onMouseEnter={group ? undefined : () => setActiveCode(n.member.code)}
           >
-            {multiple && !isGroup && (
+            {multiple && !group && (
               <span aria-hidden="true" style={{ display: "inline-block", width: 16, marginRight: 4 }}>
                 {chosen.includes(n.member.code) ? "✓" : ""}
               </span>

@@ -82,6 +82,9 @@ func (s *Store) PollDueSchedules(ctx context.Context, log zerolog.Logger, worker
 
 // pollDueSchedules is PollDueSchedules reporting how many rules it claimed.
 func (s *Store) pollDueSchedules(ctx context.Context, log zerolog.Logger, workerID string, misfireThreshold time.Duration) (int, error) {
+	if err := s.armActiveSchedules(ctx, log, time.Now()); err != nil {
+		return 0, err
+	}
 	due, err := s.claimDueSchedules(ctx, log, misfireThreshold)
 	if err != nil {
 		return 0, err
@@ -105,6 +108,73 @@ func (s *Store) pollDueSchedules(ctx context.Context, log zerolog.Logger, worker
 	return len(due), nil
 }
 
+// activeRevisionRuleSQL holds for a rule of no revision (the application's
+// own), of its model's live revision, or of a model with no live revision
+// (nothing supersedes it then, so it fires as before).
+const activeRevisionRuleSQL = `(r.revision_id IS NULL OR EXISTS (
+	SELECT 1 FROM model.revision arv JOIN core.model am ON am.id = arv.model_id
+	WHERE arv.id = r.revision_id AND (am.active_revision_id IS NULL OR am.active_revision_id = arv.id)))`
+
+// armActiveSchedules makes the live revision's schedule rules the ones that
+// fire (decided 2026-10-06). A rule of a revision that is not live is
+// disarmed (next_fire_at NULL), and an enabled rule of the live revision
+// with no next fire is armed from now: a revision copy carries its rules
+// unarmed, so after going live they waited for someone to save their
+// schedule while the superseded revision's rules kept firing. It reads
+// state rather than hooking each way a revision goes live (Set active, an
+// approval's promotion, an import), so every one of them is covered by the
+// next poll.
+func (s *Store) armActiveSchedules(ctx context.Context, log zerolog.Logger, now time.Time) error {
+	if _, err := s.db.Exec(ctx, `
+		UPDATE workflow.automation_rule r SET next_fire_at = NULL
+		WHERE r.trigger_type = 'schedule' AND r.next_fire_at IS NOT NULL
+		  AND NOT `+activeRevisionRuleSQL); err != nil {
+		return err
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT r.id::text, r.cron_expr, r.timezone
+		FROM workflow.automation_rule r
+		WHERE r.enabled AND r.trigger_type = 'schedule' AND r.next_fire_at IS NULL
+		  AND `+activeRevisionRuleSQL)
+	if err != nil {
+		return err
+	}
+	type unarmed struct{ id, cron, tz string }
+	var list []unarmed
+	for rows.Next() {
+		var u unarmed
+		var cron, tz *string
+		if err := rows.Scan(&u.id, &cron, &tz); err != nil {
+			rows.Close()
+			return err
+		}
+		if cron != nil {
+			u.cron = *cron
+		}
+		if tz != nil {
+			u.tz = *tz
+		}
+		list = append(list, u)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, u := range list {
+		next, err := nextFireTime(u.cron, u.tz, now)
+		if err != nil {
+			log.Warn().Err(err).Str("rule_id", u.id).Msg("invalid schedule config; rule left unarmed")
+			continue
+		}
+		if _, err := s.db.Exec(ctx, `
+			UPDATE workflow.automation_rule SET next_fire_at = $2
+			WHERE id = $1::uuid AND next_fire_at IS NULL`, u.id, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // claimDueSchedules selects due schedule-type rules with FOR UPDATE SKIP
 // LOCKED — so two concurrently-polling instances never even attempt the
 // same rule row in the same instant — advances each one's next_fire_at/
@@ -122,8 +192,9 @@ func (s *Store) claimDueSchedules(ctx context.Context, log zerolog.Logger, misfi
 		SELECT id::text, application_id::text, COALESCE(revision_id::text,''), name, workflow_name,
 		       COALESCE(workflow_def_id::text,''), enabled,
 		       cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, next_fire_at
-		FROM workflow.automation_rule
+		FROM workflow.automation_rule r
 		WHERE enabled AND trigger_type = 'schedule' AND next_fire_at <= now()
+		  AND `+activeRevisionRuleSQL+`
 		FOR UPDATE SKIP LOCKED
 	`)
 	if err != nil {

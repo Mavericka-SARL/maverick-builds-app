@@ -173,6 +173,29 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 		($1::uuid, 'dimension_member', upper($4), 'hidden'), ($1::uuid, 'dimension_member', $5, 'hidden'),
 		($1::uuid, 'button', 'btn-1', 'hidden')`, m, f.metricA, f.metricD, f.memberA, f.memberD)
 	before := f.accountRow(t, m)
+	// A request it started in each tenant.
+	startedIn := map[string]string{}
+	for _, app := range []string{f.app1, f.app3} {
+		def := f.one(t, `INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, status) VALUES ($1::uuid, 'Removal history', 'manual', '[]'::jsonb, 'published') RETURNING id::text`, app)
+		startedIn[app] = f.one(t, `INSERT INTO workflow.workflow_instance (workflow_def_id, started_by, context) VALUES ($1::uuid, $2::uuid, '{}') RETURNING id::text`, def, m)
+	}
+	myHistory := func() map[string]bool {
+		t.Helper()
+		var listed []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(f.expect(t, "ab-member", "GET", "/api/workflow/my-history", "", nil, http.StatusOK), &listed); err != nil {
+			t.Fatalf("my-history: %v", err)
+		}
+		ids := map[string]bool{}
+		for _, l := range listed {
+			ids[l.ID] = true
+		}
+		return ids
+	}
+	if h := myHistory(); !h[startedIn[f.app1]] || !h[startedIn[f.app3]] {
+		t.Errorf("before the removal, my-history lists %v, want both requests %v", h, startedIn)
+	}
 
 	// Refused: a developer (resource access is not theirs), a platform admin
 	// (its scope names no one tenant), the tenant's own account, the caller
@@ -223,6 +246,11 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 		t.Errorf("removed account still listed")
 	}
 	f.expect(t, ta, "DELETE", "/api/admin/users/"+m+"/tenant-access", "", nil, http.StatusForbidden)
+	// Nor are its requests there: its hidden-member rules went with the
+	// removal, so listing them would show what was withheld from it.
+	if h := myHistory(); h[startedIn[f.app1]] || !h[startedIn[f.app3]] {
+		t.Errorf("after the removal, my-history lists %v, want only tenant 2's request %s", h, startedIn[f.app3])
+	}
 
 	// A developer with no tenant narrowed to tenant 1's application: removed,
 	// its last grant goes, and its developer grant with it.

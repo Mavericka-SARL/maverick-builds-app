@@ -158,7 +158,6 @@ function SsoForm() {
               <option value="business_user">business_user</option>
               <option value="business_admin">business_admin</option>
               <option value="developer">developer</option>
-              <option value="tenant_admin">tenant_admin</option>
             </Select>
           </Field>
           <Checkbox checked={form.enabled} onChange={(e) => set({ enabled: e.target.checked })} label="Single sign-on is on" />

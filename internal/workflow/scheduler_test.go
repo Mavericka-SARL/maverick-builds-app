@@ -335,3 +335,70 @@ func TestNextScheduleAt(t *testing.T) {
 		t.Fatalf("rule disabled: next = %v, err = %v; want the zero time", next, err)
 	}
 }
+
+// Only the live revision's schedule rules fire (decided 2026-10-06): a rule
+// of a revision that is not live is disarmed and does not fire however due
+// it was, and one of the live revision with no next fire (a revision copy's)
+// is armed from now. Making another revision live swaps them.
+func TestOnlyTheLiveRevisionsScheduleRulesFire(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, appID := insertFixtures(t, store)
+	one := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := store.Pool().QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	modelID := one(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Plan') RETURNING id::text`, appID)
+	live := one(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Live') RETURNING id::text`, modelID)
+	next := one(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Next') RETURNING id::text`, modelID)
+	one(`UPDATE core.model SET active_revision_id = $2::uuid WHERE id = $1::uuid RETURNING id::text`, modelID, live)
+
+	// The live revision's rule, and its copy in the next revision as a
+	// revision copy leaves it: unarmed — here backdated as if a save had
+	// armed it, to prove it is disarmed rather than fired.
+	liveRule := createDueScheduleRule(t, store, appID, userID, 2*time.Second, workflow.ScheduleConfig{CronExpr: "0 6 * * *"})
+	one(`UPDATE workflow.automation_rule SET revision_id = $2::uuid WHERE id = $1::uuid RETURNING id::text`, liveRule.ID, live)
+	nextRule := &workflow.AutomationRule{ID: one(`
+		INSERT INTO workflow.automation_rule (application_id, revision_id, name, trigger_type, workflow_name, workflow_def_id,
+		                                      enabled, cron_expr, timezone, misfire_policy, next_fire_at)
+		SELECT application_id, $2::uuid, name, trigger_type, workflow_name, workflow_def_id,
+		       enabled, cron_expr, timezone, misfire_policy, next_fire_at
+		FROM workflow.automation_rule WHERE id = $1::uuid RETURNING id::text`, liveRule.ID, next)}
+	armed := func(id string) bool {
+		t.Helper()
+		return one(`SELECT (next_fire_at IS NOT NULL)::text FROM workflow.automation_rule WHERE id = $1::uuid`, id) == "true"
+	}
+	poll := func() {
+		t.Helper()
+		if err := store.PollDueSchedules(ctx, zerolog.Nop(), "worker-1", 5*time.Second); err != nil {
+			t.Fatalf("PollDueSchedules: %v", err)
+		}
+	}
+
+	poll()
+	if n := countExecutions(t, store, liveRule.ID); n != 1 {
+		t.Errorf("the live revision's due rule fired %d times, want 1", n)
+	}
+	if n := countExecutions(t, store, nextRule.ID); n != 0 || armed(nextRule.ID) {
+		t.Errorf("the next revision's rule fired %d times, armed=%v; want 0, disarmed", n, armed(nextRule.ID))
+	}
+
+	// Go-live of the next revision: its rule is armed for its next tick
+	// (not fired for the past), the old one disarmed.
+	one(`UPDATE core.model SET active_revision_id = $2::uuid WHERE id = $1::uuid RETURNING id::text`, modelID, next)
+	poll()
+	if !armed(nextRule.ID) || armed(liveRule.ID) {
+		t.Errorf("after go-live: next armed=%v, old armed=%v; want true, false", armed(nextRule.ID), armed(liveRule.ID))
+	}
+	if n := countExecutions(t, store, nextRule.ID); n != 0 {
+		t.Errorf("going live fired the next revision's rule %d times for a tick before it was live", n)
+	}
+	if got := one(`SELECT (next_fire_at > now())::text FROM workflow.automation_rule WHERE id = $1::uuid`, nextRule.ID); got != "true" {
+		t.Errorf("the next revision's rule is armed for a past tick")
+	}
+}

@@ -78,6 +78,44 @@ func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID stri
 	return s.recalcMetricIDs(ctx, modelID, revisionID, defs, affectedIDs)
 }
 
+// RecalcFromAllInputs is RecalcAffected for a revision whose inputs all
+// changed at once — copied from another revision, imported from a package,
+// or reshaped by a dimension change. Beyond what the inputs reach, it
+// computes every dependency-free metric and everything that reads one:
+// m2 = m1 * 2 over m1 = COUNTIFS(region, "*") is reached neither from an
+// input nor as dependency-free itself, so a revision copy left it with no
+// value until its formula was saved again. A cell write does not need them:
+// it changes no dependency-free metric.
+func (s *Scheduler) RecalcFromAllInputs(ctx context.Context, modelID, revisionID string, inputIDs []string) (err error) {
+	defer s.recoverAsError(&err, "recalculation")
+	if revisionID == "" {
+		return fmt.Errorf("revisionID is required")
+	}
+	defs, err := s.store.LoadModelMetrics(ctx, modelID, revisionID)
+	if err != nil {
+		return fmt.Errorf("load metrics: %w", err)
+	}
+	affectedIDs := withDependencyFree(defs, AffectedMetricIDs(defs, inputIDs))
+	seen := make(map[string]bool, len(affectedIDs))
+	var free []string
+	for _, id := range affectedIDs {
+		seen[id] = true
+		if def := defs[id]; def != nil && len(def.DependsOnID) == 0 {
+			free = append(free, id)
+		}
+	}
+	for _, id := range AffectedMetricIDs(defs, free) {
+		if !seen[id] {
+			seen[id] = true
+			affectedIDs = append(affectedIDs, id)
+		}
+	}
+	if len(affectedIDs) == 0 {
+		return nil
+	}
+	return s.recalcMetricIDs(ctx, modelID, revisionID, defs, affectedIDs)
+}
+
 // ChangedCell is one input cell a write changed: its metric and its
 // coordinate, {dimension ID: member code}.
 type ChangedCell struct {

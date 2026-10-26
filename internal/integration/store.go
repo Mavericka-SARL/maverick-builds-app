@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/pkg/dbx"
@@ -315,6 +318,59 @@ func (d *Definition) Tested() bool {
 	return d.Config != nil && d.LastTestedHash != "" && d.LastTestedHash == ConfigHash(d.Config)
 }
 
+// nameKey is the unique index that keeps a connector's name to one per
+// revision (migration 151).
+const nameKey = "integration_def_revision_name_uq"
+
+// NameTakenError refuses a connector name its revision already has.
+type NameTakenError struct{ Name string }
+
+func (e *NameTakenError) Error() string {
+	return fmt.Sprintf("the revision already has a connector named %q; choose another name", e.Name)
+}
+
+// NameTaken returns a *NameTakenError for name when err is the violation of
+// the one-name-per-revision index, and err unchanged otherwise. Every path
+// that creates or renames a connector passes its error through it; the
+// gateway answers a *NameTakenError with 409 (IsNameTaken).
+func NameTaken(err error, name string) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == nameKey {
+		return &NameTakenError{Name: name}
+	}
+	return err
+}
+
+// IsNameTaken reports whether err is (or wraps) a *NameTakenError.
+func IsNameTaken(err error) bool {
+	var nt *NameTakenError
+	return errors.As(err, &nt)
+}
+
+// FreeName is base when revisionID (or, with none, modelID's revision-less
+// connectors) has no connector of that name, else the first free numbered
+// form of it: "X (copy)", then "X (copy 2)"; "X", then "X (2)".
+func (s *Store) FreeName(ctx context.Context, modelID, revisionID, base string) (string, error) {
+	name := base
+	for n := 2; ; n++ {
+		var taken bool
+		if err := s.db.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM model.integration_def
+			               WHERE model_id = $1::uuid AND revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND name = $3)`,
+			modelID, revisionID, name).Scan(&taken); err != nil {
+			return "", err
+		}
+		if !taken {
+			return name, nil
+		}
+		if strings.HasSuffix(base, ")") {
+			name = strings.TrimSuffix(base, ")") + " " + strconv.Itoa(n) + ")"
+		} else {
+			name = base + " (" + strconv.Itoa(n) + ")"
+		}
+	}
+}
+
 // CreateDefinition writes metadata + typed config atomically (single INSERT —
 // deliberately not the legacy create-then-PATCH-config sequence).
 func (s *Store) CreateDefinition(ctx context.Context, modelID, revisionID, name, description string, tags []string, status string, connectionID string, cfg *Config, allowInsecure bool) (*Definition, error) {
@@ -342,6 +398,9 @@ func (s *Store) CreateDefinition(ctx context.Context, modelID, revisionID, name,
 		RETURNING id::text
 	`, modelID, revisionID, name, description, string(cfg.TargetType), cfg.TargetID, string(raw),
 		status, tags, string(cfg.Direction), connectionID, cfg.SourceModelID()).Scan(&id); err != nil {
+		if nt := NameTaken(err, name); nt != err {
+			return nil, nt
+		}
 		return nil, fmt.Errorf("create integration: %w", err)
 	}
 	return s.GetDefinition(ctx, modelID, id)
@@ -413,6 +472,9 @@ func (s *Store) UpdateDefinition(ctx context.Context, modelID, id string, name, 
 		string(next.Config.TargetType), next.Config.TargetID, string(next.Config.Direction),
 		next.Config.SourceModelID())
 	if err != nil {
+		if nt := NameTaken(err, next.Name); nt != err {
+			return nil, nt
+		}
 		return nil, fmt.Errorf("update integration: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -824,6 +886,82 @@ func (s *Store) NextScheduleAt(ctx context.Context) (time.Time, error) {
 	return *next, nil
 }
 
+// CopySchedulesSQL carries the connectors' schedules of revision $3 into
+// their copies in revision $2 of model $1, matched by name (unique within a
+// revision), unarmed: ArmActiveSchedules arms them once that revision is
+// live. Until 2026-10-26 a copy had no schedule at all, so a scheduled
+// connector of a new revision ran only by hand. Both revision copies — the
+// developer console's and the AI Developer's — run it after copying the
+// connectors.
+const CopySchedulesSQL = `
+	INSERT INTO model.integration_schedule
+	    (integration_id, kind, interval_seconds, cron_expr, timezone, enabled,
+	     overlap_policy, misfire_policy, enabled_by, next_fire_at, updated_at)
+	SELECT n.id, sc.kind, sc.interval_seconds, sc.cron_expr, sc.timezone, sc.enabled,
+	       sc.overlap_policy, sc.misfire_policy, sc.enabled_by, NULL, now()
+	FROM model.integration_schedule sc
+	JOIN model.integration_def o ON o.id = sc.integration_id
+	JOIN model.integration_def n ON n.model_id = o.model_id AND n.revision_id = $2::uuid AND n.name = o.name
+	WHERE o.model_id = $1::uuid AND o.revision_id = $3::uuid
+	ON CONFLICT (integration_id) DO NOTHING`
+
+// activeRevisionConnectorSQL holds for a connector of no revision, of its
+// model's live revision, or of a model with no live revision (nothing
+// supersedes it then, so it runs as before).
+const activeRevisionConnectorSQL = `(i.revision_id IS NULL OR EXISTS (
+	SELECT 1 FROM core.model am WHERE am.id = i.model_id
+	  AND (am.active_revision_id IS NULL OR am.active_revision_id = i.revision_id)))`
+
+// ArmActiveSchedules makes the live revision's connector schedules the ones
+// that run (decided 2026-10-06): a schedule of a connector in a revision
+// that is not live is disarmed (next_fire_at NULL), and an enabled one in
+// the live revision with no next fire is armed from now — a revision copy
+// carries its connectors' schedules unarmed. It reads state, so every way a
+// revision goes live is covered by the next tick.
+func (s *Store) ArmActiveSchedules(ctx context.Context, now time.Time) error {
+	if _, err := s.db.Exec(ctx, `
+		UPDATE model.integration_schedule sc SET next_fire_at = NULL, updated_at = now()
+		FROM model.integration_def i
+		WHERE i.id = sc.integration_id AND sc.next_fire_at IS NOT NULL
+		  AND NOT `+activeRevisionConnectorSQL); err != nil {
+		return err
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT sc.integration_id::text, sc.kind, COALESCE(sc.interval_seconds,0), sc.cron_expr, sc.timezone, sc.enabled
+		FROM model.integration_schedule sc
+		JOIN model.integration_def i ON i.id = sc.integration_id
+		WHERE sc.enabled AND sc.kind <> 'manual' AND sc.next_fire_at IS NULL
+		  AND `+activeRevisionConnectorSQL)
+	if err != nil {
+		return err
+	}
+	var unarmed []Schedule
+	for rows.Next() {
+		var sc Schedule
+		if err := rows.Scan(&sc.IntegrationID, &sc.Kind, &sc.IntervalSeconds, &sc.CronExpr, &sc.Timezone, &sc.Enabled); err != nil {
+			rows.Close()
+			return err
+		}
+		unarmed = append(unarmed, sc)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range unarmed {
+		next, err := s.computeNext(&unarmed[i], now)
+		if err != nil || next == nil {
+			continue // an invalid cron stays unarmed, as its save would refuse it
+		}
+		if _, err := s.db.Exec(ctx, `
+			UPDATE model.integration_schedule SET next_fire_at = $2, updated_at = now()
+			WHERE integration_id = $1::uuid AND next_fire_at IS NULL`, unarmed[i].IntegrationID, *next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DueSchedules returns enabled schedules whose next_fire_at has passed, and
 // advances next_fire_at atomically so sibling schedulers don't double-fire
 // (the unique (integration, scheduled_for) run index is the second guard).
@@ -835,6 +973,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time, limit int) ([]S
 		FROM model.integration_schedule sc
 		JOIN model.integration_def i ON i.id = sc.integration_id
 		WHERE sc.enabled AND sc.next_fire_at IS NOT NULL AND sc.next_fire_at <= $1
+		  AND `+activeRevisionConnectorSQL+`
 		ORDER BY sc.next_fire_at LIMIT $2
 		FOR UPDATE OF sc SKIP LOCKED
 	`, now, limit)

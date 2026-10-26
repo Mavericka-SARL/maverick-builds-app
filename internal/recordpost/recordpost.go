@@ -1037,6 +1037,13 @@ func (ps *Poster) cellRefusal(ctx context.Context, userID string, forYou bool, f
 	if err != nil {
 		return 0, "", err
 	}
+	if reason == "" {
+		// A cell the metric's closed rules close takes no input, typed or
+		// posted: a closed month took a record's value until 2026-10-26.
+		if reason, err = writeguard.ClosedReason(ctx, pool, revisionID, []writeguard.Cell{{MetricID: m.targetMetricID, DimCodes: p.members}}); err != nil {
+			return 0, "", err
+		}
+	}
 	if reason != "" {
 		if forYou {
 			return http.StatusForbidden, "this record posts into a cell you cannot change: " + reason, nil

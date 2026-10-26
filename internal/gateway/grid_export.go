@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
@@ -112,11 +114,16 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 	// ── this grid's own input metrics, ordered (columns) ─────────────────────
 	// Joined via metric name against the requested revision, matching /api/grid's
 	// own resolution so an export always reflects the viewer's active revision.
-	type metricCol struct{ ID, Name string }
+	// Format and pick-list dimension decide how a cell is written: a text
+	// metric's note, a pick-list's member code, a date as yyyy-mm-dd — what
+	// the import reads back. Until 2026-10-26 a note was written as 0 and a
+	// pick-list cell as its stored key, so a round trip blanked the one and
+	// failed the other.
+	type metricCol struct{ ID, Name, Format, PicklistDim string }
 	var metricCols []metricCol
 	{
 		rows, qErr := h.db.Query(ctx, `
-			SELECT rev.id::text, rev.name
+			SELECT rev.id::text, rev.name, COALESCE(rev.format, ''), COALESCE(rev.picklist_dimension_id::text, '')
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -131,7 +138,7 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		}
 		for rows.Next() {
 			var mc metricCol
-			if sErr := rows.Scan(&mc.ID, &mc.Name); sErr != nil {
+			if sErr := rows.Scan(&mc.ID, &mc.Name, &mc.Format, &mc.PicklistDim); sErr != nil {
 				rows.Close()
 				jsonErr(w, sErr, http.StatusInternalServerError)
 				return
@@ -176,10 +183,39 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		metricName[mc.ID] = mc.Name
 	}
 
+	// A pick-list cell's key back to its member's code.
+	picklistCode := map[string]map[float64]string{}
+	for _, mc := range metricCols {
+		if mc.Format != metricformula.FormatPicklist || mc.PicklistDim == "" || picklistCode[mc.PicklistDim] != nil {
+			continue
+		}
+		codes := map[float64]string{}
+		rows, qErr := h.db.Query(ctx, `SELECT code FROM model.dimension_member WHERE dimension_id = $1::uuid`, mc.PicklistDim)
+		if qErr != nil {
+			jsonErr(w, qErr, http.StatusInternalServerError)
+			return
+		}
+		for rows.Next() {
+			var code string
+			if sErr := rows.Scan(&code); sErr != nil {
+				rows.Close()
+				jsonErr(w, sErr, http.StatusInternalServerError)
+				return
+			}
+			codes[formula.PicklistKey(code)] = code
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		picklistCode[mc.PicklistDim] = codes
+	}
+
 	factRows, err := h.db.Query(ctx, `
-		SELECT metric_id::text, dim_members::text, value::float8
+		SELECT metric_id::text, dim_members::text, value::float8, COALESCE(text_value, '')
 		FROM (
-			SELECT DISTINCT ON (metric_id, dim_members) metric_id, dim_members, value
+			SELECT DISTINCT ON (metric_id, dim_members) metric_id, dim_members, value, text_value
 			FROM runtime.fact_input
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL
 			  AND metric_id = ANY($3::uuid[])
@@ -193,13 +229,17 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 
 	type rowKey = string
 	rowDims := map[rowKey][]string{}
-	rowValues := map[rowKey]map[string]float64{}
+	rowValues := map[rowKey]map[string]string{}
 	var keyOrder []rowKey
+	colOf := make(map[string]metricCol, len(metricCols))
+	for _, mc := range metricCols {
+		colOf[mc.ID] = mc
+	}
 
 	for factRows.Next() {
-		var metricID, dmJSON string
+		var metricID, dmJSON, text string
 		var val float64
-		if sErr := factRows.Scan(&metricID, &dmJSON, &val); sErr != nil {
+		if sErr := factRows.Scan(&metricID, &dmJSON, &val, &text); sErr != nil {
 			jsonErr(w, sErr, http.StatusInternalServerError)
 			return
 		}
@@ -224,12 +264,28 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 			continue // fact doesn't carry all of this grid's dims — not one of this grid's cells
 		}
 		key := strings.Join(codes, "\x1f")
+		cell := strconv.FormatFloat(val, 'f', -1, 64)
+		switch mc := colOf[metricID]; mc.Format {
+		case metricformula.FormatText:
+			if text == "" {
+				continue
+			}
+			cell = text
+		case metricformula.FormatPicklist:
+			code, known := picklistCode[mc.PicklistDim][val]
+			if !known {
+				continue // a key no member has: nothing the import could read
+			}
+			cell = code
+		case metricformula.FormatDate:
+			cell = formula.SerialDate(val)
+		}
 		if _, seen := rowValues[key]; !seen {
 			rowDims[key] = codes
-			rowValues[key] = map[string]float64{}
+			rowValues[key] = map[string]string{}
 			keyOrder = append(keyOrder, key)
 		}
-		rowValues[key][metricID] = val
+		rowValues[key][metricID] = cell
 	}
 	if err := factRows.Err(); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -251,11 +307,7 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		rec = append(rec, rowDims[key]...)
 		vals := rowValues[key]
 		for _, mc := range metricCols {
-			if v, ok := vals[mc.ID]; ok {
-				rec = append(rec, strconv.FormatFloat(v, 'f', -1, 64))
-			} else {
-				rec = append(rec, "")
-			}
+			rec = append(rec, vals[mc.ID])
 		}
 		records = append(records, rec)
 	}

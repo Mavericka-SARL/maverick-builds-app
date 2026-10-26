@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/mavericks-engine/mavericks/internal/formula"
 )
 
 // Querier is the one method the rule resolver needs — satisfied by
@@ -175,7 +178,82 @@ func RuleMaps(ctx context.Context, q Querier, userID, revisionID string) (dimRul
 			metricRules[ar.RefID] = ar.Access
 		}
 	}
+	if err := hideDependents(ctx, q, revisionID, metricRules); err != nil {
+		return nil, nil, err
+	}
 	return dimRules, metricRules, nil
+}
+
+// hideDependents hides from the reader every calculated metric of
+// revisionID whose formula reads a metric hidden from them, directly or
+// through other calculated metrics: `hidden_cost * 1` would otherwise show
+// the hidden metric's values (decided 2026-10-26: a metric rule withholds
+// every value it flows into). A reference is any identifier of the formula
+// that names a metric, regardless of case, as formulas resolve names — a
+// dimension that happens to share a hidden metric's name hides its readers
+// too, which only ever withholds more.
+func hideDependents(ctx context.Context, q Querier, revisionID string, metricRules map[string]string) error {
+	hidden := map[string]bool{}
+	for id, access := range metricRules {
+		if access == "hidden" {
+			hidden[id] = true
+		}
+	}
+	if len(hidden) == 0 || revisionID == "" {
+		return nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT id::text, name, COALESCE(formula, '')
+		FROM model.metric_def WHERE revision_id = $1::uuid`, revisionID)
+	if err != nil {
+		return fmt.Errorf("load metrics for hidden dependents: %w", err)
+	}
+	type calc struct{ id, formula string }
+	idsByName := map[string][]string{}
+	var calcs []calc
+	for rows.Next() {
+		var id, name, f string
+		if err := rows.Scan(&id, &name, &f); err != nil {
+			rows.Close()
+			return fmt.Errorf("load metrics for hidden dependents: %w", err)
+		}
+		key := strings.ToUpper(name)
+		idsByName[key] = append(idsByName[key], id)
+		if strings.TrimSpace(f) != "" {
+			calcs = append(calcs, calc{id, f})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("load metrics for hidden dependents: %w", err)
+	}
+	reads := make(map[string][]string, len(calcs))
+	for _, c := range calcs {
+		refs, err := formula.ExtractIdents(c.formula)
+		if err != nil {
+			continue // a formula that does not parse computes nothing
+		}
+		for _, ref := range refs {
+			reads[c.id] = append(reads[c.id], idsByName[strings.ToUpper(ref)]...)
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, c := range calcs {
+			if hidden[c.id] {
+				continue
+			}
+			for _, dep := range reads[c.id] {
+				if hidden[dep] {
+					hidden[c.id] = true
+					metricRules[c.id] = "hidden"
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Execer is the one method ReplaceUserRules needs — satisfied by pgx.Tx.

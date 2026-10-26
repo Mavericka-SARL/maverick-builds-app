@@ -35,6 +35,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/imagedata"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
@@ -2135,8 +2136,41 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 	for i := range result {
 		result[i].DimensionIDs = metricDims[result[i].ID]
 	}
+	if err := h.withholdFormulas(ctx, a, modelID, result); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 
 	jsonOK(w, result)
+}
+
+// withholdFormulas clears the formula text of lists served to someone who
+// does not build modelID. A formula names the metrics it reads, hidden ones
+// included, and no business screen shows it; builders keep it (Preview and
+// Design read /api/grid as the developer).
+func (h *handler) withholdFormulas(ctx context.Context, a *actor, modelID string, lists ...[]metricRow) error {
+	builds, err := h.buildsModel(ctx, a, modelID)
+	if err != nil || builds {
+		return err
+	}
+	for _, list := range lists {
+		for i := range list {
+			list[i].Formula = nil
+		}
+	}
+	return nil
+}
+
+// visibleRules leaves out "hidden" entries: echoed to their reader, the
+// rules would list the ids of members and metrics hidden from them.
+func visibleRules(rules map[string]string) map[string]string {
+	out := make(map[string]string, len(rules))
+	for id, access := range rules {
+		if access != "hidden" {
+			out[id] = access
+		}
+	}
+	return out
 }
 
 // ruleErrStatus answers an automation rule's create or update error: a
@@ -2974,9 +3008,10 @@ type gridDimension struct {
 	Members            []gridDimMember `json:"members"`
 }
 
+// gridAccessRules echoes the reader's own rules, its hidden ones left out.
 type gridAccessRules struct {
-	DimMembers map[string]string `json:"dim_members"` // memberID → "write"|"read"|"hidden"
-	Metrics    map[string]string `json:"metrics"`     // metricID → "write"|"read"|"hidden"
+	DimMembers map[string]string `json:"dim_members"` // memberID → "write"|"read"
+	Metrics    map[string]string `json:"metrics"`     // metricID → "write"|"read"
 }
 
 // filterHiddenMembers drops members whose dimRules entry is "hidden" and
@@ -4260,6 +4295,10 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := h.withholdFormulas(ctx, act, modelID, metrics, allMetrics); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 	jsonOK(w, gridResponse{
 		RevisionID:         revisionID,
 		Metrics:            metrics,
@@ -4271,7 +4310,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		Texts:              texts,
 		Totals:             totals,
 		Withheld:           withheld,
-		AccessRules:        gridAccessRules{DimMembers: dimRules, Metrics: metricRules},
+		AccessRules:        gridAccessRules{DimMembers: visibleRules(dimRules), Metrics: visibleRules(metricRules)},
 		WorkflowLocks:      workflowLocks,
 		RollupSourceGridID: rollupSourceGridID,
 		RecalcPending:      h.recalcPending(ctx, revisionID),
@@ -4372,7 +4411,7 @@ func (h *handler) workflowSubmit(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, workflow.ErrWorkflowNotPublished):
 			jsonErr(w, err, http.StatusBadRequest)
-		case errors.Is(err, workflow.ErrNoRACIScope), errors.Is(err, workflow.ErrHiddenScope):
+		case errors.Is(err, workflow.ErrNoRACIScope), errors.Is(err, workflow.ErrHiddenScope), errors.Is(err, workflow.ErrReadOnlyScope):
 			jsonErr(w, err, http.StatusForbidden)
 		case errors.Is(err, workflow.ErrDuplicateInstance):
 			jsonErr(w, err, http.StatusConflict)
@@ -5095,7 +5134,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at, link_owner)
 		SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 			COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
-			          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
+			          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1),
+			         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text")+` THEN i.target_id END),
 			CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
 				SELECT jsonb_object_agg(e.key, COALESCE((
 					SELECT to_jsonb(m.new_id::text) FROM idmap m
@@ -5104,7 +5144,10 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 					 ORDER BY m.kind = CASE WHEN e.key = 'target_id'
 					                        THEN COALESCE(NULLIF(i.config->>'target_type',''), NULLIF(i.target_type,''), 'grid')
 					                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
-					 LIMIT 1), e.value))
+					 LIMIT 1),
+				CASE WHEN e.key = 'target_id' AND jsonb_typeof(e.value) = 'string'
+				          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')")+`
+				     THEN 'null'::jsonb ELSE e.value END))
 				FROM jsonb_each(i.config) e), i.config)
 			ELSE i.config END,
 			i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
@@ -5114,6 +5157,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 	`, srcArgs...); err != nil {
 		return "", fmt.Errorf("revision integration copy failed: %w", err)
+	}
+	if _, err := tx.Exec(ctx, integration.CopySchedulesSQL, srcArgs...); err != nil {
+		return "", fmt.Errorf("revision connector schedule copy failed: %w", err)
 	}
 
 	// Step H: copy workflow definitions and automation rules (application-
@@ -5128,8 +5174,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// schedule rule carries its cron settings (a schedule rule without
 	// cron_expr fails automation_rule_schedule_cron_chk, which failed the
 	// whole duplication); next_fire_at stays NULL, so the copy is not
-	// armed — the scheduler fires rules of every revision, and the source
-	// rule keeps its own schedule. Saving the copy's schedule arms it.
+	// armed: the scheduler arms a revision's schedule rules once it is live
+	// and disarms them when another one is (armActiveSchedules).
 	// internal/aiassistant's createRevision runs the same statement.
 	if _, err := tx.Exec(ctx, `
 		WITH
@@ -6200,6 +6246,18 @@ func (h *handler) workflowDefinitions(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+// myHistoryReachSQL keeps My history to the applications whose workflows
+// the caller is still part of: an assignee of a step naming no role there,
+// or of one naming a business role it is a member of — the boundary the
+// inbox and notifications draw (package assignee), grants narrowing it.
+// Having taken part is not reach: an account removed from the tenant (whose
+// hidden-member rules went with it, so nothing would be redacted any more),
+// narrowed away from the application, or notified across a boundary since
+// closed reads nothing of its instances here.
+var myHistoryReachSQL = "(" + assignee.SQL("wd.application_id", "NULL::jsonb", "$1::uuid") + " OR " +
+	assignee.SQL("wd.application_id", `(SELECT jsonb_agg(mh_br.name) FROM identity.business_role_member mh_brm
+		JOIN identity.business_role mh_br ON mh_br.id = mh_brm.role_id WHERE mh_brm.user_id = $1::uuid)`, "$1::uuid") + ")"
+
 func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
@@ -6215,7 +6273,8 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema)
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-		WHERE wi.started_by = $1::uuid
+		WHERE `+myHistoryReachSQL+`
+		  AND (wi.started_by = $1::uuid
 		   OR EXISTS (
 		       SELECT 1 FROM workflow.workflow_step ws
 		       WHERE ws.instance_id = wi.id AND ws.assignee_user_id = $1::uuid
@@ -6229,7 +6288,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		       SELECT 1 FROM notification.notification n
 		       WHERE n.recipient_user_id = $1::uuid
 		         AND n.resource_type = 'workflow_instance' AND n.resource_id = wi.id::text
-		   )
+		   ))
 		ORDER BY wi.started_at DESC
 		LIMIT 50
 	`, a.UserID)
@@ -6351,7 +6410,7 @@ func (h *handler) workflowStartInstance(w http.ResponseWriter, r *http.Request) 
 			jsonErr(w, err, http.StatusBadRequest)
 		case errors.Is(err, workflow.ErrNoRACIScope):
 			jsonErr(w, err, http.StatusForbidden)
-		case errors.Is(err, workflow.ErrHiddenScope):
+		case errors.Is(err, workflow.ErrHiddenScope), errors.Is(err, workflow.ErrReadOnlyScope):
 			jsonErr(w, err, http.StatusForbidden)
 		case errors.Is(err, workflow.ErrDuplicateInstance):
 			jsonErr(w, err, http.StatusConflict)
@@ -8149,6 +8208,9 @@ func (h *handler) dimensionImportJob(ctx context.Context, dimensionID, source, u
 	if fatal != nil {
 		j.Failed, j.Rows = true, 0
 		j.Errors = []*importpkgv1.ImportError{{Message: fatal.Error()}}
+		if fe := (*dimensionFileError)(nil); errors.As(fatal, &fe) {
+			j.Errors = fe.rows
+		}
 	}
 	return j
 }
@@ -8508,6 +8570,9 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		CSV         string `json:"csv"`
 		// FileName names the person's file in Recent Imports.
 		FileName string `json:"file_name"`
+		// RowLines: each data row's line in the person's file, which a
+		// refusal names (the CSV sent is the wizard's, rebuilt).
+		RowLines []int `json:"row_lines"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DimensionID == "" || body.CSV == "" {
 		jsonErr(w, fmt.Errorf("dimension_id and csv are required"), http.StatusBadRequest)
@@ -8529,8 +8594,19 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
+	if fe := (*dimensionFileError)(nil); errors.As(importErr, &fe) {
+		for _, e := range fe.rows {
+			if k := int(e.RowNumber) - 2; k >= 0 && k < len(body.RowLines) && body.RowLines[k] > 0 {
+				e.RowNumber = int32(body.RowLines[k])
+			}
+		}
+	}
 	job := h.dimensionImportJob(ctx, body.DimensionID, "upload", act.UserID, body.FileName, started, imported, errs, importErr)
 	h.recordImportJob(ctx, job)
+	if fe := (*dimensionFileError)(nil); errors.As(importErr, &fe) {
+		jsonDimensionFileErr(w, fe)
+		return
+	}
 	if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
 		h.jsonLimitErr(w, importErr)
 		return
@@ -8669,11 +8745,16 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	if !isTime && (hasStart || hasEnd) {
 		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
 	}
-	// One transaction for the file: a time dimension is validated and
-	// reindexed whole, and a file that would take the workspace past its
-	// storage limit is refused whole (isStorageRefusal) instead of stopping
-	// part-way. A row that fails otherwise is skipped and counted, as it
-	// always was, by rolling back to a savepoint of its own.
+	// One transaction for the file, imported whole or not at all, as grid
+	// and table files are (the owner's decision, 2026-10-26): a time
+	// dimension is validated and reindexed whole, a file that would take the
+	// workspace past its storage limit is refused whole (isStorageRefusal),
+	// and a row that fails otherwise is rolled back to a savepoint of its
+	// own so the rest of the file is still checked — every failing row is
+	// then named by its line (*dimensionFileError) and nothing is kept. A
+	// failing row used to be skipped and counted ("N rows had errors"), the
+	// rest of the file loaded, and no line named; an unknown parent was not
+	// even counted.
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return 0, 0, isTime, err
@@ -8728,11 +8809,23 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM model.dimension_member WHERE dimension_id = $1::uuid`, dimensionID).Scan(&lastSort); err != nil {
 		return 0, 0, isTime, err
 	}
+	var rowErrs []*importpkgv1.ImportError
+	rowErr := func(line int, column, code, message, raw string) {
+		rowErrs = append(rowErrs, &importpkgv1.ImportError{RowNumber: int32(line), Column: column, ErrorCode: code, Message: message, RawValue: raw})
+	}
+	// A parent named before it is listed is found once every row is in.
+	type laterParent struct {
+		code, parent string
+		line         int
+	}
+	var later []laterParent
+	line := 1 // the header
 	for {
 		record, err := cr.Read()
 		if err != nil {
 			break
 		}
+		line++
 		code := ""
 		if hasCode {
 			code = cell(record, codeCol)
@@ -8746,17 +8839,17 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 		}
 		if code == "" {
 			if label == "" {
-				errs++
+				rowErr(line, "code", "MISSING_CODE", "the row has neither a code nor a label", "")
 				continue
 			}
 			code, err = h.autoMemberCodeOn(ctx, tx, dimensionID, label)
 			if err != nil {
-				errs++
+				rowErr(line, "label", "INVALID_CODE", "no code could be made from this label: "+err.Error(), label)
 				continue
 			}
 		}
 		var parentID *string
-		if hasParent {
+		if hasParent && !isTime {
 			if parentCode := cell(record, parentCol); parentCode != "" {
 				var pid string
 				if err := tx.QueryRow(ctx,
@@ -8764,6 +8857,8 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 					dimensionID, parentCode,
 				).Scan(&pid); err == nil {
 					parentID = &pid
+				} else {
+					later = append(later, laterParent{code: code, parent: parentCode, line: line})
 				}
 			}
 		}
@@ -8836,13 +8931,34 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 			if isStorageRefusal(err) {
 				return 0, 0, isTime, err
 			}
-			errs++
+			rowErr(line, "code", "INVALID_MEMBER", fmt.Sprintf("member %q could not be saved: %v", code, err), code)
 			continue
 		}
 		if err := row.Commit(ctx); err != nil {
 			return 0, 0, isTime, err
 		}
 		imported++
+	}
+	for _, p := range later {
+		if p.parent == p.code {
+			rowErr(p.line, "parent_code", "INVALID_PARENT", fmt.Sprintf("member %q cannot be its own parent", p.code), p.parent)
+			continue
+		}
+		tag, err := tx.Exec(ctx, `
+			UPDATE model.dimension_member m SET parent_member_id = p.id
+			FROM model.dimension_member p
+			WHERE m.dimension_id = $1::uuid AND m.code = $2 AND p.dimension_id = $1::uuid AND p.code = $3`,
+			dimensionID, p.code, p.parent)
+		if err != nil {
+			return 0, 0, isTime, err
+		}
+		if tag.RowsAffected() == 0 {
+			rowErr(p.line, "parent_code", "UNKNOWN_PARENT", fmt.Sprintf("parent %q is not a member of this dimension, nor a row of the file", p.parent), p.parent)
+		}
+	}
+	if len(rowErrs) > 0 {
+		sort.SliceStable(rowErrs, func(i, j int) bool { return rowErrs[i].RowNumber < rowErrs[j].RowNumber })
+		return 0, len(rowErrs), isTime, &dimensionFileError{rows: rowErrs}
 	}
 	if isTime {
 		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
@@ -8853,6 +8969,26 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 		return 0, 0, isTime, err
 	}
 	return imported, errs, isTime, nil
+}
+
+// dimensionFileError refuses a dimension file whole: every row with a
+// problem, by its line in the file. Nothing of the file was imported.
+type dimensionFileError struct{ rows []*importpkgv1.ImportError }
+
+func (e *dimensionFileError) Error() string {
+	return fmt.Sprintf("import rejected: %d row(s) failed, nothing was imported — %s", len(e.rows), firstRowProblem(e.rows))
+}
+
+// jsonDimensionFileErr answers a refused dimension file as a refused grid
+// file is answered: 422, every failing row listed.
+func jsonDimensionFileErr(w http.ResponseWriter, e *dimensionFileError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":      e.Error(),
+		"error_rows": len(e.rows),
+		"errors":     importErrorRows(e.rows),
+	})
 }
 
 func deref(s *string) string {
@@ -8988,7 +9124,7 @@ func (h *handler) developerIntegrations(w http.ResponseWriter, r *http.Request) 
 			body.Tags = []string{}
 		}
 		// The target must be this model's own: a run writes into it.
-		if err := h.checkIntegrationTarget(ctx, modelID, body.TargetType, body.TargetID); err != nil {
+		if err := h.checkIntegrationTarget(ctx, modelID, revisionID, body.TargetType, body.TargetID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -8998,7 +9134,7 @@ func (h *handler) developerIntegrations(w http.ResponseWriter, r *http.Request) 
 			 VALUES ($1::uuid, $2, $3, $4, NULLIF($5,'')::uuid, NULLIF($6,'')::uuid, $7, $8) RETURNING id::text`,
 			modelID, body.Name, body.Type, body.TargetType, body.TargetID, revisionID, body.Status, body.Tags,
 		).Scan(&newID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			writeIntegrationErr(w, err, body.Name)
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -9194,11 +9330,11 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 		// writes into it. A target resent unchanged (rename, tags) is
 		// refused only if it is another model's — one deleted since it
 		// was chosen must not block a rename (checkIntegrationSave).
-		var intModelID string
+		var intModelID, intRevisionID string
 		var stored integrationRefs
-		_ = h.db.QueryRow(ctx, `SELECT model_id::text, target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&intModelID, &stored.TargetType, &stored.TargetID)
+		_ = h.db.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,''), target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&intModelID, &intRevisionID, &stored.TargetType, &stored.TargetID)
 		next := integrationRefs{TargetType: body.TargetType, TargetID: body.TargetID}
-		if err := h.checkIntegrationSave(ctx, h.db, intModelID, stored, next, body.Status != nil && *body.Status == "active"); err != nil {
+		if err := h.checkIntegrationSave(ctx, h.db, intModelID, intRevisionID, stored, next, body.Status != nil && *body.Status == "active"); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -9208,7 +9344,7 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 			 WHERE id=$1::uuid`,
 			intID, body.Name, body.TargetType, body.TargetID, body.Status, body.Tags,
 		); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			writeIntegrationErr(w, err, body.Name)
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -9379,7 +9515,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// save-time check existed (or copied from one by revision duplication)
 	// can name another tenant's form or dimension. Refused like a rest_api
 	// run of a foreign target — 400, no run recorded.
-	if err := h.checkIntegrationTarget(ctx, intModelID, intg.TargetType, intg.TargetID); err != nil {
+	if err := h.checkIntegrationTarget(ctx, intModelID, intRevisionID, intg.TargetType, intg.TargetID); err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
@@ -9505,8 +9641,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
 		if importErr != nil {
-			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", importErr.Error())
-			h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, 0, importErr))
+			h.recordIntegrationRun(ctx, intID, act.UserID, 0, errs, "error", importErr.Error())
+			h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, errs, importErr))
+			if fe := (*dimensionFileError)(nil); errors.As(importErr, &fe) {
+				jsonDimensionFileErr(w, fe)
+				return
+			}
 			if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
 				h.jsonLimitErr(w, importErr)
 				return
@@ -11371,7 +11511,7 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusBadRequest)
 		case errors.Is(err, workflow.ErrNoRACIScope):
 			jsonErr(w, err, http.StatusForbidden)
-		case errors.Is(err, workflow.ErrHiddenScope):
+		case errors.Is(err, workflow.ErrHiddenScope), errors.Is(err, workflow.ErrReadOnlyScope):
 			jsonErr(w, err, http.StatusForbidden)
 		case errors.Is(err, workflow.ErrDuplicateInstance):
 			jsonErr(w, err, http.StatusConflict)
@@ -11459,7 +11599,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			// IsInput switches the metric between input and calculated
 			// (modeledit.SwitchMetricKind); omitted keeps it. Becoming
 			// calculated takes a formula, and DropValues for an input that
-			// holds values.
+			// holds values. A text input changing format converts its notes
+			// (modeledit.ConvertTextNotes); DropValues clears the ones that
+			// do not convert.
 			IsInput    *bool `json:"is_input"`
 			DropValues bool  `json:"drop_values"`
 		}
@@ -11491,6 +11633,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			jsonErr(w, fmt.Errorf("metric not found"), http.StatusNotFound)
 			return
 		}
+		storedFormat, storedIsInput := body.Format, metricIsInput
 		body.Name = storedName
 		if patch.Name != nil && *patch.Name != "" {
 			body.Name = *patch.Name
@@ -11704,6 +11847,23 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		if switchKind {
 			if err := modeledit.SwitchMetricKind(ctx, tx, metricID, metricIsInput, patch.DropValues); err != nil {
 				if errors.Is(err, modeledit.ErrMetricHoldsValues) {
+					jsonErr(w, err, http.StatusConflict)
+				} else {
+					jsonErr(w, err, http.StatusInternalServerError)
+				}
+				return
+			}
+		}
+		// A text input moving to another format takes its notes with it,
+		// converted, or refuses (409) while some do not convert.
+		if storedIsInput && metricIsInput && storedFormat == metricformula.FormatText && body.Format != metricformula.FormatText {
+			var actorID string
+			if a, e := h.resolveActor(ctx, r); e == nil {
+				actorID = a.UserID
+			}
+			if err := modeledit.ConvertTextNotes(ctx, tx, metricID, body.Format, body.PicklistDimensionID, actorID, patch.DropValues); err != nil {
+				var notes *modeledit.NotesDoNotConvertError
+				if errors.As(err, &notes) {
 					jsonErr(w, err, http.StatusConflict)
 				} else {
 					jsonErr(w, err, http.StatusInternalServerError)
@@ -16719,7 +16879,7 @@ func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID st
 	calcStore := calculation.NewStore(h.db.For(ctx))
 	sched := calculation.NewScheduler(h.log, calcStore)
 	for _, rid := range revIDs {
-		if err := sched.RecalcAffected(ctx, modelID, rid, inputIDs); err != nil {
+		if err := sched.RecalcFromAllInputs(ctx, modelID, rid, inputIDs); err != nil {
 			h.log.Warn().Err(err).Str("model", modelID).Str("revision", rid).
 				Msg("recalc all inputs failed")
 		}

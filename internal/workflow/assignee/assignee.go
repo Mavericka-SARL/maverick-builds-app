@@ -48,6 +48,13 @@ import "strings"
 //   - A disabled account (identity.user.disabled_at set) is an assignee of
 //     nothing, as the gateway refuses to resolve it:
 //     it is neither notified nor reminded of a step.
+//   - Application and model grants narrow every arm above: a person granted
+//     some applications (or models) is an assignee in those only, as the
+//     gateway opens only those (rolesReachApp). An administrator of the
+//     application's tenant, and a platform admin, are not narrowed. Until
+//     2026-10-26 the grants narrowed only an account with no tenant, so a
+//     business admin narrowed away from an application still saw, was told
+//     of, and decided its steps.
 //
 // The tiers are the gateway's (adminTiers in internal/gateway/admin_tiers.go):
 // roles count per tenant, by what the account holds in that tenant only, and
@@ -120,6 +127,23 @@ const stepAssigneeSQL = `EXISTS (
 	            WHERE asg_uda.user_id = {user} AND asg_uda.workspace_id IS NULL
 	              AND asg_uda.role::text = 'developer'
 	        ) AS unscoped_developer,
+	        EXISTS (
+	            SELECT 1 FROM identity.role_assignment asg_wta
+	            JOIN core.workspace asg_wtws ON asg_wtws.id = asg_wta.workspace_id
+	            WHERE asg_wta.user_id = {user} AND asg_wtws.customer_id = asg_tenant.id
+	              AND asg_wta.role::text = 'tenant_admin'
+	        ) AS ws_tenant_admin,
+	        EXISTS (SELECT 1 FROM identity.user_app_access asg_gua WHERE asg_gua.user_id = {user}) AS has_app_grants,
+	        EXISTS (SELECT 1 FROM identity.user_model_access asg_gum WHERE asg_gum.user_id = {user}) AS has_model_grants,
+	        EXISTS (
+	            SELECT 1 FROM identity.user_app_access asg_nua
+	            WHERE asg_nua.user_id = {user} AND asg_nua.application_id = asg_app.id
+	        ) AS app_granted,
+	        EXISTS (
+	            SELECT 1 FROM identity.user_model_access asg_num
+	            JOIN core.model asg_nmm ON asg_nmm.id = asg_num.model_id
+	            WHERE asg_num.user_id = {user} AND asg_nmm.application_id = asg_app.id
+	        ) AS model_granted,
 	        (EXISTS (SELECT 1 FROM identity.user_app_access asg_gua WHERE asg_gua.user_id = {user})
 	         OR EXISTS (SELECT 1 FROM identity.user_model_access asg_gum WHERE asg_gum.user_id = {user})) AS has_grants,
 	        -- A grant to this application, or — with no application grant,
@@ -160,6 +184,20 @@ const stepAssigneeSQL = `EXISTS (
 	    ) AS in_scope
 	) asg_tier
 	CROSS JOIN LATERAL (
+	    -- A person narrowed to some applications (user_app_access) or
+	    -- models (user_model_access) cannot open the others, so is no
+	    -- assignee there whatever its roles, as the gateway's rolesReachApp
+	    -- narrows them. An administrator of this tenant is not narrowed by
+	    -- its grants (builderAdminReachesApp), nor is a platform admin.
+	    SELECT (
+	        asg_held.platform
+	        OR asg_held.ws_tenant_admin
+	        OR asg_unscoped.unscoped_tenant_admin_here
+	        OR ((NOT asg_held.has_app_grants OR asg_held.app_granted)
+	            AND (NOT asg_held.has_model_grants OR asg_held.model_granted))
+	    ) AS reaches
+	) asg_narrow
+	CROSS JOIN LATERAL (
 	    SELECT CASE WHEN jsonb_typeof({roles}) = 'array' THEN {roles} ELSE '[]'::jsonb END AS names
 	) asg_roles
 	WHERE asg_app.id = {app}
@@ -169,6 +207,7 @@ const stepAssigneeSQL = `EXISTS (
 	      SELECT 1 FROM identity."user" asg_live
 	      WHERE asg_live.id = {user} AND asg_live.disabled_at IS NULL
 	  )
+	  AND asg_narrow.reaches
 	  AND (
 	      -- A step naming no role: everyone who reaches the application.
 	      (({roles} IS NULL OR {roles} = '[]'::jsonb)

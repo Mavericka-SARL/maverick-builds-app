@@ -2285,6 +2285,10 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	// Integrations (after grids/dashboards/forms so targets resolve, and
 	// before widgets so integration_button refs can).
 	integrationMap := make(map[string]string, len(pkg.Integrations))
+	// A connector's name is unique in its revision (migration 151); a
+	// package exported before then may name two alike, and the later ones
+	// arrive numbered, "Name (2)", rather than failing the import.
+	integrationNames := make(map[string]bool, len(pkg.Integrations))
 	refs.add("integration", integrationMap)
 	for _, ig := range pkg.Integrations {
 		// target_type decides which kind the target resolves through, so
@@ -2310,7 +2314,7 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, target_id, config, status)
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'csv_import'), $5, $6::uuid, COALESCE($7::jsonb,'{}'::jsonb), $8)
 			RETURNING id::text`,
-			modelID, revisionID, ig.Name, ig.Type, targetType, target, jsonArg(config), status).Scan(&newIntegrationID); err != nil {
+			modelID, revisionID, uniqueName(integrationNames, ig.Name), ig.Type, targetType, target, jsonArg(config), status).Scan(&newIntegrationID); err != nil {
 			return "", fmt.Errorf("integration %q: %w", ig.Name, err)
 		}
 		if ig.ID != "" {
@@ -2398,4 +2402,15 @@ func detachModelLink(cfg json.RawMessage) (json.RawMessage, bool) {
 		return cfg, true
 	}
 	return out, true
+}
+
+// uniqueName is name, or — when used already holds it — the first free
+// "name (n)" from 2; it records the result in used.
+func uniqueName(used map[string]bool, name string) string {
+	out := name
+	for n := 2; used[out]; n++ {
+		out = fmt.Sprintf("%s (%d)", name, n)
+	}
+	used[out] = true
+	return out
 }

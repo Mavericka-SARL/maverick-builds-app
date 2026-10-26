@@ -150,9 +150,10 @@ export interface GridData {
    * built from it (a parent, a total) may be shown as a partial sum.
    */
   withheld?: string[];
+  /** The viewer's own rules, hidden ones left out (they would name what is hidden). */
   access_rules: {
-    dim_members: Record<string, string>; // memberID → "write"|"read"|"hidden"
-    metrics:     Record<string, string>; // metricID  → "write"|"read"|"hidden"
+    dim_members: Record<string, string>; // memberID → "write"|"read"
+    metrics:     Record<string, string>; // metricID  → "write"|"read"
   };
   rollup_source_grid_id?: string | null; // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
   recalc_pending?: boolean; // a write's dependents are still being recalculated: calculated cells are about to change
@@ -526,7 +527,7 @@ export interface Metric {
   name: string;
   label: string;
   is_input: boolean;
-  formula?: string;
+  formula?: string; // /api/grid and /api/metrics: only to a developer of the model
   agg_rule: string;
   format: string;           // "number" | "percentage" | "currency" | "boolean" | "text" | "picklist"
   format_decimals: number;
@@ -2664,10 +2665,12 @@ export const api = {
   getInfraNodes: () => apiFetch<InfraNode[]>("/api/admin/infra/nodes"),
   listIntegrationRuns: (id: string) =>
     apiFetch<IntegrationRun[]>(`/api/developer/integrations/${id}/runs`),
-  importDimensionMembers: (dimensionId: string, csv: string, about?: ImportAbout) =>
+  // A dimension file imports whole: a refusal (422) lists each failing row
+  // by its line in the person's file (rowLines).
+  importDimensionMembers: (dimensionId: string, csv: string, about?: ImportAbout, rowLines?: number[]) =>
     apiFetch<{ rows_imported: number; error_rows: number }>("/api/import/dimension-members", {
       method: "POST",
-      body: JSON.stringify({ dimension_id: dimensionId, csv, file_name: about?.fileName }),
+      body: JSON.stringify({ dimension_id: dimensionId, csv, file_name: about?.fileName, row_lines: rowLines }),
     }),
   createExportIntegration: (body: { name: string; target_id: string; status?: string; tags?: string[]; config: ExportSpec }, revisionId?: string) =>
     apiFetch<{ id: string }>(`/api/developer/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, {

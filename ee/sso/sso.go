@@ -86,6 +86,11 @@ func (s *Store) Get(ctx context.Context, customerID string) (Settings, error) {
 	if out.AllowedDomains == nil {
 		out.AllowedDomains = []string{}
 	}
+	// A row saved before 2026-10-26 may name tenant_admin; it gives a new
+	// account no more than business_user now (see defaultRoleAllowed).
+	if !defaultRoleAllowed(out.DefaultRole) {
+		out.DefaultRole = "business_user"
+	}
 	out.Configured = out.Alias != ""
 	return out, nil
 }
@@ -196,6 +201,19 @@ func NormalizeDomains(in []string) []string {
 	return out
 }
 
+// defaultRoleAllowed reports whether a first sign-in may be given role.
+// Only roles a tenant admin may grant on the Users screen (assignableRoles
+// in the gateway): until 2026-10-26 tenant_admin was accepted too, so the
+// tenant admin who configures single sign-on could make every person of an
+// allowed domain a tenant admin, which the Users screen never lets it do.
+func defaultRoleAllowed(role string) bool {
+	switch role {
+	case "business_user", "business_admin", "developer":
+		return true
+	}
+	return false
+}
+
 // Register validates the settings, has Keycloak read the provider's
 // discovery or metadata document, creates or updates the identity provider
 // under the tenant's alias, then saves the row and the domain index. The
@@ -213,13 +231,11 @@ func Register(ctx context.Context, store *Store, domains *Domains, broker Broker
 	if len(in.AllowedDomains) == 0 {
 		return Settings{}, fmt.Errorf("at least one allowed e-mail domain is required — it is what keeps the provider to its own people")
 	}
-	switch in.DefaultRole {
-	case "", "business_user", "business_admin", "developer", "tenant_admin":
-		if in.DefaultRole == "" {
-			in.DefaultRole = "business_user"
-		}
-	default:
-		return Settings{}, fmt.Errorf("default_role must be one of business_user, business_admin, developer, tenant_admin")
+	if in.DefaultRole == "" {
+		in.DefaultRole = "business_user"
+	}
+	if !defaultRoleAllowed(in.DefaultRole) {
+		return Settings{}, fmt.Errorf("default_role must be one of business_user, business_admin, developer")
 	}
 	if in.DisplayName == "" {
 		in.DisplayName = "Company account"

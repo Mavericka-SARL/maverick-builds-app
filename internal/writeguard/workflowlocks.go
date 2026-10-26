@@ -87,10 +87,26 @@ func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) 
 		       ) AS awaiting_approval
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		-- The decision of the last APPROVAL step decided. A notification,
+		-- task or condition step after it records a decision of its own
+		-- (sent, done, a branch), and reading that one released the agreed
+		-- numbers as soon as "approve, then tell the requester" sent its
+		-- mail (decided 2026-10-06: an approved instance stays locked
+		-- whatever follows). A step its definition no longer names (edited
+		-- since, with no snapshot) counts when it recorded an approval's
+		-- decision.
 		LEFT JOIN LATERAL (
-			SELECT decision FROM workflow.workflow_step
-			WHERE instance_id = wi.id AND decision IS NOT NULL AND completed_at IS NOT NULL
-			ORDER BY completed_at DESC LIMIT 1
+			SELECT s.decision FROM workflow.workflow_step s
+			LEFT JOIN LATERAL (
+				SELECT lower(d->>'type') AS type
+				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
+				                               THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
+				WHERE d->>'id' = s.step_def_id LIMIT 1
+			) sd ON true
+			WHERE s.instance_id = wi.id AND s.decision IS NOT NULL AND s.completed_at IS NOT NULL
+			  AND (sd.type IN ('approval', 'step_type_approval', '2')
+			       OR (sd.type IS NULL AND s.decision IN ('approve', 'approved', 'reject', 'rejected')))
+			ORDER BY s.completed_at DESC LIMIT 1
 		) ws ON true
 		WHERE wd.application_id = $1::uuid
 		ORDER BY wi.started_at DESC

@@ -838,6 +838,12 @@ func serialToTime(serial float64) time.Time {
 	return excelEpoch.Add(time.Duration(serial * 24 * float64(time.Hour)))
 }
 
+// SerialDate writes a date-format cell's serial as its ISO date
+// (2014-11-24), the form DateSerial reads back.
+func SerialDate(serial float64) string {
+	return serialToTime(serial).UTC().Format("2006-01-02")
+}
+
 // DateSerial reads an ISO date (2014-11-24) as the serial number DATE()
 // gives, what a date-format cell stores.
 func DateSerial(iso string) (float64, bool) {

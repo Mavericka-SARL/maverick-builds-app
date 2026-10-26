@@ -7528,8 +7528,6 @@ func (s SsoSettingsDefaultRole) Validate() error {
 		return nil
 	case "developer":
 		return nil
-	case "tenant_admin":
-		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)
 	}

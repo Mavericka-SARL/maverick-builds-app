@@ -30214,7 +30214,8 @@ type SsoSettings struct {
 	ClientSecret   OptString `json:"client_secret"`
 	AllowedDomains []string  `json:"allowed_domains"`
 	// Create an account on first sign-in.
-	JitProvisioning    bool                   `json:"jit_provisioning"`
+	JitProvisioning bool `json:"jit_provisioning"`
+	// The role a first sign-in gets; only roles a tenant admin may grant on the Users screen.
 	DefaultRole        SsoSettingsDefaultRole `json:"default_role"`
 	Enabled            bool                   `json:"enabled"`
 	Configured         OptBool                `json:"configured"`
@@ -30367,13 +30368,13 @@ func (*SsoSettings) getSsoSettingsRes()    {}
 func (*SsoSettings) removeSsoRes()         {}
 func (*SsoSettings) updateSsoSettingsRes() {}
 
+// The role a first sign-in gets; only roles a tenant admin may grant on the Users screen.
 type SsoSettingsDefaultRole string
 
 const (
 	SsoSettingsDefaultRoleBusinessUser  SsoSettingsDefaultRole = "business_user"
 	SsoSettingsDefaultRoleBusinessAdmin SsoSettingsDefaultRole = "business_admin"
 	SsoSettingsDefaultRoleDeveloper     SsoSettingsDefaultRole = "developer"
-	SsoSettingsDefaultRoleTenantAdmin   SsoSettingsDefaultRole = "tenant_admin"
 )
 
 // AllValues returns all SsoSettingsDefaultRole values.
@@ -30382,7 +30383,6 @@ func (SsoSettingsDefaultRole) AllValues() []SsoSettingsDefaultRole {
 		SsoSettingsDefaultRoleBusinessUser,
 		SsoSettingsDefaultRoleBusinessAdmin,
 		SsoSettingsDefaultRoleDeveloper,
-		SsoSettingsDefaultRoleTenantAdmin,
 	}
 }
 
@@ -30394,8 +30394,6 @@ func (s SsoSettingsDefaultRole) MarshalText() ([]byte, error) {
 	case SsoSettingsDefaultRoleBusinessAdmin:
 		return []byte(s), nil
 	case SsoSettingsDefaultRoleDeveloper:
-		return []byte(s), nil
-	case SsoSettingsDefaultRoleTenantAdmin:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -30413,9 +30411,6 @@ func (s *SsoSettingsDefaultRole) UnmarshalText(data []byte) error {
 		return nil
 	case SsoSettingsDefaultRoleDeveloper:
 		*s = SsoSettingsDefaultRoleDeveloper
-		return nil
-	case SsoSettingsDefaultRoleTenantAdmin:
-		*s = SsoSettingsDefaultRoleTenantAdmin
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
