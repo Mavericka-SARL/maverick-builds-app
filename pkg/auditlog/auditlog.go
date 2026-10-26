@@ -111,6 +111,10 @@ const (
 	// A person's every grant in one tenant taken away, the account left;
 	// recorded as user.role_revoked (action=removed_from_tenant) until 2026-10.
 	EventUserRemovedFromTenant EventType = "user.removed_from_tenant"
+	// An account suspended (it cannot sign in) or let sign in again by an
+	// administrator, its roles and data kept (2026-10-26).
+	EventUserDisabled EventType = "user.disabled"
+	EventUserEnabled  EventType = "user.enabled"
 	// An invitation of an existing account refused (metadata refused: why);
 	// recorded as user.role_granted (granted=false) until 2026-10.
 	EventUserInvitationRefused EventType = "user.invitation_refused"

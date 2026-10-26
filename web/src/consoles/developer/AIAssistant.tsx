@@ -678,7 +678,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [uploading, setUploading]   = useState(false);
   const [draftBusy, setDraftBusy]   = useState(false);
   const [showActivity, setShowActivity] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const fileRef   = useRef<HTMLInputElement>(null);
   const { confirm, confirmElement } = useConfirm();
@@ -726,9 +726,13 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     return () => clearInterval(t);
   }, [turnStartedAt]);
 
-  // Auto-scroll to bottom when messages change.
+  // Auto-scroll to the newest message by scrolling the message list itself:
+  // scrollIntoView scrolled every scrollable ancestor too, so on a small
+  // screen the console's top bar — which model and revision the assistant
+  // works in — left the view right as the revision changed (2026-10-25).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = messagesRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   // Load session messages when switching sessions.
@@ -787,7 +791,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   });
 
   // Take the session's isolated draft as the working revision — not the
-  // live one: Set active in Developer › Models is a separate decision. The
+  // live one: Set active in Developer › Developer Models is a separate decision. The
   // AI-specific endpoint clears the session's draft_revision_id server-side
   // too, which makes the "AI draft" banner disappear below and finishes the
   // session; the console then switches to the draft.
@@ -1200,7 +1204,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         )}
 
         {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+        <div ref={messagesRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
           {messages.length === 0 && !sessionId && (
             <div style={{ textAlign: "center", color: "var(--color-text-muted)", marginTop: 60 }}>
               <Bot size={32} aria-hidden="true" style={{ marginBottom: 12, color: "var(--color-text-subtle)" }} />
@@ -1275,7 +1279,6 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
 
           {error && <p className="mvx-admin-error" style={{ marginBottom: 8 }}>{error}</p>}
 
-          <div ref={bottomRef} />
         </div>
 
         {/* Input bar — files can be dropped on it as well as attached. */}

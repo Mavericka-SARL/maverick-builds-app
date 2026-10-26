@@ -10,7 +10,7 @@
  * saved reshape) is covered by internal/gateway/ai_file_reshape_test.go.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { mockApi, loadAs } from "./mocks";
+import { mockApi, loadAs, acceptLiveEdits } from "./mocks";
 
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const FILE = "Plan FY26\n\nCountry,Jan,Feb\nCanada,10,12\n";
@@ -29,6 +29,7 @@ async function routes(page: Page, integrations: unknown[] = []) {
     }));
   });
   await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ id: "rev-1", name: "Working", is_active: true }])));
+  await acceptLiveEdits(page, "rev-1");
   await page.route(url => url.pathname === "/api/developer/integrations" || url.pathname === "/api/integrations", (route) =>
     route.request().method() === "POST" ? route.fulfill(json({ id: "int-new" })) : route.fulfill(json(integrations)));
   await page.route(url => /\/api\/developer\/integrations\/[^/]+\/config$/.test(url.pathname), async (route) => {

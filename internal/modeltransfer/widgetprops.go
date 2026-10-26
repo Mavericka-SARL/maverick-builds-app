@@ -246,6 +246,31 @@ func RemapRevisionSelectorBars(ctx context.Context, tx pgx.Tx, modelID, revision
 	return nil
 }
 
+// CopyDashboardGrantsSQL gives the dashboards of revision $2 (a copy of $3,
+// model $1) their business-role grants: a dashboard the model's live revision
+// has, by name, takes the live one's grants; any other takes its source's.
+// Taken from the source alone, a grant or revocation a business admin made on
+// the live revision after the working copy was made came undone when a copy
+// of it went live (decided 2026-10-06). Both revision copies — the developer
+// console's and the AI Developer's — run it.
+const CopyDashboardGrantsSQL = `
+	INSERT INTO identity.business_role_dashboard (role_id, dashboard_id)
+	SELECT brd.role_id, nd.id
+	FROM model.dashboard_def nd
+	JOIN core.model m ON m.id = nd.model_id
+	CROSS JOIN LATERAL (
+	    SELECT COALESCE(
+	        (SELECT ld.id FROM model.dashboard_def ld
+	         WHERE ld.model_id = nd.model_id AND ld.revision_id = m.active_revision_id AND ld.name = nd.name
+	         ORDER BY ld.created_at LIMIT 1),
+	        (SELECT od.id FROM model.dashboard_def od
+	         WHERE od.model_id = nd.model_id AND od.revision_id = $3::uuid AND od.name = nd.name
+	         ORDER BY od.created_at LIMIT 1)) AS from_id
+	) g
+	JOIN identity.business_role_dashboard brd ON brd.dashboard_id = g.from_id
+	WHERE nd.model_id = $1::uuid AND nd.revision_id = $2::uuid
+	ON CONFLICT DO NOTHING`
+
 // RemapRevisionTables carries the settings of srcRevisionID's tables beyond
 // their fields onto their copies in revisionID, matched by name: who may edit
 // their records, and the dimension a table keeps (its copy in revisionID, by

@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The Keycloak login theme exists twice on purpose: as files under
-// deploy/docker/config/keycloak/themes/maverickbuilds/login/, which both
+// The Keycloak theme (login and email) exists twice on purpose: as files under
+// deploy/docker/config/keycloak/themes/maverickbuilds/, which both
 // compose stacks mount so the theme can be worked on and seen, and inlined in
 // the keycloak-theme ConfigMap here, which is the only way the cluster can
 // mount it (a ConfigMap cannot reference a directory).
@@ -19,7 +19,7 @@ import (
 // developer sees and shipping the one nobody looked at. This test fails when
 // the two drift.
 func TestKeycloakThemeConfigMapMatchesTheFiles(t *testing.T) {
-	const themeDir = "../../../docker/config/keycloak/themes/maverickbuilds/login"
+	const themeDir = "../../../docker/config/keycloak/themes/maverickbuilds"
 
 	var cm struct {
 		Metadata struct {
@@ -44,10 +44,15 @@ func TestKeycloakThemeConfigMapMatchesTheFiles(t *testing.T) {
 	}
 
 	for key, path := range map[string]string{
-		"theme.properties": "theme.properties",
-		"brand.css":        "resources/css/brand.css",
-		"wordmark.svg":     "resources/img/wordmark.svg",
-		"brand.js":         "resources/js/brand.js",
+		"theme.properties":              "login/theme.properties",
+		"brand.css":                     "login/resources/css/brand.css",
+		"wordmark.svg":                  "login/resources/img/wordmark.svg",
+		"brand.js":                      "login/resources/js/brand.js",
+		"login-messages_en.properties":  "login/messages/messages_en.properties",
+		"email-theme.properties":        "email/theme.properties",
+		"email-messages_en.properties":  "email/messages/messages_en.properties",
+		"email-executeActions-html.ftl": "email/html/executeActions.ftl",
+		"email-executeActions-text.ftl": "email/text/executeActions.ftl",
 	} {
 		want, err := os.ReadFile(filepath.Join(themeDir, path))
 		if err != nil {
@@ -63,7 +68,7 @@ func TestKeycloakThemeConfigMapMatchesTheFiles(t *testing.T) {
 		}
 	}
 
-	want, err := os.ReadFile(filepath.Join(themeDir, "resources/img/favicon.ico"))
+	want, err := os.ReadFile(filepath.Join(themeDir, "login/resources/img/favicon.ico"))
 	if err != nil {
 		t.Fatalf("read favicon: %v", err)
 	}

@@ -30,6 +30,9 @@ import (
 type fakeKCUser struct {
 	Email, First, Last string
 	Enabled            bool
+	// HasPassword: the account completed its invitation.
+	HasPassword bool
+	Attributes  map[string][]string
 }
 
 type fakeBroker struct {
@@ -45,6 +48,15 @@ type fakeBroker struct {
 	nextID     int
 	// failInvite makes the invitation mail fail, as a realm without SMTP does.
 	failInvite bool
+	// holdInvite, when set, parks the invitation call until release is
+	// closed, signalling started first: a slow mail relay, and the moment a
+	// client can give up on the request that is waiting for it.
+	holdInvite *inviteHold
+}
+
+type inviteHold struct {
+	started chan struct{}
+	release chan struct{}
 }
 
 func newFakeBroker(t *testing.T) *fakeBroker {
@@ -92,12 +104,24 @@ func newFakeBroker(t *testing.T) *fakeBroker {
 			f.realmRoles = append(f.realmRoles, sub)
 			w.WriteHeader(http.StatusNoContent)
 		case tail == "execute-actions-email":
+			if hold := f.holdInvite; hold != nil {
+				f.mu.Unlock()
+				hold.started <- struct{}{}
+				<-hold.release
+				f.mu.Lock()
+			}
 			if f.failInvite {
 				http.Error(w, `{"errorMessage":"Failed to send execute actions email"}`, http.StatusInternalServerError)
 				return
 			}
 			f.invited = append(f.invited, sub)
 			w.WriteHeader(http.StatusNoContent)
+		case tail == "credentials":
+			creds := []map[string]string{}
+			if u, ok := f.users[sub]; ok && u.HasPassword {
+				creds = append(creds, map[string]string{"type": "password"})
+			}
+			_ = json.NewEncoder(w).Encode(creds)
 		case tail == "federated-identity":
 			links := f.federated[sub]
 			if links == nil {
@@ -110,7 +134,7 @@ func newFakeBroker(t *testing.T) *fakeBroker {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": sub, "email": u.Email, "firstName": u.First, "lastName": u.Last, "enabled": u.Enabled})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": sub, "username": u.Email, "email": u.Email, "firstName": u.First, "lastName": u.Last, "enabled": u.Enabled, "attributes": u.Attributes})
 		case tail == "" && r.Method == http.MethodPut:
 			u, ok := f.users[sub]
 			if !ok {
@@ -119,6 +143,18 @@ func newFakeBroker(t *testing.T) *fakeBroker {
 			}
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			// As Keycloak 24: an update that names attributes is the whole
+			// profile, and a field it leaves out is cleared.
+			if raw, ok := body["attributes"].(map[string]any); ok {
+				u.Attributes = map[string][]string{}
+				for k, v := range raw {
+					vs, _ := v.([]any)
+					for _, s := range vs {
+						u.Attributes[k] = append(u.Attributes[k], fmt.Sprint(s))
+					}
+				}
+				u.First, u.Last, u.Email = "", "", ""
+			}
 			if v, ok := body["enabled"].(bool); ok {
 				u.Enabled = v
 			}

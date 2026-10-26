@@ -23,9 +23,9 @@ only when the developer asks: **Start a new draft** in the session list
 (`POST /api/ai/sessions?new_draft=1`, a session whose first confirmed proposal
 makes one), or in chat, where the assistant makes `start_new_draft` the
 first step of its plan and the steps after it go into the new draft; the
-previous draft stays in Developer › Models. Promoting makes the draft the
+previous draft stays in Developer › Developer Models. Promoting makes the draft the
 developer's **working** revision, not the live one: making a revision active
-is a separate step (**Set active** in Developer › Models; owner decision,
+is a separate step (**Set active** in Developer › Developer Models; owner decision,
 2026-10-10). Data the assistant imports from a spreadsheet
 attached to the chat lands in the draft too. Three kinds of write are not revision-scoped, exactly as in the
 console, so they take effect on confirmation and discarding the draft does not
@@ -367,8 +367,8 @@ a dashboard's Integration button downloads one for users.
   workflow proposal. Because a rule cannot bind by id to an unpublished
   definition, the assistant binds rules **by name**; the engine resolves the
   name at fire time, so the rule goes live the moment the developer publishes.
-- **Role membership.** The assistant creates and changes business roles; a
-  business admin decides who is in them.
+- **Role membership.** The assistant creates and changes business roles; who
+  is in them is set on the Roles screen, by a developer or a business admin.
 - **Promoting or discarding the draft revision**, making a revision active,
   deleting one, and choosing the model users open by default.
 - **Cancelling a running workflow run** — a developer's (Developer › Triggers,

@@ -68,7 +68,7 @@ export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput
         <PageLayout title={TAB_LABELS[cur]}>
           {cur === "inbox" && <WorkflowInbox />}
           {cur === "history" && <WorkflowHistory focusInstanceId={focusInstanceId} />}
-          {cur === "roles" && <RolesTab />}
+          {cur === "roles" && <RolesTab builds={roles.includes("developer")} />}
           {cur === "access" && <AccessRulesTab />}
           {cur === "models" && <AppsTab />}
         </PageLayout>

@@ -124,4 +124,6 @@ export interface ConfirmState {
   destructive?: boolean;
   typeToConfirm?: string;
   onConfirm: () => void | Promise<void>;
+  /** Called when the dialog is dismissed without confirming. */
+  onCancel?: () => void;
 }

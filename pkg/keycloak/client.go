@@ -298,6 +298,73 @@ func (c *Client) SendInvite(ctx context.Context, sub string, lifetime time.Durat
 	return nil
 }
 
+// Invitation is what an invitation mail says it is (the realm's email theme,
+// executeActions.ftl): a sign-up, the person's own request; or an
+// invitation from By, to the workspace named Workspace when there is one.
+type Invitation struct {
+	SignUp    bool
+	By        string
+	Workspace string
+}
+
+// MarkInvitation records on the account what its next invitation mail says:
+// the mvx_invitation, mvx_invited_by and mvx_workspace attributes, which the
+// realm's user profile declares for administrators only. A realm that does
+// not declare them drops them, and the mail reads neutrally.
+//
+// An update that names attributes replaces every attribute and profile
+// field — sent alone, they cleared the account's name and e-mail (Keycloak
+// 24, 2026-10-26) — so the account is read whole and written back whole.
+func (c *Client) MarkInvitation(ctx context.Context, sub string, inv Invitation) error {
+	var rep map[string]any
+	if _, err := c.do(ctx, http.MethodGet, "/users/"+url.PathEscape(sub), nil, &rep); err != nil {
+		return fmt.Errorf("read user %s: %w", sub, err)
+	}
+	attrs, _ := rep["attributes"].(map[string]any)
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	delete(attrs, "mvx_invited_by")
+	delete(attrs, "mvx_workspace")
+	if inv.SignUp {
+		attrs["mvx_invitation"] = []string{"signup"}
+	} else {
+		attrs["mvx_invitation"] = []string{"invite"}
+		if inv.By != "" {
+			attrs["mvx_invited_by"] = []string{inv.By}
+		}
+		if inv.Workspace != "" {
+			attrs["mvx_workspace"] = []string{inv.Workspace}
+		}
+	}
+	rep["attributes"] = attrs
+	if _, err := c.do(ctx, http.MethodPut, "/users/"+url.PathEscape(sub), rep, nil); err != nil {
+		return fmt.Errorf("mark the invitation on user %s: %w", sub, err)
+	}
+	return nil
+}
+
+// HasPassword reports whether the account has a password: an account made
+// by an invitation has none until the invitation is completed.
+func (c *Client) HasPassword(ctx context.Context, sub string) (bool, error) {
+	var creds []struct {
+		Type string `json:"type"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/users/"+url.PathEscape(sub)+"/credentials", nil, &creds); err != nil {
+		return false, err
+	}
+	for _, cr := range creds {
+		if cr.Type == "password" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SetTimeout replaces the 15-second limit on each call to the identity
+// provider; tests use it to reach a timeout without waiting for it.
+func (c *Client) SetTimeout(d time.Duration) { c.http.Timeout = d }
+
 // DeleteUser removes the account. Used both when the console deletes a user
 // and to undo a half-finished provisioning, so a failure partway through does
 // not strand an orphan account that nothing in the application knows about.

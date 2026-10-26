@@ -62,6 +62,13 @@ type accountFacts struct {
 	HoldsInScope bool
 	// Roles are every role the account holds, in any workspace or none.
 	Roles []string
+	// LastTenantAdmin: the account is its home tenant's only tenant admin
+	// (by a role in one of its workspaces, or an unscoped one); no other
+	// enabled account of the tenant is.
+	LastTenantAdmin bool
+	// TenantAdminElsewhere: the account holds tenant_admin in a workspace of
+	// a tenant other than its home — a grant only a platform admin makes.
+	TenantAdminElsewhere bool
 }
 
 // accountPermissions says which account-level actions the caller may take on
@@ -118,18 +125,40 @@ func accountIsCallers(customerID string, scopeAll bool, scope []string) bool {
 func accountPermissionsFor(act *actor, tiers adminTiers, f accountFacts) (string, accountPermissions) {
 	home := homeTenant(f.CustomerID, tiers.all, tiers.ids())
 	if tiers.platform {
-		return home, accountPermissions{Rename: true, Delete: !f.Self, Disable: true, Reinvite: true}
+		return home, accountPermissions{Rename: true, Delete: !f.Self, Disable: !f.Self, Reinvite: true}
 	}
 	if f.PlatformAdmin || f.PlatformWide {
 		return home, accountPermissions{}
 	}
 	own := accountIsCallers(f.CustomerID, tiers.all, tiers.ids())
-	change := own && (f.Self || revokesEvery(tiers.rolesIn(f.CustomerID), f.Roles))
-	p := accountPermissions{Rename: change, Delete: change && !f.Self, Disable: change, Reinvite: change}
+	// A tenant admin also changes a fellow tenant admin of its own tenant
+	// (the user's decision, 2026-10-06), though it may not grant the role:
+	// never itself (by delete or disable) nor the tenant's last one, and not
+	// one that is a tenant admin of another tenant too, which a deletion
+	// would take from there.
+	roles := f.Roles
+	fellow := own && !f.TenantAdminElsewhere && tiers.tenantAdminOf(f.CustomerID) && slices.Contains(f.Roles, "tenant_admin")
+	if fellow {
+		roles = slices.DeleteFunc(slices.Clone(f.Roles), func(r string) bool { return r == "tenant_admin" })
+	}
+	change := own && (f.Self || revokesEvery(tiers.rolesIn(f.CustomerID), roles))
+	last := fellow && f.LastTenantAdmin
+	p := accountPermissions{Rename: change, Delete: change && !f.Self && !last, Disable: change && !f.Self && !last, Reinvite: change}
 	admin := tiers.adminIDs()
 	p.RemoveFromTenant = !tiers.all && !f.Self && f.HoldsInScope && !slices.Contains(admin, f.CustomerID) &&
 		revokesEvery([]string{"tenant_admin"}, f.ScopeRoles)
 	return home, p
+}
+
+// tenantAdminOfSQL holds when the account whose id the SQL expression user
+// yields is a tenant admin of the tenant tenant yields: by a role in one of
+// its workspaces, or by an unscoped one on an account whose home it is.
+func tenantAdminOfSQL(user, tenant string) string {
+	return `(EXISTS (SELECT 1 FROM identity.role_assignment ta_ra JOIN core.workspace ta_w ON ta_w.id = ta_ra.workspace_id
+	                 WHERE ta_ra.user_id = ` + user + ` AND ta_ra.role = 'tenant_admin' AND ta_w.customer_id = ` + tenant + `)
+	 OR EXISTS (SELECT 1 FROM identity.role_assignment ta_ru JOIN identity."user" ta_u ON ta_u.id = ta_ru.user_id
+	            WHERE ta_ru.user_id = ` + user + ` AND ta_ru.role = 'tenant_admin' AND ta_ru.workspace_id IS NULL
+	              AND ta_u.customer_id = ` + tenant + `))`
 }
 
 // revokesEvery reports whether a caller whose tier is callerRoles may revoke
@@ -165,7 +194,12 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 		                  WHERE ua.user_id = u.id AND COALESCE(a.customer_id, aw.customer_id)::text = ANY($3::text[]))
 		       OR EXISTS (SELECT 1 FROM identity.user_model_access um JOIN core.model m ON m.id = um.model_id
 		                  JOIN core.application a ON a.id = m.application_id LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
-		                  WHERE um.user_id = u.id AND COALESCE(a.customer_id, aw.customer_id)::text = ANY($3::text[]))
+		                  WHERE um.user_id = u.id AND COALESCE(a.customer_id, aw.customer_id)::text = ANY($3::text[])),
+		       u.customer_id IS NOT NULL AND `+tenantAdminOfSQL("u.id", "u.customer_id")+` AND NOT EXISTS (
+		           SELECT 1 FROM identity."user" o
+		           WHERE o.id <> u.id AND o.disabled_at IS NULL AND `+tenantAdminOfSQL("o.id", "u.customer_id")+`),
+		       EXISTS (SELECT 1 FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
+		               WHERE ra.user_id = u.id AND ra.role = 'tenant_admin' AND w.customer_id IS DISTINCT FROM u.customer_id)
 		FROM identity."user" u
 		WHERE u.id = ANY($1::uuid[])`, ids, act.UserID, scope)
 	if err != nil {
@@ -177,7 +211,8 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 	for rows.Next() {
 		var f accountFacts
 		var sub string
-		if err := rows.Scan(&f.ID, &sub, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles, &f.HoldsInScope); err != nil {
+		if err := rows.Scan(&f.ID, &sub, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles, &f.HoldsInScope,
+			&f.LastTenantAdmin, &f.TenantAdminElsewhere); err != nil {
 			return nil, err
 		}
 		out[f.ID] = f
@@ -1022,4 +1057,57 @@ func oneLineName(s string) string {
 		return string(r[:80]) + "…"
 	}
 	return strings.TrimSpace(s)
+}
+
+// adminSetAccountEnabled suspends an account or lets it sign in again — its
+// roles, grants and data stay (decided 2026-10-06; only SCIM could do it
+// before, so a tenant without SCIM could delete a member but not suspend
+// one). Allowed where permissions.disable says (accountPermissionsFor):
+// never one's own account, nor the tenant's last tenant admin. The
+// application row is marked (resolveActor refuses a disabled account) and,
+// unless another tenant's database holds the same identity, the
+// identity-provider account too, so no new token is issued.
+func (h *handler) adminSetAccountEnabled(ctx context.Context, w http.ResponseWriter, act *actor, tiers adminTiers, userID string, enabled bool) {
+	action := "disable"
+	if enabled {
+		action = "enable"
+	}
+	if !h.accountActionAllowed(ctx, w, act, tiers, userID, action,
+		func(p accountPermissions) bool { return p.Disable }) {
+		return
+	}
+	var sub, email string
+	var wasDisabled bool
+	if err := h.db.QueryRow(ctx, `SELECT keycloak_sub, email, disabled_at IS NOT NULL FROM identity.user WHERE id=$1::uuid`, userID).
+		Scan(&sub, &email, &wasDisabled); err != nil {
+		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
+		return
+	}
+	if wasDisabled == !enabled {
+		jsonOK(w, map[string]any{"status": "unchanged", "disabled": !enabled})
+		return
+	}
+	if h.kc != nil && sub != "" && !strings.HasPrefix(sub, "admin-created-") && !h.identityHeldElsewhere(ctx, sub) {
+		if err := h.kc.SetUserEnabled(ctx, sub, enabled); err != nil {
+			jsonErr(w, fmt.Errorf("the identity provider refused: %w", err), http.StatusBadGateway)
+			return
+		}
+	}
+	if _, err := h.db.Exec(ctx, `
+		UPDATE identity.user SET disabled_at = CASE WHEN $2 THEN NULL ELSE COALESCE(disabled_at, now()) END, updated_at = now()
+		WHERE id = $1::uuid`, userID, enabled); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	event := auditlog.EventUserDisabled
+	if enabled {
+		event = auditlog.EventUserEnabled
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryAdmin, EventType: event,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ResourceType: "identity_user", ResourceID: userID,
+		Metadata: map[string]string{"email": email},
+	})
+	jsonOK(w, map[string]any{"status": "ok", "disabled": !enabled})
 }

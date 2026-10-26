@@ -256,7 +256,7 @@ a page promising something else. One request creates:
 
    The tour, **Learn the platform**, is made the application's **default
    model** (`core.application.default_model_id`, the same setting as
-   Developer › Models › "Set as business default"; `starter.LandingKey`),
+   Developer › Developer Models › "Set as business default"; `starter.LandingKey`),
    so it is what the console opens on, at its first page, *1 · Start here*.
    That page links each reader on to the guide for what they came to do,
    and every guide links back (text-widget links to dashboards, whose

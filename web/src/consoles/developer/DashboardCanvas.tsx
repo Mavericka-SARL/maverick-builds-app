@@ -57,6 +57,9 @@ const PALETTE_TYPES = [
   { type: "workflow_status",    label: "Workflow status" },
 ];
 
+// A widget's type as the palette names it: "Records", not "form" (2026-10-26).
+const widgetTypeLabel = (type: string) => PALETTE_TYPES.find(p => p.type === type)?.label ?? type.replace(/_/g, " ");
+
 type WidgetSizes = { minW: number; minH: number; defW: number; defH: number };
 const WIDGET_SIZES: Record<string, WidgetSizes> = {
   grid:               { minW: 600, minH: 300, defW: 800, defH: 400 },
@@ -925,7 +928,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                 <div
                   key={w.id}
                   tabIndex={mode === "design" ? 0 : undefined}
-                  aria-label={`${w.widget_type.replace(/_/g, " ")} widget: ${widgetSourceLabel(w)}`}
+                  aria-label={`${widgetTypeLabel(w.widget_type)} widget: ${widgetSourceLabel(w)}`}
                   className={mode === "design" ? "mvx-canvas-widget" : undefined}
                   onClick={e => { if (mode === "design") { e.stopPropagation(); setSelectedId(w.id); } }}
                   // Tabbing to a widget selects it, so the arrow-key move and
@@ -974,7 +977,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     >
                       <span style={{ color: "var(--color-disabled)", fontSize: 14 }}>⠿</span>
                       <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "2px 6px", background: colors.bg, color: colors.text }}>
-                        {w.widget_type.replace(/_/g, " ").toUpperCase()}
+                        {widgetTypeLabel(w.widget_type).toUpperCase()}
                       </span>
                       {widgetSourceLabel(w) && (
                         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-strong)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1202,7 +1205,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             {/* Type badge */}
             <div style={{ marginBottom: 12 }}>
               <div className="mvx-prop-section">Type</div>
-              <StatusBadge tone="brand">{selectedWidget.widget_type.replace(/_/g, " ")}</StatusBadge>
+              <StatusBadge tone="brand">{widgetTypeLabel(selectedWidget.widget_type)}</StatusBadge>
             </div>
 
             {/* Header toggle */}
@@ -2133,7 +2136,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             title="Delete widget?"
             body={w ? (
               <>
-                Remove <strong>"{widgetSourceLabel(w)}"</strong> ({w.widget_type.replace(/_/g, " ")}) from this dashboard?
+                Remove <strong>"{widgetSourceLabel(w)}"</strong> ({widgetTypeLabel(w.widget_type)}) from this dashboard?
                 The underlying source object will not be deleted.
               </>
             ) : ""}

@@ -113,8 +113,10 @@ func TestAccountLevelActionsOnlyOnOwnAccounts(t *testing.T) {
 		other:   {HomeTenant: "other", Permissions: listedPermissions{RemoveFromTenant: true}},
 		none:    {HomeTenant: "none", Permissions: listedPermissions{RemoveFromTenant: true}},
 		coAdmin: {HomeTenant: "other"}, // tenant_admin there is a platform admin's to remove
-		taID:    {HomeTenant: "own", Permissions: listedPermissions{Rename: true, Disable: true, Reinvite: true}},
-		paID:    {HomeTenant: "own"},
+		// Never one's own account to delete or disable: it would lock its
+		// administrator out.
+		taID: {HomeTenant: "own", Permissions: listedPermissions{Rename: true, Reinvite: true}},
+		paID: {HomeTenant: "own"},
 	}
 	listed := f.listUsers(t, ta)
 	for id, w := range want {
@@ -128,12 +130,13 @@ func TestAccountLevelActionsOnlyOnOwnAccounts(t *testing.T) {
 	if got := f.listUsers(t, "ws-dev-ba")[other]; got.Permissions != (listedPermissions{}) || got.HomeTenant != "other" {
 		t.Errorf("developer's list, other tenant's account: %+v", got)
 	}
-	// A platform admin is unchanged: every action but deleting itself.
+	// A platform admin is unchanged: every action but deleting or disabling
+	// itself.
 	pl := f.listUsers(t, "mm-platform")
 	for id, w := range map[string]listedPermissions{
 		other: {Rename: true, Delete: true, Disable: true, Reinvite: true},
 		none:  {Rename: true, Delete: true, Disable: true, Reinvite: true},
-		paID:  {Rename: true, Disable: true, Reinvite: true},
+		paID:  {Rename: true, Reinvite: true},
 	} {
 		if pl[id].Permissions != w {
 			t.Errorf("platform admin's list, %s: %+v, want %+v", id, pl[id].Permissions, w)
@@ -504,12 +507,40 @@ func TestAccountActionsNeedEveryRoleRevocable(t *testing.T) {
 	// A developer deletes no developer; what it may revoke it still changes.
 	f.expect(t, "ws-dev-ba", "DELETE", "/api/admin/users/"+dev, "", nil, http.StatusForbidden)
 	f.expect(t, "ws-dev-ba", "PATCH", "/api/admin/users/"+bu, "", map[string]string{"display_name": "Renamed by a developer"}, http.StatusOK)
-	// A tenant admin deletes its developer, not its peer; itself it renames.
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+peer, "", nil, http.StatusForbidden)
+	// A tenant admin deletes its developer and — decided 2026-10-06 — a
+	// fellow tenant admin of its own tenant, audited; not one that is a
+	// tenant admin of another tenant too (the deletion would take that role
+	// there); itself it renames.
+	twoTenants := f.gbUser(t, "ab-peer-two-tenants", f.cust1, [2]string{"tenant_admin", ""}, [2]string{"tenant_admin", f.ws2})
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+twoTenants, "", nil, http.StatusForbidden)
+	f.expect(t, ta, "PATCH", "/api/admin/users/"+peer, "", map[string]string{"display_name": "Peer Admin"}, http.StatusOK)
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+peer, "", nil, http.StatusOK)
 	f.expect(t, ta, "DELETE", "/api/admin/users/"+dev, "", nil, http.StatusOK)
 	f.expect(t, ta, "PATCH", "/api/admin/users/"+taID, "", map[string]string{"display_name": "Tenant Admin"}, http.StatusOK)
-	if n := f.one(t, `SELECT count(*)::text FROM identity.user WHERE id=ANY($1::uuid[])`, []string{peer, dev}); n != "1" {
-		t.Errorf("%s of the peer and the developer left, want the peer", n)
+	if n := f.one(t, `SELECT count(*)::text FROM identity.user WHERE id=ANY($1::uuid[])`, []string{peer, dev}); n != "0" {
+		t.Errorf("%s of the peer and the developer left, want none", n)
+	}
+	if !auditedFor(t, f, ta, peer) {
+		t.Error("deleting a fellow tenant admin wrote no audit event")
+	}
+}
+
+// A tenant admin never deletes or disables its tenant's last tenant admin,
+// whatever else it may do to the account.
+func TestFellowTenantAdminIsNeverTheLast(t *testing.T) {
+	tiers := adminTiers{tier: map[string]string{"t1": tierTenantAdmin}}
+	act := &actor{UserID: "caller", Roles: []string{"tenant_admin"}}
+	f := accountFacts{ID: "a", CustomerID: "t1", Roles: []string{"tenant_admin"}}
+	if _, p := accountPermissionsFor(act, tiers, f); !p.Rename || !p.Delete || !p.Disable {
+		t.Errorf("a fellow tenant admin: %+v, want rename, delete and disable", p)
+	}
+	f.LastTenantAdmin = true
+	if _, p := accountPermissionsFor(act, tiers, f); !p.Rename || p.Delete || p.Disable {
+		t.Errorf("the tenant's last tenant admin: %+v, want rename only", p)
+	}
+	f.LastTenantAdmin, f.TenantAdminElsewhere = false, true
+	if _, p := accountPermissionsFor(act, tiers, f); p.Rename || p.Delete {
+		t.Errorf("a tenant admin of another tenant too: %+v, want nothing", p)
 	}
 }
 
@@ -739,4 +770,37 @@ func TestApplicationDeleteRacingAGrantLeavesNoPlatformWideBuilder(t *testing.T) 
 // pgxExecer is a pool or a transaction.
 type pgxExecer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// An administrator suspends an account and lets it sign in again (decided
+// 2026-10-06; only SCIM could): its roles stay, the disabled account is
+// refused, both changes are audited, and nobody disables their own account
+// or one they may not change.
+func TestAdministratorDisablesAndEnablesAnAccount(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	const ta = "mm-tenant-admin"
+	taID := f.one(t, `SELECT id::text FROM identity.user WHERE keycloak_sub=$1`, ta)
+	bu := f.gbUser(t, "ab-suspended", f.cust1, [2]string{"business_user", f.ws1a})
+
+	f.expect(t, "ab-suspended", "GET", "/api/me", "", nil, http.StatusOK)
+	f.expect(t, ta, "POST", "/api/admin/users/"+taID+"/disable", "", nil, http.StatusForbidden)
+	f.expect(t, "ws-dev-ba", "POST", "/api/admin/users/"+taID+"/disable", "", nil, http.StatusForbidden)
+
+	f.expect(t, ta, "POST", "/api/admin/users/"+bu+"/disable", "", nil, http.StatusOK)
+	if got := f.one(t, `SELECT (disabled_at IS NOT NULL)::text || ':' || (SELECT count(*) FROM identity.role_assignment WHERE user_id=$1::uuid)::text
+		FROM identity.user WHERE id=$1::uuid`, bu); got != "true:1" {
+		t.Errorf("after disable: disabled:roles = %s, want true:1", got)
+	}
+	if code, _ := f.do(t, "GET", "/api/me", "ab-suspended", "", "", nil); code == http.StatusOK {
+		t.Error("a disabled account still reads /api/me")
+	}
+	if listed := f.listUsers(t, ta)[bu]; !listed.Permissions.Disable {
+		t.Errorf("the disabled account's permissions in the list: %+v, want disable (to enable it)", listed.Permissions)
+	}
+
+	f.expect(t, ta, "POST", "/api/admin/users/"+bu+"/enable", "", nil, http.StatusOK)
+	f.expect(t, "ab-suspended", "GET", "/api/me", "", nil, http.StatusOK)
+	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE resource_id=$1 AND event_type IN ('user.disabled','user.enabled')`, bu); n != "2" {
+		t.Errorf("%s disable/enable audit events, want 2", n)
+	}
 }

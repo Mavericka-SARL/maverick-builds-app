@@ -53,7 +53,7 @@ func (f *recordFixture) posted(mappingID, metricID string) (postings int, total 
 // totalling wantTotal, and fails with what it last saw.
 func (f *recordFixture) waitPosted(label, mappingID, metricID string, wantPostings int, wantTotal float64) {
 	f.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second) // returns once settled; GitHub's runners took over 10 s
 	for {
 		n, total := f.posted(mappingID, metricID)
 		if n == wantPostings && total == wantTotal {

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -464,7 +465,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The default stays an ordinary setting: Developer › Models › "Set as
+	// The default stays an ordinary setting: Developer › Developer Models › "Set as
 	// business default" moves it to another starter (the same statement
 	// sign-up ran), and back.
 	if len(guideIDs) > 0 {
@@ -610,9 +611,29 @@ func TestSignupWithIdentityProviderAndRollback(t *testing.T) {
 	if !ok || u.First != "Bo" || !invited {
 		t.Fatalf("identity provider: user=%v invited=%v", u, invited)
 	}
-	// Known to the provider now: a second sign-up with that address is a conflict.
-	if code, _ := callJSON(t, srv, "", http.MethodPost, "/api/signup", map[string]any{"company": "Other", "first_name": "Bo", "last_name": "Kim", "email": "bo@brokered.test"}); code != 409 {
-		t.Fatalf("duplicate via provider: %d", code)
+	// The mail says the person signed up, and marking it kept the account's
+	// name and address (TestAnAdministratorsInvitationSaysWhoSentIt).
+	signedUp := func(when string) {
+		t.Helper()
+		broker.mu.Lock()
+		defer broker.mu.Unlock()
+		u := broker.users[sub]
+		if u.Email != "bo@brokered.test" || u.Last != "Kim" || !slices.Equal(u.Attributes["mvx_invitation"], []string{"signup"}) {
+			t.Errorf("%s: account %+v, want bo@brokered.test, Kim, marked a sign-up", when, *u)
+		}
+	}
+	signedUp("signed up")
+	// Known to the provider now: a second sign-up with that address makes no
+	// second tenant. While the invitation is not completed it resends it
+	// (once the account has a password it is a conflict:
+	// TestSignupKeepsAnAccountWhoseInvitationTimedOut).
+	again := map[string]any{"company": "Other", "first_name": "Bo", "last_name": "Kim", "email": "bo@brokered.test"}
+	if code, body := callJSON(t, srv, "", http.MethodPost, "/api/signup", again); code != 200 || body["status"] != "invitation_resent" {
+		t.Fatalf("duplicate via provider, invitation pending: %d %v", code, body)
+	}
+	signedUp("resent")
+	if n := countModels(); n != len(starter.Packages()) {
+		t.Fatalf("models after a repeated sign-up: %d, want %d", n, len(starter.Packages()))
 	}
 
 	broker.mu.Lock()
@@ -636,6 +657,68 @@ func TestSignupWithIdentityProviderAndRollback(t *testing.T) {
 	// sign-up's remain.
 	if n := countModels(); n != len(starter.Packages()) {
 		t.Fatalf("models after the rollback: %d, want %d (the first sign-up's only)", n, len(starter.Packages()))
+	}
+}
+
+// A visitor who closes the tab while "Creating your workspace…" is showing
+// must still get a workspace. Keycloak sends the invitation mail as soon as
+// it is asked to, so a sign-up undone after that point leaves a mail whose
+// link names a deleted account ("Invalid username or password"). The
+// identity provider here holds the invitation, the client gives up while
+// it waits, and the sign-up has to finish anyway.
+func TestSignupSurvivesClientDisconnect(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	t.Setenv("DEV_MODE", "true")
+	broker := newFakeBroker(t)
+	hold := &inviteHold{started: make(chan struct{}, 1), release: make(chan struct{})}
+	broker.holdInvite = hold
+	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Keycloak: broker.client(), Signup: SignupConfig{Enabled: true}}))
+	t.Cleanup(srv.Close)
+
+	reqCtx, cancel := context.WithCancel(ctx)
+	b, _ := json.Marshal(map[string]any{"company": "Gone Co", "first_name": "Jo", "last_name": "Doe", "email": "jo@gone.test"})
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodPost, srv.URL+"/api/signup", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	done := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		done <- err
+	}()
+
+	select {
+	case <-hold.started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the sign-up never reached the invitation")
+	}
+	cancel() // the visitor closes the tab
+	<-done
+	time.Sleep(300 * time.Millisecond) // let the server notice the connection is gone
+	close(hold.release)
+
+	// Settled once the invitation is recorded or the account is deleted.
+	deadline := time.Now().Add(15 * time.Second)
+	var invited, deleted int
+	for time.Now().Before(deadline) {
+		broker.mu.Lock()
+		invited, deleted = len(broker.invited), len(broker.deleted)
+		broker.mu.Unlock()
+		if invited+deleted > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond) // a rollback, if any, runs after the failed invitation
+	broker.mu.Lock()
+	invited, deleted = len(broker.invited), len(broker.deleted)
+	broker.mu.Unlock()
+	var users int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM identity.user WHERE email='jo@gone.test'`).Scan(&users)
+	if invited != 1 || deleted != 0 || users != 1 {
+		t.Fatalf("after the client left: invited=%d deletedAtProvider=%d users=%d, want 1, 0, 1", invited, deleted, users)
 	}
 }
 
@@ -757,5 +840,70 @@ func TestSignupRecalcReachesMetricsWithoutInputs(t *testing.T) {
 		if v != want {
 			t.Errorf("%s = %v, want %v", name, v, want)
 		}
+	}
+}
+
+// A slow mail relay: the invitation call times out though Keycloak may still
+// send the mail. The sign-up is kept and says the mail may be late (it used
+// to be undone, leaving a link to a deleted account), and signing up again
+// with the address resends the invitation while it was never completed —
+// the realm has no "forgot password". An account with a password is told
+// to sign in, as before.
+func TestSignupKeepsAnAccountWhoseInvitationTimedOut(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	t.Setenv("DEV_MODE", "true")
+	broker := newFakeBroker(t)
+	hold := &inviteHold{started: make(chan struct{}, 4), release: make(chan struct{})}
+	broker.holdInvite = hold
+	kc := broker.client()
+	kc.SetTimeout(500 * time.Millisecond)
+	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Keycloak: kc, Signup: SignupConfig{Enabled: true}}))
+	t.Cleanup(srv.Close)
+	signup := func() (int, map[string]any) {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"company": "Slow Co", "first_name": "Jo", "last_name": "Doe", "email": "jo@slow.test"})
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/api/signup", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	code, out := signup()
+	if code != http.StatusOK || out["status"] != "invitation_delayed" {
+		t.Fatalf("a timed-out invitation: %d %v, want 200 invitation_delayed", code, out)
+	}
+	var users int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM identity.user WHERE email='jo@slow.test'`).Scan(&users)
+	broker.mu.Lock()
+	deleted := len(broker.deleted)
+	broker.mu.Unlock()
+	if users != 1 || deleted != 0 {
+		t.Fatalf("after the timeout: users=%d deletedAtProvider=%d, want 1, 0", users, deleted)
+	}
+	close(hold.release) // the relay finally answers
+	broker.mu.Lock()
+	broker.holdInvite = nil
+	broker.mu.Unlock()
+
+	code, out = signup()
+	if code != http.StatusOK || out["status"] != "invitation_resent" {
+		t.Fatalf("signing up again before the invitation is completed: %d %v, want 200 invitation_resent", code, out)
+	}
+	broker.mu.Lock()
+	for _, u := range broker.users {
+		if u.Email == "jo@slow.test" {
+			u.HasPassword = true
+		}
+	}
+	broker.mu.Unlock()
+	if code, out = signup(); code != http.StatusConflict {
+		t.Errorf("signing up again once a password is set: %d %v, want 409", code, out)
 	}
 }

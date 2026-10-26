@@ -130,6 +130,10 @@ cmd_keycloak() {
   KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \
     CURL_OPTS="$curl_opts" bash "$ROOT/scripts/keycloak-master-hardening.sh"
 
+  log "the invitation mail's words (email theme and account attributes)"
+  KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \
+    CURL_OPTS="$curl_opts" bash "$ROOT/scripts/keycloak-invitation-mail.sh"
+
   if [ -n "$(env_get SMTP_HOST)" ]; then
     log "configuring Keycloak's e-mail (invitations, password resets)"
     KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \

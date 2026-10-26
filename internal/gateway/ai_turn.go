@@ -25,7 +25,7 @@ import (
 
 // promotedMessage is the session's last message once its draft is promoted.
 const promotedMessage = "The draft is now your working revision. It is not live: make it the active revision with " +
-	"Set active in Developer › Models when it is ready. This session is finished: start a new session to keep building; " +
+	"Set active in Developer › Developer Models when it is ready. This session is finished: start a new session to keep building; " +
 	"it works on your working revision."
 
 // sessionPromotedError refuses a message in a promoted session.

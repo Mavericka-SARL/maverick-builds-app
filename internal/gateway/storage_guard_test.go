@@ -114,8 +114,15 @@ func TestStorageLimitRefusesTheWriteThatWouldCrossIt(t *testing.T) {
 	if code, body := do(t, f.srv, call{persona: "held-pa", tenant: id}, http.MethodDelete, "/api/admin/models/"+deleted, nil); code != http.StatusOK {
 		t.Fatalf("delete: %d %s", code, body)
 	}
-	deadline := time.Now().Add(60 * time.Second)
-	for files() > before/2 && time.Now().Before(deadline) {
+	// The compaction rewrites table after table in the background: wait
+	// while it still gives space back, and stop when it has stalled for a
+	// minute. A busy machine slows it — on 2026-10-18 it was still going
+	// at a fixed 60 s deadline.
+	last, stalled, limit := before, time.Now().Add(time.Minute), time.Now().Add(5*time.Minute)
+	for n := files(); n > before/2 && time.Now().Before(stalled) && time.Now().Before(limit); n = files() {
+		if n < last {
+			last, stalled = n, time.Now().Add(time.Minute)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Logf("database files %d MB before the delete, %d MB after", before>>20, files()>>20)

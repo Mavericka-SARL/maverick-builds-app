@@ -11,21 +11,26 @@ interface GridDraft {
   metric_ids: string[];
   dimension_ids: string[];
   levels: Record<string, number | null>;
+  // The grid whose metrics this one mirrors through the cross-dimension
+  // rollup; "" for none.
+  rollup_source: string;
 }
 
 function draftOf(g: GridDef): GridDraft {
-  return { gridId: g.id, metric_ids: [...g.metric_ids], dimension_ids: [...g.dimension_ids], levels: { ...(g.dimension_levels ?? {}) } };
+  return { gridId: g.id, metric_ids: [...g.metric_ids], dimension_ids: [...g.dimension_ids], levels: { ...(g.dimension_levels ?? {}) }, rollup_source: g.rollup_source_grid_id ?? "" };
 }
 
 /** Whether d differs from the grid as saved. */
 function draftChanged(g: GridDef, d: GridDraft): boolean {
   return d.metric_ids.join() !== g.metric_ids.join()
     || [...d.dimension_ids].sort().join() !== [...g.dimension_ids].sort().join()
-    || d.dimension_ids.some(id => (d.levels[id] ?? null) !== (g.dimension_levels?.[id] ?? null));
+    || d.dimension_ids.some(id => (d.levels[id] ?? null) !== (g.dimension_levels?.[id] ?? null))
+    || d.rollup_source !== (g.rollup_source_grid_id ?? "");
 }
 
 /** Writes d over g: dimensions out and in, their levels, metrics out and in, then the metric order. */
 async function saveDraft(g: GridDef, d: GridDraft) {
+  if (d.rollup_source !== (g.rollup_source_grid_id ?? "")) await api.updateGrid(g.id, { rollup_source_grid_id: d.rollup_source });
   for (const id of g.dimension_ids) if (!d.dimension_ids.includes(id)) await api.removeGridDimension(g.id, id);
   for (const id of d.dimension_ids) if (!g.dimension_ids.includes(id)) await api.addGridDimension(g.id, id);
   for (const id of d.dimension_ids) {
@@ -262,6 +267,21 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                     saving={save.isPending}
                     error={saveError ?? undefined}
                   />
+                </div>
+              )}
+              {expandedGrid === g.id && draft?.gridId === g.id && (
+                <div style={{ padding: "12px 16px 0" }}>
+                  <Field label="Mirrors grid" description="A grid of this revision whose metrics this one shows, rolled up along related dimensions; its cells are then read-only.">
+                    <Select
+                      aria-label="Mirrors grid"
+                      value={draft.rollup_source}
+                      onChange={e => edit(d => ({ ...d, rollup_source: e.target.value }))}
+                      style={{ maxWidth: 320 }}
+                    >
+                      <option value="">— none —</option>
+                      {(grids as GridDef[]).filter(o => o.id !== g.id).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </Select>
+                  </Field>
                 </div>
               )}
               {expandedGrid === g.id && draft?.gridId === g.id && (() => { const view = draft; return (

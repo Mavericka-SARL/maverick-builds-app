@@ -17,6 +17,8 @@ export interface NavItem {
   badge?: React.ReactNode;
   disabled?: boolean;
   href?: string;
+  /** Former labels a page link may still name (a renamed page keeps its links). */
+  aliases?: string[];
 }
 
 export interface NavGroup {

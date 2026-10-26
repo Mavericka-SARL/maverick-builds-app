@@ -1208,7 +1208,7 @@ func plural(n int) string {
 // lazily on its first confirmed proposal — see aiConfirmProposal above) to
 // the developer as their working revision: the console switches to it.
 // It does not make it the model's active revision — which revision goes
-// live is a separate decision, Set active in Developer › Models (owner
+// live is a separate decision, Set active in Developer › Developer Models (owner
 // decision, 2026-10-10). It then clears the session's draft_revision_id,
 // which makes the "AI draft" banner disappear, and finishes the session:
 // its next confirmed proposal would otherwise write on into a revision the

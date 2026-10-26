@@ -58,6 +58,16 @@ data:
       "enabled": true,
       "registrationAllowed": false,
       "loginTheme": "maverickbuilds",
+      "emailTheme": "maverickbuilds",
+      "components": {
+        "org.keycloak.userprofile.UserProfileProvider": [
+          {
+            "providerId": "declarative-user-profile",
+            "subComponents": {},
+            "config": { "kc.user.profile.config": ["{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"mvx_invitation\",\"displayName\":\"Invitation (signup or invite)\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"mvx_invited_by\",\"displayName\":\"Invited by\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"mvx_workspace\",\"displayName\":\"Invited to workspace\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"] }
+          }
+        ]
+      },
       "sslRequired": "external",
       "displayName": "maverickbuilds.app",
       "bruteForceProtected": true,
@@ -112,17 +122,23 @@ data:
     }
 
 ---
-# The sign-in page in the product's colours. A CSS-only theme: it inherits
-# every template and message from Keycloak's own login theme and adds one
-# stylesheet, so an upgrade cannot break signing in. The source of truth is
-# deploy/docker/config/keycloak/themes/maverickbuilds/login/ — edit there and
-# copy the files here (they are small and change rarely; a ConfigMap cannot
-# reference a directory). deploy/k8s/base/infra/keycloak_theme_test.go fails
-# if the two drift.
+# The sign-in page in the product's colours, and the invitation mail in its
+# words. The login theme inherits every template from Keycloak's own and adds
+# one stylesheet and the invitation link's first page's words; the email
+# theme replaces only the invitation (execute-actions) mail. The source of
+# truth is deploy/docker/config/keycloak/themes/maverickbuilds/ — edit there
+# and copy the files here (they are small and change rarely; a ConfigMap
+# cannot reference a directory). deploy/k8s/base/infra/keycloak_theme_test.go
+# fails if the two drift.
 #
-# A realm uses it when its loginTheme is "maverickbuilds"; realm.json sets that
-# on first import, and an existing realm is switched in the admin console or
-# with a PUT to /admin/realms/<realm>.
+# A realm uses them when its loginTheme and emailTheme are "maverickbuilds";
+# realm.json sets both on first import, and an existing realm is switched in
+# the admin console or with a PUT to /admin/realms/<realm>. The invitation
+# mail reads the mvx_invitation, mvx_invited_by and mvx_workspace attributes,
+# which realm.json declares in the user profile (administrators only); an
+# existing realm needs them declared too (PUT /admin/realms/<realm>/users/profile),
+# or the mail reads neutrally. A pod reads the files at start: restart it
+# after this ConfigMap changes.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -135,8 +151,10 @@ metadata:
 data:
   theme.properties: |
     # The sign-in page belongs to the product's front door, not to Keycloak's
-    # default look. This theme changes only the paint: it inherits every template,
-    # message and behaviour from the stock login theme, then adds one stylesheet.
+    # default look. This theme changes the paint: it inherits every template and
+    # behaviour from the stock login theme, then adds one stylesheet. Its only
+    # words of its own are the invitation link's first page
+    # (messages/messages_en.properties).
     #
     # Listing css/login.css before css/brand.css matters — each file is resolved
     # through the theme chain, so login.css comes from the parent and brand.css
@@ -458,6 +476,74 @@ data:
         /* The stock icon is a fine fallback; never break sign-in over a picture. */
       }
     })();
+  login-messages_en.properties: |
+    # The page an invitation link opens first. Keycloak asks before it acts on
+    # the link, so a mail scanner that opens it changes nothing; the stock words
+    # ("Perform the following action(s): Update Password, Verify Email") read as
+    # an administrator's errand.
+    confirmExecutionOfActions=One step left to finish your account
+    proceedWithAction=Continue &raquo;
+    requiredAction.UPDATE_PASSWORD=choose your password
+    requiredAction.VERIFY_EMAIL=confirm your e-mail address
+  email-theme.properties: |
+    # The invitation mail — Keycloak's execute-actions mail, which is how every
+    # account here gets its first password — says who it is from and what it is
+    # for. Every other mail is Keycloak's own.
+    parent=base
+  email-messages_en.properties: |
+    # The invitation (html and text executeActions.ftl). The gateway marks the
+    # account first (mvx_invitation: signup or invite, with mvx_invited_by and
+    # mvx_workspace); an account without a mark reads mvxAccountLead. Plain
+    # sentences: the templates put them into HTML, escaped, so a name cannot add
+    # markup to the mail.
+    executeActionsSubject=Choose your password
+    mvxAccountLead=Choose your password for your {0} account.
+    mvxSignupLead=You signed up for {0}. Choose your password to finish setting up your account.
+    mvxInviteLead={0} invited you to the {1} workspace on {2}. Choose your password to sign in.
+    mvxInviteNoWorkspaceLead={0} invited you to {1}. Choose your password to sign in.
+    mvxChoosePassword=Choose your password
+    mvxLinkWorks=The link works for {0}.
+    mvxSignupIgnore=If you did not sign up, ignore this mail: nothing happens without the password.
+    mvxInviteIgnore=If you were not expecting this, ignore this mail: nothing happens without the password.
+  email-executeActions-html.ftl: |
+    <#-- The invitation. The names come from account attributes, so every
+         sentence goes through FreeMarker's escaping, not kcSanitize (which
+         decodes entities first and lets a link in a name through). -->
+    <#assign kind = (user.attributes.mvx_invitation)!"">
+    <#assign by = (user.attributes.mvx_invited_by)!"">
+    <#assign workspace = (user.attributes.mvx_workspace)!"">
+    <#import "template.ftl" as layout>
+    <@layout.emailLayout>
+    <#if kind == "signup">
+    <p>${msg("mvxSignupLead", realmName)}</p>
+    <#elseif kind != "invite" || !by?has_content>
+    <p>${msg("mvxAccountLead", realmName)}</p>
+    <#elseif workspace?has_content>
+    <p>${msg("mvxInviteLead", by, workspace, realmName)}</p>
+    <#else>
+    <p>${msg("mvxInviteNoWorkspaceLead", by, realmName)}</p>
+    </#if>
+    <p><a href="${link}">${msg("mvxChoosePassword")}</a></p>
+    <p>${msg("mvxLinkWorks", linkExpirationFormatter(linkExpiration))} ${msg((kind == "signup")?then("mvxSignupIgnore", "mvxInviteIgnore"))}</p>
+    </@layout.emailLayout>
+  email-executeActions-text.ftl: |
+    <#ftl output_format="plainText">
+    <#assign kind = (user.attributes.mvx_invitation)!"">
+    <#assign by = (user.attributes.mvx_invited_by)!"">
+    <#assign workspace = (user.attributes.mvx_workspace)!"">
+    <#if kind == "signup">
+    ${msg("mvxSignupLead", realmName)}
+    <#elseif kind != "invite" || !by?has_content>
+    ${msg("mvxAccountLead", realmName)}
+    <#elseif workspace?has_content>
+    ${msg("mvxInviteLead", by, workspace, realmName)}
+    <#else>
+    ${msg("mvxInviteNoWorkspaceLead", by, realmName)}
+    </#if>
+
+    ${link}
+
+    ${msg("mvxLinkWorks", linkExpirationFormatter(linkExpiration))} ${msg((kind == "signup")?then("mvxSignupIgnore", "mvxInviteIgnore"))}
 binaryData:
   # The tab icon the stock login template asks for by name
   # (img/favicon.ico); base64 because a ConfigMap cannot hold raw bytes.
@@ -1102,8 +1188,9 @@ spec:
             - name: realm-config
               mountPath: /opt/keycloak/data/import
               readOnly: true
-            # subPath, because the two files belong in different directories
-            # of the theme and a ConfigMap key cannot contain a slash.
+            # subPath, because the files belong in different directories of
+            # the theme (login and email) and a ConfigMap key cannot contain
+            # a slash.
             - name: login-theme
               mountPath: /opt/keycloak/themes/maverickbuilds/login/theme.properties
               subPath: theme.properties
@@ -1123,6 +1210,26 @@ spec:
             - name: login-theme
               mountPath: /opt/keycloak/themes/maverickbuilds/login/resources/js/brand.js
               subPath: brand.js
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/login/messages/messages_en.properties
+              subPath: login-messages_en.properties
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/email/theme.properties
+              subPath: email-theme.properties
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/email/messages/messages_en.properties
+              subPath: email-messages_en.properties
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/email/html/executeActions.ftl
+              subPath: email-executeActions-html.ftl
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/email/text/executeActions.ftl
+              subPath: email-executeActions-text.ftl
               readOnly: true
           resources:
             requests:

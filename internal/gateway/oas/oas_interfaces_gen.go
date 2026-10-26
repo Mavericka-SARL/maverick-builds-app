@@ -237,6 +237,10 @@ type DeleteWorkflowRes interface {
 	deleteWorkflowRes()
 }
 
+type DisableAdminUserRes interface {
+	disableAdminUserRes()
+}
+
 type DiscardAiDraftRes interface {
 	discardAiDraftRes()
 }
@@ -255,6 +259,10 @@ type DownloadExportIntegrationRes interface {
 
 type DuplicateIntegrationRes interface {
 	duplicateIntegrationRes()
+}
+
+type EnableAdminUserRes interface {
+	enableAdminUserRes()
 }
 
 type ExportAuditRes interface {

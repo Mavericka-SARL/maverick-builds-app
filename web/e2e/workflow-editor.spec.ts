@@ -5,7 +5,7 @@
  * recipient check, restore from archive) are Go tests in internal/gateway.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { mockApi, loadAs } from "./mocks";
+import { mockApi, loadAs, acceptLiveEdits } from "./mocks";
 
 const APP = "app-1";
 const REV = "rev-1";
@@ -57,6 +57,8 @@ test("object picker asks for THIS revision's grids", async ({ page }) => {
   expect(req).toContain(`revision_id=${REV}`);
 });
 
+// The working revision is the live one, and Validate changes nothing in it:
+// it is not one of the edits the console asks about first.
 test("Validate checks the unsaved draft and never saves it", async ({ page }) => {
   const log: string[] = [];
   await mockEditor(page, log);
@@ -112,6 +114,7 @@ test("leaving with unsaved changes asks through the design-system dialog", async
 test("Instances section lists real runs with test runs marked; one-active-per-scope is a saved property", async ({ page }) => {
   const log: string[] = [];
   await mockEditor(page, log);
+  await acceptLiveEdits(page, REV);
   await openEditor(page);
 
   // Developers had no way to see a definition's instances in their console.

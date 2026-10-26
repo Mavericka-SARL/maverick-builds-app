@@ -195,7 +195,7 @@ The row marked **default** is the model everyone lands on until they choose anot
 
 A model changes in **revisions**: complete copies a developer works on, then makes live. The **Revision** in the bar at the top of the page names the live one. Everything under **User** — for you and for every user — happens in the live revision.
 
-As a business admin you cannot make a revision or choose which one is live; developers do that under **Developer › Models**, and tenant admins under **Tenant admin › Applications**. That is deliberate: what you look at is what everyone else looks at.`, 164),
+As a business admin you cannot make a revision or choose which one is live; developers do that under **Developer › Developer Models**, and tenant admins under **Tenant admin › Applications**. That is deliberate: what you look at is what everyone else looks at.`, 164),
 
 		baText(`## What stays when a new revision goes live
 

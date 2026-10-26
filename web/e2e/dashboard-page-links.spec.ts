@@ -17,6 +17,7 @@ const guide = {
       "Your steps wait in [your inbox](page:Workflow Inbox).",
       "Who sees what: [the roles](page:business admin > roles).",
       "The structure: [the dimensions](page:Developer › Dimensions).",
+      "Revisions: [the models](page:Developer › Models).",
       "Gone: [nowhere](page:No such page).",
     ].join("\n\n"),
   }],
@@ -70,4 +71,14 @@ test("a developer with the Business user role follows a link into the Developer 
   await openGuide(page);
   await page.getByRole("link", { name: "the dimensions" }).click();
   await expect(nav(page).getByRole("button", { name: "Dimensions" })).toHaveAttribute("aria-current", "page");
+});
+
+// Developer › Models became Developer Models (2026-10-26, beside the User
+// group's Models): a link written with the former name still opens it.
+test("a link naming a renamed page by its former name still opens it", async ({ page }) => {
+  await withGuide(page, ["business_user", "developer"]);
+  await loadAs(page, "developer");
+  await openGuide(page);
+  await page.getByRole("link", { name: "the models" }).click();
+  await expect(nav(page).getByRole("button", { name: "Developer Models" })).toHaveAttribute("aria-current", "page");
 });

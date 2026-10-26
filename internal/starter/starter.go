@@ -323,7 +323,7 @@ To build one, open **Developer › Dashboards**, press **New dashboard**, give i
 
 A **revision** is a complete copy of the model: its dimensions, metrics, grids, dashboards, tables of records, workflows and the numbers entered so far. One revision is *live*: it is what everyone else sees.
 
-The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Developer › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
+The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Developer › Developer Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
 
 Every change to a model belongs to a revision; people, roles and access rules sit outside revisions and apply to every one. A workflow that is already running keeps the definition it started with.`, 240)
 
@@ -483,7 +483,7 @@ Access can be narrower still. Under **Business Admin › Access Rules**, pick a 
 
 ## Building by describing it
 
-**Developer › AI Developer** builds the same things you can build by hand. It needs an AI provider key: if none is set up for your workspace, add your own in its **Settings** (one key for the whole workspace, under **Tenant admin › AI keys**, needs the Enterprise Edition). Describe what you want, review its action plan step by step and press **Confirm & Execute**. Its changes land in a separate AI draft revision until you press **Promote to Active**, and it has no more power than you do.`, 288)
+**Developer › AI Developer** builds the same things you can build by hand. It needs an AI provider key: if none is set up for your workspace, add your own in its **Settings** (one key for the whole workspace, under **Tenant admin › AI keys**, needs the Enterprise Edition). Describe what you want, review its action plan step by step and press **Confirm & Execute**. Its changes land in a separate AI draft revision: **Use as working revision** makes you build in it, **Set active** under **Developer › Developer Models** makes it live, and it has no more power than you do.`, 288)
 
 	p.text(`## Three more guides
 

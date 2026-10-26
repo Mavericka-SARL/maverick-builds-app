@@ -237,9 +237,10 @@ What a person sees *inside* a model — which dashboards, which rows of data —
 
 - **One role** — in the edit row, click the × on the role's chip.
 - **An application or a model** — tick what the person keeps. An empty list means *everything*, so unticking the last box lifts the restriction rather than closing it.
+- **For a while** — press the person icon with a cross (**Disable**) and confirm: they cannot sign in until you press **Enable** on the same row. Their roles and access stay.
 - **Everything** — press the bin icon on their row and confirm **Delete user**. It revokes all their access.
 
-You cannot delete your own account, or remove the last role that lets you manage users; another administrator has to. Each of these changes is recorded in the **Audit Log** (page 4).
+This works for a fellow tenant admin too, but never for yourself or for the tenant's last tenant admin; another administrator has to. You also cannot remove the last role that lets you manage users. Each of these changes is recorded in the **Audit Log** (page 4).
 
 ---
 Next: [3 · Models as packages](dashboard:3 · Models as packages).`, 264),
@@ -272,7 +273,7 @@ Under an application, press **Import model** and choose a `+tick+`.mavericks-mod
 
 		taText(`## Which model people open first
 
-When an application holds several models, people land on its *business default*. A developer chooses it under **Developer › Models** with **Set as business default**. Each person can move to another model for themselves with **Open**, under **Business Admin › Models** or **User › Models**.`, 132),
+When an application holds several models, people land on its *business default*. A developer chooses it under **Developer › Developer Models** with **Set as business default**. Each person can move to another model for themselves with **Open**, under **Business Admin › Models** or **User › Models**.`, 132),
 
 		taText(`## Deleting
 

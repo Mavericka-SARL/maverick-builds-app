@@ -37,7 +37,7 @@ import {
  * grant in the same step and says so in its reply (accessRemovalNotice).
  * Users are refetched either way: their access lists named what was deleted.
  */
-// Developer › Models lists the same applications, models and revisions under its
+// Developer › Developer Models lists the same applications, models and revisions under its
 // own key; a change made here shows there at once, not when its cache ages.
 // What the search on Applications shows (see tenancyMatches); null shows everything.
 const SearchMatches = createContext<Set<string> | null>(null);

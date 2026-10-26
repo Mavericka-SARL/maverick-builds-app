@@ -395,13 +395,17 @@ func (e *WriteExecutor) updateGrid(ctx context.Context, raw json.RawMessage) (st
 	var p struct {
 		GridID string `json:"grid_id"`
 		Name   string `json:"name"`
+		// RollupSourceGridID: the grid this one mirrors through the
+		// cross-dimension rollup; "" mirrors none (as PATCH
+		// /api/developer/grids/{id}).
+		RollupSourceGridID *string `json:"rollup_source_grid_id"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
 		return "", "", perr
 	}
-	if perr != nil || p.GridID == "" || strings.TrimSpace(p.Name) == "" {
-		return "", "", fmt.Errorf("grid_id and name are required")
+	if perr != nil || p.GridID == "" || (strings.TrimSpace(p.Name) == "" && p.RollupSourceGridID == nil) {
+		return "", "", fmt.Errorf("grid_id, and name and/or rollup_source_grid_id, are required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
 	if err != nil {
@@ -409,10 +413,32 @@ func (e *WriteExecutor) updateGrid(ctx context.Context, raw json.RawMessage) (st
 	}
 	var old string
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id=$1::uuid`, gridID).Scan(&old)
-	if _, err := e.pool.Exec(ctx, `UPDATE model.grid_def SET name=$2 WHERE id=$1::uuid`, gridID, p.Name); err != nil {
-		return "", "", fmt.Errorf("rename grid: %w", err)
+	var done []string
+	if p.RollupSourceGridID != nil {
+		source := strings.TrimSpace(*p.RollupSourceGridID)
+		if source != "" {
+			if source, err = e.requireInModel(ctx, "grid", source); err != nil {
+				return "", "", err
+			}
+		}
+		if err := modeledit.SetGridRollupSource(ctx, e.pool, gridID, source); err != nil {
+			return "", "", err
+		}
+		if source == "" {
+			done = append(done, "mirrors no grid")
+		} else {
+			var name string
+			_ = e.pool.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id=$1::uuid`, source).Scan(&name)
+			done = append(done, fmt.Sprintf("mirrors grid '%s'", name))
+		}
 	}
-	return fmt.Sprintf("Grid '%s' renamed to '%s'", old, p.Name), gridID, nil
+	if strings.TrimSpace(p.Name) != "" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.grid_def SET name=$2 WHERE id=$1::uuid`, gridID, p.Name); err != nil {
+			return "", "", fmt.Errorf("rename grid: %w", err)
+		}
+		done = append([]string{fmt.Sprintf("renamed to '%s'", p.Name)}, done...)
+	}
+	return fmt.Sprintf("Grid '%s' %s", old, strings.Join(done, " and ")), gridID, nil
 }
 
 // deleteGrid is DELETE /api/developer/grids/{id}: the grid, and the widgets

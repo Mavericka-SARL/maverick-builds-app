@@ -581,6 +581,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// back is to delete the user and re-create them, which discards their
 	// roles and access grants.
 	register("POST", "/api/admin/users/{id}/invite", "user_admin", userAdm(h.adminUserAction))
+	register("POST", "/api/admin/users/{id}/disable", "user_admin", userAdm(h.adminUserAction))
+	register("POST", "/api/admin/users/{id}/enable", "user_admin", userAdm(h.adminUserAction))
 	register("POST", "/api/admin/users/{id}/roles", "user_admin", userAdm(h.adminUserAction))
 	register("DELETE", "/api/admin/users/{id}/roles/{role}", "user_admin", userAdm(h.adminUserAction))
 	register("POST", "/api/admin/users/{id}/access/apps/{appId}", "user_admin", userAdm(h.adminUserAction))
@@ -1589,8 +1591,12 @@ func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string)
 }
 
 // rolesReachApp reports whether a's roles open appID on the route ctx
-// arrived through (reachSQL), narrowed by its application and model grants;
-// an application with no model it may open opens for no role.
+// arrived through (reachSQL), narrowed by its application and model grants:
+// an application with models opens only when one of them may be opened. One
+// with no model (an execution-mode application, made to run workflows) opens
+// for a role that reaches it, unless the account is narrowed to models —
+// until 2026-10-26 it opened for no role, so the tenant's developers could
+// not build the workflows it exists for (decided 2026-10-06).
 func (h *handler) rolesReachApp(ctx context.Context, a *actor, appID string) (bool, error) {
 	var ok bool
 	err := h.db.QueryRow(ctx, `
@@ -1604,7 +1610,7 @@ func (h *handler) rolesReachApp(ctx context.Context, a *actor, appID string) (bo
 		          NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
 		          OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
 		      )
-		      AND EXISTS (
+		      AND (EXISTS (
 		          SELECT 1
 		          FROM core.model m
 		          WHERE m.application_id=app.id
@@ -1612,7 +1618,10 @@ func (h *handler) rolesReachApp(ctx context.Context, a *actor, appID string) (bo
 		                NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
 		                OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
 		            )
-		      )
+		      ) OR (
+		          NOT EXISTS (SELECT 1 FROM core.model m0 WHERE m0.application_id=app.id)
+		          AND NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
+		      ))
 		)
 	`, appID, a.UserID).Scan(&ok)
 	return ok, err
@@ -5402,16 +5411,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// revokes every dashboard from everyone at once — silently, since an
 	// empty grant set is indistinguishable from "no dashboards yet".
 	// Old→new correlation is by dashboard name, the same key Steps F and I
-	// already use.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO identity.business_role_dashboard (role_id, dashboard_id)
-		SELECT brd.role_id, nd.id
-		FROM identity.business_role_dashboard brd
-		JOIN model.dashboard_def od ON od.id = brd.dashboard_id
-		JOIN model.dashboard_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
-		WHERE od.model_id = $1::uuid AND od.revision_id = $3::uuid
-		ON CONFLICT DO NOTHING
-	`, srcArgs...); err != nil {
+	// already use; the live revision's grants win where it has the
+	// dashboard (modeltransfer.CopyDashboardGrantsSQL).
+	if _, err := tx.Exec(ctx, modeltransfer.CopyDashboardGrantsSQL, srcArgs...); err != nil {
 		return "", fmt.Errorf("revision dashboard-grant copy failed: %w", err)
 	}
 
@@ -7419,7 +7421,8 @@ type adminUserItem struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
-	// DisabledAt is set when the account was deactivated (SCIM); such a
+	// DisabledAt is set when the account was deactivated (SCIM, or an
+	// administrator: POST /api/admin/users/{id}/disable); such a
 	// user cannot sign in.
 	DisabledAt  *string          `json:"disabled_at,omitempty"`
 	CreatedAt   string           `json:"created_at"`
@@ -14069,19 +14072,39 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		}
 		// The tenant's plan may cap its users. The tenant is the admin's
 		// own scope, the routed one, or the workspace the role goes into;
-		// a platform-level creation with none of those is not capped.
-		if cid := firstNonEmpty(customerID, tenantdb.TenantFrom(ctx), h.customerOfWorkspace(ctx, body.WorkspaceID)); cid != "" && h.plans != nil {
-			if err := h.plans.CheckUsers(ctx, h.db.For(ctx), cid, 1); err != nil {
-				h.jsonLimitErr(w, err)
-				return
+		// a platform-level creation with none of those is not capped. Only
+		// an account new to the tenant counts (decided 2026-10-06): giving
+		// an existing member another role adds nobody, and used to be
+		// refused at the cap.
+		capCID := firstNonEmpty(customerID, tenantdb.TenantFrom(ctx), h.customerOfWorkspace(ctx, body.WorkspaceID))
+		withinCap := func(accountID string) bool {
+			if capCID == "" || h.plans == nil {
+				return true
 			}
+			if accountID != "" {
+				var member bool
+				if err := h.db.QueryRow(ctx, `
+					SELECT u.customer_id IS NOT DISTINCT FROM $2::uuid
+					    OR EXISTS (SELECT 1 FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
+					               WHERE ra.user_id = u.id AND w.customer_id = $2::uuid)
+					FROM identity."user" u WHERE u.id = $1::uuid`, accountID, capCID).Scan(&member); err == nil && member {
+					return true
+				}
+			}
+			if err := h.plans.CheckUsers(ctx, h.db.For(ctx), capCID, 1); err != nil {
+				h.jsonLimitErr(w, err)
+				return false
+			}
+			return true
 		}
 
 		// An address that already has an account — by e-mail, compared
 		// case-insensitively, or by the subject a creation here resolves to
 		// — is added to the caller's tenant, never adopted, by anyone but a
 		// platform admin (addExistingAccount). Everything above is checked
-		// first, alike for both, so the answers do not tell them apart.
+		// first, alike for both, so the answers do not tell them apart —
+		// but for the cap, which an existing member of the tenant never
+		// meets.
 		platformCreator := act.hasRole("platform_admin")
 		if !platformCreator {
 			existingID, err := h.existingAccountID(ctx, body.Email, "admin-created-"+body.Email)
@@ -14090,9 +14113,15 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if existingID != "" {
+				if !withinCap(existingID) {
+					return
+				}
 				h.addExistingAccount(ctx, w, act, tierRoles, existingID, body.Email, body.Role, body.WorkspaceID)
 				return
 			}
+		}
+		if !withinCap("") {
+			return
 		}
 
 		// Resolve the subject this user will authenticate as.
@@ -14262,7 +14291,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// reporting a success that leaves an account nobody can use.
 		invited := false
 		if h.kc != nil && !heldElsewhere {
-			if err := h.kc.SendInvite(ctx, sub, inviteLifetime); err != nil {
+			if err := h.sendInvitation(ctx, sub, h.adminInvitation(ctx, act, customerID)); err != nil {
 				// Only what this request made is undone: an account it
 				// adopted was someone's before, with what they authored —
 				// deleting its row cut the person off (2026-09-30). It
@@ -14368,10 +14397,10 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("identity provider is not configured; cannot send invitations"), http.StatusServiceUnavailable)
 			return
 		}
-		var inviteSub, inviteEmail string
+		var inviteSub, inviteEmail, inviteTenant string
 		if err := h.db.QueryRow(ctx,
-			`SELECT keycloak_sub, email FROM identity.user WHERE id=$1::uuid`, userID,
-		).Scan(&inviteSub, &inviteEmail); err != nil {
+			`SELECT keycloak_sub, email, COALESCE(customer_id::text, '') FROM identity.user WHERE id=$1::uuid`, userID,
+		).Scan(&inviteSub, &inviteEmail, &inviteTenant); err != nil {
 			jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 			return
 		}
@@ -14383,7 +14412,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				"delete and re-create them to issue an invitation"), http.StatusConflict)
 			return
 		}
-		if err := h.kc.SendInvite(ctx, inviteSub, inviteLifetime); err != nil {
+		if err := h.sendInvitation(ctx, inviteSub, h.adminInvitation(ctx, act, inviteTenant)); err != nil {
 			jsonErr(w, fmt.Errorf("%w — check the realm's SMTP settings", err), http.StatusBadGateway)
 			return
 		}
@@ -14394,6 +14423,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			Metadata: map[string]string{"action": "invitation_resent", "email": inviteEmail},
 		})
 		jsonOK(w, map[string]string{"status": "invited", "email": inviteEmail})
+		return
+	}
+
+	// POST /api/admin/users/{id}/disable and /enable — suspend an account,
+	// or let it sign in again (adminSetAccountEnabled).
+	if len(parts) == 2 && (parts[1] == "disable" || parts[1] == "enable") && r.Method == http.MethodPost {
+		h.adminSetAccountEnabled(ctx, w, act, tiers, userID, parts[1] == "enable")
 		return
 	}
 
@@ -14962,6 +14998,8 @@ type gridDefResponse struct {
 	MetricIDs       []string        `json:"metric_ids"`
 	DimensionIDs    []string        `json:"dimension_ids"`
 	DimensionLevels map[string]*int `json:"dimension_levels"` // dim_id → display_level (null=all)
+	// RollupSourceGridID: the grid this one mirrors, when it does.
+	RollupSourceGridID *string `json:"rollup_source_grid_id,omitempty"`
 }
 
 func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
@@ -14995,10 +15033,10 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		gridQ := `SELECT id::text, name, COALESCE(revision_id::text,''), tags FROM model.grid_def WHERE model_id=$1::uuid ORDER BY created_at`
+		gridQ := `SELECT id::text, name, COALESCE(revision_id::text,''), tags, rollup_source_grid_id::text FROM model.grid_def WHERE model_id=$1::uuid ORDER BY created_at`
 		gridArgs := []any{modelID}
 		if revisionID != "" {
-			gridQ = `SELECT id::text, name, COALESCE(revision_id::text,''), tags FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY created_at`
+			gridQ = `SELECT id::text, name, COALESCE(revision_id::text,''), tags, rollup_source_grid_id::text FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY created_at`
 			gridArgs = []any{modelID, revisionID}
 		}
 		rows, err := h.db.Query(ctx, gridQ, gridArgs...)
@@ -15010,7 +15048,7 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		var grids []gridDefResponse
 		for rows.Next() {
 			var g gridDefResponse
-			if err := rows.Scan(&g.ID, &g.Name, &g.RevisionID, &g.Tags); err != nil {
+			if err := rows.Scan(&g.ID, &g.Name, &g.RevisionID, &g.Tags, &g.RollupSourceGridID); err != nil {
 				continue
 			}
 			grids = append(grids, g)
@@ -15155,18 +15193,32 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 			var body struct {
 				Name *string   `json:"name"`
 				Tags *[]string `json:"tags"`
+				// RollupSourceGridID: the grid whose metrics this one
+				// mirrors through the cross-dimension rollup; "" mirrors
+				// none (modeledit.SetGridRollupSource).
+				RollupSourceGridID *string `json:"rollup_source_grid_id"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid JSON body"), http.StatusBadRequest)
 				return
 			}
-			if body.Name == nil && body.Tags == nil {
-				jsonErr(w, fmt.Errorf("nothing to change: send name and/or tags"), http.StatusBadRequest)
+			if body.Name == nil && body.Tags == nil && body.RollupSourceGridID == nil {
+				jsonErr(w, fmt.Errorf("nothing to change: send name, tags and/or rollup_source_grid_id"), http.StatusBadRequest)
 				return
 			}
 			if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
 				jsonErr(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest)
 				return
+			}
+			if body.RollupSourceGridID != nil {
+				if err := modeledit.SetGridRollupSource(ctx, h.db.For(ctx), gridID, strings.TrimSpace(*body.RollupSourceGridID)); err != nil {
+					if errors.Is(err, modeledit.ErrRollupSource) {
+						jsonErr(w, err, http.StatusBadRequest)
+					} else {
+						jsonErr(w, err, http.StatusInternalServerError)
+					}
+					return
+				}
 			}
 			if _, err := h.db.Exec(ctx, `UPDATE model.grid_def SET name=COALESCE($2, name), tags=COALESCE($3, tags) WHERE id=$1::uuid`,
 				gridID, body.Name, optionalTags(body.Tags)); err != nil {
@@ -15174,6 +15226,9 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			meta := map[string]string{}
+			if body.RollupSourceGridID != nil {
+				meta["rollup_source_grid_id"] = *body.RollupSourceGridID
+			}
 			if body.Name != nil {
 				meta["name"] = *body.Name
 			}
@@ -17474,6 +17529,25 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 				if !inModel {
 					jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 					return
+				}
+				// A revision that is not live is a builder's: a developer, or
+				// a business admin who also builds the model (decided
+				// 2026-10-06). A business admin alone grants the live one.
+				var live bool
+				_ = h.db.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text = $2, false) FROM core.model WHERE id = $1::uuid`, modelID, revID).Scan(&live)
+				if !live {
+					a, aErr := h.resolveActor(ctx, r)
+					if aErr != nil {
+						jsonErr(w, aErr, http.StatusUnauthorized)
+						return
+					}
+					if builds, bErr := h.buildsModel(ctx, a, modelID); bErr != nil {
+						jsonErr(w, bErr, http.StatusInternalServerError)
+						return
+					} else if !builds {
+						jsonErr(w, fmt.Errorf("only someone who builds the model grants a revision that is not live"), http.StatusForbidden)
+						return
+					}
 				}
 			}
 			tx, err := h.db.Begin(ctx)

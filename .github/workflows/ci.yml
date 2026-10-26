@@ -58,6 +58,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       web: ${{ steps.filter.outputs.web }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -83,13 +84,19 @@ jobs:
 
           # The Go gates cover more than *.go: ogen reads the OpenAPI spec and
           # fails the drift check if it moves without the generated output
-          # following, and tests read the migrations. Go tests also read the
-          # docs (docs_test.go: TestManualsMatchTheirParts, TestDocsLinksResolve;
-          # TestFormulasManualIndexMatchesEngine), so a docs-only edit runs them.
-          if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/|docs/)|(^|/)(go\.mod|go\.sum)$|\.(go|md)$'; then
+          # following, and tests read the migrations.
+          if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/)|(^|/)(go\.mod|go\.sum)$|\.go$'; then
             echo "go=true" >> "$GITHUB_OUTPUT"
           else
             echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Some Go tests read the documents (docs-test below); a change
+          # touching only documents runs those, not the whole Go gate
+          # (decided 2026-10-06).
+          if echo "$files" | grep -qE '^docs/|\.md$'; then
+            echo "docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs=false" >> "$GITHUB_OUTPUT"
           fi
           # The e2e suite fetches the manuals through the dev server
           # (web/vite.config.ts serves them from docs/).
@@ -105,6 +112,28 @@ jobs:
           fi
 
   # ── Go ───────────────────────────────────────────────────────────────────────
+
+  # The Go tests that read the documents, for a change that touches nothing
+  # else: links resolve, manual.html is its parts, the formulas manual's
+  # index matches the engine, and the guides' links name real documents.
+  # With Go changed as well, Go test runs them among the rest.
+  docs-test:
+    name: Docs tests
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.go != 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: ${{ !vars.RUNNER_LABEL }}
+      - name: Run the tests that read the documents
+        run: |
+          go test -count=1 -run 'TestDocs|TestManual' .
+          go test -count=1 -run 'TestFormulasManualIndexMatchesEngine' ./internal/formula
+          go test -count=1 -run 'TestPackagesCarryTheirGuides' ./internal/starter
 
   go-lint:
     name: Go lint
@@ -177,9 +206,10 @@ jobs:
       # and uploading an artifact nobody read. Run it locally when you want it
       # (the command is in docs/DEVELOPMENT.md).
       - name: Run tests
-        # -p 4 rather than the default GOMAXPROCS because self-hosted runners
-        # share a capped CPU budget, and -race on top of 8 concurrent packages
-        # just thrashes.
+        # Packages run three at a time (P, default 3) rather than GOMAXPROCS
+        # because self-hosted runners share a capped CPU budget, and -race on
+        # top of 8 concurrent packages just thrashes. internal/gateway, the
+        # long pole, runs as two halves beside them (scripts/go-test-split.sh).
         #
         # It is NOT what fixes the "bind: address already in use" failures this
         # suite hit on rootless Docker — capping parallelism only made them
@@ -201,9 +231,9 @@ jobs:
         # -timeout 20m: Go's default is 10 minutes per package, and
         # internal/gateway alone grew from 339s to 437s here in three days
         # (2.5 minutes locally under -race), then crossed 600s on 2026-10-02
-        # and was killed mid-suite. The job's own 30-minute limit still bounds
-        # the run.
-        run: go test -race -p 4 -timeout 20m ./...
+        # and was killed mid-suite; about 620s by 2026-10-26, hence the
+        # halves. The job's own 30-minute limit still bounds the run.
+        run: scripts/go-test-split.sh -race -timeout 20m
       # A backstop for Ryuk (a reaper that died with the runner leaves its
       # containers): orphaned postgres containers and their volumes once
       # took all three runners down (93GB, 2026-08-29). Age-filtered (>1h) so

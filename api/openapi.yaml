@@ -1225,6 +1225,13 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         tags: { type: array, items: { type: string }, description: "Replaces the whole list; [] clears it" }
+        rollup_source_grid_id:
+          type: string
+          description: >
+            The grid of the same model and revision whose metrics this one
+            mirrors through the cross-dimension rollup (its cells are then
+            read-only); "" mirrors none. Refused (400) for the grid itself, a
+            grid of another revision, or a loop.
 
     GridDimensionRequest:
       type: object
@@ -5741,7 +5748,7 @@ paths:
     patch:
       operationId: updateGrid
       tags: [Developer Console]
-      summary: Rename or retag a grid
+      summary: Rename or retag a grid, or set the grid it mirrors
       parameters:
         - name: id
           in: path
@@ -7675,6 +7682,59 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/users/{id}/disable:
+    post:
+      operationId: disableAdminUser
+      tags: [Admin]
+      summary: Suspend an account
+      description: >
+        The account can no longer sign in; its roles, grants and data stay
+        (user.disabled in the audit log). Allowed where
+        AdminUser.permissions.disable says: never one's own account, nor the
+        tenant's last tenant admin. The identity-provider account is disabled
+        too unless another tenant's database holds the same identity.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Disabled (or already disabled — status "unchanged")
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  disabled: { type: boolean }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/users/{id}/enable:
+    post:
+      operationId: enableAdminUser
+      tags: [Admin]
+      summary: Let a suspended account sign in again
+      description: The reverse of disable, under the same permission (user.enabled in the audit log).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Enabled (or already enabled — status "unchanged")
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  disabled: { type: boolean }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/admin/users/{id}/roles:
     post:

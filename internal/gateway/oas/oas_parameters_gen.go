@@ -4244,6 +4244,71 @@ func decodeDeleteWorkflowParams(args [1]string, argsEscaped bool, r *http.Reques
 	return params, nil
 }
 
+// DisableAdminUserParams is parameters of disableAdminUser operation.
+type DisableAdminUserParams struct {
+	ID uuid.UUID
+}
+
+func unpackDisableAdminUserParams(packed middleware.Parameters) (params DisableAdminUserParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeDisableAdminUserParams(args [1]string, argsEscaped bool, r *http.Request) (params DisableAdminUserParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DiscardAiDraftParams is parameters of discardAiDraft operation.
 type DiscardAiDraftParams struct {
 	ID uuid.UUID
@@ -4711,6 +4776,71 @@ func unpackDuplicateWorkflowParams(packed middleware.Parameters) (params Duplica
 }
 
 func decodeDuplicateWorkflowParams(args [1]string, argsEscaped bool, r *http.Request) (params DuplicateWorkflowParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// EnableAdminUserParams is parameters of enableAdminUser operation.
+type EnableAdminUserParams struct {
+	ID uuid.UUID
+}
+
+func unpackEnableAdminUserParams(packed middleware.Parameters) (params EnableAdminUserParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeEnableAdminUserParams(args [1]string, argsEscaped bool, r *http.Request) (params EnableAdminUserParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

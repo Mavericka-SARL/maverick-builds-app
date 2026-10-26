@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder, Pencil, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DashboardDef, type DashboardFolder } from "../../api/client";
-import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm, Txt } from "../../ui";
+import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, LoadingState, IconButton, useConfirm, Txt } from "../../ui";
 import { DashboardCanvas } from "./DashboardCanvas";
 import { flattenFolders, UNFILED_LABEL, type FolderNode } from "./folderTree";
 
@@ -30,7 +30,10 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderParent, setNewFolderParent] = useState(ROOT_OPTION);
 
-  const { data: dashboardsRaw = [] } = useQuery({
+  // Until the list has answered it is not empty: "0 of 0 dashboards" and
+  // "No dashboards match." showed for seconds after the AI Developer built
+  // some, inviting a developer to build them again (2026-10-25).
+  const { data: dashboardsRaw = [], isPending: dashboardsLoading } = useQuery({
     queryKey: ["dev-dashboards", revisionId],
     queryFn: () => api.listDashboards(revisionId),
   });
@@ -260,6 +263,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
         </div>
       )}
 
+      {dashboardsLoading ? <LoadingState label="Loading dashboards…" /> : <>
       <p className="mvx-admin-muted" style={{ margin: "0 0 12px" }}>
         {filtered.length} of {dashboards.length} dashboard<Txt>{dashboards.length !== 1 ? "s" : ""}</Txt>
         <Txt>{filterTag ? ` tagged "${filterTag}"` : ""}</Txt>
@@ -269,6 +273,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
       </p>
 
       {filtered.length === 0 && folders.length === 0 && <EmptyState label="No dashboards match." />}
+      </>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {groups.map(group => (

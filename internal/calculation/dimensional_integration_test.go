@@ -544,23 +544,35 @@ func TestConditionalAggregationPerformance(t *testing.T) {
 	insertMonths(t, store, ctx, monthID, 12)
 	salesID := insertMetric(t, store, ctx, modelID, revID, "sales", "", true)
 	segID := insertCalc(t, store, ctx, modelID, revID, "seg", "SUMIFS(sales, region.segment, region.segment)")
-	insertGridSetup(t, store, ctx, modelID, []string{regionID, monthID}, []string{salesID, segID})
-	// sales = the region's number, every month.
-	if _, err := store.Pool().Exec(ctx, `
-		INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value)
-		SELECT $1::uuid, $2::uuid, $3::uuid, jsonb_build_object($6::text, r.code, $7::text, m.code), substr(r.code, 2)::int
-		FROM model.dimension_member r, model.dimension_member m
-		WHERE r.dimension_id = $4::uuid AND r.code <> 'World' AND m.dimension_id = $5::uuid`,
-		modelID, revID, salesID, regionID, monthID, regionID, monthID); err != nil {
-		t.Fatal(err)
+	// The yardstick: a plain calculation over the same 3,600 cells.
+	unitsID := insertMetric(t, store, ctx, modelID, revID, "units", "", true)
+	twiceID := insertCalc(t, store, ctx, modelID, revID, "twice", "units * 2")
+	insertGridSetup(t, store, ctx, modelID, []string{regionID, monthID}, []string{salesID, segID, unitsID, twiceID})
+	// sales and units = the region's number, every month.
+	for _, metricID := range []string{salesID, unitsID} {
+		if _, err := store.Pool().Exec(ctx, `
+			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value)
+			SELECT $1::uuid, $2::uuid, $3::uuid, jsonb_build_object($6::text, r.code, $7::text, m.code), substr(r.code, 2)::int
+			FROM model.dimension_member r, model.dimension_member m
+			WHERE r.dimension_id = $4::uuid AND r.code <> 'World' AND m.dimension_id = $5::uuid`,
+			modelID, revID, metricID, regionID, monthID, regionID, monthID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
+	// Timed against the plain pass on the same machine, so a busy runner
+	// slows both (a fixed 10 s failed at 13 s on CI, 2026-10-12, yet passed
+	// without the memo: 0.8 s, ten times the plain pass; with it the two
+	// take about the same).
 	start := time.Now()
+	runRecalc(t, store, ctx, modelID, revID, []string{unitsID})
+	plain := time.Since(start)
+	start = time.Now()
 	runRecalc(t, store, ctx, modelID, revID, []string{salesID})
 	elapsed := time.Since(start)
-	t.Logf("SUMIFS over 300 members x 12 periods: recalculation took %v", elapsed)
-	if elapsed > 10*time.Second {
-		t.Errorf("recalculation took %v, want well under 10s", elapsed)
+	t.Logf("SUMIFS over 300 members x 12 periods: recalculation took %v; a plain one over the same cells %v", elapsed, plain)
+	if elapsed > 500*time.Millisecond && elapsed > 4*plain {
+		t.Errorf("recalculation took %v, %.1f times the plain one's %v: is every (segment, period) still answered once?", elapsed, float64(elapsed)/float64(plain), plain)
 	}
 	// Segment S1 = members 1, 4, ..., 298: 100 members summing to 14,950.
 	var s1 float64

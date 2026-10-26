@@ -65,7 +65,7 @@ test("Workflows asks the picked revision's application, not the one cached befor
   await expect.poll(() => asked.some((p) => p.get("application_id") === "app-1")).toBe(true);
 
   // Budgeting's draft becomes the working revision, then straight to Workflows.
-  await page.getByRole("button", { name: "Models", exact: true }).first().click();
+  await page.getByRole("button", { name: "Developer Models", exact: true }).click();
   const budgetRow = page.locator(".mvx-admin-revision", { hasText: BUDGET_REV.name });
   await budgetRow.click();
   await expect(budgetRow.getByText("Working")).toBeVisible({ timeout: 15_000 });

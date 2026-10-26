@@ -3,16 +3,20 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/startersync"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 )
 
 // Self-service sign-up: a visitor with a company name and a work address
@@ -33,6 +37,9 @@ const (
 	signupBurst    = 3
 	signupAppName  = startersync.AppName
 	signupMaxField = 80
+	// signupProvisionTimeout bounds a sign-up that no longer depends on the
+	// visitor's connection: the server's own write timeout.
+	signupProvisionTimeout = 2 * time.Minute
 )
 
 type signupRequest struct {
@@ -127,9 +134,24 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	} else if exists {
+		// An account whose invitation was never completed — the mail went
+		// astray, or came late after a slow relay — gets it again: the
+		// realm has no "forgot password", and "sign in instead" left the
+		// person with no way in. The mail goes only to that address.
+		if h.resendPendingInvite(ctx, req.Email) {
+			jsonOK(w, map[string]any{"status": "invitation_resent", "invited": true, "email": req.Email})
+			return
+		}
 		jsonErr(w, fmt.Errorf("an account with this e-mail address already exists — sign in instead"), http.StatusConflict)
 		return
 	}
+
+	// From here on the sign-up finishes even if the visitor closes the tab.
+	// The identity provider mails the invitation the moment it is asked, so
+	// undoing the sign-up because the connection dropped would leave a mail
+	// whose link names a deleted account.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signupProvisionTimeout)
+	defer cancel()
 
 	// Everything created from here on is undone if a later step fails.
 	var undo []func()
@@ -241,14 +263,25 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 
 	// 4. The invitation, which is what makes the account usable. Without
 	//    it there is nothing to show for the sign-up, so its failure undoes
-	//    all of the above.
-	invited := false
+	//    all of the above — unless the call only timed out: Keycloak sends
+	//    the mail inside the call, so a relay slower than the client's
+	//    timeout may still deliver it, and undoing the sign-up then left a
+	//    link to a deleted account. That outcome is unknown, not failed:
+	//    the account stays, the person is told the mail may be late, and
+	//    signing up again with the address resends it (resendPendingInvite).
+	invited, delayed := false, false
 	if h.kc != nil {
-		if err := h.kc.SendInvite(ctx, sub, inviteLifetime); err != nil {
-			fail(http.StatusBadGateway, fmt.Errorf("%w — nothing was created; the deployment's mail relay may be down", err))
-			return
+		if err := h.sendInvitation(ctx, sub, &keycloak.Invitation{SignUp: true}); err != nil {
+			var ne net.Error
+			if !errors.As(err, &ne) || !ne.Timeout() {
+				fail(http.StatusBadGateway, fmt.Errorf("%w — nothing was created; the deployment's mail relay may be down", err))
+				return
+			}
+			h.log.Warn().Err(err).Str("email", req.Email).Msg("sign-up invitation timed out; account kept")
+			delayed = true
+		} else {
+			invited = true
 		}
-		invited = true
 	}
 
 	meta := map[string]string{"email": req.Email, "company": req.Company, "plan": p.Key, "ip": ip, "application_id": appID,
@@ -267,6 +300,9 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 	if invited {
 		out["status"] = "invited"
+	}
+	if delayed {
+		out["status"] = "invitation_delayed"
 	}
 	if h.devMode && h.kc == nil {
 		// The dev stack has no identity provider: the new account is
@@ -315,4 +351,57 @@ func (h *handler) emailRegistered(ctx context.Context, email string) (bool, erro
 		return existing != "", nil
 	}
 	return false, nil
+}
+
+// resendPendingInvite sends the invitation again to the identity-provider
+// account of email when it was never completed — it has no password and no
+// link to a company identity provider (which signs in without one) — and
+// reports whether it did.
+func (h *handler) resendPendingInvite(ctx context.Context, email string) bool {
+	if h.kc == nil {
+		return false
+	}
+	sub, err := h.kc.FindUserByEmail(ctx, email)
+	if err != nil || sub == "" {
+		return false
+	}
+	if has, err := h.kc.HasPassword(ctx, sub); err != nil || has {
+		return false
+	}
+	if links, err := h.kc.FederatedIdentities(ctx, sub); err != nil || len(links) > 0 {
+		return false
+	}
+	// The account keeps what its first invitation said: a sign-up, or
+	// whoever invited the address before it was signed up with.
+	if err := h.sendInvitation(ctx, sub, nil); err != nil {
+		h.log.Warn().Err(err).Str("email", email).Msg("resend a pending sign-up invitation")
+		return false
+	}
+	return true
+}
+
+// sendInvitation sends the set-your-password mail, first marking on the
+// account what the mail is to say (keycloak.MarkInvitation) unless inv is
+// nil. The mark only words the mail, so a failed one is logged, not
+// returned: the invitation still goes out, worded neutrally.
+func (h *handler) sendInvitation(ctx context.Context, sub string, inv *keycloak.Invitation) error {
+	if inv != nil {
+		if err := h.kc.MarkInvitation(ctx, sub, *inv); err != nil {
+			h.log.Warn().Err(err).Str("sub", sub).Msg("the invitation mail will read neutrally: marking the account failed")
+		}
+	}
+	return h.kc.SendInvite(ctx, sub, inviteLifetime)
+}
+
+// adminInvitation is what an administrator's invitation says: who sent it,
+// and the name of the tenant it is to.
+func (h *handler) adminInvitation(ctx context.Context, act *actor, customerID string) *keycloak.Invitation {
+	inv := &keycloak.Invitation{By: act.Name}
+	if inv.By == "" {
+		inv.By = act.Email
+	}
+	if customerID != "" {
+		_ = h.db.QueryRow(ctx, `SELECT name FROM core.customer WHERE id = $1::uuid`, customerID).Scan(&inv.Workspace)
+	}
+	return inv
 }

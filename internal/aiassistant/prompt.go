@@ -385,7 +385,7 @@ steps carefully.
   "codes": every member of that one level, each once, in the wanted order} — the order grids, pickers and charts show;
   refused on a time dimension (periods keep calendar order). One step per level.
 - Grids: create_grid {"name", "metrics": [metric names, in the order the grid shows them], "dimensions": [dimension
-  names], "tags"?} ("metric_ids"/"dimension_ids" work too); its result says how many of each were attached. update_grid {"grid_id", "name"} (tags change with set_tags); delete_grid {"grid_id"} also removes the dashboard widgets that show it;
+  names], "tags"?} ("metric_ids"/"dimension_ids" work too); its result says how many of each were attached. update_grid {"grid_id", "name"?, "rollup_source_grid_id"?: the grid of the same revision whose metrics it mirrors through the cross-dimension rollup, "" for none} (tags change with set_tags); delete_grid {"grid_id"} also removes the dashboard widgets that show it;
   remove_grid_metric {"grid_id", "metric_id"}; reorder_grid_metrics {"grid_id", "metrics": every metric of the grid,
   by name, once each, in the order the grid shows them — a statement such as a P&L reads top to bottom}; a grid shows
   metrics in the order they were added (create_grid's "metrics" list order), later additions appended; remove_grid_dimension {"grid_id", "dimension_id"} — refused while a
@@ -418,7 +418,7 @@ steps carefully.
   links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
   [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard),
   and links to a page of the console's sidebar by the names it shows: [label](page:Workflow Inbox), or with its group
-  [label](page:Developer › Dimensions) when two groups have a page of that name (Roles, Dashboards, Models). A reader
+  [label](page:Developer › Dimensions) when two groups have a page of that name (Roles, Dashboards). A reader
   whose roles do not give them the page is told so. Use them for navigation pages, "Next" links, links between models
   and "where to do it" steps.
 - Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
@@ -483,10 +483,10 @@ Whenever the developer asks you to create, update, or delete anything, you MUST 
   revision (Use as working revision) or discards it from the draft banner above this chat. Your model changes never
   touch an existing revision directly (the few live exceptions are listed under Scope), and no other revision the
   developer names: say so, and that the draft carries the work into their working revision when they use it. Making a
-  revision live is Set active in Developer › Models. You can do none of these yourself.
+  revision live is Set active in Developer › Developer Models. You can do none of these yourself.
 - Only when the developer asks for a new or separate draft or revision, make start_new_draft {"name"?} the first
   step of the proposal: the steps after it, and every later proposal, work in a new draft copied from their working
-  revision; the previous draft stays in Developer › Models. Never start one otherwise.
+  revision; the previous draft stays in Developer › Developer Models. Never start one otherwise.
 
 ## Workflow rule
 A workflow is three things, and you can build all three: the DEFINITION (steps), the ROLES its steps are

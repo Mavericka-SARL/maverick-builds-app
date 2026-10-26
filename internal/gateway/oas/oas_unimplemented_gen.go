@@ -770,6 +770,18 @@ func (UnimplementedHandler) DeleteWorkflow(ctx context.Context, params DeleteWor
 	return r, ht.ErrNotImplemented
 }
 
+// DisableAdminUser implements disableAdminUser operation.
+//
+// The account can no longer sign in; its roles, grants and data stay (user.disabled in the audit
+// log). Allowed where AdminUser.permissions.disable says: never one's own account, nor the tenant's
+// last tenant admin. The identity-provider account is disabled too unless another tenant's database
+// holds the same identity.
+//
+// POST /api/admin/users/{id}/disable
+func (UnimplementedHandler) DisableAdminUser(ctx context.Context, params DisableAdminUserParams) (r DisableAdminUserRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DiscardAiDraft implements discardAiDraft operation.
 //
 // Delete the session's isolated draft revision and clear the session's draft, in one server-side
@@ -824,6 +836,15 @@ func (UnimplementedHandler) DuplicateIntegration(ctx context.Context, params Dup
 //
 // POST /api/developer/workflows/{id}/duplicate
 func (UnimplementedHandler) DuplicateWorkflow(ctx context.Context, req OptDuplicateWorkflowRequest, params DuplicateWorkflowParams) (r *WorkflowDefFull, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// EnableAdminUser implements enableAdminUser operation.
+//
+// The reverse of disable, under the same permission (user.enabled in the audit log).
+//
+// POST /api/admin/users/{id}/enable
+func (UnimplementedHandler) EnableAdminUser(ctx context.Context, params EnableAdminUserParams) (r EnableAdminUserRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2746,7 +2767,7 @@ func (UnimplementedHandler) UpdateFormRecord(ctx context.Context, req *UpdateRec
 
 // UpdateGrid implements updateGrid operation.
 //
-// Rename or retag a grid.
+// Rename or retag a grid, or set the grid it mirrors.
 //
 // PATCH /api/developer/grids/{id}
 func (UnimplementedHandler) UpdateGrid(ctx context.Context, req *UpdateGridRequest, params UpdateGridParams) (r UpdateGridRes, _ error) {

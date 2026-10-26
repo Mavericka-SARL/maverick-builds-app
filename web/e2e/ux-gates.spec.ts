@@ -25,7 +25,7 @@ const VIEWPORTS = [
 const PERSONAS: { persona: string; screens: string[] }[] = [
   { persona: "dept_head", screens: ["Dashboards", "Workflow Inbox", "My History", "Models"] },
   { persona: "finance", screens: ["Dashboards", "Workflow Inbox", "History", "Roles", "Access Rules"] },
-  { persona: "developer", screens: ["Models", "Metrics", "Dimensions", "Grids", "Dashboards", "Triggers", "Integrations"] },
+  { persona: "developer", screens: ["Developer Models", "Metrics", "Dimensions", "Grids", "Dashboards", "Triggers", "Integrations"] },
   { persona: "platform_admin", screens: ["Applications", "Users", "Audit Log"] },
 ];
 

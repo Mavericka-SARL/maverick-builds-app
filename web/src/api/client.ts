@@ -1,3 +1,4 @@
+import { liveEditAllowed } from "./liveEdit";
 import keycloak from "../auth/keycloak";
 
 /** Which typed values a Clear values or sample fill touches. */
@@ -457,13 +458,16 @@ export interface SignupRequest {
 }
 
 export interface SignupResult {
-  status: "created" | "invited";
+  /** invitation_delayed: the workspace exists, the mail server answered too
+      slowly to confirm the invitation; invitation_resent: the address had an
+      account whose invitation was never completed, and it went out again. */
+  status: "created" | "invited" | "invitation_delayed" | "invitation_resent";
   invited: boolean;
   email: string;
-  tenant_id: string;
-  application_id: string;
-  model_id: string;
-  plan: string;
+  tenant_id?: string;
+  application_id?: string;
+  model_id?: string;
+  plan?: string;
   /** Dev stack only: the persona the new account is reachable as. */
   dev_persona?: string;
 }
@@ -689,6 +693,7 @@ export interface GridDef {
   metric_ids: string[];
   dimension_ids: string[];
   dimension_levels: Record<string, number | null>; // dim_id → display_level
+  rollup_source_grid_id?: string | null; // the grid it mirrors, if any
 }
 
 // A layout saved over the API may leave a zone out; readers treat a missing
@@ -2234,18 +2239,21 @@ function noAnswer(res: Response): string {
 async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): Promise<T> {
   const appId = localStorage.getItem("selected_app_id") ?? "";
   const modelId = localStorage.getItem("selected_model_id") ?? "";
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Dev-User": persona(),
-      ...tenantHeader(),
-      ...authHeader(),
-      ...(appId ? { "X-App-Id": appId } : {}),
-      ...(modelId ? { "X-Model-Id": modelId } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  // Read before anything is awaited: a caller may name the tenant only for
+  // the synchronous moment it calls (UsersPanel's atUser).
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Dev-User": persona(),
+    ...tenantHeader(),
+    ...authHeader(),
+    ...(appId ? { "X-App-Id": appId } : {}),
+    ...(modelId ? { "X-Model-Id": modelId } : {}),
+    ...(init?.headers ?? {}),
+  };
+  if (!retrying && !(await liveEditAllowed(init?.method, path))) {
+    throw new Error("Not changed: you chose to leave the live revision as it is. Make a new revision under Developer › Developer Models to build in.");
+  }
+  const res = await fetch(path, { ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: noAnswer(res) }));
     // A stale selected_app_id (e.g. after the database was reseeded) makes the
@@ -2830,6 +2838,10 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/users/${id}/roles/${role}${workspaceId ? `?workspace_id=${workspaceId}` : ""}`, { method: "DELETE" }),
   deleteAdminUser: (id: string) =>
     apiFetch<{ status: string }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+  // Suspend an account (it cannot sign in; roles and data stay), or let it
+  // sign in again — where permissions.disable says.
+  setAdminUserEnabled: (id: string, enabled: boolean) =>
+    apiFetch<{ status: string; disabled: boolean }>(`/api/admin/users/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" }),
   grantUserAppAccess: (id: string, appId: string) =>
     apiFetch<{ status: string }>(`/api/admin/users/${id}/access/apps/${appId}`, { method: "POST" }),
   revokeUserAppAccess: (id: string, appId: string) =>
@@ -2896,7 +2908,7 @@ export const api = {
   createGrid: (body: { name: string; revision_id?: string; tags?: string[] }) =>
     apiFetch<{ id: string }>("/api/developer/grids", { method: "POST", body: JSON.stringify(body) }),
   // Partial: a field left out keeps the grid's own; tags replace the list.
-  updateGrid: (id: string, body: { name?: string; tags?: string[] }) =>
+  updateGrid: (id: string, body: { name?: string; tags?: string[]; rollup_source_grid_id?: string }) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteGrid: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "DELETE" }),

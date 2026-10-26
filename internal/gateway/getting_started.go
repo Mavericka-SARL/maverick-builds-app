@@ -63,7 +63,7 @@ func installGettingStarted(ctx context.Context, tx pgx.Tx, customerID, workspace
 	}
 	// They share one created_at (the transaction's), so "newest model"
 	// cannot pick the one to land on: name it as the application's default,
-	// the same setting a developer changes later under Developer › Models.
+	// the same setting a developer changes later under Developer › Developer Models.
 	if _, err := setApplicationDefaultModel(ctx, tx, gs.models[gs.landing].modelID); err != nil {
 		return gs, fmt.Errorf("set default model: %w", err)
 	}

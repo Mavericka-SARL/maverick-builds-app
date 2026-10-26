@@ -52,7 +52,29 @@ export function SignUpPage() {
 
       {opts?.enabled && submit.isSuccess && (
         <div data-testid="sign-up-done" role="status">
-          {submit.data.invited ? (
+          {submit.data.status === "invitation_resent" ? (
+            <>
+              <h1>Check your e-mail</h1>
+              <p>
+                This address already has a workspace whose invitation was never used, so we sent it again
+                to <strong style={{ color: "var(--public-text)" }}>{submit.data.email}</strong>. Follow the link to choose
+                your password; it is valid for three days.
+              </p>
+              <p className="mvx-public__footer">
+                <a href="/">Go to sign in</a>
+              </p>
+            </>
+          ) : submit.data.status === "invitation_delayed" ? (
+            <>
+              <h1>Your workspace is ready</h1>
+              <p>
+                Your workspace, <strong style={{ color: "var(--public-text)" }}>{form.company.trim()}</strong>, is ready. Our mail
+                server answered slowly, so the invitation to <strong style={{ color: "var(--public-text)" }}>{submit.data.email}</strong> may
+                arrive a few minutes late.
+              </p>
+              <p>If nothing arrives, sign up again with the same address: we will send the invitation again.</p>
+            </>
+          ) : submit.data.invited ? (
             <>
               <h1>Check your e-mail</h1>
               <p>

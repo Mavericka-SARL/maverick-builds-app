@@ -286,3 +286,39 @@ func TestDeveloperRoutesKeepOwnerAdminReach(t *testing.T) {
 		}
 	}
 }
+
+// A plain developer of the tenant builds workflows on an application with
+// no model — an execution-mode application, made to run them (decided
+// 2026-10-06); the model clause applies only to an application that has
+// models. A developer narrowed to models, and another tenant's, still do
+// not reach it.
+func TestPlainDeveloperBuildsOnAModelLessApplication(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	appX := f.one(t, `INSERT INTO core.application (customer_id, name, mode) VALUES ($1::uuid, 'Execution only', 'execution') RETURNING id::text`, f.cust1)
+	f.expect(t, "mm-dev", "GET", "/api/developer/workflows?application_id="+appX, "", nil, http.StatusOK)
+	f.expect(t, "mm-dev", "POST", "/api/developer/workflows?application_id="+appX, "", map[string]string{"name": "Developer workflow"}, http.StatusOK)
+	narrowed := f.gbUser(t, "ml-model-narrowed", f.cust1, [2]string{"developer", f.ws1a})
+	if _, err := f.pool.Exec(context.Background(), `INSERT INTO identity.user_model_access (user_id, model_id) VALUES ($1::uuid, $2::uuid)`, narrowed, f.modelA); err != nil {
+		t.Fatal(err)
+	}
+	f.expect(t, "ml-model-narrowed", "GET", "/api/developer/workflows?application_id="+appX, "", nil, http.StatusForbidden)
+	appX2 := f.one(t, `INSERT INTO core.application (customer_id, name, mode) VALUES ($1::uuid, 'Execution only two', 'execution') RETURNING id::text`, f.cust2)
+	f.expect(t, "mm-dev", "GET", "/api/developer/workflows?application_id="+appX2, "", nil, http.StatusForbidden)
+}
+
+// Business Admin › Roles grants a working revision's dashboards for someone
+// who also builds the model, before it goes live (decided 2026-10-06); a
+// business admin alone grants the live revision only.
+func TestBuilderGrantsAWorkingRevisionsDashboards(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	work := f.one(t, `INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, f.modelA)
+	dash := f.one(t, `INSERT INTO model.dashboard_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'New page') RETURNING id::text`, f.modelA, work)
+	f.gbUser(t, "wr-ba-only", f.cust1, [2]string{"business_admin", f.ws1a})
+	path := "/api/business-admin/roles/" + f.roleID + "/dashboards?revision_id=" + work
+	body := map[string]any{"dashboard_ids": []string{dash}}
+	f.expect(t, "wr-ba-only", "PUT", path, f.app1, body, http.StatusForbidden)
+	f.expect(t, "ws-dev-ba", "PUT", path, f.app1, body, http.StatusOK)
+	if n := f.one(t, `SELECT count(*)::text FROM identity.business_role_dashboard WHERE role_id=$1::uuid AND dashboard_id=$2::uuid`, f.roleID, dash); n != "1" {
+		t.Errorf("%s grants of the working revision's dashboard, want 1", n)
+	}
+}

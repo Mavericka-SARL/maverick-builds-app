@@ -194,7 +194,7 @@ function DevModelRevisions({
 }
 
 /**
- * New application and New model, at the top of Developer › Models. Creating them
+ * New application and New model, at the top of Developer › Developer Models. Creating them
  * belongs to the tenant admin (and platform admin): the bar offers only the
  * tenants of this list that the person administers, and is absent for a
  * developer alone, whose guide sends them to their tenant admin.
@@ -282,7 +282,7 @@ function CreateBar({ tenants }: { tenants: AdminTenant[] }) {
               {open === "app" ? "Create application" : "Create model"}
             </Button>
           </div>
-          {open === "model" && <p className="mvx-admin-muted" style={{ margin: "10px 0 0" }}>A new model starts empty. Press <strong>New revision</strong> under it to start building.</p>}
+          {open === "model" && <p className="mvx-admin-muted" style={{ margin: "10px 0 0" }}>A new model comes with one empty revision, <strong>Revision 1</strong>. Click it under the model to start building.</p>}
           {pending.isError && <p className="mvx-admin-error" role="alert">{(pending.error as Error).message}</p>}
         </div>
       )}

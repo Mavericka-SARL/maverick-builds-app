@@ -10,7 +10,7 @@
  * The server side is internal/gateway/import_wizard_checks_test.go.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { mockApi, loadAs } from "./mocks";
+import { mockApi, loadAs, acceptLiveEdits } from "./mocks";
 
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 
@@ -28,6 +28,7 @@ async function chooseGridFile(page: Page, file: string) {
 test.beforeEach(async ({ page }) => {
   await mockApi(page);
   await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ id: "rev-1", name: "Working", is_active: true }])));
+  await acceptLiveEdits(page, "rev-1");
 });
 
 test("an empty row under a workbook's title previews as an empty row", async ({ page }) => {

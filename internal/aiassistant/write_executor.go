@@ -3366,15 +3366,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// Business-role dashboard grants follow the copies, or activating
 		// this revision hides every dashboard from every business user —
 		// same reasoning as duplicateRevision's Step K.
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO identity.business_role_dashboard (role_id, dashboard_id)
-			SELECT brd.role_id, nd.id
-			FROM identity.business_role_dashboard brd
-			JOIN model.dashboard_def od ON od.id = brd.dashboard_id
-			JOIN model.dashboard_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
-			WHERE od.model_id = $1::uuid AND od.revision_id = $3::uuid
-			ON CONFLICT DO NOTHING
-		`, e.modelID, newID, srcID); err != nil {
+		if _, err := tx.Exec(ctx, modeltransfer.CopyDashboardGrantsSQL, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy dashboard grants into new revision: %w", err)
 		}
 	}

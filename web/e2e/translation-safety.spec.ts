@@ -50,7 +50,7 @@ test("translated, a member search's count and a revision switch keep the console
     await expect(search).toBeVisible();
   }
 
-  await page.getByRole("button", { name: "Models", exact: true }).first().click();
+  await page.getByRole("button", { name: "Developer Models", exact: true }).click();
   await translatePage(page);
   for (const row of await page.locator(".mvx-admin-revision").all()) await row.click();
 

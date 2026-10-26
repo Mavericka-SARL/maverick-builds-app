@@ -158,3 +158,48 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		}
 	})
 }
+
+// The user cap counts accounts new to the tenant only (decided 2026-10-06):
+// at the cap an invitation of a new address is refused, while giving an
+// existing member another role adds nobody and goes through.
+func TestUserCapCountsOnlyAccountsNewToTheTenant(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	t.Setenv("DEV_MODE", "true")
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Capped Co', 'enterprise') RETURNING id::text`)
+	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
+	admin := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('cap-admin', 'admin@cap.test', 'Admin', $1::uuid) RETURNING id::text`, cust)
+	q(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'tenant_admin') RETURNING user_id::text`, admin)
+	member := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('cap-member', 'member@cap.test', 'Member', $1::uuid) RETURNING id::text`, cust)
+	q(`INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid) RETURNING user_id::text`, member, ws)
+	padmin := q(`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ('cap-padmin', 'p@cap.test', 'Platform') RETURNING id::text`)
+	q(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'platform_admin') RETURNING user_id::text`, padmin)
+
+	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Plans: plan.NewEnforcer(pool)}))
+	t.Cleanup(srv.Close)
+	if code, body := callJSON(t, srv, "cap-padmin", http.MethodPut, "/api/admin/plans/enterprise",
+		map[string]any{"name": "Enterprise", "limits": map[string]int{"max_users": 2}, "sort_order": 40}); code != 200 {
+		t.Fatalf("set the cap: %d %v", code, body)
+	}
+	invite := func(email string) (int, map[string]any) {
+		return callJSON(t, srv, "cap-admin", http.MethodPost, "/api/admin/users", map[string]any{
+			"email": email, "first_name": "Some", "last_name": "One", "role": "business_admin", "workspace_id": ws})
+	}
+	if code, body := invite("newcomer@cap.test"); code != http.StatusPaymentRequired || body["limit"] != "max_users" {
+		t.Errorf("a new account at the cap: %d %v, want 402 max_users", code, body)
+	}
+	if code, body := invite("member@cap.test"); code != http.StatusOK {
+		t.Errorf("another role for an existing member at the cap: %d %v, want 200", code, body)
+	}
+	if n := q(`SELECT count(*)::text FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'business_admin'`, member); n != "1" {
+		t.Errorf("the member holds %s business_admin role(s), want 1", n)
+	}
+}

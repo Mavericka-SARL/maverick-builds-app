@@ -536,6 +536,15 @@ type Handler interface {
 	//
 	// DELETE /api/developer/workflows/{id}
 	DeleteWorkflow(ctx context.Context, params DeleteWorkflowParams) (DeleteWorkflowRes, error)
+	// DisableAdminUser implements disableAdminUser operation.
+	//
+	// The account can no longer sign in; its roles, grants and data stay (user.disabled in the audit
+	// log). Allowed where AdminUser.permissions.disable says: never one's own account, nor the tenant's
+	// last tenant admin. The identity-provider account is disabled too unless another tenant's database
+	// holds the same identity.
+	//
+	// POST /api/admin/users/{id}/disable
+	DisableAdminUser(ctx context.Context, params DisableAdminUserParams) (DisableAdminUserRes, error)
 	// DiscardAiDraft implements discardAiDraft operation.
 	//
 	// Delete the session's isolated draft revision and clear the session's draft, in one server-side
@@ -575,6 +584,12 @@ type Handler interface {
 	//
 	// POST /api/developer/workflows/{id}/duplicate
 	DuplicateWorkflow(ctx context.Context, req OptDuplicateWorkflowRequest, params DuplicateWorkflowParams) (*WorkflowDefFull, error)
+	// EnableAdminUser implements enableAdminUser operation.
+	//
+	// The reverse of disable, under the same permission (user.enabled in the audit log).
+	//
+	// POST /api/admin/users/{id}/enable
+	EnableAdminUser(ctx context.Context, params EnableAdminUserParams) (EnableAdminUserRes, error)
 	// ExportAudit implements exportAudit operation.
 	//
 	// Stream the caller's audit events, oldest first, as a CSV download or JSON Lines for a collector;
@@ -1913,7 +1928,7 @@ type Handler interface {
 	UpdateFormRecord(ctx context.Context, req *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error)
 	// UpdateGrid implements updateGrid operation.
 	//
-	// Rename or retag a grid.
+	// Rename or retag a grid, or set the grid it mirrors.
 	//
 	// PATCH /api/developer/grids/{id}
 	UpdateGrid(ctx context.Context, req *UpdateGridRequest, params UpdateGridParams) (UpdateGridRes, error)

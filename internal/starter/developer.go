@@ -204,14 +204,14 @@ Not building models? Go back to the `+dashLink("tour", ModelName, DashboardName)
 
 An **application** groups related models; a **model** holds what you build. Creating them belongs to the **tenant admin**. If you signed up for this workspace yourself, that is you: your account is tenant admin, developer and business admin at once. If it is not, ask your tenant admin for the two, and start at step 3.
 
-1. Open **Developer › Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
+1. Open **Developer › Developer Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
 2. The model form opens next, with the new application already chosen. Type a name, such as *Sales plan*, and press **Create model**. For another model in an application you already have, press **New model** instead.
 
 **Tenant admin › Applications** does the same: **New application** at the top of your tenant, **Add model** at the top of each application.`, 244),
 
 		devText(`## 3 · A revision to build in
 
-A new model is empty and has no revision yet. Under it in **Developer › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Developer screen now changes them. Page 2 covers revisions.`, 132),
+A new model comes with one empty revision, **Revision 1**, which is not live yet. Under the model in **Developer › Developer Models**, click it: it becomes your working revision. The bar at the top names the model and the revision, and every Developer screen now changes them. Page 2 covers revisions.`, 132),
 
 		devText(`## 4 · Dimensions
 
@@ -223,7 +223,7 @@ A new model is empty and has no revision yet. Under it in **Developer › Models
 
 ## 6 · A grid
 
-**Developer › Grids** → **New grid**, name it, **Create**. Press **Configure** on its card, move your metrics and dimensions to *In this grid*, and press **Done**. A metric takes its dimensions from the grid it sits on. Page 5.
+**Developer › Grids** → **New grid**, name it, **Create**. Press **Configure** on its card, move your metrics and dimensions to *In this grid*, and press **Save**. A metric takes its dimensions from the grid it sits on. Page 5.
 
 ## 7 · A dashboard
 
@@ -231,11 +231,11 @@ A new model is empty and has no revision yet. Under it in **Developer › Models
 
 		devText(`## 8 · Make it live
 
-Back in **Developer › Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
+Back in **Developer › Developer Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
 
 ## Or describe it to the AI Developer
 
-After step 3 you can hand steps 4 to 7 to **Developer › AI Developer**. Describe the model in plain words — *products and quarters; units and price typed in; revenue is units times price; a grid and a dashboard to type into* — and confirm the plan it proposes. Its changes land in a draft revision of their own, which **Promote to Active** makes live. Page 7.
+After step 3 you can hand steps 4 to 7 to **Developer › AI Developer**. Describe the model in plain words — *products and quarters; units and price typed in; revenue is units times price; a grid and a dashboard to type into* — and confirm the plan it proposes. Its changes land in a draft revision of their own: **Use as working revision** on its banner makes you build in it, and **Set active** here in Developer › Developer Models makes it live. Page 7.
 
 ---
 Next: [2 · Revisions](dashboard:2 · Revisions).`, 284),
@@ -258,7 +258,7 @@ Build starts in the live revision of the model you have open, and nothing stops 
 
 		devText(`## Make a revision
 
-1. Open **Developer › Models**. It lists each application you can reach, its models, and each model's revisions.
+1. Open **Developer › Developer Models**. It lists each application you can reach, its models, and each model's revisions.
 2. Under the model you want to change, press **New revision**, type a name where it says *Revision name…* and press **Save**.
 3. The revision is made in that model. It copies your working revision if that is in the same model, and the model's live revision if not. It becomes your working revision at once: its row is marked **Working**, and the bar names it.
 
@@ -272,7 +272,7 @@ The live revision cannot be deleted. Any other can, with the trash icon on its r
 
 		devText(`## Which model people open
 
-An application can hold several models: *Getting started* holds the tour and three guides. Business screens open the model marked **business default** unless someone has opened another one under **Models** in their own sidebar. To change the default, press **Set as business default** beside a model in **Developer › Models**.`, 132),
+An application can hold several models: *Getting started* holds the tour and three guides. Business screens open the model marked **business default** unless someone has opened another one under **Models** in their own sidebar. To change the default, press **Set as business default** beside a model in **Developer › Developer Models**.`, 132),
 
 		devText(`## Two more things to know
 
@@ -310,7 +310,7 @@ A member or a property that a formula names cannot be deleted, and renaming a pr
 Open **Developer › Metrics** and press **Add metric**:
 
 - **Metric name** — snake_case, such as `+devCode("gross_margin")+`. Names ignore case: `+devCode("Revenue")+` and `+devCode("revenue")+` count as the same name. **Display name**, if you give one, is what grids and charts show instead.
-- **Type** — **Input** is typed or imported. **Calc** has a **Formula** and is worked out by the platform whenever an input changes. The type cannot be changed afterwards.
+- **Type** — **Input** is typed or imported. **Calc** has a **Formula** and is worked out by the platform whenever an input changes. **Edit** can change the type later, keeping the metric's id and the formulas that read it.
 - **Format** — Number, Percentage, Currency, Boolean, Text, **Pick-list** (each cell holds a member of the dimension chosen under **Members of**, picked from a list in the grid) or **Date**, with decimal places and a currency symbol where they apply.
 - **Aggregation rule** and **Time summary** — how its totals are made, below.
 - **Tags** — for the tag filter and the *Search metrics…* box.
@@ -434,7 +434,7 @@ A grid decides which numbers belong together; a dashboard decides how people see
 
 ## A grid
 
-Open **Developer › Grids**, press **New grid**, name it — **Tags** too, if you like — and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. Every change is saved as you make it; **Done** closes the card.
+Open **Developer › Grids**, press **New grid**, name it — **Tags** too, if you like — and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. The changes wait for **Save**, in the bar that appears above them; **Close** folds the card, and asks first if something is unsaved.
 
 A grid has no layout of its own. Where each dimension sits — rows, columns or a selector — is set on each dashboard that shows it.`, 252),
 
@@ -442,9 +442,9 @@ A grid has no layout of its own. Where each dimension sits — rows, columns or 
 
 1. Open **Developer › Dashboards** and press **New dashboard**. Give it a **Name** — a **Folder** and **Tags** too, if you like — and press **Create**.
 2. Press **Design** on its row.
-3. Click a widget type in the palette — Grid, Chart, Records, Metric KPI, Trigger, Integration, Text, Image or Import — choose what it shows under *Configure & place*, and press **Add widget**. It lands on the canvas, already saved.
+3. Click a widget type in the palette — Grid, Chart, Records, Metric KPI, Trigger, Integration, Text, Image or Import — choose what it shows under *Configure & place*, and press **Add widget**. It lands on the canvas.
 4. Drag a widget to move it; pull its handles to resize it.
-5. Moves, resizes and property changes wait for **Save**, in the bar that appears when there is something to save.`, 216),
+5. New widgets, deleted ones, moves, resizes and property changes all wait for **Save**, in the bar that appears when there is something to save.`, 216),
 
 		devText(`## Widget Properties
 
@@ -556,7 +556,7 @@ Ask it how something works, too. It reads your model — formulas, grids, workfl
 
 The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from your working revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
 
-The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which switches you to it (live only once you **Set active**), and **Discard**.
+The draft is listed in **Developer › Developer Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which switches you to it (live only once you **Set active**), and **Discard**.
 
 Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and records posted into the model.
 
@@ -573,7 +573,7 @@ Before you press **Set active**:
 - **Developer › Dashboards** — each page checked in **Preview**.
 - **Developer › Workflows** — the ones people need are published, and each that should start on a button, a schedule or an event has a rule under **Developer › Triggers**.
 
-Then open **Developer › Models**, press **Set active** on your revision, and **Set as business default** if people should open this model first.`, 252),
+Then open **Developer › Developer Models**, press **Set active** on your revision, and **Set as business default** if people should open this model first.`, 252),
 
 		devText(`## Read further
 

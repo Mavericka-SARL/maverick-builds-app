@@ -19,7 +19,7 @@
  * Mocked API (CI runs the e2e job without a gateway).
  */
 import { test, expect, type Page, type Request } from "@playwright/test";
-import { mockApi, loadAs } from "./mocks";
+import { mockApi, loadAs, acceptLiveEdits } from "./mocks";
 
 const DEFAULT_REV = { id: "rev-default", name: "Tour live", created_at: "2026-09-01T00:00:00Z" };
 const OTHER_LIVE = { id: "rev-other-live", name: "Sales live", created_at: "2026-09-01T00:00:00Z" };
@@ -139,7 +139,7 @@ test("Triggers lists and creates in the working revision, and follows a revision
   await expect.poll(() => postedRuleUrl?.searchParams.get("revision_id") ?? null).toBe(OTHER_DRAFT.id);
 
   // Switching the working revision refetches the tab for the new one.
-  await page.getByRole("button", { name: "Models", exact: true }).first().click();
+  await page.getByRole("button", { name: "Developer Models", exact: true }).click();
   const liveRow = page.locator(".mvx-admin-revision", { hasText: OTHER_LIVE.name });
   await liveRow.click();
   await expect(liveRow.getByText("Working")).toBeVisible();
@@ -237,6 +237,7 @@ test("the metric recalc banner names each revision, or shows a short id when it 
       { revision_id: UNNAMED, metric: "revenue", value: null },
     ] }))
     : route.fallback());
+  await acceptLiveEdits(page, DEFAULT_REV.id);
 
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "Metrics", exact: true }).click();

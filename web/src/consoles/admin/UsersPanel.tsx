@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { roleLabel } from "../../ui/roleLabel";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, Pencil, Plus, Trash2, UserMinus, X } from "lucide-react";
+import { Mail, Pencil, Plus, Trash2, UserCheck, UserMinus, UserX, X } from "lucide-react";
 import {
   api,
   type AccessRemovalResult,
@@ -292,6 +292,15 @@ export function UsersPanel({
     mutationFn: (u: AdminUser) => atUser(u.id, () => api.resendAdminUserInvite(u.id)),
     onMutate: () => setNotice(null),
     onSuccess: (res, u) => setNotice({ tone: "success", text: `Invitation sent to ${res.email || u.email}.` }),
+    onError: failed,
+  });
+  const setEnabled = useMutation({
+    mutationFn: ({ u, enabled }: { u: AdminUser; enabled: boolean }) => atUser(u.id, () => api.setAdminUserEnabled(u.id, enabled)),
+    onMutate: () => setNotice(null),
+    onSuccess: (_res, { u, enabled }) => {
+      inv();
+      setNotice({ tone: "success", text: enabled ? `${u.display_name} can sign in again.` : `${u.display_name} can no longer sign in.` });
+    },
     onError: failed,
   });
   const removeFromTenant = useMutation({
@@ -805,6 +814,32 @@ export function UsersPanel({
                           <Mail size={14} aria-hidden="true" />
                         </IconButton>
                       )}
+                      {permissionsOf(u).disable && (u.disabled_at ? (
+                        <IconButton
+                          aria-label={`Enable ${u.display_name}`}
+                          title="Enable: let them sign in again"
+                          size={28}
+                          disabled={setEnabled.isPending}
+                          onClick={() => setEnabled.mutate({ u, enabled: true })}
+                        >
+                          <UserCheck size={14} aria-hidden="true" />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          aria-label={`Disable ${u.display_name}`}
+                          title="Disable: they cannot sign in until enabled"
+                          size={28}
+                          disabled={setEnabled.isPending}
+                          onClick={() => confirm({
+                            title: "Disable this account?",
+                            body: `"${u.display_name}" will not be able to sign in. Their roles, access and data stay, and you can enable the account again at any time.`,
+                            confirmLabel: "Disable account",
+                            onConfirm: () => setEnabled.mutate({ u, enabled: false }),
+                          })}
+                        >
+                          <UserX size={14} aria-hidden="true" />
+                        </IconButton>
+                      ))}
                       {/* Another organisation's account (or one with none)
                           is not this administrator's to delete — only what
                           it holds here is theirs to take back. */}

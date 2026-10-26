@@ -571,6 +571,13 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
   });
 }
 
+// A spec that saves to a revision its mocks mark live answers the console's
+// "Edit the live revision?" question up front, as a developer who said yes
+// earlier in the session has.
+export async function acceptLiveEdits(page: Page, revisionId: string) {
+  await page.addInitScript((id) => sessionStorage.setItem(`live_edit_ok:${id}`, "1"), revisionId);
+}
+
 export async function loadAs(page: Page, persona: string, query = "") {
   await page.addInitScript((p) => localStorage.setItem("dev_persona", p), persona);
   await page.goto("/" + query);

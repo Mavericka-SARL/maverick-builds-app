@@ -30,14 +30,14 @@ async function withApplications(page: Page) {
   await page.route((url) => url.pathname === "/api/developer/applications", (route) => route.fulfill({ json: tenants }));
 }
 
-test("Developer opens with AI Developer, ends with Models, and folds away until unfolded", async ({ page }) => {
+test("Developer opens with AI Developer, ends with Developer Models, and folds away until unfolded", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "developer");
   const build = sidebar(page).getByRole("button", { name: "Developer", exact: true });
   await expect(build).toHaveAttribute("aria-expanded", "true");
   const items = await page.locator(".mvx-sidebar-nav__group", { has: page.getByRole("button", { name: "Developer", exact: true }) }).locator(".mvx-sidebar-nav__item .mvx-sidebar-nav__label").allTextContents();
   expect(items[0]).toBe("AI Developer");
-  expect(items[items.length - 1]).toBe("Models");
+  expect(items[items.length - 1]).toBe("Developer Models");
 
   await build.click();
   await expect(build).toHaveAttribute("aria-expanded", "false");
@@ -63,19 +63,19 @@ test("the icon-only rail shows every item, folded or not", async ({ page }) => {
   await expect(sidebar(page).getByRole("button", { name: "Metrics", exact: true })).toHaveCount(0);
 });
 
-test("a developer alone gets no New application or New model in Developer › Models", async ({ page }) => {
+test("a developer alone gets no New application or New model in Developer › Developer Models", async ({ page }) => {
   await withApplications(page);
   await loadAs(page, "developer");
-  await sidebar(page).getByRole("button", { name: "Models", exact: true }).click();
+  await sidebar(page).getByRole("button", { name: "Developer Models", exact: true }).click();
   await expect(page.locator(".mvx-admin-model__name", { hasText: "Finance Model" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New application" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New model" })).toHaveCount(0);
 });
 
-test("a developer who is also tenant admin creates a model from the top of Developer › Models", async ({ page }) => {
+test("a developer who is also tenant admin creates a model from the top of Developer › Developer Models", async ({ page }) => {
   await withApplications(page);
   await loadAs(page, "dev_admin");
-  await sidebar(page).getByRole("button", { name: "Models", exact: true }).first().click();
+  await sidebar(page).getByRole("button", { name: "Developer Models", exact: true }).click();
   const newModel = page.getByRole("button", { name: "New model" });
   await expect(newModel).toBeVisible();
   expect(await top(page, ".mvx-toolbar")).toBeLessThan(await top(page, ".mvx-admin-object"));

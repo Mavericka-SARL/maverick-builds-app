@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Users, UserCog, Sigma, ListTree, GitBranch, Zap, FileText, Table2, LayoutDashboard, Workflow, Plug, Sparkles } from "lucide-react";
 import { api, type AdminTenant, type AdminUser, type ApiError } from "../../api/client";
@@ -16,7 +16,8 @@ import { DepGraph } from "./DependencyGraphTab";
 import { IntegrationsTab } from "./IntegrationsTab";
 import { DashboardsTab } from "./DashboardsTab";
 import { RolesTab } from "../business-admin/BusinessAdminConsole";
-import { PageLayout, LoadingState, ErrorState, SELECTED_APP_KEY } from "../../ui";
+import { PageLayout, LoadingState, ErrorState, SELECTED_APP_KEY, useConfirm } from "../../ui";
+import { setLiveEditGuard } from "../../api/liveEdit";
 import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 
 // ── Section ───────────────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, ty
 type Tab = "applications" | "users" | "metrics" | "dimensions" | "graph" | "automation" | "forms" | "grids" | "dashboards" | "workflows" | "roles" | "integrations" | "ai";
 
 const TAB_LABELS: Record<Tab, string> = {
-  applications: "Models",
+  applications: "Developer Models",
   users:        "Users",
   metrics:      "Metrics",
   dimensions:   "Dimensions",
@@ -107,6 +108,41 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
     enabled,
   });
 
+  // Whether Build is working in the model's live revision: then the badge
+  // says so, and the first change of the session asks first (decided
+  // 2026-10-06) — business users see such an edit at once.
+  const { data: modelRevisions } = useQuery({
+    queryKey: ["dev-revisions", model?.model_id],
+    queryFn: () => api.getDevRevisions(model!.model_id),
+    enabled: enabled && !!model?.model_id,
+  });
+  const editingLive = !!effectiveRevisionId && !!modelRevisions?.some(r => r.id === effectiveRevisionId && r.is_active);
+  const { confirm: confirmLive, confirmElement: liveConfirmElement } = useConfirm();
+  useEffect(() => {
+    if (!enabled || !editingLive) return;
+    const key = `live_edit_ok:${effectiveRevisionId}`;
+    setLiveEditGuard(() => {
+      try {
+        if (sessionStorage.getItem(key)) return Promise.resolve(true);
+      } catch { /* ask */ }
+      return new Promise<boolean>(resolve => confirmLive({
+        title: "Edit the live revision?",
+        body: `"${effectiveRevisionName}" is the revision business users work in now: what you change here, they see at once. `
+          + "To prepare changes first, make a new revision under Developer › Developer Models and build in it.",
+        confirmLabel: "Edit the live revision",
+        destructive: false,
+        onConfirm: () => {
+          try { sessionStorage.setItem(key, "1"); } catch { /* asked again next time */ }
+          resolve(true);
+        },
+        onCancel: () => resolve(false),
+      }));
+    });
+    return () => setLiveEditGuard(null);
+    // confirmLive is a fresh function each render; the guard needs only the revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, editingLive, effectiveRevisionId, effectiveRevisionName]);
+
   const { data: dims, isLoading: dimsLoading, error: dimsError } = useQuery({
     queryKey: ["dev-dimensions", effectiveRevisionId],
     queryFn: () => api.getDevDimensions(effectiveRevisionId || undefined),
@@ -163,7 +199,8 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         { id: t("automation"), label: TAB_LABELS.automation, icon: <Zap size={16} /> },
         { id: t("integrations"), label: TAB_LABELS.integrations, icon: <Plug size={16} /> },
         { id: t("graph"), label: TAB_LABELS.graph, icon: <GitBranch size={16} /> },
-        { id: t("applications"), label: TAB_LABELS.applications, icon: <Boxes size={16} /> },
+        // "Models" until 2026-10-26, beside the User group's Models.
+        { id: t("applications"), label: TAB_LABELS.applications, aliases: ["Models"], icon: <Boxes size={16} /> },
       ],
     },
   ];
@@ -188,7 +225,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         ? [{ id: "model", label: "Model", value: [model.app_name, model.model_name].filter(Boolean).join(" · ") }]
         : []),
       effectiveRevisionId
-        ? { id: "revision", label: "Revision", value: effectiveRevisionName, tone: "draft" as const }
+        ? { id: "revision", label: "Revision", value: editingLive ? `${effectiveRevisionName} (live)` : effectiveRevisionName, tone: editingLive ? "live" as const : "draft" as const }
         : { id: "revision", label: "Revision", value: "No revision selected", tone: "warning" as const },
     ],
     onNotificationNavigate: (resourceType) => {
@@ -201,12 +238,14 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
       if (cur === "workflows" || cur === "ai") {
         return (
           <div style={{ flex: 1, overflow: "hidden" }}>
+            {liveConfirmElement}
             {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} onSelectRevision={handleSelectRevision} />}
           </div>
         );
       }
       return (
         <PageLayout title={TAB_LABELS[cur]}>
+          {liveConfirmElement}
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
           {cur === "applications" && <DevApplicationsTab revisionId={effectiveRevisionId} revisionName={effectiveRevisionName} defaultRevisionPending={autoRevisionsLoading} canCreate={roles.includes("tenant_admin") || roles.includes("platform_admin")} onSelect={handleSelectRevision} />}

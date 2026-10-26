@@ -48,7 +48,7 @@ const same = (a: string | undefined, b: string) => (a ?? "").trim().toLowerCase(
 export function resolvePageLink(target: PageLinkTarget, groups: NavGroup[]): string | null {
   for (const g of groups) {
     if (target.group !== null && !same(g.label, target.group)) continue;
-    const item = g.items.find(i => !i.disabled && same(i.label, target.page));
+    const item = g.items.find(i => !i.disabled && (same(i.label, target.page) || (i.aliases ?? []).some(a => same(a, target.page))));
     if (item) return item.id;
   }
   return null;

@@ -22,7 +22,7 @@ export function useConfirm() {
     destructive: state.destructive,
     typeToConfirm: state.typeToConfirm,
     onConfirm: () => { state.onConfirm(); close(); },
-    onCancel: close,
+    onCancel: () => { state.onCancel?.(); close(); },
   });
 
   return { confirm, confirmElement: element };

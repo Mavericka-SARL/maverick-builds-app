@@ -9422,6 +9422,41 @@ func (s *DimensionTimeGranularity) UnmarshalText(data []byte) error {
 	}
 }
 
+type DisableAdminUserForbidden Error
+
+func (*DisableAdminUserForbidden) disableAdminUserRes() {}
+
+type DisableAdminUserNotFound Error
+
+func (*DisableAdminUserNotFound) disableAdminUserRes() {}
+
+type DisableAdminUserOK struct {
+	Status   OptString `json:"status"`
+	Disabled OptBool   `json:"disabled"`
+}
+
+// GetStatus returns the value of Status.
+func (s *DisableAdminUserOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetDisabled returns the value of Disabled.
+func (s *DisableAdminUserOK) GetDisabled() OptBool {
+	return s.Disabled
+}
+
+// SetStatus sets the value of Status.
+func (s *DisableAdminUserOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetDisabled sets the value of Disabled.
+func (s *DisableAdminUserOK) SetDisabled(val OptBool) {
+	s.Disabled = val
+}
+
+func (*DisableAdminUserOK) disableAdminUserRes() {}
+
 type DiscardAiDraftBadRequest Error
 
 func (*DiscardAiDraftBadRequest) discardAiDraftRes() {}
@@ -9676,6 +9711,41 @@ func (s *DuplicateWorkflowRequest) GetName() OptString {
 func (s *DuplicateWorkflowRequest) SetName(val OptString) {
 	s.Name = val
 }
+
+type EnableAdminUserForbidden Error
+
+func (*EnableAdminUserForbidden) enableAdminUserRes() {}
+
+type EnableAdminUserNotFound Error
+
+func (*EnableAdminUserNotFound) enableAdminUserRes() {}
+
+type EnableAdminUserOK struct {
+	Status   OptString `json:"status"`
+	Disabled OptBool   `json:"disabled"`
+}
+
+// GetStatus returns the value of Status.
+func (s *EnableAdminUserOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetDisabled returns the value of Disabled.
+func (s *EnableAdminUserOK) GetDisabled() OptBool {
+	return s.Disabled
+}
+
+// SetStatus sets the value of Status.
+func (s *EnableAdminUserOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetDisabled sets the value of Disabled.
+func (s *EnableAdminUserOK) SetDisabled(val OptBool) {
+	s.Disabled = val
+}
+
+func (*EnableAdminUserOK) enableAdminUserRes() {}
 
 // The shape every gateway error response actually has (internal/gateway's jsonErr helper) — a
 // single "error" string, not the {code, message} pair this schema previously (and incorrectly)
@@ -32666,6 +32736,10 @@ type UpdateGridRequest struct {
 	Name OptString `json:"name"`
 	// Replaces the whole list; [] clears it.
 	Tags []string `json:"tags"`
+	// The grid of the same model and revision whose metrics this one mirrors through the cross-dimension
+	// rollup (its cells are then read-only); "" mirrors none. Refused (400) for the grid itself, a grid
+	// of another revision, or a loop.
+	RollupSourceGridID OptString `json:"rollup_source_grid_id"`
 }
 
 // GetName returns the value of Name.
@@ -32678,6 +32752,11 @@ func (s *UpdateGridRequest) GetTags() []string {
 	return s.Tags
 }
 
+// GetRollupSourceGridID returns the value of RollupSourceGridID.
+func (s *UpdateGridRequest) GetRollupSourceGridID() OptString {
+	return s.RollupSourceGridID
+}
+
 // SetName sets the value of Name.
 func (s *UpdateGridRequest) SetName(val OptString) {
 	s.Name = val
@@ -32686,6 +32765,11 @@ func (s *UpdateGridRequest) SetName(val OptString) {
 // SetTags sets the value of Tags.
 func (s *UpdateGridRequest) SetTags(val []string) {
 	s.Tags = val
+}
+
+// SetRollupSourceGridID sets the value of RollupSourceGridID.
+func (s *UpdateGridRequest) SetRollupSourceGridID(val OptString) {
+	s.RollupSourceGridID = val
 }
 
 type UpdateIntegrationConfigOK struct {

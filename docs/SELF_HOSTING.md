@@ -195,7 +195,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.26        # a release: the newest is on the Releases page
+git checkout 2026.10.26.1        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -250,7 +250,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.26   # the release you checked out
+MAVERICKS_RELEASE=2026.10.26.1   # the release you checked out
 ```
 
 ```bash
@@ -464,12 +464,22 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.10.26
+git fetch --tags && git checkout <new release>       # e.g. 2026.10.26.1
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
 #   docker compose up -d --build
 ./setup.sh check
+```
+
+From a release before 2026.10.26.1, also run once (the realm file is read only
+on first start, so an existing realm keeps Keycloak's own invitation mail
+until then; running it again changes nothing):
+
+```bash
+KEYCLOAK_URL="https://$(grep '^AUTH_HOST=' .env | cut -d= -f2-)" \
+KEYCLOAK_ADMIN_PASSWORD="$(grep '^KEYCLOAK_ADMIN_PASSWORD=' .env | cut -d= -f2-)" \
+  bash ../../scripts/keycloak-invitation-mail.sh
 ```
 
 The gateway applies database migrations when it starts. They only go
@@ -639,7 +649,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.26`; set the release you deploy, or, if you built your
+   release `2026.10.26.1`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -717,7 +727,7 @@ within a few minutes, and nothing in `CrashLoopBackOff`. A pod in
 
 ### Step 6 — Finish setting up sign-in
 
-The same three scripts `./setup.sh keycloak` runs for Compose, run by hand
+The same four scripts `./setup.sh keycloak` runs for Compose, run by hand
 from the repository's root:
 
 ```bash
@@ -737,6 +747,12 @@ SMTP_FROM=no-reply@example.com SMTP_TEST_TO=you@example.com \
 
 # 3. Brute-force protection for the administrator realm.
 bash scripts/keycloak-master-hardening.sh
+
+# 4. The invitation mail's words: the email theme and the account
+#    attributes it reads. A realm from before 2026.10.26.1 needs this once on
+#    upgrade too, after `kubectl -n mavericks rollout restart
+#    deployment/keycloak` has loaded the new theme files.
+bash scripts/keycloak-invitation-mail.sh
 ```
 
 While the certificates are still from `letsencrypt-staging`, or come from your
@@ -815,7 +831,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.26   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.26.1   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

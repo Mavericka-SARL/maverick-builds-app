@@ -128,7 +128,7 @@ func TestRenameAndDescribeApplicationsAndModels(t *testing.T) {
 	if a, m := descriptions(getArray("/api/apps", "test-manager")); a != "Store replenishment." || m != "Weekly order proposals per store." {
 		t.Errorf("/api/apps descriptions = %q / %q", a, m)
 	}
-	// And the creator's own list (Developer › Models, Tenant admin).
+	// And the creator's own list (Developer › Developer Models, Tenant admin).
 	var listed bool
 	for _, tenant := range getArray("/api/admin/tenants", ta) {
 		apps, _ := tenant["applications"].([]any)

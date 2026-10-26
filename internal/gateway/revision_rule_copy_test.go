@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -91,5 +92,98 @@ func TestDuplicateRevisionCopiesRuleScopeAndSchedule(t *testing.T) {
 		FROM workflow.automation_rule WHERE revision_id=$1::uuid AND name='Nightly'`, schedRev)
 	if sched != "0 2 * * *|Europe/Berlin|fire_now|3|120|unarmed" {
 		t.Errorf("copied schedule rule = %s, want 0 2 * * *|Europe/Berlin|fire_now|3|120|unarmed", sched)
+	}
+}
+
+// A revision copy gives each dashboard the live revision's grants where the
+// live revision has it, the source's elsewhere (decided 2026-10-06): a grant
+// revoked on the live revision after a working copy was made used to come
+// back when a copy of that working copy went live.
+func TestRevisionCopyTakesTheLiveRevisionsGrants(t *testing.T) {
+	f := setupRollupFixture(t)
+	ctx := context.Background()
+	h := &handler{db: tenantdb.NewHandle(f.pool, nil), log: logger.New("test")}
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var s string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return s
+	}
+	live := f.workingRevID // the fixture's active revision
+	work := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working copy') RETURNING id::text`, f.modelID)
+	ws := q(`SELECT workspace_id::text FROM core.application WHERE id = $1::uuid`, f.appID)
+	role := q(`INSERT INTO identity.business_role (workspace_id, name) VALUES ($1::uuid, 'Planners') RETURNING id::text`, ws)
+	dash := func(rev, name string) string {
+		return q(`INSERT INTO model.dashboard_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, $3) RETURNING id::text`, f.modelID, rev, name)
+	}
+	grant := func(d string) {
+		q(`INSERT INTO identity.business_role_dashboard (role_id, dashboard_id) VALUES ($1::uuid, $2::uuid) RETURNING role_id::text`, role, d)
+	}
+	dash(live, "Budget")          // revoked on the live revision: no grant
+	grant(dash(work, "Budget"))   // still granted on the working copy
+	grant(dash(work, "New page")) // only the working copy has it
+
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyRev, err := h.duplicateRevision(ctx, tx, f.modelID, "Next", work, &work)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("duplicateRevision: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"Budget": "0", "New page": "1"} {
+		got := q(`SELECT count(*)::text FROM identity.business_role_dashboard brd JOIN model.dashboard_def d ON d.id = brd.dashboard_id
+			WHERE d.revision_id = $1::uuid AND d.name = $2 AND brd.role_id = $3::uuid`, copyRev, name, role)
+		if got != want {
+			t.Errorf("%s in the copy has %s grant(s), want %s", name, got, want)
+		}
+	}
+}
+
+// A developer sets which grid a grid mirrors through the cross-dimension
+// rollup, and clears it (standing rule 2: only a model import could): a grid
+// of the same revision, never itself, never a loop.
+func TestDeveloperSetsAGridsRollupSource(t *testing.T) {
+	f := setupRollupFixture(t)
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var s string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return s
+	}
+	patch := func(grid, source string) int {
+		t.Helper()
+		code, _ := f.do(t, "PATCH", "/api/developer/grids/"+grid, "test-approver", map[string]any{"rollup_source_grid_id": source})
+		return code
+	}
+	source := func(grid string) string {
+		return q(`SELECT COALESCE(rollup_source_grid_id::text, 'none') FROM model.grid_def WHERE id = $1::uuid`, grid)
+	}
+	other := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Other') RETURNING id::text`, f.modelID)
+	elsewhere := q(`INSERT INTO model.grid_def (model_id, name, revision_id) VALUES ($1::uuid, 'Elsewhere', $2::uuid) RETURNING id::text`, f.modelID, other)
+
+	if code := patch(f.gridDeptTotalID, f.gridStaffID); code != http.StatusOK || source(f.gridDeptTotalID) != f.gridStaffID {
+		t.Fatalf("set: %d, source %s", code, source(f.gridDeptTotalID))
+	}
+	for name, c := range map[string]struct{ grid, source string }{
+		"itself":           {f.gridStaffID, f.gridStaffID},
+		"another revision": {f.gridStaffID, elsewhere},
+		"a loop":           {f.gridStaffID, f.gridDeptTotalID},
+	} {
+		if code := patch(c.grid, c.source); code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, code)
+		}
+	}
+	if code := patch(f.gridDeptTotalID, ""); code != http.StatusOK || source(f.gridDeptTotalID) != "none" {
+		t.Errorf("clear: %d, source %s", code, source(f.gridDeptTotalID))
 	}
 }

@@ -5,7 +5,7 @@
  * deleted ones removed, the rest updated.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { mockApi, loadAs } from "./mocks";
+import { mockApi, loadAs, acceptLiveEdits } from "./mocks";
 
 const REV = { id: "rev-live", name: "Live", created_at: "2026-08-01T00:00:00Z" };
 const dashboards = [{
@@ -23,6 +23,7 @@ async function openDesigner(page: Page): Promise<Sent[]> {
   await mockApi(page);
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ ...REV, is_active: true }])));
+  await acceptLiveEdits(page, REV.id);
   await page.route("**/api/developer/folders*", (route) => route.fulfill(json([])));
   await page.route((url) => url.pathname.startsWith("/api/developer/dashboards"), (route) => {
     const req = route.request();

@@ -7,6 +7,7 @@ import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
 import {
   Button,
+  Field,
   IconButton,
   TextInput,
   Select,
@@ -292,14 +293,26 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
 
 /**
  * Business roles: create, rename, delete, the dashboards each may open and,
- * for a business admin, who is in it. The developer console shows the same
- * screen without members (`variant="developer"`): a developer creates the
- * roles their workflow steps are assigned to, and a business admin decides who
- * holds them. The developer's dashboard list is its working revision's; a
- * role's grants on dashboards not listed are sent back unchanged.
+ * who is in it. The developer console shows the same screen
+ * (`variant="developer"`): a developer creates the roles their workflow steps
+ * are assigned to and may fill them too (decided 2026-10-06; until then
+ * members were left to a business admin, though the API allowed it). The
+ * developer's dashboard list is its working revision's; a role's grants on
+ * dashboards not listed are sent back unchanged.
  */
-export function RolesTab({ variant = "business-admin", revisionId }: { variant?: "business-admin" | "developer"; revisionId?: string } = {}) {
+export function RolesTab({ variant = "business-admin", revisionId, builds = false }: { variant?: "business-admin" | "developer"; revisionId?: string; builds?: boolean } = {}) {
   const developer = variant === "developer";
+  // A business admin who also builds the model grants a working revision's
+  // dashboards too, before it goes live (decided 2026-10-06): Developer ›
+  // Roles is hidden from them, and a dashboard new in the working revision
+  // reached no business role until after Set active. "" is the live one.
+  const { data: revisions = [] } = useQuery({
+    queryKey: ["dev-revisions-auto"],
+    queryFn: () => api.getDevRevisions(),
+    enabled: !developer && builds,
+  });
+  const [grantRevision, setGrantRevision] = useState("");
+  const editRevision = developer ? revisionId : (grantRevision || undefined);
   const qc = useQueryClient();
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -309,11 +322,21 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
   const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   const { data: roles = [] } = useQuery<BARole[]>({ queryKey: ["ba-roles"], queryFn: api.listBARoles });
-  const { data: allUsers = [] } = useQuery<BAUser[]>({ queryKey: ["ba-users"], queryFn: api.listBAUsers, enabled: !developer });
-  const { data: allDashboards = [] } = useQuery<BAAvailableItem[]>({
-    queryKey: developer ? ["dev-role-dashboards", revisionId] : ["ba-available-dashboards"],
+  // Who may be added: the workspace's users. A developer reads them from the
+  // tenant's users list (Developer › Users) — a tenant has one workspace —
+  // and the server refuses anyone outside the role's workspace.
+  const { data: allUsers = [] } = useQuery<BAUser[]>({
+    queryKey: developer ? ["dev-role-candidates"] : ["ba-users"],
     queryFn: developer
-      ? async () => (await api.listDashboards(revisionId)).map(d => ({ id: d.id, name: d.name }))
+      ? () => api.getAdminUsers().then(us => us
+        .filter(u => u.assignments.length > 0 && !u.disabled_at)
+        .map(u => ({ id: u.id, display_name: u.display_name, email: u.email, role: "" })))
+      : api.listBAUsers,
+  });
+  const { data: allDashboards = [] } = useQuery<BAAvailableItem[]>({
+    queryKey: editRevision ? ["dev-role-dashboards", editRevision] : ["ba-available-dashboards"],
+    queryFn: editRevision
+      ? async () => (await api.listDashboards(editRevision)).map(d => ({ id: d.id, name: d.name }))
       : () => api.getBAAvailable("dashboards"),
   });
 
@@ -331,9 +354,10 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
   });
   const setDashboards = useMutation({
     // Developer › Roles edits the working revision's grants; Business Admin ›
-    // Roles sends no revision (the live one of the selected model).
+    // Roles sends no revision (the live one of the selected model), unless a
+    // builder picked another.
     mutationFn: ({ id, ids }: { id: string; ids: string[] }) =>
-      api.setRoleDashboards(id, ids, developer ? revisionId : undefined),
+      api.setRoleDashboards(id, ids, editRevision),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ba-roles"] }),
   });
   const addMember = useMutation({
@@ -393,6 +417,19 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
           error={setDashboards.isError ? (setDashboards.error as Error).message : undefined}
         />
       )}
+      {!developer && builds && revisions.length > 1 && (
+        <Field label="Dashboard access for">
+          <Select
+            aria-label="Dashboard access for"
+            value={grantRevision}
+            onChange={e => { setGrantRevision(e.target.value); setDashboardDraft({}); }}
+            style={{ maxWidth: 360 }}
+          >
+            <option value="">{(revisions.find(r => r.is_active)?.name ?? "The live revision") + " (live)"}</option>
+            {revisions.filter(r => !r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </Select>
+        </Field>
+      )}
       {/* Create */}
       <Toolbar>
         <ToolbarGroup>
@@ -442,7 +479,6 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                     <span className="mvx-admin-object__name">{role.name}</span>
                     <div className="mvx-admin-object__meta">
                       {role.member_count} user<Txt>{role.member_count !== 1 ? "s" : ""}</Txt>
-                      <Txt>{developer && " · members are managed by a business admin"}</Txt>
                     </div>
                   </div>
                   <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} onClick={() => { setEditingId(role.id); setEditName(role.name); }}>
@@ -533,7 +569,7 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                 </div>
 
                 {/* Members */}
-                {!developer && <div style={{ flex: 1 }}>
+                <div style={{ flex: 1 }}>
                   <div className="mvx-admin-revisions__label" style={{ marginBottom: 10 }}>
                     Members
                   </div>
@@ -559,7 +595,7 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
                       Add member
                     </Button>
                   )}
-                </div>}
+                </div>
               </div>
             )}
           </div>
