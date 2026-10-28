@@ -97,5 +97,5 @@
   <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. A schedule is an event like any other: it starts a manual workflow at the times it names. Only the live revision's schedule rules run: a new revision carries its rules with their schedules, and they start running when that revision is made live, while the previous revision's stop.</li>
   <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A user sees a disabled button with the reason when that stops being true.</li>
   <li><b>A failed start</b> (for example a duplicate refused by "one active instance per scope") produces a "Workflow could not start" notification for the person who triggered it.</li>
-  <li>Rules are per revision and are copied with it.</li>
+  <li>Rules are per revision and are copied with it. An exported model file carries them too: a schedule rule with its schedule (cron expression, time zone, missed runs, retries), and an integration rule with the integration it waits for. One waiting for another model's integration arrives switched off. A file exported before release 2026.10.28.1 has no schedules in it, and a schedule rule in it stops the import until the model is exported again.</li>
 </ul>

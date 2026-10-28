@@ -309,6 +309,19 @@ type AutomationRule struct {
 	WorkflowDefID *string `json:"workflow_def_id,omitempty"`
 	SourceFormID  *string `json:"source_form_id,omitempty"`
 	SourceGridID  *string `json:"source_grid_id,omitempty"`
+	// SourceIntegrationID scopes an integration_completed/_failed rule to
+	// one integration (remapped on import). A package without it left the
+	// rule firing after every integration of the application.
+	SourceIntegrationID *string `json:"source_integration_id,omitempty"`
+	// The schedule of a trigger_type "schedule" rule (migration 059). A
+	// package without it could not be imported at all: a schedule rule
+	// needs its cron expression (2026-10-28). The first firing is armed by
+	// the scheduler once the rule's revision is live.
+	CronExpr            string `json:"cron_expr,omitempty"`
+	Timezone            string `json:"timezone,omitempty"`
+	MisfirePolicy       string `json:"misfire_policy,omitempty"`
+	MaxRetries          int    `json:"max_retries,omitempty"`
+	RetryBackoffSeconds *int   `json:"retry_backoff_seconds,omitempty"`
 }
 
 type Fact struct {
@@ -797,7 +810,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	rows, err = q.Query(ctx, `
 		SELECT ar.id::text, ar.name, COALESCE(ar.description,''), ar.trigger_type::text, ar.workflow_name, ar.enabled,
-		       ar.workflow_def_id::text, ar.source_form_id::text, ar.source_grid_id::text
+		       ar.workflow_def_id::text, ar.source_form_id::text, ar.source_grid_id::text, ar.source_integration_id::text,
+		       COALESCE(ar.cron_expr,''), ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds
 		FROM workflow.automation_rule ar
 		WHERE ar.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (ar.revision_id=$2::uuid OR ar.revision_id IS NULL)
@@ -808,10 +822,19 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var ar AutomationRule
+		var backoff int
 		if err := rows.Scan(&ar.ID, &ar.Name, &ar.Description, &ar.TriggerType, &ar.WorkflowName, &ar.Enabled,
-			&ar.WorkflowDefID, &ar.SourceFormID, &ar.SourceGridID); err != nil {
+			&ar.WorkflowDefID, &ar.SourceFormID, &ar.SourceGridID, &ar.SourceIntegrationID,
+			&ar.CronExpr, &ar.Timezone, &ar.MisfirePolicy, &ar.MaxRetries, &backoff); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if ar.TriggerType != "schedule" {
+			// Only a schedule rule has a schedule; the columns' defaults
+			// would only clutter every other rule.
+			ar.Timezone, ar.MisfirePolicy, ar.MaxRetries = "", "", 0
+		} else {
+			ar.RetryBackoffSeconds = &backoff
 		}
 		pkg.AutomationRules = append(pkg.AutomationRules, ar)
 	}
@@ -2265,16 +2288,23 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 				gridID = &id
 			}
 		}
+		if ar.TriggerType == "schedule" && ar.CronExpr == "" {
+			return "", fmt.Errorf("automation rule %q runs on a schedule, but the package carries no schedule for it: "+
+				"export the model again from release 2026.10.28.1 or later, or remove the rule from the file", ar.Name)
+		}
 		var newRuleID string
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO workflow.automation_rule
 			  (application_id, revision_id, name, description, trigger_type, workflow_name, enabled,
-			   workflow_def_id, source_form_id, source_grid_id)
+			   workflow_def_id, source_form_id, source_grid_id,
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds)
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE(NULLIF($5::text,''),'manual')::workflow.trigger_type, $6, COALESCE($7::bool, true),
-			        $8::uuid, $9::uuid, $10::uuid)
+			        $8::uuid, $9::uuid, $10::uuid,
+			        NULLIF($11,''), COALESCE(NULLIF($12,''),'UTC'), COALESCE(NULLIF($13,''),'skip'), $14, COALESCE($15::int, 60))
 			RETURNING id::text`,
 			appID, revisionID, ar.Name, ar.Description, ar.TriggerType, ar.WorkflowName, ar.Enabled,
-			wfID, formID, gridID).Scan(&newRuleID); err != nil {
+			wfID, formID, gridID,
+			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds).Scan(&newRuleID); err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
 		if ar.ID != "" {
@@ -2319,6 +2349,26 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if ig.ID != "" {
 			integrationMap[ig.ID] = newIntegrationID
+		}
+	}
+
+	// A rule scoped to one integration, now that the integrations exist. A
+	// rule waiting for an integration the package does not carry (another
+	// model's) arrives switched off: unscoped, it would start after every
+	// integration of the application.
+	for _, ar := range pkg.AutomationRules {
+		if ar.SourceIntegrationID == nil || ar.ID == "" {
+			continue
+		}
+		newIntegrationID, ok := integrationMap[*ar.SourceIntegrationID]
+		if ok {
+			_, err = tx.Exec(ctx, `UPDATE workflow.automation_rule SET source_integration_id = $2::uuid WHERE id = $1::uuid`,
+				ruleMap[ar.ID], newIntegrationID)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE workflow.automation_rule SET enabled = false WHERE id = $1::uuid`, ruleMap[ar.ID])
+		}
+		if err != nil {
+			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
 	}
 
