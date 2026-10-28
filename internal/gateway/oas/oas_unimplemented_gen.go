@@ -269,6 +269,10 @@ func (UnimplementedHandler) CreateAdminRevision(ctx context.Context, req *Create
 // ever set server-side. The whole operation is undone if any step fails, so a user that exists can
 // always sign in. When no identity provider is configured (the dev stack) the account is local-only
 // and `invited` is false.
+// A deployment with no e-mail (TEMPORARY_PASSWORDS, never with public sign-up or on the Playground)
+// sends no invitation: it sets a random temporary password on the new account and returns it once,
+// as `temporary_password`, and the person chooses their own at their first sign-in. An address that
+// already has an account gets none, and `temporary_password` is then absent.
 //
 // POST /api/admin/users
 func (UnimplementedHandler) CreateAdminUser(ctx context.Context, req *CreateAdminUserReq) (r CreateAdminUserRes, _ error) {
@@ -1418,6 +1422,19 @@ func (UnimplementedHandler) ImportUpload(ctx context.Context, req *ImportUploadR
 // GET /api/integrations/oauth/callback
 func (UnimplementedHandler) IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error {
 	return ht.ErrNotImplemented
+}
+
+// IssueAdminUserTemporaryPassword implements issueAdminUserTemporaryPassword operation.
+//
+// Only on a deployment with temporary passwords instead of invitation e-mails (409 elsewhere).
+// Refused (403) as re-inviting is (AdminUser.permissions.temporary_password). Refused (409) for an
+// account that already signs in with a password of its own or through another identity provider:
+// whoever set one could sign in as its owner. The person chooses their own password at their first
+// sign-in.
+//
+// POST /api/admin/users/{id}/temporary-password
+func (UnimplementedHandler) IssueAdminUserTemporaryPassword(ctx context.Context, params IssueAdminUserTemporaryPasswordParams) (r IssueAdminUserTemporaryPasswordRes, _ error) {
+	return r, ht.ErrNotImplemented
 }
 
 // ListAPITokens implements listAPITokens operation.

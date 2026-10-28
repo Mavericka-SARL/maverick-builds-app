@@ -100,6 +100,11 @@ type cfg struct {
 	// workspaces nobody uses retired (internal/dormancy); everywhere else
 	// that rule cannot be switched on.
 	Playground bool `mapstructure:"PLAYGROUND"`
+	// TemporaryPasswords is for a deployment with no SMTP relay: a new
+	// account gets a temporary password the administrator hands over
+	// instead of an invitation e-mail (internal/gateway/temporary_passwords.go).
+	// Ignored with SIGNUP_ENABLED or PLAYGROUND.
+	TemporaryPasswords bool `mapstructure:"TEMPORARY_PASSWORDS"`
 	// BackupRetentionDays is the backup job's setting of the same name
 	// (deploy/docker/pg-backup), read here to say how long a deleted
 	// workspace can still be restored. Default 14, as there.
@@ -246,6 +251,13 @@ func main() {
 		log.Warn().Msg("KEYCLOAK_ADMIN_CLIENT_ID/SECRET unset: creating users through the console " +
 			"will be refused, because the accounts it made could not sign in")
 	}
+	switch {
+	case c.TemporaryPasswords && (c.SignupEnabled || c.Playground):
+		log.Warn().Msg("TEMPORARY_PASSWORDS is ignored with SIGNUP_ENABLED or PLAYGROUND: tenants there do not trust " +
+			"one another, and whoever hands over a temporary password can sign in as its owner")
+	case c.TemporaryPasswords:
+		log.Info().Msg("new accounts get a temporary password to hand over, not an invitation e-mail (TEMPORARY_PASSWORDS)")
+	}
 
 	// Wrap the handler with OTel HTTP instrumentation (traces + metrics per route)
 	// Tenant databases. In shared mode router stays nil and everything below
@@ -360,6 +372,7 @@ func main() {
 			Router:        router,
 			Signup: gateway.SignupConfig{Enabled: c.SignupEnabled, ContactURL: c.PlanContactURL,
 				BackupRetentionDays: c.BackupRetentionDays, Playground: c.Playground},
+			TemporaryPasswords: c.TemporaryPasswords,
 			Legal: gateway.LegalConfig{
 				Entity: c.LegalEntity, Address: c.LegalAddress, Email: c.LegalEmail,
 				Jurisdiction: c.LegalJurisdiction, Hosting: c.LegalHosting, Updated: c.LegalUpdated,

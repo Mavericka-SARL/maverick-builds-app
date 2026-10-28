@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { roleLabel } from "../../ui/roleLabel";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, Pencil, Plus, Trash2, UserCheck, UserMinus, UserX, X } from "lucide-react";
+import { KeyRound, Mail, Pencil, Plus, Trash2, UserCheck, UserMinus, UserX, X } from "lucide-react";
 import {
   api,
   type AccessRemovalResult,
@@ -28,6 +28,7 @@ import {
   useConfirm,
   type DesignTone,
 } from "../../ui";
+import { CopyField } from "../../shell/ChatConnectorDialog";
 import { accessRemovalNotice } from "./accessRemoval";
 
 const ROLE_TONE: Record<string, DesignTone> = {
@@ -268,19 +269,27 @@ export function UsersPanel({
   // closed.
   const [notice, setNotice] = useState<{ tone: "success" | "warning" | "danger"; text: string } | null>(null);
   const failed = (e: unknown) => setNotice({ tone: "danger", text: (e as Error).message });
+  // A temporary password to hand over, on a deployment with no e-mail: the
+  // server returns it once, so it stays until dismissed.
+  const [handover, setHandover] = useState<{ email: string; password: string } | null>(null);
 
   const createUser = useMutation({
     mutationFn: (body: typeof newUser) =>
       address(workspaces.find((w) => w.id === body.workspace_id)?.tenant_id, () => api.createAdminUser(body)),
-    onMutate: () => setNotice(null),
+    onMutate: () => { setNotice(null); setHandover(null); },
     // Worded from what was asked, never from the reply: an address that
     // already had an account is only given the role, and the confirmation
     // does not tell the two apart. (The refreshed list still shows such an
-    // account as it is — its own name and joined date.)
-    onSuccess: (_res, body) => {
+    // account as it is — its own name and joined date.) The one exception is
+    // a temporary password, which only a new account gets.
+    onSuccess: (res, body) => {
       inv();
       setShowCreate(false);
       setNewUser({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" });
+      if (res.temporary_password) {
+        setHandover({ email: body.email.trim(), password: res.temporary_password });
+        return;
+      }
       setNotice({ tone: "success", text: `Invited ${body.email.trim()}. They will be notified of their access.` });
     },
   });
@@ -292,6 +301,12 @@ export function UsersPanel({
     mutationFn: (u: AdminUser) => atUser(u.id, () => api.resendAdminUserInvite(u.id)),
     onMutate: () => setNotice(null),
     onSuccess: (res, u) => setNotice({ tone: "success", text: `Invitation sent to ${res.email || u.email}.` }),
+    onError: failed,
+  });
+  const reissuePassword = useMutation({
+    mutationFn: (u: AdminUser) => atUser(u.id, () => api.issueAdminUserTemporaryPassword(u.id)),
+    onMutate: () => { setNotice(null); setHandover(null); },
+    onSuccess: (res, u) => setHandover({ email: res.email || u.email, password: res.temporary_password }),
     onError: failed,
   });
   const setEnabled = useMutation({
@@ -499,6 +514,23 @@ export function UsersPanel({
       {notice && (
         <div role={notice.tone === "danger" ? "alert" : "status"} style={{ marginBottom: 12 }}>
           <InlineAlert tone={notice.tone}>{notice.text}</InlineAlert>
+        </div>
+      )}
+
+      {handover && (
+        <div role="status" style={{ marginBottom: 12, maxWidth: 640 }}>
+          <InlineAlert tone="success">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <span>
+                Give {handover.email} this temporary password; it is shown only now. They sign in with their
+                e-mail address and choose their own password at their first sign-in.
+              </span>
+              <CopyField label="Temporary password" value={handover.password} />
+              <div>
+                <Button variant="ghost" onClick={() => setHandover(null)}>Done</Button>
+              </div>
+            </div>
+          </InlineAlert>
         </div>
       )}
 
@@ -812,6 +844,17 @@ export function UsersPanel({
                           onClick={() => reinviteUser.mutate(u)}
                         >
                           <Mail size={14} aria-hidden="true" />
+                        </IconButton>
+                      )}
+                      {permissionsOf(u).temporary_password && (
+                        <IconButton
+                          aria-label={`New temporary password for ${u.display_name}`}
+                          title="New temporary password: for someone who has not signed in yet"
+                          size={28}
+                          disabled={reissuePassword.isPending}
+                          onClick={() => reissuePassword.mutate(u)}
+                        >
+                          <KeyRound size={14} aria-hidden="true" />
                         </IconButton>
                       )}
                       {permissionsOf(u).disable && (u.disabled_at ? (

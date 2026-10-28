@@ -192,6 +192,10 @@ type Handler interface {
 	// ever set server-side. The whole operation is undone if any step fails, so a user that exists can
 	// always sign in. When no identity provider is configured (the dev stack) the account is local-only
 	// and `invited` is false.
+	// A deployment with no e-mail (TEMPORARY_PASSWORDS, never with public sign-up or on the Playground)
+	// sends no invitation: it sets a random temporary password on the new account and returns it once,
+	// as `temporary_password`, and the person chooses their own at their first sign-in. An address that
+	// already has an account gets none, and `temporary_password` is then absent.
 	//
 	// POST /api/admin/users
 	CreateAdminUser(ctx context.Context, req *CreateAdminUserReq) (CreateAdminUserRes, error)
@@ -985,6 +989,16 @@ type Handler interface {
 	//
 	// GET /api/integrations/oauth/callback
 	IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error
+	// IssueAdminUserTemporaryPassword implements issueAdminUserTemporaryPassword operation.
+	//
+	// Only on a deployment with temporary passwords instead of invitation e-mails (409 elsewhere).
+	// Refused (403) as re-inviting is (AdminUser.permissions.temporary_password). Refused (409) for an
+	// account that already signs in with a password of its own or through another identity provider:
+	// whoever set one could sign in as its owner. The person chooses their own password at their first
+	// sign-in.
+	//
+	// POST /api/admin/users/{id}/temporary-password
+	IssueAdminUserTemporaryPassword(ctx context.Context, params IssueAdminUserTemporaryPasswordParams) (IssueAdminUserTemporaryPasswordRes, error)
 	// ListAPITokens implements listAPITokens operation.
 	//
 	// The caller's personal API tokens not revoked (signed in, never with a token).

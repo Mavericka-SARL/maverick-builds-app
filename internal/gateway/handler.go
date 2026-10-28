@@ -93,6 +93,10 @@ type handler struct {
 	// subject is a UUID that can never match it — which is exactly how the
 	// console came to create accounts that silently could not log in.
 	kc *keycloak.Client
+	// tempPasswords: a new account gets a temporary password the
+	// administrator hands over, not an invitation e-mail
+	// (temporary_passwords.go).
+	tempPasswords bool
 	// lic answers edition and feature questions for gated routes (see
 	// license.go). nil behaves as the community edition, which is what a
 	// handler built without Deps.License gets.
@@ -159,6 +163,11 @@ type Deps struct {
 	PublicURL         string
 	// Signup opens public self-service sign-up (signup.go).
 	Signup SignupConfig
+	// TemporaryPasswords gives a new account a temporary password instead of
+	// an invitation e-mail, for a deployment with no SMTP relay
+	// (temporary_passwords.go). Ignored with Signup.Enabled or
+	// Signup.Playground: there tenants do not trust one another.
+	TemporaryPasswords bool
 	// Legal identifies the operator and its published documents (legal.go).
 	// Zero means this deployment publishes none, and the sign-up page then
 	// claims agreement to nothing.
@@ -235,6 +244,7 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 		legalCfg:    deps.Legal,
 		signupLimit: discoverLimiter{rate: signupRate, burst: signupBurst},
 	}
+	h.tempPasswords = deps.TemporaryPasswords && !deps.Signup.Enabled && !deps.Signup.Playground
 	h.plans = deps.Plans
 	if h.plans == nil {
 		h.plans = plan.NewEnforcer(h.db.Control())
@@ -581,6 +591,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// back is to delete the user and re-create them, which discards their
 	// roles and access grants.
 	register("POST", "/api/admin/users/{id}/invite", "user_admin", userAdm(h.adminUserAction))
+	register("POST", "/api/admin/users/{id}/temporary-password", "user_admin", userAdm(h.adminUserAction))
 	register("POST", "/api/admin/users/{id}/disable", "user_admin", userAdm(h.adminUserAction))
 	register("POST", "/api/admin/users/{id}/enable", "user_admin", userAdm(h.adminUserAction))
 	register("POST", "/api/admin/users/{id}/roles", "user_admin", userAdm(h.adminUserAction))
@@ -14291,10 +14302,22 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// The invitation is what makes the account reachable: creation sets no
 		// password, so until the recipient completes it they cannot sign in.
 		// A failure here therefore rolls the whole thing back rather than
-		// reporting a success that leaves an account nobody can use.
+		// reporting a success that leaves an account nobody can use. On a
+		// deployment without e-mail a temporary password, which the caller
+		// hands over, does instead; an account that already signs in its
+		// own way gets none (temporaryPasswordFor).
 		invited := false
+		temporaryPassword := ""
 		if h.kc != nil && !heldElsewhere {
-			if err := h.sendInvitation(ctx, sub, h.adminInvitation(ctx, act, customerID)); err != nil {
+			var err error
+			hint := "check the realm's SMTP settings (a deployment with no e-mail sets TEMPORARY_PASSWORDS=true instead)"
+			if h.tempPasswords {
+				temporaryPassword, err = h.temporaryPasswordFor(ctx, sub, createdInKeycloak)
+				hint = "the temporary password could not be set"
+			} else {
+				err = h.sendInvitation(ctx, sub, h.adminInvitation(ctx, act, customerID))
+			}
+			if err != nil {
 				// Only what this request made is undone: an account it
 				// adopted was someone's before, with what they authored —
 				// deleting its row cut the person off (2026-09-30). It
@@ -14304,11 +14327,10 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				} else if grantedRoleID != "" {
 					_, _ = h.db.Exec(ctx, `DELETE FROM identity.role_assignment WHERE id=$1::uuid`, grantedRoleID)
 				}
-				abort(http.StatusBadGateway, fmt.Errorf("%w — no user was created; "+
-					"check the realm's SMTP settings", err))
+				abort(http.StatusBadGateway, fmt.Errorf("%w — no user was created; %s", err, hint))
 				return
 			}
-			invited = true
+			invited = !h.tempPasswords
 		}
 
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -14316,9 +14338,14 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ResourceType: "identity_user", ResourceID: userID,
 			Metadata: map[string]string{"email": body.Email, "role": body.Role, "workspace_id": body.WorkspaceID,
-				"customer_id": accountCustomer, "invited": strconv.FormatBool(invited)},
+				"customer_id": accountCustomer, "invited": strconv.FormatBool(invited),
+				"temporary_password": strconv.FormatBool(temporaryPassword != "")},
 		})
-		jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": invited})
+		out := map[string]any{"id": userID, "status": "created", "invited": invited}
+		if temporaryPassword != "" {
+			out["temporary_password"] = temporaryPassword
+		}
+		jsonOK(w, out)
 		return
 	}
 
@@ -14426,6 +14453,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			Metadata: map[string]string{"action": "invitation_resent", "email": inviteEmail},
 		})
 		jsonOK(w, map[string]string{"status": "invited", "email": inviteEmail})
+		return
+	}
+
+	// POST /api/admin/users/{id}/temporary-password — a new temporary
+	// password, on a deployment without e-mail (adminTemporaryPassword).
+	if len(parts) == 2 && parts[1] == "temporary-password" && r.Method == http.MethodPost {
+		h.adminTemporaryPassword(ctx, w, act, tiers, userID)
 		return
 	}
 

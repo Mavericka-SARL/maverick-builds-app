@@ -433,6 +433,10 @@ type ImportUploadRes interface {
 	importUploadRes()
 }
 
+type IssueAdminUserTemporaryPasswordRes interface {
+	issueAdminUserTemporaryPasswordRes()
+}
+
 type ListAPITokensRes interface {
 	listAPITokensRes()
 }

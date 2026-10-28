@@ -50,11 +50,19 @@ type fakeIDP struct {
 	deleted    []string
 	failInvite bool
 	nextID     int
+	// Sign-in state (temporary_passwords_test.go): the password each
+	// account holds, whether it must still replace it, and whether it
+	// signs in through another identity provider.
+	passwords map[string]string
+	pending   map[string]bool
+	linked    map[string]bool
+	failReset bool
 }
 
 func newFakeIDP(t *testing.T) *fakeIDP {
 	t.Helper()
-	f := &fakeIDP{users: map[string]string{}, roles: map[string][]string{}}
+	f := &fakeIDP{users: map[string]string{}, roles: map[string][]string{},
+		passwords: map[string]string{}, pending: map[string]bool{}, linked: map[string]bool{}}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/realms/mavericks/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
@@ -103,6 +111,42 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 			}
 			f.invited = append(f.invited, strings.TrimSuffix(rest, "/execute-actions-email"))
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(rest, "/reset-password"):
+			if f.failReset {
+				http.Error(w, `{"error":"invalidPasswordMinLengthMessage"}`, http.StatusBadRequest)
+				return
+			}
+			sub := strings.TrimSuffix(rest, "/reset-password")
+			var cred struct {
+				Type      string `json:"type"`
+				Value     string `json:"value"`
+				Temporary bool   `json:"temporary"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&cred)
+			if cred.Type != "password" || cred.Value == "" {
+				http.Error(w, "bad credential", http.StatusBadRequest)
+				return
+			}
+			f.passwords[sub], f.pending[sub] = cred.Value, cred.Temporary
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(rest, "/credentials"):
+			out := []map[string]string{}
+			if f.passwords[strings.TrimSuffix(rest, "/credentials")] != "" {
+				out = append(out, map[string]string{"type": "password"})
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		case strings.HasSuffix(rest, "/federated-identity"):
+			out := []map[string]string{}
+			if f.linked[strings.TrimSuffix(rest, "/federated-identity")] {
+				out = append(out, map[string]string{"identityProvider": "corp-oidc", "userId": "x", "userName": "x"})
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodGet && f.users[rest] != "":
+			actions := []string{}
+			if f.pending[rest] {
+				actions = append(actions, "UPDATE_PASSWORD")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": rest, "email": f.users[rest], "requiredActions": actions})
 		case r.Method == http.MethodDelete:
 			f.deleted = append(f.deleted, rest)
 			delete(f.users, rest)
@@ -130,7 +174,7 @@ type provFixture struct {
 	adminSub string
 }
 
-func setupProvFixture(t *testing.T, idp *fakeIDP) *provFixture {
+func setupProvFixture(t *testing.T, idp *fakeIDP, opts ...func(*Deps)) *provFixture {
 	t.Helper()
 	ctx := context.Background()
 
@@ -152,6 +196,9 @@ func setupProvFixture(t *testing.T, idp *fakeIDP) *provFixture {
 	deps := Deps{}
 	if idp != nil {
 		deps.Keycloak = idp.client()
+	}
+	for _, o := range opts {
+		o(&deps)
 	}
 	f.srv = httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, deps))
 	t.Cleanup(f.srv.Close)

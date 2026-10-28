@@ -79,6 +79,9 @@ type accountPermissions struct {
 	Disable          bool `json:"disable"`
 	Reinvite         bool `json:"reinvite"`
 	RemoveFromTenant bool `json:"remove_from_tenant"`
+	// TemporaryPassword stands in for Reinvite on a deployment that gives
+	// temporary passwords instead of invitation e-mails (withUserPermissions).
+	TemporaryPassword bool `json:"temporary_password"`
 }
 
 // homeTenant classifies customerID against the tenants the caller holds a
@@ -317,6 +320,10 @@ func (h *handler) withUserPermissions(ctx context.Context, act *actor, tiers adm
 			continue
 		}
 		users[i].HomeTenant, users[i].Permissions = accountPermissionsFor(act, tiers, f)
+		if h.tempPasswords {
+			p := &users[i].Permissions
+			p.TemporaryPassword, p.Reinvite = p.Reinvite, false
+		}
 		users[i].GrantableRoles = unscopedGrantableRoles(ctx, act, tiers, f.CustomerID)
 	}
 	return h.labelMembersFromElsewhere(ctx, users)
@@ -939,7 +946,7 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 	if here != "" {
 		h.noteUser(ctx, sub, email)
 	}
-	jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": h.kc != nil})
+	jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": h.kc != nil && !h.tempPasswords})
 }
 
 // errInviteNeedsRoleAndWorkspace refuses, to anyone but a platform admin, an
@@ -962,7 +969,7 @@ func (h *handler) refuseExistingAccount(ctx context.Context, w http.ResponseWrit
 		Metadata: map[string]string{"email": email, "role": role, "workspace_id": workspaceID,
 			"existing_account": "true", "granted": "false", "refused": reason, auditVisibilityKey: auditPlatformOnly},
 	})
-	jsonOK(w, map[string]any{"id": uuid.NewString(), "status": "created", "invited": h.kc != nil})
+	jsonOK(w, map[string]any{"id": uuid.NewString(), "status": "created", "invited": h.kc != nil && !h.tempPasswords})
 }
 
 // An audit event whose metadata has visibility=platform is shown to platform

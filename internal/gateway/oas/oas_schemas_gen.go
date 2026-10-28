@@ -1407,14 +1407,17 @@ func (s *AdminUserHomeTenant) UnmarshalText(data []byte) error {
 // elsewhere is removed from the caller's tenant instead (remove_from_tenant), by a tenant admin who
 // may revoke every role it holds there. A platform admin has every action but deleting itself, and
 // no remove_from_tenant (its scope names no one tenant). The gateway has no disable endpoint;
-// "disable" states the rule for the account's own tenant (SCIM).
+// "disable" states the rule for the account's own tenant (SCIM). On a deployment with temporary
+// passwords instead of invitation e-mails, temporary_password takes reinvite's place and reinvite is
+// false.
 // Ref: #/components/schemas/AdminUserPermissions
 type AdminUserPermissions struct {
-	Rename           bool `json:"rename"`
-	Delete           bool `json:"delete"`
-	Disable          bool `json:"disable"`
-	Reinvite         bool `json:"reinvite"`
-	RemoveFromTenant bool `json:"remove_from_tenant"`
+	Rename            bool    `json:"rename"`
+	Delete            bool    `json:"delete"`
+	Disable           bool    `json:"disable"`
+	Reinvite          bool    `json:"reinvite"`
+	RemoveFromTenant  bool    `json:"remove_from_tenant"`
+	TemporaryPassword OptBool `json:"temporary_password"`
 }
 
 // GetRename returns the value of Rename.
@@ -1442,6 +1445,11 @@ func (s *AdminUserPermissions) GetRemoveFromTenant() bool {
 	return s.RemoveFromTenant
 }
 
+// GetTemporaryPassword returns the value of TemporaryPassword.
+func (s *AdminUserPermissions) GetTemporaryPassword() OptBool {
+	return s.TemporaryPassword
+}
+
 // SetRename sets the value of Rename.
 func (s *AdminUserPermissions) SetRename(val bool) {
 	s.Rename = val
@@ -1465,6 +1473,11 @@ func (s *AdminUserPermissions) SetReinvite(val bool) {
 // SetRemoveFromTenant sets the value of RemoveFromTenant.
 func (s *AdminUserPermissions) SetRemoveFromTenant(val bool) {
 	s.RemoveFromTenant = val
+}
+
+// SetTemporaryPassword sets the value of TemporaryPassword.
+func (s *AdminUserPermissions) SetTemporaryPassword(val OptBool) {
+	s.TemporaryPassword = val
 }
 
 // Ref: #/components/schemas/AdminWorkspace
@@ -5645,6 +5658,9 @@ type CreateAdminUserOK struct {
 	Status OptString `json:"status"`
 	// Whether an invitation email was sent.
 	Invited OptBool `json:"invited"`
+	// Only on a deployment with temporary passwords, for a new account: the password to hand over, shown
+	// this once.
+	TemporaryPassword OptString `json:"temporary_password"`
 }
 
 // GetID returns the value of ID.
@@ -5662,6 +5678,11 @@ func (s *CreateAdminUserOK) GetInvited() OptBool {
 	return s.Invited
 }
 
+// GetTemporaryPassword returns the value of TemporaryPassword.
+func (s *CreateAdminUserOK) GetTemporaryPassword() OptString {
+	return s.TemporaryPassword
+}
+
 // SetID sets the value of ID.
 func (s *CreateAdminUserOK) SetID(val OptUUID) {
 	s.ID = val
@@ -5675,6 +5696,11 @@ func (s *CreateAdminUserOK) SetStatus(val OptString) {
 // SetInvited sets the value of Invited.
 func (s *CreateAdminUserOK) SetInvited(val OptBool) {
 	s.Invited = val
+}
+
+// SetTemporaryPassword sets the value of TemporaryPassword.
+func (s *CreateAdminUserOK) SetTemporaryPassword(val OptString) {
+	s.TemporaryPassword = val
 }
 
 func (*CreateAdminUserOK) createAdminUserRes() {}
@@ -16406,6 +16432,60 @@ func (s *IntegrationRunRequest) SetXlsxBase64(val OptString) {
 func (s *IntegrationRunRequest) SetSheet(val OptString) {
 	s.Sheet = val
 }
+
+type IssueAdminUserTemporaryPasswordBadGateway Error
+
+func (*IssueAdminUserTemporaryPasswordBadGateway) issueAdminUserTemporaryPasswordRes() {}
+
+type IssueAdminUserTemporaryPasswordConflict Error
+
+func (*IssueAdminUserTemporaryPasswordConflict) issueAdminUserTemporaryPasswordRes() {}
+
+type IssueAdminUserTemporaryPasswordForbidden Error
+
+func (*IssueAdminUserTemporaryPasswordForbidden) issueAdminUserTemporaryPasswordRes() {}
+
+type IssueAdminUserTemporaryPasswordNotFound Error
+
+func (*IssueAdminUserTemporaryPasswordNotFound) issueAdminUserTemporaryPasswordRes() {}
+
+type IssueAdminUserTemporaryPasswordOK struct {
+	Status            OptString `json:"status"`
+	Email             OptString `json:"email"`
+	TemporaryPassword OptString `json:"temporary_password"`
+}
+
+// GetStatus returns the value of Status.
+func (s *IssueAdminUserTemporaryPasswordOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetEmail returns the value of Email.
+func (s *IssueAdminUserTemporaryPasswordOK) GetEmail() OptString {
+	return s.Email
+}
+
+// GetTemporaryPassword returns the value of TemporaryPassword.
+func (s *IssueAdminUserTemporaryPasswordOK) GetTemporaryPassword() OptString {
+	return s.TemporaryPassword
+}
+
+// SetStatus sets the value of Status.
+func (s *IssueAdminUserTemporaryPasswordOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetEmail sets the value of Email.
+func (s *IssueAdminUserTemporaryPasswordOK) SetEmail(val OptString) {
+	s.Email = val
+}
+
+// SetTemporaryPassword sets the value of TemporaryPassword.
+func (s *IssueAdminUserTemporaryPasswordOK) SetTemporaryPassword(val OptString) {
+	s.TemporaryPassword = val
+}
+
+func (*IssueAdminUserTemporaryPasswordOK) issueAdminUserTemporaryPasswordRes() {}
 
 // Ref: #/components/schemas/LegalInfo
 type LegalInfo struct {

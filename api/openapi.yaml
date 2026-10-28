@@ -1632,6 +1632,9 @@ components:
         every action but deleting itself, and no remove_from_tenant (its
         scope names no one tenant). The gateway has no disable endpoint;
         "disable" states the rule for the account's own tenant (SCIM).
+        On a deployment with temporary passwords instead of invitation
+        e-mails, temporary_password takes reinvite's place and reinvite is
+        false.
       required: [rename, delete, disable, reinvite, remove_from_tenant]
       properties:
         rename:             { type: boolean }
@@ -1639,6 +1642,7 @@ components:
         disable:            { type: boolean }
         reinvite:           { type: boolean }
         remove_from_tenant: { type: boolean }
+        temporary_password: { type: boolean }
 
     RevokedGrant:
       type: object
@@ -7449,6 +7453,14 @@ paths:
         undone if any step fails, so a user that exists can always sign in. When
         no identity provider is configured (the dev stack) the account is
         local-only and `invited` is false.
+
+
+        A deployment with no e-mail (TEMPORARY_PASSWORDS, never with public
+        sign-up or on the Playground) sends no invitation: it sets a random
+        temporary password on the new account and returns it once, as
+        `temporary_password`, and the person chooses their own at their first
+        sign-in. An address that already has an account gets none, and
+        `temporary_password` is then absent.
       requestBody:
         required: true
         content:
@@ -7484,6 +7496,11 @@ paths:
                   invited:
                     type: boolean
                     description: Whether an invitation email was sent.
+                  temporary_password:
+                    type: string
+                    description: >-
+                      Only on a deployment with temporary passwords, for a new
+                      account: the password to hand over, shown this once.
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502":
@@ -7679,6 +7696,49 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "503":
           description: No identity provider is configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/users/{id}/temporary-password:
+    post:
+      operationId: issueAdminUserTemporaryPassword
+      tags: [Admin]
+      summary: Give a new temporary password to an account that has not signed in yet
+      description: >
+        Only on a deployment with temporary passwords instead of invitation
+        e-mails (409 elsewhere). Refused (403) as re-inviting is
+        (AdminUser.permissions.temporary_password). Refused (409) for an
+        account that already signs in with a password of its own or through
+        another identity provider: whoever set one could sign in as its
+        owner. The person chooses their own password at their first sign-in.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The new temporary password, shown this once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  email: { type: string }
+                  temporary_password: { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            Not a deployment with temporary passwords, an account that signs
+            in its own way, or one with no identity-provider account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The identity provider refused the password
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

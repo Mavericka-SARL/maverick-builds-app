@@ -42,14 +42,16 @@ later is a backup and a restore.
   API (say `mavericks.example.com`) and one for the sign-in service
   (`auth.mavericks.example.com`). Sign-in is Keycloak, and it runs on its own
   host name.
-- **An SMTP relay.** This is not optional: an administrator adds a user by
-  having the platform e-mail them a link to set their own password, and when
-  the e-mail cannot be sent the user is not created. The same relay carries
+- **An SMTP relay**, recommended. An administrator adds a user by having the
+  platform e-mail them a link to set their own password, and when the e-mail
+  cannot be sent the user is not created. The same relay carries
   notifications and task reminders. Any relay works — your organisation's own,
   or a sending service such as Amazon SES, Postmark or Resend — with or without
   authentication, on port 587 (STARTTLS) or 465 (TLS). An internal relay on
   port 25 works with Docker Compose; on Kubernetes the network policies only
-  let 587 and 465 out.
+  let 587 and 465 out. Without a relay, administrators hand new users a
+  temporary password instead ([Adding users without an SMTP
+  relay](#adding-users-without-an-smtp-relay)).
 - **Somewhere else to keep backups**: an S3-compatible bucket that does not
   live on the same machine or cluster as the database. The platform backs up
   on its own by default, but to storage next to the data, which survives a
@@ -195,7 +197,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.28.2        # a release: the newest is on the Releases page
+git checkout 2026.10.28.3        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -235,7 +237,34 @@ Two choices are easier to make now than later:
   its own authority, which browsers warn about until its root certificate is
   installed on them (`docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .`).
 
+No SMTP relay? Leave the `SMTP_*` lines empty and set
+`TEMPORARY_PASSWORDS=true` ([Adding users without an SMTP
+relay](#adding-users-without-an-smtp-relay)).
+
 Every other setting is optional and explained in `.env.example`.
+
+#### Adding users without an SMTP relay
+
+With `TEMPORARY_PASSWORDS=true` the platform sends no invitation. When an
+administrator adds someone, the console shows a temporary password once,
+with a button to copy it. The administrator hands it over, and the person
+signs in with their e-mail address and that password. The sign-in page then
+has them choose their own password. A password lost before it was used is
+replaced from the user's row (**New temporary password**). A password the
+person forgets after they have chosen their own is reset in [Keycloak's admin
+console](#keycloaks-admin-console), never from the platform's console:
+otherwise whoever reset it could sign in as them.
+
+This gives up two things the invitation e-mail provides. Whoever hands over
+the password could sign in first. And nobody proves that the e-mail address
+belongs to the person. Turn it on only where your administrators are trusted
+with that. The setting is ignored when public sign-up is on
+(`SIGNUP_ENABLED=true`), where the tenants are strangers to one another.
+Notifications and task reminders still need a relay, and without one they
+appear only in the console.
+
+On Kubernetes, set `TEMPORARY_PASSWORDS: "true"` in `site.yaml`'s
+`mavericks-config`.
 
 **Save a copy of `.env` in a password manager now.** It holds the database
 password and the two keys (`INTEGRATION_CRED_KEY`, `SECRETS_ENCRYPTION_KEY`)
@@ -250,7 +279,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.28.2   # the release you checked out
+MAVERICKS_RELEASE=2026.10.28.3   # the release you checked out
 ```
 
 ```bash
@@ -464,7 +493,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.10.28.2
+git fetch --tags && git checkout <new release>       # e.g. 2026.10.28.3
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -552,7 +581,8 @@ Each container keeps five log files of 20 MB.
 | The gateway restarts over and over; its log says `failed to initialize JWKS validator` | It cannot reach Keycloak's realm. Check `docker compose logs keycloak`; it may still be starting. |
 | Every API call answers 401 after signing in | The token's issuer is not `https://AUTH_HOST`: `AUTH_HOST` was edited without `docker compose up -d`, or Keycloak is reached through another name. |
 | **Invite user** answers 503 | The provisioning account is not configured: run `./setup.sh keycloak`. |
-| **Invite user** answers 502 and names the e-mail step | Keycloak could not send the invitation. Rerun `SMTP_TEST_TO=you@example.com ./setup.sh keycloak` and read what the relay says. |
+| **Invite user** answers 502 and names the e-mail step | Keycloak could not send the invitation. Rerun `SMTP_TEST_TO=you@example.com ./setup.sh keycloak` and read what the relay says. With no relay at all, set `TEMPORARY_PASSWORDS=true` and run `docker compose up -d` ([Adding users without an SMTP relay](#adding-users-without-an-smtp-relay)). |
+| **New temporary password** answers that the person already signs in with a password of their own | They have chosen their own at their first sign-in. If they forgot it, reset it in [Keycloak's admin console](#keycloaks-admin-console). |
 | Keycloak stops with `database "keycloak" does not exist` | The database volume was created before the stack's init script ran. Create it: `docker compose exec postgres psql -U mavericks -c 'CREATE DATABASE keycloak OWNER mavericks'`, then `docker compose up -d`. |
 | The `web` container restarts over and over; its log says `99-runtime-config.sh: not found` | The clone has Windows (CRLF) line endings: Git for Windows made it, from a release before 2026.10.12.1. Repair it in place from `deploy/compose`, in the Ubuntu terminal: `git config core.autocrlf false`, then `(cd ../.. && git rm -rq --cached . && git reset -q --hard)` and `sed -i 's/\r$//' .env`, then `docker compose up -d --build`. |
 | The gateway restarts, `docker inspect` says `OOMKilled`, or its CPU stays high with nothing in its log | A recalculation or a grid read of a large model held more than its memory allows. The gateway takes 90% of its container's memory limit as Go's own (`GOMEMLIMIT` overrides it), and answers `GRID_READ_CONCURRENCY` full grid reads at once (default 4). To see what it is doing, read its Go profiles on `127.0.0.1:6060` inside its container (`PPROF_ADDR`, `off` to turn them off) — on Kubernetes `kubectl port-forward pod/<gateway> 6060`, then `go tool pprof http://localhost:6060/debug/pprof/heap`. |
@@ -649,7 +679,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.28.2`; set the release you deploy, or, if you built your
+   release `2026.10.28.3`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -831,7 +861,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.28.2   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.28.3   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated
@@ -894,3 +924,5 @@ kubectl -n mavericks get deploy,statefulset        # gateway, integration, web, 
 - [ ] You know which revision you run, and you upgrade deliberately.
 - [ ] Public sign-up stays off unless you mean to offer the platform to
       strangers — and then your terms and privacy notice are published.
+- [ ] `TEMPORARY_PASSWORDS` is on only if you have no SMTP relay, and your
+      administrators are trusted to hand over first passwords.

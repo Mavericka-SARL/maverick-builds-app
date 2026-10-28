@@ -1162,6 +1162,9 @@ export interface AdminUserPermissions {
   disable: boolean;
   reinvite: boolean;
   remove_from_tenant: boolean;
+  /** In reinvite's place on a deployment that gives new accounts a
+   *  temporary password instead of an invitation e-mail. */
+  temporary_password?: boolean;
 }
 
 export interface AdminUser {
@@ -2822,10 +2825,14 @@ export const api = {
   // alike: the refreshed users list shows an existing account as it is,
   // and a role or workspace left out is refused only
   // for an existing account.
+  // A deployment with no e-mail returns a new account's temporary_password
+  // instead of inviting it: shown once, to be handed over.
   createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }) =>
-    apiFetch<{ id: string; status: string; invited?: boolean }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),
+    apiFetch<{ id: string; status: string; invited?: boolean; temporary_password?: string }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),
   resendAdminUserInvite: (id: string) =>
     apiFetch<{ status: string; email: string }>(`/api/admin/users/${id}/invite`, { method: "POST" }),
+  issueAdminUserTemporaryPassword: (id: string) =>
+    apiFetch<{ status: string; email: string; temporary_password: string }>(`/api/admin/users/${id}/temporary-password`, { method: "POST" }),
   // Removes every role and grant the account holds in the caller's tenant —
   // for an account that belongs to another tenant or none. An account with no
   // tenant whose developer role those grants were the last to narrow also

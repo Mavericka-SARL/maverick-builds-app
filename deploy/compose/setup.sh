@@ -143,8 +143,11 @@ cmd_keycloak() {
       SMTP_FROM="$(env_get SMTP_FROM)" SMTP_FROM_NAME="${SMTP_FROM_NAME:-maverickbuilds.app}" \
       SMTP_TEST_TO="${SMTP_TEST_TO:-}" \
       bash "$ROOT/scripts/keycloak-smtp-setup.sh"
+  elif [ "$(env_get TEMPORARY_PASSWORDS)" = "true" ]; then
+    log "SMTP_HOST is empty: new users get a temporary password to hand over (TEMPORARY_PASSWORDS)"
   else
-    log "SMTP_HOST is empty: Keycloak cannot send invitations, so the console cannot add users yet"
+    log "SMTP_HOST is empty: Keycloak cannot send invitations, so the console cannot add users yet" \
+      "(set the SMTP_* lines, or TEMPORARY_PASSWORDS=true)"
   fi
 
   log "restarting the gateway with the new secret"
@@ -205,8 +208,10 @@ cmd_check() {
   fi
   if [ -n "$(env_get SMTP_HOST)" ]; then
     echo "  ok    e-mail relay set ($(env_get SMTP_HOST))"
+  elif [ "$(env_get TEMPORARY_PASSWORDS)" = "true" ]; then
+    echo "  ok    no e-mail relay: new users get a temporary password (TEMPORARY_PASSWORDS); nothing is e-mailed"
   else
-    echo "  FAIL  SMTP_HOST is empty — the console cannot invite users"; failed=1
+    echo "  FAIL  SMTP_HOST is empty — the console cannot invite users (set SMTP_* or TEMPORARY_PASSWORDS=true)"; failed=1
   fi
 
   echo "Backups:"

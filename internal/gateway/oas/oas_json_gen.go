@@ -3766,14 +3766,21 @@ func (s *AdminUserPermissions) encodeFields(e *jx.Encoder) {
 		e.FieldStart("remove_from_tenant")
 		e.Bool(s.RemoveFromTenant)
 	}
+	{
+		if s.TemporaryPassword.Set {
+			e.FieldStart("temporary_password")
+			s.TemporaryPassword.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAdminUserPermissions = [5]string{
+var jsonFieldsNameOfAdminUserPermissions = [6]string{
 	0: "rename",
 	1: "delete",
 	2: "disable",
 	3: "reinvite",
 	4: "remove_from_tenant",
+	5: "temporary_password",
 }
 
 // Decode decodes AdminUserPermissions from json.
@@ -3844,6 +3851,16 @@ func (s *AdminUserPermissions) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"remove_from_tenant\"")
+			}
+		case "temporary_password":
+			if err := func() error {
+				s.TemporaryPassword.Reset()
+				if err := s.TemporaryPassword.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"temporary_password\"")
 			}
 		default:
 			return d.Skip()
@@ -13861,12 +13878,19 @@ func (s *CreateAdminUserOK) encodeFields(e *jx.Encoder) {
 			s.Invited.Encode(e)
 		}
 	}
+	{
+		if s.TemporaryPassword.Set {
+			e.FieldStart("temporary_password")
+			s.TemporaryPassword.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateAdminUserOK = [3]string{
+var jsonFieldsNameOfCreateAdminUserOK = [4]string{
 	0: "id",
 	1: "status",
 	2: "invited",
+	3: "temporary_password",
 }
 
 // Decode decodes CreateAdminUserOK from json.
@@ -13906,6 +13930,16 @@ func (s *CreateAdminUserOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"invited\"")
+			}
+		case "temporary_password":
+			if err := func() error {
+				s.TemporaryPassword.Reset()
+				if err := s.TemporaryPassword.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"temporary_password\"")
 			}
 		default:
 			return d.Skip()
@@ -40490,6 +40524,255 @@ func (s *IntegrationRunRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *IntegrationRunRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes IssueAdminUserTemporaryPasswordBadGateway as json.
+func (s *IssueAdminUserTemporaryPasswordBadGateway) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes IssueAdminUserTemporaryPasswordBadGateway from json.
+func (s *IssueAdminUserTemporaryPasswordBadGateway) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode IssueAdminUserTemporaryPasswordBadGateway to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = IssueAdminUserTemporaryPasswordBadGateway(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordBadGateway) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *IssueAdminUserTemporaryPasswordBadGateway) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes IssueAdminUserTemporaryPasswordConflict as json.
+func (s *IssueAdminUserTemporaryPasswordConflict) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes IssueAdminUserTemporaryPasswordConflict from json.
+func (s *IssueAdminUserTemporaryPasswordConflict) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode IssueAdminUserTemporaryPasswordConflict to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = IssueAdminUserTemporaryPasswordConflict(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordConflict) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *IssueAdminUserTemporaryPasswordConflict) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes IssueAdminUserTemporaryPasswordForbidden as json.
+func (s *IssueAdminUserTemporaryPasswordForbidden) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes IssueAdminUserTemporaryPasswordForbidden from json.
+func (s *IssueAdminUserTemporaryPasswordForbidden) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode IssueAdminUserTemporaryPasswordForbidden to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = IssueAdminUserTemporaryPasswordForbidden(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordForbidden) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *IssueAdminUserTemporaryPasswordForbidden) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes IssueAdminUserTemporaryPasswordNotFound as json.
+func (s *IssueAdminUserTemporaryPasswordNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes IssueAdminUserTemporaryPasswordNotFound from json.
+func (s *IssueAdminUserTemporaryPasswordNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode IssueAdminUserTemporaryPasswordNotFound to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = IssueAdminUserTemporaryPasswordNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *IssueAdminUserTemporaryPasswordNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *IssueAdminUserTemporaryPasswordOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Status.Set {
+			e.FieldStart("status")
+			s.Status.Encode(e)
+		}
+	}
+	{
+		if s.Email.Set {
+			e.FieldStart("email")
+			s.Email.Encode(e)
+		}
+	}
+	{
+		if s.TemporaryPassword.Set {
+			e.FieldStart("temporary_password")
+			s.TemporaryPassword.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfIssueAdminUserTemporaryPasswordOK = [3]string{
+	0: "status",
+	1: "email",
+	2: "temporary_password",
+}
+
+// Decode decodes IssueAdminUserTemporaryPasswordOK from json.
+func (s *IssueAdminUserTemporaryPasswordOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode IssueAdminUserTemporaryPasswordOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "status":
+			if err := func() error {
+				s.Status.Reset()
+				if err := s.Status.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "email":
+			if err := func() error {
+				s.Email.Reset()
+				if err := s.Email.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"email\"")
+			}
+		case "temporary_password":
+			if err := func() error {
+				s.TemporaryPassword.Reset()
+				if err := s.TemporaryPassword.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"temporary_password\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode IssueAdminUserTemporaryPasswordOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *IssueAdminUserTemporaryPasswordOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *IssueAdminUserTemporaryPasswordOK) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

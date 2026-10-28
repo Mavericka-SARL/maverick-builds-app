@@ -28,6 +28,10 @@ data:
   SMTP_HOST: "smtp.example.com"                                 # CHANGE
   SMTP_PORT: "587"
   SMTP_FROM: "no-reply@example.com"                             # CHANGE
+  # With no relay, new users get a temporary password to hand over instead
+  # of an invitation e-mail (docs/SELF_HOSTING.md, "Adding users without an
+  # SMTP relay"):
+  # TEMPORARY_PASSWORDS: "true"
   # Where the backup watchdog reports a missing or undersized dump.
   ALERT_EMAIL: "ops@example.com"                                # CHANGE
   # The smallest dump the watchdog accepts — a floor against empty objects

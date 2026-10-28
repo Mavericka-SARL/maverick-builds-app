@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,10 @@ type User struct {
 	LastName      string `json:"lastName,omitempty"`
 	Enabled       bool   `json:"enabled"`
 	EmailVerified bool   `json:"emailVerified"`
+	// Read only (AwaitsFirstSignIn): what the account must do at its next
+	// sign-in, and the user federation (LDAP) it belongs to, if any.
+	RequiredActions []string `json:"requiredActions,omitempty"`
+	FederationLink  string   `json:"federationLink,omitempty"`
 }
 
 // accessToken returns a cached service-account token, refreshing when it is
@@ -359,6 +364,58 @@ func (c *Client) HasPassword(ctx context.Context, sub string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// SetTemporaryPassword gives the account a password its owner must replace
+// at their next sign-in: Keycloak adds the UPDATE_PASSWORD action itself.
+// It is the way in on a deployment that sends no e-mail (the gateway's
+// TEMPORARY_PASSWORDS). Unlike SendInvite, the credential passes through
+// whoever hands it over, so callers set one only on an account they have just
+// created or one with no sign-in of its own yet (AwaitsFirstSignIn).
+func (c *Client) SetTemporaryPassword(ctx context.Context, sub, password string) error {
+	body := map[string]any{"type": "password", "value": password, "temporary": true}
+	if _, err := c.do(ctx, http.MethodPut, "/users/"+url.PathEscape(sub)+"/reset-password", body, nil); err != nil {
+		return fmt.Errorf("set temporary password: %w", err)
+	}
+	return nil
+}
+
+// AwaitsFirstSignIn reports whether the account has no sign-in of its own
+// yet: no credential at all, or only a password it must still replace; and
+// no link to another identity provider or to a user federation, whose
+// accounts sign in there. Only such an account may be given a temporary
+// password — on any other, whoever set it could sign in as the owner.
+func (c *Client) AwaitsFirstSignIn(ctx context.Context, sub string) (bool, error) {
+	u, err := c.GetUser(ctx, sub)
+	if err != nil {
+		return false, err
+	}
+	if u == nil {
+		return false, fmt.Errorf("identity provider account %s not found", sub)
+	}
+	if u.FederationLink != "" {
+		return false, nil
+	}
+	links, err := c.FederatedIdentities(ctx, sub)
+	if err != nil {
+		return false, err
+	}
+	if len(links) > 0 {
+		return false, nil
+	}
+	var creds []struct {
+		Type string `json:"type"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/users/"+url.PathEscape(sub)+"/credentials", nil, &creds); err != nil {
+		return false, err
+	}
+	pending := slices.Contains(u.RequiredActions, "UPDATE_PASSWORD")
+	for _, cr := range creds {
+		if cr.Type != "password" || !pending {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // SetTimeout replaces the 15-second limit on each call to the identity
