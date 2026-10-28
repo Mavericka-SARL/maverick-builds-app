@@ -41,6 +41,38 @@ func NewStoreOn(db dbx.DB) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
+// lockPasses holds revisionID's pass lock in the database until unlock is
+// called, waiting while another process holds it: the pass queue and
+// revisionLocks are per process, so two gateways recalculated one revision
+// at once, and the pass that read its inputs first could write last.
+//
+// The lock is a transaction's advisory lock (PgBouncer runs in transaction
+// mode, where a session lock would stay on whichever server connection ran
+// it), on a connection of its own rather than one of the pool's: a tenant
+// pool holds five, and five revisions recalculating at once would take them
+// all and leave their passes none.
+func (s *Store) lockPasses(ctx context.Context, revisionID string) (unlock func(), err error) {
+	conn, err := pgx.ConnectConfig(ctx, s.pool.Config().ConnConfig.Copy())
+	if err != nil {
+		return nil, fmt.Errorf("pass lock connection: %w", err)
+	}
+	release := func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx) // ends the transaction, and with it the lock
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("pass lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('calculation pass'), hashtext($1))`, revisionID); err != nil {
+		release()
+		return nil, fmt.Errorf("pass lock: %w", err)
+	}
+	return release, nil
+}
+
 // ── Partition state ───────────────────────────────────────────────────────────
 
 func (s *Store) GetPartitionState(ctx context.Context, key string) (*calculationv1.PartitionState, error) {

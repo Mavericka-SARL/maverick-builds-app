@@ -666,7 +666,7 @@
 <tr><td><b>Validate</b></td><td>Checks the on-screen draft without saving and opens <b>Validation Results</b>: "✓ Workflow is valid" or a list of problems.</td></tr>
 <tr><td><b>Test Run</b></td><td>Only after saving. Asks for the context variables and starts an instance in test mode: real routing, no notifications, no data written. Shows instance id, status and the step it stopped at.</td></tr>
 <tr><td><b>Save</b> / <b>Cancel</b></td><td>Save writes name, description, trigger, subject, steps, context and concurrency. Cancel discards the draft.</td></tr>
-<tr><td><b>Publish</b></td><td>Shown while not published; needs a clean save. Makes the workflow startable. There is no unpublish; archive from the list instead.</td></tr>
+<tr><td><b>Publish</b></td><td>Shown while not published; needs a clean save. Makes the workflow startable in its own revision: business users can start it once that revision is live (<b>Set active</b>). There is no unpublish; archive from the list instead.</td></tr>
 </table>
 <div class="note warn"><b>Published workflows and running instances.</b> Saving a published workflow applies to instances started afterwards. A running instance keeps the definition it started with. Changes across revisions belong to the revision.</div>
 

@@ -1895,57 +1895,10 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 	if err != nil {
 		return nil, err
 	}
-
-	// Publish-to-active. Publishing means "live for the business", and the
-	// business-facing surfaces (GET /api/workflow/definitions, the start
-	// dialog) only show the ACTIVE revision's defs — but an AI-authored def
-	// is born inside the session's lazily-created draft, which may never be
-	// promoted, leaving a published workflow stranded where no business
-	// user can ever see it (found live: "Country data approval" published
-	// into an orphan draft, invisible until a manual one-row re-home).
-	// Publishing now moves a non-active-revision def onto the active
-	// revision, remapping context_schema dimension references by NAME so a
-	// "Dimension member" variable keeps pointing at the geography the
-	// author meant rather than a dead revision's copy of it. A dimension
-	// with no same-named counterpart keeps its old reference — the start
-	// dialog surfaces that as a fix-it warning rather than failing here.
-	// The to_regclass guard only skips when core.model does not exist at
-	// all — minimal test fixtures; every real deployment migrates it.
-	var coreModelExists bool
-	if err := s.db.QueryRow(ctx, `SELECT to_regclass('core.model') IS NOT NULL`).Scan(&coreModelExists); err != nil {
-		return nil, fmt.Errorf("publish re-home precheck: %w", err)
-	}
-	if !coreModelExists {
-		return &w, nil
-	}
-	if _, rhErr := s.db.Exec(ctx, `
-		WITH target AS (
-			SELECT m.active_revision_id AS active_rev
-			FROM workflow.workflow_def wd
-			JOIN core.model m ON m.application_id = wd.application_id
-			WHERE wd.id = $1::uuid AND m.active_revision_id IS NOT NULL
-			LIMIT 1
-		)
-		UPDATE workflow.workflow_def wd SET
-			revision_id = t.active_rev,
-			context_schema = COALESCE((
-				SELECT jsonb_agg(
-					CASE WHEN (e.elem ? 'dimension_id') AND nd.id IS NOT NULL
-					     THEN jsonb_set(e.elem, '{dimension_id}', to_jsonb(nd.id::text))
-					     ELSE e.elem END ORDER BY e.ord)
-				FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
-				LEFT JOIN model.dimension_def od ON od.id::text = e.elem->>'dimension_id'
-				LEFT JOIN model.dimension_def nd ON nd.model_id = od.model_id
-				     AND lower(nd.name) = lower(od.name)
-				     AND nd.revision_id = t.active_rev
-			), wd.context_schema)
-		FROM target t
-		WHERE wd.id = $1::uuid
-		  AND wd.revision_id IS NOT NULL
-		  AND wd.revision_id IS DISTINCT FROM t.active_rev
-	`, defID); rhErr != nil {
-		return nil, fmt.Errorf("publish re-home to active revision: %w", rhErr)
-	}
+	// Publishing keeps a definition in its own revision: business users can
+	// start it once that revision is made live, never earlier. Making a
+	// revision live is a separate decision (Set active), and an AI draft
+	// reaches it by being promoted to a working revision first.
 	return &w, nil
 }
 

@@ -1,5 +1,7 @@
 package calculation
 
+import "context"
+
 // InputValueMapSQL lets the external tests explain LoadInputValueMap's plan.
 const InputValueMapSQL = inputValueMapSQL
 
@@ -17,4 +19,10 @@ func SetLeanCellsAt(n int64) (restore func()) {
 	old := leanCellsAt
 	leanCellsAt = n
 	return func() { leanCellsAt = old }
+}
+
+// HoldPassLock takes revisionID's pass lock in the database as another
+// gateway's pass would, until release is called.
+func HoldPassLock(s *Store, revisionID string) (release func(), err error) {
+	return s.lockPasses(context.Background(), revisionID)
 }

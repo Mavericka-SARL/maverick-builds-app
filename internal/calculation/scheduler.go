@@ -191,6 +191,8 @@ func (s *Scheduler) RecalcSpecific(ctx context.Context, modelID, revisionID stri
 // added period's rows vanishing until the next edit; the load-sensitive
 // form-mapping convergence test). A pass that waits its turn sees every
 // write made before it started, so the last pass to run is the current one.
+// Across processes (two gateways) the same order is kept by the database's
+// pass lock (Store.lockPasses).
 var revisionLocks sync.Map // "model:revision" → *sync.Mutex
 
 func lockRevision(modelID, revisionID string) func() {
@@ -233,7 +235,15 @@ func (s *Scheduler) recalcRequest(ctx context.Context, modelID, revisionID strin
 	return queueFor(s.store.pool, modelID, revisionID).runRequest(req, func(merged passRequest) error {
 		// The pass may calculate other requests' metrics as well: it runs
 		// on when this caller's request is cancelled, bounded as a
-		// background recalculation is.
+		// background recalculation is. Another gateway's pass over the
+		// revision is waited for first, and does not count against it.
+		lockCtx, cancelLock := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
+		unlock, err := s.store.lockPasses(lockCtx, revisionID)
+		cancelLock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
 		defer cancel()
 		return s.recalcPass(passCtx, modelID, revisionID, defs, merged)
