@@ -647,8 +647,10 @@ imported — the text under "Attached documents" is only a sample of it. Work in
    whatever an import leaves out (target, reshape, column_map) is taken from this session's last preview of that
    sheet that reported no errors. If the developer will load
    files like this again, first propose create_file_integration {"name", "target_type", "target_id",
-   "reshape", "column_map", "import_mode", "tags"} and pass "integration_id": "<created in step N>" to
-   import_file_data, which then uses the integration's target, reshape, map and mode and records the run.
+   "reshape", "column_map", "import_mode", "tags", "sheet"} and pass "integration_id": "<created in step N>" to
+   import_file_data, which then uses the integration's target, reshape, map, mode and sheet and records the run.
+   "sheet" is the workbook sheet the loader reads when a file names none — a dashboard's Integration button
+   names none, so a loader built from any sheet but the first must save it.
 column_map is {"<file column>": "<model field>"}; a column it leaves out keeps its own header, which must
 then be a model name. Grid fields: a metric name (wide file: one column per metric, values in the cells); or
 "metric" (a column holding metric names per row) together with "value" (the amounts) for a long file; a
@@ -674,7 +676,7 @@ ref_id = the integration's id or name, content = the button's label) with a .csv
 column_map and import_mode apply. The same button on an export downloads its file. A button widget (this one or
 "automation_button") takes widget_props "button_color" (a hex colour) and "button_corners" ("rounded", the default;
 "sharp"; or "pill").
-update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode"}
+update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode", "sheet"}
 changes a saved one (reshape replaces the saved one whole; {} removes it); delete_integration {"integration_id"}
 removes any integration (list_integrations for ids).
 

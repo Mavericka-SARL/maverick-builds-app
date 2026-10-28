@@ -493,7 +493,10 @@ func (e *WriteExecutor) loadIntegrationDef(ctx context.Context, ref string) (int
 type fileIntegrationConfig struct {
 	// SheetURL makes it a Google Sheets integration, which re-reads the
 	// sheet on every run instead of taking a file.
-	SheetURL   string             `json:"sheet_url,omitempty"`
+	SheetURL string `json:"sheet_url,omitempty"`
+	// Sheet is the workbook sheet an Excel loader reads when a run's file
+	// names none (a dashboard's Integration button names none).
+	Sheet      string             `json:"sheet,omitempty"`
 	Reshape    *importpkg.Reshape `json:"reshape,omitempty"`
 	ColumnMap  map[string]string  `json:"column_map,omitempty"`
 	ImportMode string             `json:"import_mode,omitempty"`
@@ -511,6 +514,7 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		ImportMode string             `json:"import_mode"`
 		Tags       []string           `json:"tags"`
 		SheetURL   string             `json:"sheet_url"`
+		Sheet      string             `json:"sheet"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -524,6 +528,9 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 			return "", "", fmt.Errorf("sheet_url: %w", err)
 		}
 		kindOf = "google_sheets"
+	}
+	if p.Sheet = strings.TrimSpace(p.Sheet); p.Sheet != "" && kindOf == "google_sheets" {
+		return "", "", fmt.Errorf("a Google Sheets integration reads the tab its sheet_url's gid names; sheet is for an Excel file loader")
 	}
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
@@ -547,6 +554,7 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		cfg.Reshape = p.Reshape
 	}
 	cfg.SheetURL = p.SheetURL
+	cfg.Sheet = p.Sheet
 	if err := e.integrationNameFree(ctx, p.Name, ""); err != nil {
 		return "", "", err
 	}
@@ -652,6 +660,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		Spec          json.RawMessage   `json:"spec"`
 		Status        *string           `json:"status"`
 		SheetURL      *string           `json:"sheet_url"`
+		Sheet         *string           `json:"sheet"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -733,6 +742,19 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 			c["sheet_url"] = strings.TrimSpace(*p.SheetURL)
 			changed = append(changed, "sheet_url")
 		}
+		// sheet: the workbook sheet each run reads when its file names none;
+		// "" removes it (the first sheet again).
+		if p.Sheet != nil {
+			if row.Type != "csv_import" {
+				return "", "", fmt.Errorf("only an Excel/CSV file integration has a sheet; a Google Sheets one reads the tab its sheet_url names")
+			}
+			if s := strings.TrimSpace(*p.Sheet); s == "" {
+				delete(c, "sheet")
+			} else {
+				c["sheet"] = s
+			}
+			changed = append(changed, "sheet")
+		}
 		if p.ColumnMap != nil {
 			c["column_map"] = p.ColumnMap
 			changed = append(changed, "column_map")
@@ -778,7 +800,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		changed = append(changed, "status")
 	}
 	if len(changed) == 0 {
-		return "", "", fmt.Errorf("nothing to change — pass name, tags, target_id, status, reshape, column_map, import_mode or spec")
+		return "", "", fmt.Errorf("nothing to change — pass name, tags, target_id, status, reshape, column_map, import_mode, sheet or spec")
 	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.integration_def
@@ -853,6 +875,9 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		_ = json.Unmarshal(row.Config, &c)
 		req.IntegrationID, req.TargetType, req.TargetID = row.ID, row.TargetType, row.TargetID
 		req.Reshape, req.ColumnMap, req.ImportMode = c.Reshape, c.ColumnMap, c.ImportMode
+		if req.Sheet == "" {
+			req.Sheet = c.Sheet
+		}
 		if p.TargetType != "" && p.TargetType != row.TargetType {
 			return "", "", fmt.Errorf("integration '%s' imports into a %s; leave target_type out or match it", row.Name, row.TargetType)
 		}

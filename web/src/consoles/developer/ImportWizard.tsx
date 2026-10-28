@@ -91,6 +91,9 @@ interface WizardConfig {
   // Running a saved integration: its column map, which the run applies on
   // the server, is the mapping the map step starts from.
   savedColumnMap?: Record<string, string>;
+  // A saved integration's workbook sheet, which the upload step opens a
+  // workbook on.
+  sheet?: string;
 }
 
 interface CommitResult {
@@ -381,6 +384,14 @@ async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Pr
   ));
 }
 
+// sheetOf is the workbook sheet a saved integration keeps: the one the
+// wizard read, which a run of a workbook naming none reads too. A loader
+// saved from a workbook's second sheet used to read its first from a
+// dashboard button (2026-10-28).
+function sheetOf(pf?: ParsedFile | null): { sheet?: string } {
+  return pf?.ext === "xlsx" && pf.activeSheet ? { sheet: pf.activeSheet } : {};
+}
+
 // savedMode is the import mode a saved integration keeps: a grid's, from
 // a file as well as a sheet. A file integration used to keep none and run
 // as incremental, whatever was chosen (2026-10-21).
@@ -475,14 +486,18 @@ function UploadStep({
     setLoading(true);
     rawFileRef.current = file;
     try {
-      const pf = await parseFile(file);
+      // A saved integration's workbook opens on the sheet it reads; a file
+      // without that sheet opens on its first.
+      const pf = config.sheet
+        ? await parseFile(file, config.sheet).catch(() => parseFile(file))
+        : await parseFile(file);
       setParsedFile(pf);
     } catch (e) {
       setError(`Could not parse file: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [config.sheet]);
 
   const handleSheetChange = useCallback(async (sheet: string) => {
     if (!rawFileRef.current) return;
@@ -1143,6 +1158,7 @@ function CommitStep({
             column_map: columnMapOf(mappings),
             ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
             ...savedMode(config),
+            ...sheetOf(parsedFile),
           });
         } catch { /* draft stays a draft; the import result stands */ }
       }
@@ -1557,7 +1573,7 @@ function ImportWizard({
       const it = config.editIntegration!;
       const { reshape: _old, column_map: _oldMap, ...rest } = it.config;
       void _old; void _oldMap;
-      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config) });
+      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config), ...sheetOf(sourceFile) });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-integrations"] }); onClose(); },
   });
@@ -1609,6 +1625,7 @@ function ImportWizard({
           // input at all — the server re-fetches the sheet.
           ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
           ...savedMode(config),
+          ...sheetOf(sourceFile),
         })
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-integrations"] }),
@@ -1833,6 +1850,11 @@ function SavedIntegrationsList({
                     Mode: <Txt>{MODE_LABEL[d.config?.import_mode ?? (d.type === "google_sheets" ? "replace" : "incremental")] ?? d.config?.import_mode}</Txt>
                   </span>
                 )}
+                {d.type === "csv_import" && d.config?.sheet && (
+                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-sheet-${d.id}`} title="The workbook sheet each run reads when its file names none; change it with Edit shape and mapping">
+                    Reads sheet {d.config.sheet}
+                  </span>
+                )}
                 {d.config?.reshape && describeReshape(d.config.reshape) && (
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-reshape-${d.id}`} title="Applies to every run; change it with Edit shape and mapping">
                     Reshapes each file: {describeReshape(d.config.reshape)}
@@ -1850,6 +1872,7 @@ function SavedIntegrationsList({
                     targetId: d.target_id,
                     ...(d.config?.import_mode ? { importMode: d.config.import_mode as WizardConfig["importMode"] } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
+                    ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
                   })}
                 >
@@ -1872,7 +1895,8 @@ function SavedIntegrationsList({
                   size="sm"
                   leadingIcon={<Play size={13} />}
                   onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id,
-                    ...(d.config?.column_map ? { savedColumnMap: d.config.column_map } : {}) })}
+                    ...(d.config?.column_map ? { savedColumnMap: d.config.column_map } : {}),
+                    ...(d.config?.sheet ? { sheet: d.config.sheet } : {}) })}
                 >
                   Run Import
                 </Button>
@@ -1887,6 +1911,7 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     importMode: (d.config?.import_mode as WizardConfig["importMode"] | undefined) ?? (d.type === "google_sheets" ? "replace" : "incremental"),
+                    ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
                   })}

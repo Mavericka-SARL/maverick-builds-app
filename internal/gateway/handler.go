@@ -9533,6 +9533,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		ColumnMap  map[string]string  `json:"column_map"`
 		SheetURL   string             `json:"sheet_url"`
 		ImportMode string             `json:"import_mode"`
+		// Sheet is the workbook sheet a csv_import integration reads when a
+		// run's workbook names none: the one it was built from.
+		Sheet string `json:"sheet"`
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
 	// ?dry_run=true reads and checks the file as the run would and imports
@@ -9568,7 +9571,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		header, rows, err = importpkg.ShapeCSV(data, cfg.Reshape)
 	} else {
-		header, rows, fileName, err = parseRunFile(w, r, cfg.Reshape)
+		header, rows, fileName, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
 	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)

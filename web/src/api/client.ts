@@ -1561,6 +1561,9 @@ export interface IntegrationDef {
     // re-syncing converges instead of double-counting).
     sheet_url?: string;
     import_mode?: ImportModeParam;
+    // csv_import from a workbook: the sheet a run reads when its workbook
+    // names none (a dashboard's Integration button, Run with a file).
+    sheet?: string;
   } & Partial<ExportSpec>;
 }
 

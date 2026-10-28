@@ -16352,7 +16352,8 @@ type IntegrationRunRequest struct {
 	// The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB
 	// before encoding.
 	XlsxBase64 OptString `json:"xlsx_base64"`
-	// The workbook's sheet; the first when omitted.
+	// The workbook's sheet; when omitted, the sheet the integration's config saved (config.sheet), else
+	// the first. A workbook without that sheet is refused.
 	Sheet OptString `json:"sheet"`
 }
 

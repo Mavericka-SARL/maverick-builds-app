@@ -209,9 +209,10 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 		tool("preview_file_import", importArgs),
 		tool("propose_actions", map[string]any{"steps": []map[string]any{
 			proposeStep("create_file_integration", "Save 'Monthly actuals' (Excel into Sales)", map[string]any{
-				"name": "Monthly actuals", "target_type": "grid", "target_id": "Sales", "column_map": columnMap}),
+				"name": "Monthly actuals", "target_type": "grid", "target_id": "Sales", "column_map": columnMap, "sheet": "Actuals"}),
+			// No sheet: the loader's saved one is read, not the cover sheet.
 			proposeStep("import_file_data", "Import actuals.xlsx", map[string]any{
-				"file": "actuals.xlsx", "sheet": "Actuals", "integration_id": "<created in step 1>"}),
+				"file": "actuals.xlsx", "integration_id": "<created in step 1>"}),
 		}}),
 		// Turn 2: a file with an unknown member — the plan check refuses it
 		// before the developer sees it, and the assistant says so.
@@ -328,8 +329,8 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 		t.Errorf("CA revenue = %v (err %v), want the stored 1234.5, not the displayed \"1,234.50\"", caRevenue, err)
 	}
 	intID := p.Steps[0].CreatedID
-	if n := count(`SELECT count(*) FROM model.integration_def WHERE id=$1::uuid AND type='csv_import' AND revision_id=$2::uuid AND config->>'import_mode'='replace'`, intID, draft); n != 1 {
-		t.Errorf("saved integration not found as a csv_import in the draft with mode replace")
+	if n := count(`SELECT count(*) FROM model.integration_def WHERE id=$1::uuid AND type='csv_import' AND revision_id=$2::uuid AND config->>'import_mode'='replace' AND config->>'sheet'='Actuals'`, intID, draft); n != 1 {
+		t.Errorf("saved integration not found as a csv_import in the draft with mode replace and sheet Actuals")
 	}
 	if n := count(`SELECT count(*) FROM model.integration_run WHERE integration_id=$1::uuid AND status='success' AND rows_imported=6`, intID); n != 1 {
 		t.Errorf("the import was not recorded in the integration's run history")

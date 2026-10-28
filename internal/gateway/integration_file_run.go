@@ -40,11 +40,14 @@ import (
 const maxRunBodyBytes = 24 << 20
 
 // parseRunFile reads the file a csv_import run carries: "csv" text, or
-// "xlsx_base64" with an optional "sheet" (default the first), reshaped as
-// the integration saved (nil = as is). Workbook cells are read as stored,
+// "xlsx_base64" with an optional "sheet" — by default the sheet the
+// integration saved (savedSheet), else the first — reshaped as the
+// integration saved (nil = as is). A dashboard's Integration button sends
+// no sheet, so a loader saved from a workbook's second sheet read its first
+// (2026-10-28). Workbook cells are read as stored,
 // so a formatted "1,234.50" arrives as 1234.5. fileName is the person's
 // file as the request names it ("file_name"), for Recent Imports.
-func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape) (header []string, rows []importpkg.RawRow, fileName string, err error) {
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, err error) {
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
@@ -64,7 +67,11 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("xlsx_base64: %w", err)
 		}
-		header, rows, err = importpkg.ReadShaped("run.xlsx", raw, body.Sheet, reshape)
+		sheet := body.Sheet
+		if sheet == "" {
+			sheet = savedSheet
+		}
+		header, rows, err = importpkg.ReadShaped("run.xlsx", raw, sheet, reshape)
 		return header, rows, body.FileName, err
 	case body.CSV != "":
 		header, rows, err = importpkg.ShapeCSV([]byte(body.CSV), reshape)

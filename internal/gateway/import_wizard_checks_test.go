@@ -214,3 +214,72 @@ func TestATableImportsDryRunCreatesNothing(t *testing.T) {
 		t.Fatalf("a dry run created %d record(s)", n-before)
 	}
 }
+
+// A loader saved from a workbook's second sheet keeps reading that sheet
+// when a run's workbook names none — a dashboard's Integration button sends
+// none. It used to read the first sheet: the education model's KPI and
+// balance loaders read its GL sheet and refused the month (2026-10-28). A
+// sheet the run names still wins.
+func TestAFileLoaderReadsTheSheetItWasSavedWith(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, &multiScriptProvider{})
+	status, body := do(f.devSub, "POST", "/api/developer/integrations?revision_id="+f.revID,
+		map[string]any{"name": "Actuals", "type": "csv_import", "target_type": "grid", "target_id": f.grid})
+	var created struct {
+		ID string `json:"id"`
+	}
+	if status != http.StatusOK && status != http.StatusCreated || json.Unmarshal(body, &created) != nil || created.ID == "" {
+		t.Fatalf("create integration: %d %s", status, body)
+	}
+	if status, body := do(f.devSub, "PATCH", "/api/developer/integrations/"+created.ID+"/config",
+		map[string]any{"config": map[string]any{"sheet": "Actuals", "import_mode": "replace"}}); status != http.StatusOK {
+		t.Fatalf("save the loader's sheet: %d %s", status, body)
+	}
+	x := excelize.NewFile()
+	_ = x.SetSheetName("Sheet1", "Notes")
+	_ = x.SetSheetRow("Notes", "A1", &[]any{"Read me: the actuals are on the next sheet"})
+	_, _ = x.NewSheet("Actuals")
+	_ = x.SetSheetRow("Actuals", "A1", &[]any{"geography", "period", "revenue"})
+	_ = x.SetSheetRow("Actuals", "A2", &[]any{"CA", "Q1", 11})
+	_, _ = x.NewSheet("Other")
+	_ = x.SetSheetRow("Other", "A1", &[]any{"geography", "period", "revenue"})
+	_ = x.SetSheetRow("Other", "A2", &[]any{"UK", "Q2", 22})
+	var buf bytes.Buffer
+	if err := x.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	book := base64.StdEncoding.EncodeToString(buf.Bytes())
+	run := "/api/integrations/" + created.ID + "/run"
+	value := func(geo, period string) float64 {
+		t.Helper()
+		var v float64
+		_ = f.pool.QueryRow(f.ctx, `
+			SELECT COALESCE(sum(fi.value),0)::float8 FROM runtime.fact_input fi
+			JOIN model.metric_def md ON md.id = fi.metric_id AND md.name = 'revenue'
+			WHERE fi.model_id = $1::uuid AND fi.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='geography') = $2
+			  AND fi.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='period') = $3`,
+			f.modelID, geo, period).Scan(&v)
+		return v
+	}
+
+	status, body = do(f.devSub, "POST", run, map[string]any{"xlsx_base64": book})
+	if a := decodeAnswer(t, body); status != http.StatusOK || a.Imported != 1 || value("CA", "Q1") != 11 {
+		t.Fatalf("a workbook naming no sheet: %d %s; CA Q1 = %v, want the saved sheet's 11", status, body, value("CA", "Q1"))
+	}
+	status, body = do(f.devSub, "POST", run, map[string]any{"xlsx_base64": book, "sheet": "Other"})
+	if a := decodeAnswer(t, body); status != http.StatusOK || a.Imported != 1 || value("UK", "Q2") != 22 {
+		t.Fatalf("a workbook naming its sheet: %d %s; UK Q2 = %v, want 22", status, body, value("UK", "Q2"))
+	}
+	// A workbook without the saved sheet is refused, naming the sheets it has.
+	other := excelize.NewFile()
+	_ = other.SetSheetRow("Sheet1", "A1", &[]any{"geography", "period", "revenue"})
+	_ = other.SetSheetRow("Sheet1", "A2", &[]any{"CA", "Q3", 33})
+	buf.Reset()
+	if err := other.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	status, body = do(f.devSub, "POST", run, map[string]any{"xlsx_base64": base64.StdEncoding.EncodeToString(buf.Bytes())})
+	if status == http.StatusOK || !strings.Contains(string(body), `no sheet \"Actuals\" — its sheets are: Sheet1`) || value("CA", "Q3") != 0 {
+		t.Fatalf("a workbook without the saved sheet: %d %s; CA Q3 = %v, want a refusal and nothing written", status, body, value("CA", "Q3"))
+	}
+}
