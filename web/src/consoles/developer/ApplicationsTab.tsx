@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
-import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
+import { api, withTenant, type AdminModel, type AdminTenant, type ApiError } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle, Txt } from "../../ui";
 
@@ -66,8 +66,15 @@ function DevModelRevisions({
     mutationFn: (id: string) => at(() => api.recalculateDevRevision(id)),
   });
 
+  // A revision someone or something removed since the list was read (a
+  // discarded AI draft, another tab) answers 404: it is gone, as asked, so
+  // the list is read again rather than keeping the row beside "Not
+  // deleted: revision not found" (reported 2026-10-29).
   const del = useMutation({
-    mutationFn: (id: string) => at(() => api.deleteDevRevision(id)),
+    mutationFn: (id: string) => at(() => api.deleteDevRevision(id)).catch((e: Partial<ApiError>) => {
+      if (e.status === 404) return { status: "deleted" };
+      throw e;
+    }),
     onSuccess: (_, id) => {
       inv();
       if (revisionId === id) onSelect("", "");

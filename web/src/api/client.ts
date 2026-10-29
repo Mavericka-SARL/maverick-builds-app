@@ -2247,10 +2247,14 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
   const modelId = localStorage.getItem("selected_model_id") ?? "";
   // Read before anything is awaited: a caller may name the tenant only for
   // the synchronous moment it calls (UsersPanel's atUser).
+  const tenant = tenantHeader();
+  // A retry below runs after that moment: it carries the tenant along, or
+  // it went to the person's default database instead of the row's.
+  const retry = () => apiFetch<T>(path, { ...init, headers: { ...tenant, ...(init?.headers ?? {}) } }, true);
   const headers = {
     "Content-Type": "application/json",
     "X-Dev-User": persona(),
-    ...tenantHeader(),
+    ...tenant,
     ...authHeader(),
     ...(appId ? { "X-App-Id": appId } : {}),
     ...(modelId ? { "X-Model-Id": modelId } : {}),
@@ -2269,7 +2273,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     const scopingError = typeof body.error === "string" && /resolve (model|app)/.test(body.error);
     if (res.status === 403 && appId && !retrying && scopingError) {
       localStorage.removeItem("selected_app_id");
-      return apiFetch<T>(path, init, true);
+      return retry();
     }
     // A selected model the caller may not open (deleted, its access
     // revoked, another account signed in) is refused rather than silently
@@ -2277,7 +2281,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     // opens the default as before.
     if (res.status === 404 && modelId && !retrying && body.code === "MODEL_NOT_OPEN") {
       localStorage.removeItem("selected_model_id");
-      return apiFetch<T>(path, init, true);
+      return retry();
     }
     // Structured error bodies (e.g. import's per-row validation errors) are
     // attached to the thrown Error rather than discarded, so any caller that

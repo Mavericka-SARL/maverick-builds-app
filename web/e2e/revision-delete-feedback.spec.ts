@@ -75,3 +75,22 @@ test("a revision delete that succeeds removes the row", async ({ page }) => {
   await expect(model.locator(".mvx-admin-revision", { hasText: DRAFT.name })).toHaveCount(0);
   await expect(model.getByRole("alert")).toHaveCount(0);
 });
+
+// A revision removed since the list was read (a discarded AI draft) answers
+// 404: it is gone, as asked. The row used to stay beside "Not deleted: 404:
+// revision not found" (reported 2026-10-29).
+test("a revision delete answered 404 reads the list again and removes the row", async ({ page }) => {
+  let removedElsewhere = false;
+  await mockModel(page, () => (removedElsewhere ? [LIVE] : [LIVE, DRAFT]));
+  await page.route("**/api/developer/revisions/**", (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    removedElsewhere = true;
+    return route.fulfill(json({ error: "revision not found" }, 404));
+  });
+
+  await loadAs(page, "developer");
+  const model = await deleteDraft(page);
+
+  await expect(model.locator(".mvx-admin-revision", { hasText: DRAFT.name })).toHaveCount(0);
+  await expect(model.getByRole("alert")).toHaveCount(0);
+});

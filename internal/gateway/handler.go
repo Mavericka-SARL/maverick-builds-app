@@ -5652,6 +5652,14 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by the requested revision; when none specified, show all metrics for the model
 	revisionID := r.URL.Query().Get("revision_id")
+	// A revision deleted since — alone, or with its model — is a 404, which
+	// is what makes the console drop it as the working revision. It used to
+	// answer the application's default model with no metrics, so the console
+	// went on showing the deleted model's revision with nothing in it
+	// (reported 2026-10-29).
+	if !h.requireRevisionInModel(w, r, revisionID, modelID) {
+		return
+	}
 	revFilter := `TRUE`
 	revArgs := []any{modelID}
 	if revisionID != "" {
@@ -6841,6 +6849,11 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	// A revision deleted since (alone or with its model) is a 404, as in the
+	// model read below: an empty 200 kept it as the console's working revision.
+	if !h.requireRevisionInModel(w, r, revisionID, modelID) {
 		return
 	}
 
@@ -15685,6 +15698,9 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		revisionID := r.URL.Query().Get("revision_id")
+		if !h.requireRevisionInModel(w, r, revisionID, modelID) {
+			return
+		}
 		// When no revision specified, fall back to the active revision so developers
 		// always see the same dashboards as users.
 		if revisionID == "" {

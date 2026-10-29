@@ -53,6 +53,12 @@ func TestForeignRevisionIDRejected(t *testing.T) {
 		{"dimensions", "/api/dimensions?revision_id=%s"},
 		{"developer integrations", "/api/developer/integrations?revision_id=%s"},
 		{"debug facts", "/api/developer/debug/facts?revision_id=%s"},
+		// The console's working revision: a deleted one (absentRev) answered
+		// the default model with nothing in it, so the console never let go
+		// of it (2026-10-29).
+		{"developer model", "/api/developer/model?revision_id=%s"},
+		{"developer dimensions", "/api/developer/dimensions?revision_id=%s"},
+		{"developer dashboards", "/api/developer/dashboards?revision_id=%s"},
 	}
 	for _, rd := range reads {
 		t.Run("read/"+rd.name, func(t *testing.T) {
@@ -69,6 +75,16 @@ func TestForeignRevisionIDRejected(t *testing.T) {
 			ownStatus, ownBody := doAs(t, f, "GET", fmt.Sprintf(rd.path, f.workingRevID), dev, f.appID, nil)
 			if ownStatus < 200 || ownStatus >= 300 {
 				t.Errorf("own revision returned %d, want 2xx — the rejections above would be vacuous\nbody: %s", ownStatus, ownBody)
+			}
+		})
+	}
+
+	// A malformed id is a revision not in the model too: the dimensions read
+	// answered 500 ("access rules: malformed revision id").
+	for _, path := range []string{"/api/developer/model", "/api/developer/dimensions", "/api/developer/dashboards"} {
+		t.Run("read/malformed "+path, func(t *testing.T) {
+			if status, body := doAs(t, f, "GET", path+"?revision_id=None", dev, f.appID, nil); status != http.StatusNotFound {
+				t.Errorf("malformed revision returned %d, want 404\nbody: %s", status, body)
 			}
 		})
 	}

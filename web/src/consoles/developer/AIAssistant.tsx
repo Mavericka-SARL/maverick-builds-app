@@ -647,6 +647,14 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   onSelectRevision?: (id: string, name: string) => void;
 } = {}) {
   const qc = useQueryClient();
+  // Developer › Developer Models and Tenant admin › Applications list the
+  // revisions a draft adds, becomes or removes: a discarded draft stayed
+  // listed there, and deleting it answered "revision not found" (2026-10-29).
+  const refreshRevisions = () => {
+    for (const key of ["dev-model", "dev-applications", "admin-tenants", "dev-revisions", "dev-revisions-auto"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
+  };
   const [sessionId, setSessionId]   = useState<string | null>(null);
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
   const [messages, setMessages]     = useState<AIMessage[]>([]);
@@ -804,8 +812,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
       setCurrentSession(resp.session);
       setMessages(resp.messages ?? []);
       if (resp.revision) onSelectRevision?.(resp.revision.id, resp.revision.name);
-      qc.invalidateQueries({ queryKey: ["dev-model"] });
-      qc.invalidateQueries({ queryKey: ["dev-applications"] });
+      refreshRevisions();
       qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
     } catch (e) {
       setError((e as Error).message);
@@ -832,6 +839,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           const resp = await api.aiDiscardDraft(sessionId);
           setCurrentSession(resp.session);
           setMessages(resp.messages ?? []);
+          refreshRevisions();
           qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
         } catch (e) {
           setError((e as Error).message);
@@ -1241,6 +1249,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                 setMessages(msgs);
                 setPendingProposal(updated.status === "pending" ? updated : null);
                 if (session) setCurrentSession(session);
+                // A confirmed plan's first step makes the session's draft.
+                if (session && session.draft_revision_id !== currentSession?.draft_revision_id) refreshRevisions();
                 qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
                 // A fully-executed maximum-size batch means the plan very
                 // likely continues — ask for the next batch automatically.

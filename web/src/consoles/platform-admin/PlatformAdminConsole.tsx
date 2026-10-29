@@ -45,6 +45,11 @@ const SearchMatches = createContext<Set<string> | null>(null);
 function invalidateTenancy(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["admin-tenants"] });
   qc.invalidateQueries({ queryKey: ["dev-applications"] });
+  // The developer section's working revision is read again: one whose model
+  // (or application) was deleted here is refused (404) and Build opens on the
+  // default, rather than the deleted revision staying on with no data.
+  qc.invalidateQueries({ queryKey: ["dev-model"] });
+  qc.invalidateQueries({ queryKey: ["dev-revisions-auto"] });
 }
 
 function RemovalNotice({ result }: { result?: AccessRemovalResult }) {
