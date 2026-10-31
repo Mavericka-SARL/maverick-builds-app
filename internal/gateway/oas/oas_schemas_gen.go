@@ -1224,6 +1224,10 @@ type AdminUser struct {
 	// developer or tenant_admin unless the caller is a platform admin. Inside a workspace, that
 	// workspace's grantable_roles apply.
 	GrantableRoles []string `json:"grantable_roles"`
+	// Set, for a caller that is no platform admin, on a platform admin's or platform-wide builder's
+	// account other than the caller's own: its roles, with or without a workspace, are changed only by a
+	// platform admin, and the role endpoints refuse anyone else.
+	PlatformAccount OptBool `json:"platform_account"`
 }
 
 // GetTenantID returns the value of TenantID.
@@ -1286,6 +1290,11 @@ func (s *AdminUser) GetGrantableRoles() []string {
 	return s.GrantableRoles
 }
 
+// GetPlatformAccount returns the value of PlatformAccount.
+func (s *AdminUser) GetPlatformAccount() OptBool {
+	return s.PlatformAccount
+}
+
 // SetTenantID sets the value of TenantID.
 func (s *AdminUser) SetTenantID(val OptString) {
 	s.TenantID = val
@@ -1344,6 +1353,11 @@ func (s *AdminUser) SetPermissions(val AdminUserPermissions) {
 // SetGrantableRoles sets the value of GrantableRoles.
 func (s *AdminUser) SetGrantableRoles(val []string) {
 	s.GrantableRoles = val
+}
+
+// SetPlatformAccount sets the value of PlatformAccount.
+func (s *AdminUser) SetPlatformAccount(val OptBool) {
+	s.PlatformAccount = val
 }
 
 // Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the

@@ -164,12 +164,12 @@ func (e *ToolExecutor) integrationsForForm(ctx context.Context, formID string) (
 // ── list_workflow_roles ───────────────────────────────────────────────────────
 
 // The two vocabularies a step's assignee_roles and a notification's
-// recipient_role accept: the platform roles every deployment has, and the
+// recipient_role accept: the built-in roles every deployment has, and the
 // business roles of this application's customer (the console's own picker
 // lists the same set through /api/developer/workflow-roles).
 func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 	var sb strings.Builder
-	sb.WriteString("Platform roles (use the code): business_user, business_admin, developer, platform_admin\n")
+	sb.WriteString("Built-in roles (use the code): business_user, business_admin, developer (tenant roles); platform_admin (the platform role)\n")
 	rows, err := e.pool.Query(ctx, `
 		SELECT br.id::text, br.name,
 		       (SELECT count(*) FROM identity.business_role_member brm WHERE brm.role_id = br.id),

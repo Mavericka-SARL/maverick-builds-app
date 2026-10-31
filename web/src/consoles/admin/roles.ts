@@ -1,12 +1,13 @@
-// Mirrors assignableRoles() in internal/gateway/handler.go — the server is
+// Mirrors grantableRoles() in internal/gateway/admin_tiers.go — the server is
 // the actual security boundary (it re-validates every grant/revoke), this
-// only keeps the UI from offering choices the actor cannot make. Strictly
-// below the actor's own tier: a tenant_admin can grant developer/business
-// roles but never another tenant_admin; a developer can grant business
-// roles but never a developer or tenant_admin.
+// only keeps the UI from offering choices the actor cannot make. Only a
+// platform admin grants platform_admin; a tenant_admin grants tenant_admin
+// too, in its own tenant (the server refuses it for another tenant's
+// account, and refuses removing a tenant's last tenant admin); a developer
+// grants business roles but never a developer or tenant_admin.
 const ROLE_HIERARCHY: Record<string, string[]> = {
   platform_admin: ["platform_admin", "tenant_admin", "developer", "business_admin", "business_user"],
-  tenant_admin: ["developer", "business_admin", "business_user"],
+  tenant_admin: ["tenant_admin", "developer", "business_admin", "business_user"],
   developer: ["business_admin", "business_user"],
 };
 

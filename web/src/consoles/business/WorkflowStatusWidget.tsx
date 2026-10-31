@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type WorkflowStatusStep } from "../../api/client";
 import { LoadingState } from "../../ui";
 
-// The platform roles a step names, as people read them; a business role
+// The tenant roles a step names, as people read them; a business role
 // keeps its own name.
 const ROLE_NAMES: Record<string, string> = {
   business_admin: "Business admin", business_user: "Business users", approver: "Approver",

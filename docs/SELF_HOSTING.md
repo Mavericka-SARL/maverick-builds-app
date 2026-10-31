@@ -197,7 +197,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.29        # a release: the newest is on the Releases page
+git checkout 2026.10.31        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -279,7 +279,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.29   # the release you checked out
+MAVERICKS_RELEASE=2026.10.31   # the release you checked out
 ```
 
 ```bash
@@ -364,16 +364,25 @@ sign-in page; sign in as the administrator from step 6.
 
 The platform is organised as **tenants** (the organisations using it — often
 just your own), each holding **applications**, each holding **models** that
-developers build and users work in. People are given
-**roles**:
+developers build and users work in. People are given **roles** of two
+kinds. The **platform role**, `platform_admin`, is held above every tenant
+and runs the deployment; only a platform administrator gives it. Every other
+role is a **tenant role**, held inside one tenant: `tenant_admin` and
+`developer` across the whole tenant, the two business roles in one of its
+workspaces.
 
-| Role | Does |
-|---|---|
-| `platform_admin` | Everything, across all tenants: tenants, applications, users, platform settings |
-| `tenant_admin` | Manages one tenant's workspaces, applications and users |
-| `developer` | Builds models: dimensions, metrics, grids, tables of records, dashboards, workflows, integrations |
-| `business_admin` | Administers business consoles within a workspace |
-| `business_user` | Enters and reviews data |
+| Role | Kind | Does |
+|---|---|---|
+| `platform_admin` | platform | Everything, across all tenants: tenants, applications, users, platform settings |
+| `tenant_admin` | tenant | Manages one tenant's workspaces, applications and users, and makes other tenant admins there |
+| `developer` | tenant | Builds models: dimensions, metrics, grids, tables of records, dashboards, workflows, integrations |
+| `business_admin` | tenant, in a workspace | Administers business consoles within a workspace |
+| `business_user` | tenant, in a workspace | Enters and reviews data; shown as *user* |
+
+Each role adds its own group to the sidebar. The platform administrator's
+**Platform** group already holds the tenant administrator's screens —
+Applications, Users, Audit Log and the rest — for every tenant, so there is
+no separate **Tenant admin** group beside it.
 
 A self-hosted deployment starts where a sign-up on the hosted Playground
 does, without the Playground's 100 MB limit. As the platform administrator:
@@ -397,7 +406,10 @@ does, without the Playground's 100 MB limit. As the platform administrator:
    Editions**.
 2. **Users › Invite user** — e-mail, name and a role, e.g. `developer`. The
    person receives an e-mail with a link to set their password; the link is
-   valid for three days. Business roles are also given a workspace.
+   valid for three days. Business roles are also given a workspace. To
+   give someone more roles later, press the pencil on their row: **Platform
+   role** offers `platform_admin`, and **Tenant roles** offers the rest —
+   choose *user* or *business admin* and then the workspace.
 3. To build your own application: **New application** in the tenant, then
    **Add model** inside it. The developer finds the model under **Models**,
    creates its first revision and starts building.
@@ -493,7 +505,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.10.29
+git fetch --tags && git checkout <new release>       # e.g. 2026.10.31
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -679,7 +691,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.29`; set the release you deploy, or, if you built your
+   release `2026.10.31`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -861,7 +873,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.29   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.31   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

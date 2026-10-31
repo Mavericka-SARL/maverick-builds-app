@@ -3446,9 +3446,15 @@ func (s *AdminUser) encodeFields(e *jx.Encoder) {
 		}
 		e.ArrEnd()
 	}
+	{
+		if s.PlatformAccount.Set {
+			e.FieldStart("platform_account")
+			s.PlatformAccount.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAdminUser = [12]string{
+var jsonFieldsNameOfAdminUser = [13]string{
 	0:  "tenant_id",
 	1:  "tenant_name",
 	2:  "id",
@@ -3461,6 +3467,7 @@ var jsonFieldsNameOfAdminUser = [12]string{
 	9:  "home_tenant",
 	10: "permissions",
 	11: "grantable_roles",
+	12: "platform_account",
 }
 
 // Decode decodes AdminUser from json.
@@ -3637,6 +3644,16 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"grantable_roles\"")
+			}
+		case "platform_account":
+			if err := func() error {
+				s.PlatformAccount.Reset()
+				if err := s.PlatformAccount.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"platform_account\"")
 			}
 		default:
 			return d.Skip()

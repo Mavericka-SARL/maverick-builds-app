@@ -1186,6 +1186,8 @@ export interface AdminUser {
   home_tenant?: "own" | "other" | "none";
   /** Roles this caller may give the account without a workspace (the server's grantable_roles). */
   grantable_roles?: string[];
+  /** A platform admin's or platform-wide builder's account: only a platform admin changes its roles. */
+  platform_account?: boolean;
   /**
    * The database the row lives in, as the console addresses it (X-Tenant-Id):
    * a dedicated tenant's id, CONTROL_PLANE, or "" with a single database. The

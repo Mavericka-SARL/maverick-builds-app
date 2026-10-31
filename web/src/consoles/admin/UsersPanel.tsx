@@ -39,7 +39,18 @@ const ROLE_TONE: Record<string, DesignTone> = {
   business_user: "success",
 };
 
-const PLATFORM_ROLES = ["platform_admin", "developer", "tenant_admin"] as const;
+/**
+ * The platform role: held above every tenant, it runs the whole deployment.
+ * Every other role is a tenant role, held inside one tenant.
+ */
+const PLATFORM_ROLE = "platform_admin";
+
+/**
+ * The tenant roles that may be held with no workspace, across the account's
+ * own tenant. The business roles are tenant roles too, but given in a
+ * workspace (BUSINESS_ROLES).
+ */
+const TENANT_WIDE_ROLES = ["tenant_admin", "developer"] as const;
 const WORKSPACE_ROLES = ["tenant_admin", "developer", "business_admin", "business_user"] as const;
 
 /**
@@ -105,6 +116,11 @@ function foreignAccountNote(u: AdminUser) {
  */
 function hasNarrowedDeveloperGrant(u: AdminUser) {
   return u.home_tenant === "none" && (u.assignments ?? []).some(a => a.role === "developer" && a.workspace_id === "");
+}
+
+/** The roles the account holds with no workspace: the platform role, and tenant roles across its own tenant. */
+function unscopedOf(u: AdminUser) {
+  return (u.assignments ?? []).filter(a => a.workspace_id === "");
 }
 
 function assignmentKey(a: UserAssignment) {
@@ -235,7 +251,8 @@ export function UsersPanel({
   }
   const [editUser, setEditUser] = useState({ email: "", display_name: "" });
   const [search, setSearch] = useState("");
-  const [addPlatformRole, setAddPlatformRole] = useState("");
+  const [addRoleChoice, setAddRoleChoice] = useState("");
+  const [addRoleWsId, setAddRoleWsId] = useState("");
   const [addWsRole, setAddWsRole] = useState("business_user");
   const [addWsId, setAddWsId] = useState("");
   const [addWsCustomerId, setAddWsCustomerId] = useState<string | null>(null);
@@ -337,7 +354,7 @@ export function UsersPanel({
   const addRole = useMutation({
     mutationFn: ({ userId, role, workspaceId }: { userId: string; role: string; workspaceId?: string }) =>
       atUser(userId, () => api.addAdminUserRole(userId, role, workspaceId)),
-    onSuccess: () => { inv(); setAddPlatformRole(""); setAddWsId(""); setAddWsCustomerId(null); },
+    onSuccess: () => { inv(); setAddRoleChoice(""); setAddRoleWsId(""); setAddWsId(""); setAddWsCustomerId(null); },
   });
   const removeRole = useMutation({
     mutationFn: ({ userId, role, workspaceId }: { userId: string; role: string; workspaceId?: string }) =>
@@ -388,6 +405,28 @@ export function UsersPanel({
   // Only a platform admin may assign platform_admin (computeAssignableRoles),
   // so this is exactly "the caller is a platform admin".
   const callerIsPlatformAdmin = assignableRoles.includes("platform_admin");
+  // A platform admin's account has its roles changed only by a platform admin
+  // (platformAccountRolesAllowed in the gateway), so nobody else is offered to.
+  // The server says so (platform_account), for platform-wide builders and
+  // for platform reach held in the control plane too; one older than the
+  // field is read from the account's own platform_admin grant.
+  const rolesArePlatformAdmins = (u: AdminUser) => u.platform_account ??
+    (!callerIsPlatformAdmin && u.id !== currentUserId && (u.assignments ?? []).some(a => a.role === "platform_admin"));
+  // tenant_admin in a workspace is not given to another organisation's
+  // account (tenantAdminGrantErr in the gateway): its own tenant could no
+  // longer delete or disable it.
+  const workspaceRolesFor = (u: AdminUser) => WORKSPACE_ROLES.filter(r =>
+    assignableRoles.includes(r) && !(r === "tenant_admin" && u.home_tenant === "other" && !callerIsPlatformAdmin));
+  // The workspaces this administrator may give the account role in: of a
+  // tenant in the account's database, where the server says the role is
+  // grantable (AdminWorkspace.grantable_roles), and not held there already.
+  const roleWorkspaces = (u: AdminUser, role: string) => workspaces.filter(w =>
+    tenants.some(t => t.id === w.customer_id && inRowDatabase(t, u)) &&
+    (w.grantable_roles ? w.grantable_roles.includes(role) : assignableRoles.includes(role)) &&
+    !(u.assignments ?? []).some(a => a.role === role && a.workspace_id === w.id));
+  // A workspace is named with its tenant when the list spans several.
+  const manyTenants = new Set(workspaces.map(w => w.customer_id)).size > 1;
+  const workspaceLabel = (w: AdminWorkspace) => manyTenants ? `${w.customer_name} · ${w.name}` : w.name;
   // Anyone else always adds a person with a role inside a workspace: the
   // gateway refuses POST /api/admin/users from them without both, and refuses
   // it the same way whether or not the address already has an account, so
@@ -448,7 +487,13 @@ export function UsersPanel({
                 </Field>
               )}
               {!rolesLoading && assignableRoles.length > 0 && (
-                <Field label="Initial Role" required={inviteNeedsRoleAndWorkspace}>
+                <Field label="Initial Role" required={inviteNeedsRoleAndWorkspace}
+                  // An address that already belongs to another organisation
+                  // is not added as tenant admin (tenantAdminGrantErr), and
+                  // the reply cannot say so without telling the address apart.
+                  description={newUser.role === "tenant_admin" && !callerIsPlatformAdmin
+                    ? "an address that already belongs to another organisation is not added as tenant admin: invite it with another role, or ask a platform admin"
+                    : undefined}>
                   <Select
                     value={newUser.role}
                     required={inviteNeedsRoleAndWorkspace}
@@ -463,7 +508,7 @@ export function UsersPanel({
                       : <option value="">None</option>}
                     {/* Every role this actor may assign, not just the platform
                         tiers. A developer's whole assignable set is the
-                        business roles, so filtering to PLATFORM_ROLES left
+                        business roles, so filtering to the whole-tenant roles left
                         them an empty dropdown and no way to give an invited
                         user any role at all. */}
                     {assignableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
@@ -590,12 +635,58 @@ export function UsersPanel({
                     <p className="mvx-admin-error" role="alert" style={{ margin: "0 0 16px" }}>{(updateUser.error as Error).message}</p>
                   )}
 
-                  <div style={{ marginBottom: 14 }}>
-                    <div className="mvx-admin-revisions__label" style={{ marginBottom: 6 }}>
-                      Platform roles
+                  {/* A platform role is held above every tenant; tenant
+                      roles inside one. Stated on the screen, because one
+                      "Platform roles" list used to hold tenant admin and
+                      developer too. */}
+                  {(callerIsPlatformAdmin || unscopedOf(u).some(a => a.role === PLATFORM_ROLE)) && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div className="mvx-admin-revisions__label" style={{ marginBottom: 2 }}>Platform role</div>
+                      <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                        Platform admin runs the whole deployment: every tenant, its people and its settings.
+                      </p>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        {unscopedOf(u).filter(a => a.role === PLATFORM_ROLE).map(a => (
+                          <RemovableRoleChip
+                            key={assignmentKey(a)}
+                            role={a.role}
+                            label={roleLabel(a.role)}
+                            onRemove={assignableRoles.includes(a.role) ? () => removeRole.mutate({ userId: u.id, role: a.role }) : undefined}
+                            blockedReason={isLastOwnAdminGrant(u, a, currentUserId)
+                              ? "This is what grants you user administration — another administrator has to remove it"
+                              : undefined}
+                            removing={removeRole.isPending}
+                          />
+                        ))}
+                        {!unscopedOf(u).some(a => a.role === PLATFORM_ROLE) && <span className="mvx-admin-muted">None</span>}
+                        {!unscopedOf(u).some(a => a.role === PLATFORM_ROLE) && assignableRoles.includes(PLATFORM_ROLE) && !isForeignAccount(u) &&
+                          (u.grantable_roles ? u.grantable_roles.includes(PLATFORM_ROLE) : true) && (
+                          <Button size="sm" aria-label="Add platform role" disabled={addRole.isPending}
+                            onClick={() => confirm({
+                              title: "Make platform admin?",
+                              body: `"${u.display_name}" will run the whole deployment: every tenant, its people and its settings.`,
+                              confirmLabel: "Make platform admin",
+                              onConfirm: () => addRole.mutate({ userId: u.id, role: PLATFORM_ROLE }),
+                            })}>
+                            Make platform admin
+                          </Button>
+                        )}
+                      </div>
                     </div>
+                  )}
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div className="mvx-admin-revisions__label" style={{ marginBottom: 2 }}>Tenant roles</div>
+                    <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                      {/* Without a workspace, these roles apply to the
+                          account's own tenant — and, on an account of none,
+                          beyond any one tenant (platformWideGrantErr). */}
+                      {u.home_tenant === "none"
+                        ? "This account belongs to no tenant: developer without a workspace builds in every tenant, and tenant admin administers every tenant it holds a role in. User and business admin are given in a workspace, and listed under it below."
+                        : "Tenant admin and developer cover the account's own tenant. User and business admin are given in a workspace, and listed under it below."}
+                    </p>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                      {(u.assignments ?? []).filter(a => a.workspace_id === "").map(a => (
+                      {unscopedOf(u).filter(a => a.role !== PLATFORM_ROLE).map(a => (
                         <RemovableRoleChip
                           key={assignmentKey(a)}
                           role={a.role}
@@ -603,31 +694,53 @@ export function UsersPanel({
                           // A role with no workspace belongs to the account's
                           // own organisation; on another's it is not this
                           // administrator's to take away.
-                          onRemove={assignableRoles.includes(a.role) && !isForeignAccount(u) ? () => removeRole.mutate({ userId: u.id, role: a.role }) : undefined}
+                          onRemove={assignableRoles.includes(a.role) && !isForeignAccount(u) && !rolesArePlatformAdmins(u)
+                            ? () => removeRole.mutate({ userId: u.id, role: a.role }) : undefined}
                           blockedReason={isLastOwnAdminGrant(u, a, currentUserId)
                             ? "This is what grants you user administration — another administrator has to remove it"
                             : undefined}
                           removing={removeRole.isPending}
                         />
                       ))}
-                      {(u.assignments ?? []).filter(a => a.workspace_id === "").length === 0 && (
-                        <span className="mvx-admin-muted">None</span>
+                      {!unscopedOf(u).some(a => a.role !== PLATFORM_ROLE) && (
+                        <span className="mvx-admin-muted">
+                          {(u.assignments ?? []).some(a => a.workspace_id !== "") ? "Only in workspaces" : "None"}
+                        </span>
                       )}
                       {(() => {
-                        const existing = (u.assignments ?? []).filter(a => a.workspace_id === "").map(a => a.role);
-                        const available = PLATFORM_ROLES.filter(r => !existing.includes(r) && assignableRoles.includes(r) &&
-                          (u.grantable_roles ? u.grantable_roles.includes(r) : true));
-                        if (!available.length || isForeignAccount(u)) return null;
+                        // One list for every tenant role this administrator
+                        // may give: tenant admin and developer for the whole
+                        // tenant, and the business roles, which grant nothing
+                        // outside a workspace and so are given in one (they
+                        // used to be reachable only through Add workspace
+                        // below, and looked missing).
+                        const existing = unscopedOf(u).map(a => a.role);
+                        const wholeTenant = isForeignAccount(u) || rolesArePlatformAdmins(u) ? [] : TENANT_WIDE_ROLES.filter(r =>
+                          !existing.includes(r) && assignableRoles.includes(r) && (u.grantable_roles ? u.grantable_roles.includes(r) : true));
+                        const inWorkspace = canGrantWorkspaceRoles && !rolesArePlatformAdmins(u)
+                          ? BUSINESS_ROLES.filter(r => roleWorkspaces(u, r).length > 0) : [];
+                        if (!wholeTenant.length && !inWorkspace.length) return null;
+                        const needsWorkspace = BUSINESS_ROLES.includes(addRoleChoice);
+                        const choices = needsWorkspace ? roleWorkspaces(u, addRoleChoice) : [];
+                        const wsId = addRoleWsId || (choices.length === 1 ? choices[0].id : "");
                         return (
                           <div className="mvx-admin-inline-form">
-                            <Select value={addPlatformRole} onChange={e => setAddPlatformRole(e.target.value)}
-                              style={{ width: 140 }} aria-label="Add platform role">
-                              <option value="">+ Add...</option>
-                              {available.map(r => <option key={r} value={r}>{r}</option>)}
+                            <Select value={addRoleChoice} onChange={e => { setAddRoleChoice(e.target.value); setAddRoleWsId(""); }}
+                              style={{ width: 230 }} aria-label="Add tenant role">
+                              <option value="">+ Add tenant role…</option>
+                              {wholeTenant.map(r => <option key={r} value={r}>{roleLabel(r)} — {u.home_tenant === "none" ? "without a workspace" : "whole tenant"}</option>)}
+                              {inWorkspace.map(r => <option key={r} value={r}>{roleLabel(r)} — in a workspace</option>)}
                             </Select>
-                            {addPlatformRole && (
-                              <Button variant="primary" size="sm" disabled={addRole.isPending}
-                                onClick={() => addRole.mutate({ userId: u.id, role: addPlatformRole })}>
+                            {needsWorkspace && (
+                              <Select value={wsId} onChange={e => setAddRoleWsId(e.target.value)}
+                                style={{ width: 220 }} aria-label="Workspace for the role">
+                                <option value="" disabled>Select a workspace…</option>
+                                {choices.map(w => <option key={w.id} value={w.id}>{workspaceLabel(w)}</option>)}
+                              </Select>
+                            )}
+                            {addRoleChoice && (
+                              <Button variant="primary" size="sm" disabled={addRole.isPending || (needsWorkspace && !wsId)}
+                                onClick={() => addRole.mutate({ userId: u.id, role: addRoleChoice, workspaceId: needsWorkspace ? wsId : undefined })}>
                                 Add
                               </Button>
                             )}
@@ -635,6 +748,12 @@ export function UsersPanel({
                         );
                       })()}
                     </div>
+                    {/* The server has the last word — it refuses, say, the
+                        tenant's last tenant admin — and its reason is shown
+                        under the account it was about. */}
+                    {[...(addWsCustomerId === null ? [addRole] : []), removeRole]
+                      .filter(m => m.isError && m.variables?.userId === u.id)
+                      .map((m, i) => <p key={i} className="mvx-admin-error" role="alert" style={{ marginTop: 6 }}>{(m.error as Error).message}</p>)}
                   </div>
 
                   {/* Two different permissions share this block. Placing
@@ -663,7 +782,8 @@ export function UsersPanel({
                                 key={assignmentKey(a)}
                                 role={a.role}
                                 label={`${a.workspace_name} · ${roleLabel(a.role)}`}
-                                onRemove={assignableRoles.includes(a.role) ? () => removeRole.mutate({ userId: u.id, role: a.role, workspaceId: a.workspace_id }) : undefined}
+                                onRemove={assignableRoles.includes(a.role) && !rolesArePlatformAdmins(u)
+                                  ? () => removeRole.mutate({ userId: u.id, role: a.role, workspaceId: a.workspace_id }) : undefined}
                                 blockedReason={isLastOwnAdminGrant(u, a, currentUserId)
                                   ? "This is what grants you user administration — another administrator has to remove it"
                                   : undefined}
@@ -671,7 +791,7 @@ export function UsersPanel({
                               />
                             ))}
                             {wsAssignments.length === 0 && <span className="mvx-admin-muted">No workspace access</span>}
-                            <Button
+                            {!rolesArePlatformAdmins(u) && <Button
                               size="sm"
                               variant="ghost"
                               style={{ marginLeft: "auto" }}
@@ -679,7 +799,7 @@ export function UsersPanel({
                               onClick={() => { setAddWsCustomerId(isGrantingHere ? null : tenant.id); setAddWsId(""); setAddWsRole("business_user"); }}
                             >
                               {isGrantingHere ? "Cancel" : "Add workspace"}
-                            </Button>
+                            </Button>}
                           </div>
 
                           {isGrantingHere && (
@@ -691,7 +811,7 @@ export function UsersPanel({
                               </Select>
                               <Select value={addWsRole} onChange={e => setAddWsRole(e.target.value)}
                                 style={{ flex: 1 }} aria-label="Select role">
-                                {WORKSPACE_ROLES.filter(r => assignableRoles.includes(r)).map(r => <option key={r} value={r}>{r}</option>)}
+                                {workspaceRolesFor(u).map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                               </Select>
                               <Button
                                 variant="primary"
@@ -702,6 +822,10 @@ export function UsersPanel({
                                 Grant
                               </Button>
                             </div>
+                          )}
+                          {/* A grant refused here is said here, by the form that asked. */}
+                          {isGrantingHere && addRole.isError && addRole.variables?.userId === u.id && (
+                            <p className="mvx-admin-error" role="alert" style={{ margin: 0, padding: "6px 12px" }}>{(addRole.error as Error).message}</p>
                           )}
 
                           {canManageResourceAccess && tenant.applications.length === 0 && (
@@ -762,7 +886,6 @@ export function UsersPanel({
                         </div>
                       );
                     })}
-                    {addRole.isError && <p className="mvx-admin-error" style={{ marginTop: 4 }}>{(addRole.error as Error).message}</p>}
                     {/* The server may refuse a grant or revoke (the last application
                         or model narrowing a developer with no tenant, say); its
                         reason is shown under the account it was about, as sent. */}
@@ -828,7 +951,7 @@ export function UsersPanel({
                         aria-label={`Edit ${u.display_name}`}
                         title="Edit"
                         size={28}
-                        onClick={() => { setEditId(u.id); updateUser.reset(); setEditUser({ email: u.email, display_name: u.display_name }); setAddPlatformRole(""); setAddWsId(""); setAddWsRole("business_user"); setAddWsCustomerId(null); }}
+                        onClick={() => { setEditId(u.id); updateUser.reset(); setEditUser({ email: u.email, display_name: u.display_name }); setAddRoleChoice(""); setAddRoleWsId(""); addRole.reset(); removeRole.reset(); setAddWsId(""); setAddWsRole("business_user"); setAddWsCustomerId(null); }}
                       >
                         <Pencil size={14} aria-hidden="true" />
                       </IconButton>

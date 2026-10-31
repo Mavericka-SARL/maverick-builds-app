@@ -635,7 +635,7 @@ func (s *Session) DescribeWorkflow(ctx context.Context, p Pinned, workflowID str
 	}
 	return &WorkflowDescription{Context: p, Workflow: def.WorkflowRef, Start: def.ContextSchema, Steps: def.Steps, Notes: []string{
 		"Steps are in the order the designer listed them; routes and next_step_ids say which step follows (by step id), per decision where a step has routes.",
-		"assignee_roles are role names: a business role, or a platform role such as business_admin. Conditions and notification recipients are not shown.",
+		"assignee_roles are role names: a business role, or a tenant role such as business_admin. Conditions and notification recipients are not shown.",
 		"This connection describes workflows; it never starts, approves or submits one.",
 	}}, nil
 }

@@ -213,6 +213,7 @@ test("another organisation's account cannot be renamed or re-roled at home", asy
   // developer with no workspace is his own organisation's grant, not ours to take.
   await expect(page.getByLabel("Remove developer")).toHaveCount(0);
   await expect(page.getByLabel("Add platform role")).toHaveCount(0);
+  await expect(page.getByLabel("Add tenant role").locator("option", { hasText: "whole tenant" })).toHaveCount(0);
   // The role he holds in our workspace is ours to remove.
   await expect(page.getByLabel("Remove user")).toBeEnabled();
   await page.getByRole("button", { name: "Close" }).click();
@@ -220,6 +221,37 @@ test("another organisation's account cannot be renamed or re-roled at home", asy
   await page.getByLabel("Edit Olivia Own").click();
   await expect(page.getByPlaceholder("display name")).toHaveValue("Olivia Own");
   await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+});
+
+// A platform role is held above every tenant, tenant roles inside one; the
+// screen says which is which (2026-10-30). The business roles are tenant
+// roles given in a workspace: they used to be offered only behind "Add
+// workspace", so a tenant admin who had dropped them saw no way back.
+test("a tenant admin gives every tenant role from one list, business roles in a workspace", async ({ page }) => {
+  const calls = await openConsole(page);
+  await openUsers(page);
+
+  await page.getByLabel("Edit Ada Admin").click();
+  await expect(page.getByText("Tenant roles", { exact: true })).toBeVisible();
+  // Nobody here holds the platform role, and a tenant admin cannot give it.
+  await expect(page.getByText("Platform role", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Add platform role")).toHaveCount(0);
+
+  const add = page.getByLabel("Add tenant role");
+  await expect(add.locator("option")).toHaveText([
+    "+ Add tenant role…", "developer — whole tenant", "business admin — in a workspace", "user — in a workspace",
+  ]);
+  await add.selectOption({ label: "user — in a workspace" });
+  // The only workspace this administrator may grant in is chosen for them.
+  await expect(page.getByLabel("Workspace for the role")).toHaveValue(WS_ID);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect.poll(() => calls.filter((c) => c.method() === "POST" && c.url().endsWith(`/api/admin/users/${SELF_ID}/roles`))
+    .map((c) => c.postDataJSON())).toEqual([{ role: "business_user", workspace_id: WS_ID }]);
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // tenant_admin is a tenant admin's to give in its own tenant.
+  await page.getByLabel("Edit Olivia Own").click();
+  await expect(page.getByLabel("Add tenant role").locator("option", { hasText: "tenant admin — whole tenant" })).toHaveCount(1);
 });
 
 test("Remove from this tenant asks first, then removes only the tenant access", async ({ page }) => {

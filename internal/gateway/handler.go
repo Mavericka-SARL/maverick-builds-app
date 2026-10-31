@@ -7462,6 +7462,11 @@ type adminUserItem struct {
 	// no workspace (unscopedGrantableRoles); inside a workspace, the
 	// workspace's grantable_roles (GET /api/admin/workspaces) apply.
 	GrantableRoles []string `json:"grantable_roles"`
+	// PlatformAccount is set, for a caller that is no platform admin, on a
+	// platform admin's or platform-wide builder's account other than its
+	// own: its roles are a platform admin's to change
+	// (platformAccountRolesAllowed), so none are offered.
+	PlatformAccount bool `json:"platform_account,omitempty"`
 	// TenantID is the database the row lives in, as the console addresses
 	// it (X-Tenant-Id): a dedicated tenant's id, controlPlaneAddress for the
 	// control plane, or "" with a single database. The same person has a
@@ -13722,7 +13727,10 @@ func (h *handler) adminRevisionAction(w http.ResponseWriter, r *http.Request) {
 // the actor's own tier: a tenant_admin can never mint another tenant_admin,
 // a developer can never mint another developer or a tenant_admin — otherwise
 // any tenant_admin/developer account could self-replicate or escalate peers
-// to platform_admin via the workspace-scoped role-grant path.
+// to platform_admin via the workspace-scoped role-grant path. It also
+// decides what deleting, disabling or removing an account from a tenant may
+// take (revokesEvery, removeFromTenant). The role endpoints alone add a
+// tenant_admin's grant and revoke of tenant_admin (roleIsGrantableBy).
 func assignableRoles(actorRoles []string) []string {
 	has := func(role string) bool {
 		for _, r := range actorRoles {
@@ -14026,7 +14034,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, errInviteNeedsRoleAndWorkspace, http.StatusBadRequest)
 			return
 		}
-		if body.Role != "" && !roleIsAssignableBy(act.Roles, body.Role) {
+		if body.Role != "" && !roleIsGrantableBy(act.Roles, body.Role) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role", body.Role), http.StatusForbidden)
 			return
 		}
@@ -14055,7 +14063,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tierRoles = tiers.rolesIn(customerID)
-			if !roleIsAssignableBy(tierRoles, body.Role) {
+			if !roleIsGrantableBy(tierRoles, body.Role) {
 				jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this workspace's tenant", body.Role), http.StatusForbidden)
 				return
 			}
@@ -14294,6 +14302,15 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			abort(http.StatusInternalServerError, err)
 			return
 		}
+		// A row this request did not make is an existing account's — one
+		// made at the same moment for another tenant, say — and is given
+		// tenant_admin only as addExistingAccount gives it.
+		if !insertedRow && body.WorkspaceID != "" {
+			if err := tenantAdminGrantErr(act, body.Role, customerID, accountCustomer); err != nil {
+				h.refuseExistingAccount(ctx, w, act, userID, body.Email, body.Role, body.WorkspaceID, err.Error())
+				return
+			}
+		}
 		// The directory is what routes this person to their database on
 		// their next request.
 		h.noteUser(ctx, sub, body.Email)
@@ -14493,24 +14510,25 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("role required"), http.StatusBadRequest)
 			return
 		}
-		if !roleIsAssignableBy(act.Roles, body.Role) {
+		if !roleIsGrantableBy(act.Roles, body.Role) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role", body.Role), http.StatusForbidden)
 			return
 		}
 		// The caller's tier where the grant applies decides (adminTiers):
 		// the workspace's tenant, or — with no workspace — the account's own.
 		var tierRoles []string
+		var wsCustomer string
 		if body.WorkspaceID != "" {
 			// A workspace-scoped grant is resource access, not a platform
 			// role — it decides which workspace someone reaches. Developers
 			// are admitted for business roles only; see canGrantWorkspaceRole.
-			wsCustomer := h.customerOfWorkspace(ctx, body.WorkspaceID)
+			wsCustomer = h.customerOfWorkspace(ctx, body.WorkspaceID)
 			if wsCustomer == "" || !tiers.inScope(wsCustomer) {
 				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
 				return
 			}
 			tierRoles = tiers.rolesIn(wsCustomer)
-			if !roleIsAssignableBy(tierRoles, body.Role) {
+			if !roleIsGrantableBy(tierRoles, body.Role) {
 				jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this workspace's tenant", body.Role), http.StatusForbidden)
 				return
 			}
@@ -14532,10 +14550,17 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusForbidden)
 			return
 		}
+		if body.WorkspaceID != "" {
+			if err := tenantAdminGrantErr(act, body.Role, wsCustomer, targetCustomer); err != nil {
+				jsonErr(w, err, http.StatusForbidden)
+				return
+			}
+		}
 		// Any role in a new tenant's workspace makes an account with no
 		// tenant and tenant_admin without a workspace that tenant's
-		// administrator (customerlessAdminGainsTenant).
-		if body.WorkspaceID != "" && !roleIsAssignableBy(tierRoles, "tenant_admin") {
+		// administrator (customerlessAdminGainsTenant), which only a
+		// platform admin decides.
+		if body.WorkspaceID != "" && !slices.Contains(tierRoles, "platform_admin") {
 			gains, err := h.customerlessAdminGainsTenant(ctx, userID, body.WorkspaceID)
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
@@ -14553,8 +14578,11 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				"Grant %s inside a workspace of your tenant instead", body.Role), http.StatusForbidden)
 			return
 		}
-		if body.WorkspaceID == "" && !roleIsAssignableBy(tiers.rolesIn(targetCustomer), body.Role) {
+		if body.WorkspaceID == "" && !roleIsGrantableBy(tiers.rolesIn(targetCustomer), body.Role) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this account's tenant", body.Role), http.StatusForbidden)
+			return
+		}
+		if !h.platformAccountRolesAllowed(ctx, w, act, tiers, userID) {
 			return
 		}
 		var execErr error
@@ -14589,10 +14617,14 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 3 && parts[1] == "roles" && r.Method == http.MethodDelete {
 		role := parts[2]
 		wsID := r.URL.Query().Get("workspace_id")
-		if !roleIsAssignableBy(act.Roles, role) {
+		if !roleIsGrantableBy(act.Roles, role) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role", role), http.StatusForbidden)
 			return
 		}
+		// The tenant whose administrators a tenant_admin revocation counts
+		// against (revokeRole): the workspace's, or with none the account's
+		// own. A platform admin's revocations are not counted.
+		guardTenant := ""
 		if wsID != "" {
 			// Symmetric with the grant above: revoking workspace-scoped access
 			// is the same decision as granting it, by the caller's tier in the
@@ -14606,9 +14638,12 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
 				return
 			}
-			if tierRoles := tiers.rolesIn(wsCustomer); !roleIsAssignableBy(tierRoles, role) || !canGrantWorkspaceRole(tierRoles, role) {
+			if tierRoles := tiers.rolesIn(wsCustomer); !roleIsGrantableBy(tierRoles, role) || !canGrantWorkspaceRole(tierRoles, role) {
 				jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role in this workspace's tenant", role), http.StatusForbidden)
 				return
+			}
+			if !tiers.platform {
+				guardTenant = wsCustomer
 			}
 		} else if !act.hasRole("platform_admin") {
 			// A role held with no workspace applies to the account's own
@@ -14625,20 +14660,20 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 					"is not yours to remove. Remove its roles in your workspaces, or remove it from your tenant"), http.StatusForbidden)
 				return
 			}
-			if !roleIsAssignableBy(tiers.rolesIn(targetCustomer), role) {
+			if !roleIsGrantableBy(tiers.rolesIn(targetCustomer), role) {
 				jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role in this account's tenant", role), http.StatusForbidden)
 				return
 			}
+			guardTenant = targetCustomer
 		}
 		// The same lock-yourself-out hazard as self-deletion, reached through
-		// the other control on the same screen. roleIsAssignableBy already
-		// stops a developer or tenant_admin from revoking their own tier, so
-		// the one case that actually gets here is a platform_admin removing
-		// their own platform_admin grant — and for the sole platform admin
-		// that ends user administration for the whole deployment as surely as
-		// deleting the account would. Stated as "your last admin-capable
-		// grant" rather than naming platform_admin, so it keeps holding if the
-		// assignable-role matrix changes.
+		// the other control on the same screen: a platform_admin removing
+		// their own platform_admin grant, or a tenant_admin its own
+		// tenant_admin with no developer grant beside it — and for the sole
+		// platform admin that ends user administration for the whole
+		// deployment as surely as deleting the account would. Stated as "your
+		// last admin-capable grant" rather than naming a role, so it keeps
+		// holding if the assignable-role matrix changes.
 		var keepsAdminAccess bool
 		if err := h.db.QueryRow(ctx, `
 			SELECT $1::uuid <> $2::uuid OR EXISTS (
@@ -14658,19 +14693,17 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var execErr error
-		if wsID != "" {
-			_, execErr = h.db.Exec(ctx, `
-				DELETE FROM identity.role_assignment
-				WHERE user_id=$1::uuid AND role=$2::identity.user_role AND workspace_id=$3::uuid
-			`, userID, role, wsID)
-		} else {
-			_, execErr = h.db.Exec(ctx, `
-				DELETE FROM identity.role_assignment
-				WHERE user_id=$1::uuid AND role=$2::identity.user_role AND workspace_id IS NULL
-			`, userID, role)
+		if !h.platformAccountRolesAllowed(ctx, w, act, tiers, userID) {
+			return
 		}
-		if execErr != nil {
+		if role != "tenant_admin" {
+			guardTenant = ""
+		}
+		if execErr := h.revokeRole(ctx, userID, role, wsID, guardTenant); execErr != nil {
+			if errors.Is(execErr, errLastTenantAdmin) {
+				jsonErr(w, execErr, http.StatusConflict)
+				return
+			}
 			jsonErr(w, execErr, http.StatusInternalServerError)
 			return
 		}

@@ -207,31 +207,32 @@ What a person sees in the console depends on their roles: each role adds its own
 
 1. Press **Invite user**.
 2. Fill in **Email**, **First name** and **Last name** — all three are needed.
-3. Choose an **Initial Role**: developer, business admin or user. For a business role, also choose the **Workspace**: a business role grants nothing until it has one.
+3. Choose an **Initial Role** — tenant admin, developer, business admin or user — and the **Workspace** they join.
 4. Press **Create user**.
 
 They get an e-mail asking them to set a password, and its link works for three days. The address is their sign-in and cannot be changed later, so check it first. If the invitation cannot be sent, no account is created and the screen says why.`, 244),
 
 		taText(`## Which role to give
 
-- **User** — enters numbers, saves records, submits requests, reads dashboards.
-- **Business admin** — approves requests, and decides who sees which dashboards and which data inside a model. Dashboards themselves come with **User**: give both to someone who also plans.
+Roles are of two kinds. The one **platform role**, *platform admin*, runs the whole deployment — every tenant — and only a platform admin gives it. Every other role is a **tenant role**, held in this tenant:
+
+- **Tenant admin** — looks after the tenant, as you do.
 - **Developer** — builds models: dimensions, metrics, grids, dashboards, tables of records, workflows, integrations.
+- **Business admin** — approves requests, and decides who sees which dashboards and which data inside a model. Dashboards themselves come with **User**: give both to someone who also plans.
+- **User** — enters numbers, saves records, submits requests, reads dashboards.
 
-You can give these three here, but not your own role; a platform admin — whoever runs this deployment — can make another tenant admin. A developer can invite people too, with the two business roles only, and cannot decide which applications or models they reach.`, 216),
+Tenant admin and developer cover the whole tenant; business admin and user are given in a workspace. You can give every tenant role, tenant admin included, to people of your tenant. A developer can invite people too, with the two business roles only, and cannot decide which applications or models they reach.`, 330),
 
-		taPicture(taGrants(), "Who may grant what: a platform admin every role, a tenant admin the developer and business roles plus application and model access, a developer the business roles", 880, 214),
+		taPicture(taGrants(), "Who may grant what: a platform admin every role, a tenant admin every tenant role plus application and model access, a developer the business roles", 880, 214),
 
 		taText(`## Deciding what someone reaches
 
-Press the pencil (**Edit**) on a person's row. Under **Resource access**:
+Press the pencil (**Edit**) on a person's row.
 
-- **Add workspace** places them in a workspace with a role — choose the workspace and the role, then press **Grant**.
-- Below it, every application and model has a checkbox. With none ticked, the person reaches all of them, and the **Access** column says *All apps/models*. Tick one and they reach only what is ticked.
+- Under **Tenant roles**, choose a role in **+ Add tenant role…** and press **Add**. *Tenant admin* and *developer* cover the whole tenant; for *business admin* or *user* also choose the workspace — with only one, it is chosen for you.
+- Under **Resource access**, the roles they hold in a workspace are listed by the workspace, and **Add workspace** gives any tenant role in one workspace only. Below, every application and model has a checkbox. With none ticked, the person reaches all of them, and the **Access** column says *All apps/models*. Tick one and they reach only what is ticked.
 
-Under **Platform roles**, **+ Add...** then **Add** gives someone the developer role, which needs no workspace.
-
-What a person sees *inside* a model — which dashboards, which rows of data — is the business admin's to decide, under **Business Admin › Roles** and **Business Admin › Access Rules**. The account that signed the tenant up holds that role as well; the *Business admin guide* model explains it.`, 276),
+What a person sees *inside* a model — which dashboards, which rows of data — is the business admin's to decide, under **Business Admin › Roles** and **Business Admin › Access Rules**. The account that signed the tenant up holds that role as well; the *Business admin guide* model explains it.`, 300),
 
 		taText(`## Taking access away
 
@@ -240,10 +241,10 @@ What a person sees *inside* a model — which dashboards, which rows of data —
 - **For a while** — press the person icon with a cross (**Disable**) and confirm: they cannot sign in until you press **Enable** on the same row. Their roles and access stay.
 - **Everything** — press the bin icon on their row and confirm **Delete user**. It revokes all their access.
 
-This works for a fellow tenant admin too, but never for yourself or for the tenant's last tenant admin; another administrator has to. You also cannot remove the last role that lets you manage users. Each of these changes is recorded in the **Audit Log** (page 4).
+This works for a fellow tenant admin too, but never for yourself or for the tenant's last tenant admin; another administrator has to. The tenant admin role itself you can remove — a fellow's or your own — while another tenant admin remains. You also cannot remove the last role that lets you manage users. Each of these changes is recorded in the **Audit Log** (page 4).
 
 ---
-Next: [3 · Models as packages](dashboard:3 · Models as packages).`, 264),
+Next: [3 · Models as packages](dashboard:3 · Models as packages).`, 288),
 	)
 }
 
@@ -418,7 +419,7 @@ func taGrants() string {
 		from, to int // the chips this role reaches, inclusive
 	}{
 		{"Platform admin", "runs the deployment", false, 0, 4},
-		{"Tenant admin", "you", true, 1, 4},
+		{"Tenant admin", "you", true, 0, 4},
 		{"Developer", "builds models", false, 2, 3},
 	}
 	for r, row := range rows {

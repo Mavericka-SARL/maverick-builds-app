@@ -70,7 +70,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_workflow_roles",
-			Description: "Returns what a step's assignee_roles and a notification's recipient_role may contain: the platform role codes, and this application's business roles by name with their member counts and the dashboards of this revision each may open. Call it before assigning any step; propose create_business_role when the role a developer names does not exist.",
+			Description: "Returns what a step's assignee_roles and a notification's recipient_role may contain: the built-in role codes (the tenant roles and platform_admin), and this application's business roles by name with their member counts and the dashboards of this revision each may open. Call it before assigning any step; propose create_business_role when the role a developer names does not exist.",
 			Parameters:  noParams,
 		},
 		{

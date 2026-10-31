@@ -67,7 +67,7 @@ posting runs the gateway's own posting code the same way.
 | `validate_formulas`, `check_grid_completeness` | the audit checks the console runs |
 | `list_workflows`, `get_workflow` | definitions; one in full — steps, context, subject, rules, and the Validate verdict |
 | `validate_workflow` | the editor's Validate button, for stored or not-yet-proposed steps |
-| `list_workflow_roles` | what `assignee_roles` may contain: platform role codes and the tenant's business roles, with each role's member count and the dashboards of the revision it may open |
+| `list_workflow_roles` | what `assignee_roles` may contain: built-in role codes (the tenant roles and `platform_admin`) and the tenant's business roles, with each role's member count and the dashboards of the revision it may open |
 | `list_automation_rules` | what starts each workflow |
 | `list_forms`, `get_form` | tables of records (the Records tab); one in full — fields, "own records only", integrations, record count |
 | `query_records` | a table's records, read-only, through the records query as the developer: a page (filters, search, sort) or totals (count, count_distinct, sum, avg, min, max, grouped by fields or a date period) |

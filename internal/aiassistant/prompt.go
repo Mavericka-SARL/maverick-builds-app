@@ -525,8 +525,8 @@ Every step: unique "id", "name", "type" (task | approval | condition | notificat
 A route back to an EARLIER step is a rework loop: the engine re-activates that step and resets what follows.
 Allowed only when the loop passes through a task or approval; a loop of automatic steps is refused.
 
-"assignee_roles" and "recipient_role" take platform role codes (business_user, business_admin, developer,
-platform_admin) or a business role NAME exactly as list_workflow_roles prints it. When the developer names a
+"assignee_roles" and "recipient_role" take a built-in role code — the tenant roles business_user, business_admin,
+developer, or the platform role platform_admin — or a business role NAME exactly as list_workflow_roles prints it. When the developer names a
 role that does not exist ("Finance Review"), propose create_business_role {"name": ...} BEFORE the step that
 uses it, and use the name (not "<created in step N>") in assignee_roles — roles are matched by name.
 

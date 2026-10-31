@@ -112,7 +112,7 @@ func TestAccountLevelActionsOnlyOnOwnAccounts(t *testing.T) {
 		own:     {HomeTenant: "own", Permissions: listedPermissions{Rename: true, Delete: true, Disable: true, Reinvite: true}},
 		other:   {HomeTenant: "other", Permissions: listedPermissions{RemoveFromTenant: true}},
 		none:    {HomeTenant: "none", Permissions: listedPermissions{RemoveFromTenant: true}},
-		coAdmin: {HomeTenant: "other"}, // tenant_admin there is a platform admin's to remove
+		coAdmin: {HomeTenant: "other"}, // tenant_admin there is revoked on its own (revokeRole), not by removal
 		// Never one's own account to delete or disable: it would lock its
 		// administrator out.
 		taID: {HomeTenant: "own", Permissions: listedPermissions{Rename: true, Reinvite: true}},
@@ -202,8 +202,8 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 
 	// Refused: a developer (resource access is not theirs), a platform admin
 	// (its scope names no one tenant), the tenant's own account, the caller
-	// itself, and an account holding a role there only a platform admin
-	// removes.
+	// itself, and an account holding tenant_admin there, which only the role
+	// endpoint revokes (revokeRole keeps the tenant's last tenant admin).
 	f.expect(t, "ws-dev-ba", "DELETE", "/api/admin/users/"+m+"/tenant-access", "", nil, http.StatusForbidden)
 	f.expect(t, "mm-platform", "DELETE", "/api/admin/users/"+m+"/tenant-access", "", nil, http.StatusBadRequest)
 	own := f.gbUser(t, "ab-own", f.cust1, [2]string{"business_user", f.ws1a})
@@ -214,6 +214,13 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 	f.expect(t, ta, "DELETE", "/api/admin/users/"+coAdmin+"/tenant-access", "", nil, http.StatusForbidden)
 	if n := f.one(t, `SELECT count(*)::text FROM identity.role_assignment WHERE user_id=$1::uuid`, coAdmin); n != "2" {
 		t.Errorf("refused removal left %s of the co-admin's 2 roles", n)
+	}
+	// Its tenant_admin revoked first (2026-10-30: a tenant admin's to
+	// revoke, the caller staying one), it is removed like anyone else.
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+coAdmin+"/roles/tenant_admin?workspace_id="+f.ws1a, "", nil, http.StatusOK)
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+coAdmin+"/tenant-access", "", nil, http.StatusOK)
+	if n := f.one(t, `SELECT count(*)::text FROM identity.role_assignment WHERE user_id=$1::uuid`, coAdmin); n != "0" {
+		t.Errorf("removal left %s of the co-admin's roles in this tenant", n)
 	}
 	pa := f.gbUser(t, "ab-pa", "", [2]string{"platform_admin", ""}, [2]string{"business_user", f.ws1a})
 	f.expect(t, ta, "DELETE", "/api/admin/users/"+pa+"/tenant-access", "", nil, http.StatusForbidden)
@@ -302,8 +309,15 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 	}
 
 	// What cannot be given to a new account cannot be given to this one.
-	invite("ab-existing@gb.test", "tenant_admin", f.ws1b, http.StatusForbidden)
 	invite("ab-existing@gb.test", "business_user", f.ws2, http.StatusForbidden)
+	// tenant_admin, which a new account of this tenant may be given, is not
+	// given to another tenant's account (tenantAdminGrantErr) — answered as
+	// a new invitation is, so the address is not told apart, and audited as
+	// refused.
+	invite("ab-existing@gb.test", "tenant_admin", f.ws1b, http.StatusOK)
+	if n := f.one(t, `SELECT count(*)::text FROM identity.role_assignment WHERE user_id=$1::uuid AND role='tenant_admin'`, ex); n != "0" {
+		t.Errorf("%s tenant_admin grant(s) on another tenant's account, want none", n)
+	}
 
 	fresh := invite("ab-fresh@gb.test", "business_user", f.ws1b, http.StatusOK)
 	// An invitation names a role and a workspace (decided 2026-09-30): one
@@ -369,9 +383,9 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 		t.Errorf("%s audited additions, want 2", audited)
 	}
 	// Refused before the address was looked at, nothing about the account
-	// was recorded.
-	if refusals != "0" {
-		t.Errorf("%s audited refusals without a workspace, want none", refusals)
+	// was recorded; the one refusal is the tenant_admin above.
+	if refusals != "1" {
+		t.Errorf("%s audited refusals, want only the tenant_admin one", refusals)
 	}
 
 	// Added, removed and added again: told once a day per workspace.

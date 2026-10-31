@@ -67,7 +67,8 @@ type accountFacts struct {
 	// enabled account of the tenant is.
 	LastTenantAdmin bool
 	// TenantAdminElsewhere: the account holds tenant_admin in a workspace of
-	// a tenant other than its home — a grant only a platform admin makes.
+	// a tenant other than its home — a grant only a platform admin makes
+	// (tenantAdminGrantErr), or one made while the account had no tenant.
 	TenantAdminElsewhere bool
 }
 
@@ -123,8 +124,9 @@ func accountIsCallers(customerID string, scopeAll bool, scope []string) bool {
 // developer of the home tenant read its tenant_admin tier there. Its own
 // account it renames and re-invites whatever it holds. It removes from the
 // tenants it is tenant admin of an account whose home is none of them — when
-// it may revoke every role the account holds there (a tenant_admin grant a
-// platform admin made stays).
+// it may revoke every role the account holds there (a tenant_admin grant
+// stays: it is revoked on its own, through the role endpoints, where the
+// tenant keeps its last tenant admin — revokeRole).
 func accountPermissionsFor(act *actor, tiers adminTiers, f accountFacts) (string, accountPermissions) {
 	home := homeTenant(f.CustomerID, tiers.all, tiers.ids())
 	if tiers.platform {
@@ -135,10 +137,11 @@ func accountPermissionsFor(act *actor, tiers adminTiers, f accountFacts) (string
 	}
 	own := accountIsCallers(f.CustomerID, tiers.all, tiers.ids())
 	// A tenant admin also changes a fellow tenant admin of its own tenant
-	// (the user's decision, 2026-10-06), though it may not grant the role:
-	// never itself (by delete or disable) nor the tenant's last one, and not
-	// one that is a tenant admin of another tenant too, which a deletion
-	// would take from there.
+	// (the user's decision, 2026-10-06): never itself (by delete or
+	// disable) nor the tenant's last one, and not one that is a tenant
+	// admin of another tenant too, which a deletion would take from there.
+	// The role itself, held in this tenant, it revokes through the role
+	// endpoints (roleIsGrantableBy, 2026-10-30).
 	roles := f.Roles
 	fellow := own && !f.TenantAdminElsewhere && tiers.tenantAdminOf(f.CustomerID) && slices.Contains(f.Roles, "tenant_admin")
 	if fellow {
@@ -288,9 +291,25 @@ func (h *handler) accountActionAllowed(ctx context.Context, w http.ResponseWrite
 	}
 	if accountIsCallers(f.CustomerID, tiers.all, tiers.ids()) && !f.PlatformAdmin && !f.PlatformWide {
 		tierRoles := tiers.rolesIn(f.CustomerID)
-		unrevocable := slices.DeleteFunc(slices.Clone(f.Roles), func(r string) bool { return roleIsAssignableBy(tierRoles, r) })
-		jsonErr(w, fmt.Errorf("forbidden: this account holds a role you may not revoke (%s), so you may not %s it either",
-			strings.Join(unrevocable, ", "), action), http.StatusForbidden)
+		// tenant_admin is a tenant admin's to revoke (roleIsGrantableBy), so
+		// it is not named as a role it may not: the refusal then says why.
+		unrevocable := slices.DeleteFunc(slices.Clone(f.Roles), func(r string) bool { return roleIsGrantableBy(tierRoles, r) })
+		var refusal error
+		switch {
+		case len(unrevocable) > 0:
+			refusal = fmt.Errorf("forbidden: this account holds a role you may not revoke (%s), so you may not %s it either",
+				strings.Join(unrevocable, ", "), action)
+		case f.Self:
+			refusal = fmt.Errorf("forbidden: you may not %s your own account; ask another administrator", action)
+		case f.TenantAdminElsewhere:
+			refusal = fmt.Errorf("forbidden: this account is also a tenant admin of another tenant, which this would take from there; "+
+				"only a platform admin can %s it. You can remove its roles here", action)
+		case f.LastTenantAdmin:
+			refusal = fmt.Errorf("forbidden: this account is its tenant's last tenant admin; make someone else tenant admin before you %s it", action)
+		default:
+			refusal = fmt.Errorf("forbidden: you may not %s this account", action)
+		}
+		jsonErr(w, refusal, http.StatusForbidden)
 		return false
 	}
 	jsonErr(w, accountActionRefusal(home, action), http.StatusForbidden)
@@ -325,6 +344,7 @@ func (h *handler) withUserPermissions(ctx context.Context, act *actor, tiers adm
 			p.TemporaryPassword, p.Reinvite = p.Reinvite, false
 		}
 		users[i].GrantableRoles = unscopedGrantableRoles(ctx, act, tiers, f.CustomerID)
+		users[i].PlatformAccount = !tiers.platform && !f.Self && (f.PlatformAdmin || f.PlatformWide)
 	}
 	return h.labelMembersFromElsewhere(ctx, users)
 }
@@ -884,11 +904,12 @@ func (h *handler) followIdentity(ctx context.Context, a *actor, claims *identity
 // workspace's tenant (adminTiers).
 func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, tierRoles []string, userID, email, role, workspaceID string) {
 	var platformAdmin, platformWide bool
-	var existingSub string
+	var existingSub, accountCustomer string
 	if err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'platform_admin'),
-		       `+platformWideBuilderSQL("$1::uuid")+`, (SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid)`,
-		userID).Scan(&platformAdmin, &platformWide, &existingSub); err != nil {
+		       `+platformWideBuilderSQL("$1::uuid")+`, (SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid),
+		       (SELECT COALESCE(customer_id::text, '') FROM identity."user" WHERE id = $1::uuid)`,
+		userID).Scan(&platformAdmin, &platformWide, &existingSub, &accountCustomer); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -904,7 +925,7 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 			"a platform admin or platform-wide builder is modified only by a platform admin")
 		return
 	}
-	if !roleIsAssignableBy(tierRoles, "tenant_admin") {
+	if !slices.Contains(tierRoles, "platform_admin") {
 		gains, err := h.customerlessAdminGainsTenant(ctx, userID, workspaceID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -914,6 +935,10 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 			h.refuseExistingAccount(ctx, w, act, userID, email, role, workspaceID, customerlessAdminRefusal)
 			return
 		}
+	}
+	if err := tenantAdminGrantErr(act, role, h.customerOfWorkspace(ctx, workspaceID), accountCustomer); err != nil {
+		h.refuseExistingAccount(ctx, w, act, userID, email, role, workspaceID, err.Error())
+		return
 	}
 	here := tenantdb.TenantFrom(ctx)
 	var sub string

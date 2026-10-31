@@ -148,7 +148,8 @@ func TestCreateUserRoleGate(t *testing.T) {
 		{"platform_admin can create a tenant_admin", f.platformAdminSub, "new-pa-ta@roleco.com", "tenant_admin", http.StatusOK},
 		{"tenant_admin can create a developer", f.tenantAdminSub, "new-ta-dev@roleco.com", "developer", http.StatusOK},
 		{"tenant_admin can create a business_admin", f.tenantAdminSub, "new-ta-ba@roleco.com", "business_admin", http.StatusOK},
-		{"tenant_admin CANNOT create a tenant_admin", f.tenantAdminSub, "new-ta-ta@roleco.com", "tenant_admin", http.StatusForbidden},
+		// In its own tenant, since 2026-10-30 (assignableRoles).
+		{"tenant_admin can create a tenant_admin", f.tenantAdminSub, "new-ta-ta@roleco.com", "tenant_admin", http.StatusOK},
 		{"tenant_admin CANNOT create a platform_admin", f.tenantAdminSub, "new-ta-pa@roleco.com", "platform_admin", http.StatusForbidden},
 		{"developer can create a business_admin", f.developerSub, "new-dev-ba@roleco.com", "business_admin", http.StatusOK},
 		{"developer can create a business_user", f.developerSub, "new-dev-bu@roleco.com", "business_user", http.StatusOK},
@@ -199,7 +200,7 @@ func TestAddPlatformLevelRoleGate(t *testing.T) {
 	}{
 		{"platform_admin grants platform-level tenant_admin", f.platformAdminSub, "tenant_admin", http.StatusOK},
 		{"tenant_admin grants platform-level developer", f.tenantAdminSub, "developer", http.StatusOK},
-		{"tenant_admin CANNOT grant platform-level tenant_admin", f.tenantAdminSub, "tenant_admin", http.StatusForbidden},
+		{"tenant_admin grants tenant_admin across its own tenant", f.tenantAdminSub, "tenant_admin", http.StatusOK},
 		{"tenant_admin CANNOT grant platform-level platform_admin", f.tenantAdminSub, "platform_admin", http.StatusForbidden},
 		{"developer CANNOT grant platform-level developer", f.developerSub, "developer", http.StatusForbidden},
 		{"developer CANNOT grant platform-level tenant_admin", f.developerSub, "tenant_admin", http.StatusForbidden},
@@ -279,7 +280,6 @@ func TestWorkspaceScopedGrantCannotEscalate(t *testing.T) {
 		{"developer cannot grant workspace-scoped developer (self-replication)", f.developerSub, "developer"},
 		{"developer cannot grant workspace-scoped tenant_admin (escalation)", f.developerSub, "tenant_admin"},
 		{"developer cannot grant workspace-scoped platform_admin (escalation)", f.developerSub, "platform_admin"},
-		{"tenant_admin cannot grant workspace-scoped tenant_admin (self-replication)", f.tenantAdminSub, "tenant_admin"},
 		{"tenant_admin cannot grant workspace-scoped platform_admin (escalation)", f.tenantAdminSub, "platform_admin"},
 	}
 	for _, c := range escalations {
@@ -314,6 +314,10 @@ func TestWorkspaceScopedGrantCannotEscalate(t *testing.T) {
 	}{
 		{"tenant_admin can grant workspace-scoped developer", f.tenantAdminSub, "developer"},
 		{"tenant_admin can grant workspace-scoped business_admin", f.tenantAdminSub, "business_admin"},
+		// Its own tenant's tenant_admin since 2026-10-30: a grant in a
+		// workspace administers that workspace's tenant only (adminTiers),
+		// which the exploit above predates.
+		{"tenant_admin can grant workspace-scoped tenant_admin in its tenant", f.tenantAdminSub, "tenant_admin"},
 	}
 	for _, c := range allowed {
 		t.Run(c.name, func(t *testing.T) {
@@ -363,10 +367,139 @@ func TestRemoveRoleGate(t *testing.T) {
 		t.Error("developer role still present after removal")
 	}
 
-	// A tenant_admin may not remove another tenant_admin's role.
+	// A tenant_admin removes a fellow tenant_admin's role in its own tenant
+	// (2026-10-30): the caller stays one.
 	status, body = f.do(t, "DELETE", "/api/admin/users/"+f.targetID+"/roles/tenant_admin?workspace_id="+f.wsID, f.tenantAdminSub, nil)
-	if status != http.StatusForbidden {
-		t.Fatalf("tenant_admin removing tenant_admin: status = %d, want 403 (body %v)", status, body)
+	if status != http.StatusOK {
+		t.Fatalf("tenant_admin removing tenant_admin: status = %d, want 200 (body %v)", status, body)
+	}
+
+	// Its own, as the tenant's last: refused, though developer would keep it
+	// in user administration.
+	taID := f.userID(t, f.tenantAdminSub)
+	if status, body := f.do(t, "POST", "/api/admin/users/"+taID+"/roles", f.tenantAdminSub, map[string]string{"role": "developer"}); status != http.StatusOK {
+		t.Fatalf("tenant_admin granting itself developer: status = %d (body %v)", status, body)
+	}
+	status, body = f.do(t, "DELETE", "/api/admin/users/"+taID+"/roles/tenant_admin", f.tenantAdminSub, nil)
+	if status != http.StatusConflict {
+		t.Fatalf("last tenant_admin removing its own role: status = %d, want 409 (body %v)", status, body)
+	}
+	if !hasRoleRow(t, f.pool, taID, "tenant_admin", "") {
+		t.Fatal("the tenant's last tenant_admin grant is gone despite the refusal")
+	}
+	// A disabled tenant admin does not count as one that remains.
+	if status, body := f.do(t, "POST", "/api/admin/users/"+f.targetID+"/roles", f.tenantAdminSub, map[string]string{"role": "tenant_admin"}); status != http.StatusOK {
+		t.Fatalf("granting target tenant_admin: status = %d (body %v)", status, body)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.user SET disabled_at = now() WHERE id = $1::uuid`, f.targetID); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.do(t, "DELETE", "/api/admin/users/"+taID+"/roles/tenant_admin", f.tenantAdminSub, nil); status != http.StatusConflict {
+		t.Fatalf("removing own tenant_admin beside a disabled one: status = %d, want 409 (body %v)", status, body)
+	}
+	// With another enabled one, it may step down.
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.user SET disabled_at = NULL WHERE id = $1::uuid`, f.targetID); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.do(t, "DELETE", "/api/admin/users/"+taID+"/roles/tenant_admin", f.tenantAdminSub, nil); status != http.StatusOK {
+		t.Fatalf("removing own tenant_admin beside another: status = %d, want 200 (body %v)", status, body)
+	}
+	if hasRoleRow(t, f.pool, taID, "tenant_admin", "") {
+		t.Error("tenant_admin still present after stepping down")
+	}
+}
+
+// A tenant admin makes tenant admins of its own tenant's people only: one of
+// another tenant's member would stop that tenant deleting or disabling it
+// (accountFacts.TenantAdminElsewhere). And a platform admin's roles are a
+// platform admin's to change, as the account-level actions are.
+func TestTenantAdminGrantStaysInItsTenant(t *testing.T) {
+	f := setupRolesFixture(t)
+	ctx := context.Background()
+	var otherCust, foreignID, paID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO core.customer (name, plan) VALUES ('OtherCo', 'enterprise') RETURNING id::text`).Scan(&otherCust); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, `INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		VALUES ('roles-foreign', 'foreign@other.test', 'Foreign', $1::uuid) RETURNING id::text`, otherCust).Scan(&foreignID); err != nil {
+		t.Fatal(err)
+	}
+	// A member of this tenant's workspace, as an invitation leaves it.
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid)`, foreignID, f.wsID); err != nil {
+		t.Fatal(err)
+	}
+	status, body := f.do(t, "POST", "/api/admin/users/"+foreignID+"/roles", f.tenantAdminSub,
+		map[string]string{"role": "tenant_admin", "workspace_id": f.wsID})
+	if msg, _ := body["error"].(string); status != http.StatusForbidden || !strings.Contains(msg, "only a platform admin can make it a tenant admin") {
+		t.Fatalf("tenant_admin for another tenant's account: status = %d, want 403 from tenantAdminGrantErr (body %v)", status, body)
+	}
+	if hasRoleRow(t, f.pool, foreignID, "tenant_admin", f.wsID) {
+		t.Fatal("tenant_admin persisted on another tenant's account despite the 403")
+	}
+	// A business role there stays the tenant admin's to give.
+	if status, body := f.do(t, "POST", "/api/admin/users/"+foreignID+"/roles", f.tenantAdminSub,
+		map[string]string{"role": "business_admin", "workspace_id": f.wsID}); status != http.StatusOK {
+		t.Fatalf("business_admin for another tenant's account: status = %d, want 200 (body %v)", status, body)
+	}
+	// A platform admin may.
+	if status, body := f.do(t, "POST", "/api/admin/users/"+foreignID+"/roles", f.platformAdminSub,
+		map[string]string{"role": "tenant_admin", "workspace_id": f.wsID}); status != http.StatusOK {
+		t.Fatalf("platform_admin: status = %d, want 200 (body %v)", status, body)
+	}
+
+	// A platform admin's account in the tenant: its roles are not the tenant
+	// admin's to change, either way.
+	if err := f.pool.QueryRow(ctx, `INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		VALUES ('roles-pa-member', 'pa-member@roleco.com', 'PA Member', $1::uuid) RETURNING id::text`, f.custID).Scan(&paID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'platform_admin'), ($1::uuid, 'tenant_admin')`, paID); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.do(t, "DELETE", "/api/admin/users/"+paID+"/roles/tenant_admin", f.tenantAdminSub, nil); status != http.StatusForbidden {
+		t.Fatalf("tenant_admin removing a platform admin's tenant_admin: status = %d, want 403 (body %v)", status, body)
+	}
+	if status, body := f.do(t, "POST", "/api/admin/users/"+paID+"/roles", f.tenantAdminSub,
+		map[string]string{"role": "business_user", "workspace_id": f.wsID}); status != http.StatusForbidden {
+		t.Fatalf("tenant_admin granting a platform admin a role: status = %d, want 403 (body %v)", status, body)
+	}
+	if !hasRoleRow(t, f.pool, paID, "tenant_admin", "") || hasRoleRow(t, f.pool, paID, "business_user", f.wsID) {
+		t.Fatal("a platform admin's roles changed despite the 403s")
+	}
+
+	// The users list says so, so that the console offers none of it; not
+	// of the tenant admin's own account, nor to a platform admin.
+	listed := func(sub string) map[string]bool {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, "GET", f.srv.URL+"/api/admin/users", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Dev-User", sub)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		var users []struct {
+			ID              string `json:"id"`
+			PlatformAccount bool   `json:"platform_account"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, u := range users {
+			out[u.ID] = u.PlatformAccount
+		}
+		return out
+	}
+	byTA := listed(f.tenantAdminSub)
+	if !byTA[paID] || byTA[f.userID(t, f.tenantAdminSub)] || byTA[f.targetID] {
+		t.Errorf("platform_account in the tenant admin's list: %v, want only %s", byTA, paID)
+	}
+	if byPA := listed(f.platformAdminSub); byPA[paID] {
+		t.Errorf("platform_account in a platform admin's list: %v, want none", byPA)
 	}
 }
 

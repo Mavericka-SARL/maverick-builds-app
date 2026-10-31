@@ -69,7 +69,7 @@ users, and keep its groups in step with business roles.
 (SCIM). A token is `mvx_scim_<tenant>_<secret>`: the tenant part routes the
 request to the right database before the hash is checked; the secret is the
 only part that authenticates. The plaintext is shown once; the database
-keeps a SHA-256. A token carries the platform role a provisioned user gets
+keeps a SHA-256. A token carries the tenant role a provisioned user gets
 and the workspace groups are created in. Revoking is immediate.
 
 **What the endpoint does:**

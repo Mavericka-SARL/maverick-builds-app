@@ -434,7 +434,7 @@ func TestUsersScreenIsToldTheTierPerTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		f.ws1a: {"developer", "business_admin", "business_user"},
+		f.ws1a: {"tenant_admin", "developer", "business_admin", "business_user"},
 		f.ws2:  {"business_admin", "business_user"},
 	}
 	wantAccess := map[string]bool{f.ws1a: true, f.ws2: false}
@@ -462,8 +462,8 @@ func TestUsersScreenIsToldTheTierPerTenant(t *testing.T) {
 	f.expect(t, ta, "POST", "/api/admin/users/"+bu2+"/access/apps/"+f.app3, "", nil, http.StatusForbidden)
 
 	users := f.grantableRoles(t, ta)
-	if got := users[bu1]; !slices.Equal(got, []string{"developer", "business_admin", "business_user"}) {
-		t.Errorf("an account of tenant 1: grantable_roles %v, want developer and the business roles", got)
+	if got := users[bu1]; !slices.Equal(got, []string{"tenant_admin", "developer", "business_admin", "business_user"}) {
+		t.Errorf("an account of tenant 1: grantable_roles %v, want every tenant role", got)
 	}
 	// In tenant 2 it is a developer: the business roles, which the grant
 	// endpoint accepts, and not developer, which it refuses.

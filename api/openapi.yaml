@@ -1614,6 +1614,13 @@ components:
             home_tenant is "other", and for an account with no tenant never
             developer or tenant_admin unless the caller is a platform admin.
             Inside a workspace, that workspace's grantable_roles apply.
+        platform_account:
+          type: boolean
+          description: >-
+            Set, for a caller that is no platform admin, on a platform admin's
+            or platform-wide builder's account other than the caller's own:
+            its roles, with or without a workspace, are changed only by a
+            platform admin, and the role endpoints refuse anyone else.
 
     AdminUserPermissions:
       type: object

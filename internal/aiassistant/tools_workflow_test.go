@@ -204,7 +204,8 @@ func TestBusinessRoles_CreateAndList(t *testing.T) {
 	reader := aiassistant.NewToolExecutor(pool, modelID, revID)
 
 	out, _ := reader.Execute(ctx, "list_workflow_roles", nil)
-	if !strings.Contains(out, "business_user, business_admin, developer, platform_admin") || !strings.Contains(out, "none yet") {
+	if !strings.Contains(out, "Built-in roles (use the code): business_user, business_admin, developer (tenant roles); platform_admin") ||
+		!strings.Contains(out, "none yet") {
 		t.Errorf("empty listing: %s", out)
 	}
 	res, roleID, err := writer.Execute(ctx, "create_business_role", mustJSON(t, map[string]any{"name": " Finance Review "}))

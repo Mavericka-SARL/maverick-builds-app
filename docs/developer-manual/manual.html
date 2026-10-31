@@ -688,7 +688,7 @@
 <table class="ctl">
 <tr><th>Step type</th><th>Properties</th></tr>
 <tr><td>All</td><td><b>Step name</b> (required), <b>Instructions</b> shown to the person acting.</td></tr>
-<tr><td><b>Task</b></td><td><b>Assignee roles</b> (platform roles business_admin and business_user, plus named roles from the Business Admin console; a hint says where to create one), <b>SLA hours</b>, <b>Require comment</b>, <b>Completion button label</b> (default "Complete"), <b>Next step</b> or <b>Parallel branches</b> (add with <b>+ parallel</b>).</td></tr>
+<tr><td><b>Task</b></td><td><b>Assignee roles</b> (tenant roles business_admin and business_user, plus named roles from the Business Admin console; a hint says where to create one), <b>SLA hours</b>, <b>Require comment</b>, <b>Completion button label</b> (default "Complete"), <b>Next step</b> or <b>Parallel branches</b> (add with <b>+ parallel</b>).</td></tr>
 <tr><td><b>Approval</b></td><td><b>Approver roles</b>, <b>SLA hours</b>, <b>Require comment</b>, <b>On approve →</b>, <b>On reject →</b>.</td></tr>
 <tr><td><b>Condition</b></td><td><b>Context field</b>, <b>Operator</b> (equals, not equals, greater than, ≥, less than, ≤, contains, is empty, is not empty), <b>Value</b>, <b>If true →</b>, <b>If false →</b>. Evaluated automatically; if the value is missing the inbox asks a person to pick the branch. <b>Tests</b> chooses between <b>A context field</b> (the above) and <b>The model (a formula)</b>: a formula in the model's language over its metrics and the context fields, such as <code>ABS(cr_var_pct) &gt; threshold_pct</code> — "the collected target is outside the correction threshold → another round". Metrics are read in the workflow's revision at the instance's members (each Dimension member field pins its dimension), every other dimension at its total; a context field is read by its key. True takes <b>If true</b>; a formula that cannot be evaluated parks the step for a person and its comment says why. Over the API the condition is <code>{"formula": "…"}</code>.</td></tr>
 <tr><td><b>Notification</b></td><td><b>Recipient</b>: Requester or Specific role (then <b>Recipient role</b>), <b>Subject</b>, <b>Message</b>, then Next step or parallel branches. Unconfigured notifications complete without notifying anyone; a warning says so.</td></tr>
@@ -886,7 +886,7 @@
 
 <h2 id="users">Users</h2>
 <p class="path">Sidebar: Govern › Users (hidden when an admin section already provides it)</p>
-<p>The developer's Users screen invites people and gives them business roles, so that the applications you build have users. Deciding which applications and models a person may reach, and the platform roles above business level, stay with tenant and platform administrators.</p>
+<p>The developer's Users screen invites people and gives them business roles, so that the applications you build have users. Deciding which applications and models a person may reach, and the tenant roles above business level, stay with tenant and platform administrators.</p>
 <figure><img src="img/12-users.png" width="1140" height="900" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
@@ -898,7 +898,7 @@
 </table>
 <h2 id="roles">Roles</h2>
 <p class="path">Sidebar: Developer › Roles (hidden when you also hold business_admin: the Business Admin console's Roles tab is the same screen)</p>
-<p>Named business roles ("Budget Approvers", "Regional Managers"). Workflow tasks and approvals are assigned to these roles by name, or to the platform roles. A developer creates the roles their workflows need, decides which dashboards each may open, and may add and remove its members, as a business admin does.</p>
+<p>Named business roles ("Budget Approvers", "Regional Managers"). Workflow tasks and approvals are assigned to these roles by name, or to the tenant roles. A developer creates the roles their workflows need, decides which dashboards each may open, and may add and remove its members, as a business admin does.</p>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>New role name…</b> / <b>Add role</b></td><td>Creates a role in the application's workspace.</td></tr>

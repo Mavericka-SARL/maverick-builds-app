@@ -30,9 +30,13 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // The administration tiers adminTiers records per tenant.
@@ -57,8 +61,8 @@ type adminTiers struct {
 const adminTiersSQL = `
 	SELECT customer_id::text, bool_or(role = 'tenant_admin')
 	FROM (
-	    -- An unscoped grant — the "platform role" of the Users panel — is
-	    -- held in the tenant the account belongs to.
+	    -- An unscoped grant — a tenant role "covering the whole tenant" on
+	    -- the Users panel — is held in the tenant the account belongs to.
 	    SELECT u.customer_id, ra.role::text AS role
 	    FROM identity."user" u
 	    JOIN identity.role_assignment ra ON ra.user_id = u.id AND ra.workspace_id IS NULL
@@ -239,14 +243,38 @@ func grantedAppSQL(app, userExpr string) string {
 		                    WHERE ga_um.user_id = %[2]s AND ga_m.application_id = %[1]s.id)))`, app, userExpr)
 }
 
+// grantableRoles is what an actor holding actorRoles grants and revokes
+// through the role endpoints and an invitation: assignableRoles, and for a
+// tenant_admin tenant_admin itself (the user's decision, 2026-10-30: a tenant
+// used to need the platform's operator for a second administrator). The
+// callers read it against the caller's tier in the tenant the grant applies
+// to (adminTiers.rolesIn), so it never reaches another tenant;
+// tenantAdminGrantErr keeps it off another tenant's accounts, and revokeRole
+// keeps a tenant from losing its last tenant admin. Kept apart from
+// assignableRoles, which also decides what deleting, disabling or removing
+// an account from a tenant — by a person or by SCIM — may take: none of
+// those takes a tenant_admin grant past that guard.
+func grantableRoles(actorRoles []string) []string {
+	out := assignableRoles(actorRoles)
+	if slices.Contains(actorRoles, "tenant_admin") && !slices.Contains(out, "tenant_admin") {
+		out = append([]string{"tenant_admin"}, out...)
+	}
+	return out
+}
+
+// roleIsGrantableBy reports whether role is in grantableRoles(actorRoles).
+func roleIsGrantableBy(actorRoles []string, role string) bool {
+	return slices.Contains(grantableRoles(actorRoles), role)
+}
+
 // workspaceGrantableRoles is what a caller whose tier in a workspace's
 // tenant is tierRoles (adminTiers.rolesIn) may grant inside the workspace —
 // by the checks POST /api/admin/users/{id}/roles and an invitation make
 // there — so the users screen offers exactly those.
 func workspaceGrantableRoles(act *actor, tierRoles []string) []string {
 	out := []string{}
-	for _, r := range assignableRoles(tierRoles) {
-		if roleIsAssignableBy(act.Roles, r) && canGrantWorkspaceRole(tierRoles, r) {
+	for _, r := range grantableRoles(tierRoles) {
+		if roleIsGrantableBy(act.Roles, r) && canGrantWorkspaceRole(tierRoles, r) {
 			out = append(out, r)
 		}
 	}
@@ -264,11 +292,130 @@ func unscopedGrantableRoles(ctx context.Context, act *actor, t adminTiers, custo
 	if !act.hasRole("platform_admin") && !accountIsCallers(customerID, t.all, t.ids()) {
 		return out
 	}
-	for _, r := range assignableRoles(t.rolesIn(customerID)) {
-		if roleIsAssignableBy(act.Roles, r) && platformWideGrantErr(act, r, "", customerID, t.all, t.ids()) == nil &&
+	for _, r := range grantableRoles(t.rolesIn(customerID)) {
+		if roleIsGrantableBy(act.Roles, r) && platformWideGrantErr(act, r, "", customerID, t.all, t.ids()) == nil &&
 			dedicatedGrantErr(ctx, r, "", customerID) == nil {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// tenantAdminGrantErr refuses, to anyone but a platform admin, tenant_admin
+// for an account whose home is a tenant other than grantTenant, the one the
+// grant is in. A tenant admin makes administrators of its own tenant's
+// people, and of accounts with no tenant (in a dedicated tenant's database,
+// the rows of people another database holds); an administrator of another
+// tenant's member could not be deleted or disabled by that tenant's own
+// administrators any more (accountFacts.TenantAdminElsewhere), so one tenant
+// would shield another's member from it.
+func tenantAdminGrantErr(act *actor, role, grantTenant, accountCustomer string) error {
+	if role != "tenant_admin" || act.hasRole("platform_admin") || accountCustomer == "" || accountCustomer == grantTenant {
+		return nil
+	}
+	return errors.New("forbidden: this account belongs to another tenant, so only a platform admin can make it a tenant admin here: " +
+		"its own tenant could no longer delete or disable it")
+}
+
+// errLastTenantAdmin refuses a revocation that would leave a tenant with no
+// tenant admin (revokeRole).
+var errLastTenantAdmin = errors.New("this is the tenant's last tenant admin: make someone else tenant admin first")
+
+// revokeRole deletes userID's grant of role in workspace wsID ("" = its grant
+// with no workspace). guardTenant, when set, is the tenant a tenant_admin
+// revocation counts against: it is refused (errLastTenantAdmin) when it
+// leaves no enabled tenant admin there (tenantAdminOfSQL), as deleting or
+// disabling the tenant's last one is (accountPermissionsFor) — else a tenant
+// admin could leave its tenant with no administrator, itself included, that
+// only a platform admin could restore. Revocations counted against one
+// tenant run one after the other, so two tenant admins removing each other
+// at once do not each see the other remain.
+func (h *handler) revokeRole(ctx context.Context, userID, role, wsID, guardTenant string) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if guardTenant != "" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('tenant admins'), hashtext($1))`, guardTenant); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM identity.role_assignment
+		WHERE user_id=$1::uuid AND role=$2::identity.user_role AND workspace_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+	`, userID, role, wsID); err != nil {
+		return err
+	}
+	if guardTenant != "" {
+		// Every administrator adminTiers counts: tenantAdminOfSQL's, and an
+		// account with no tenant holding tenant_admin without a workspace
+		// and any role in one of the tenant's.
+		var remains bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity."user" o
+			WHERE o.disabled_at IS NULL AND (`+tenantAdminOfSQL("o.id", "$1::uuid")+`
+			   OR (o.customer_id IS NULL
+			       AND EXISTS (SELECT 1 FROM identity.role_assignment cta
+			                   WHERE cta.user_id = o.id AND cta.role = 'tenant_admin' AND cta.workspace_id IS NULL)
+			       AND EXISTS (SELECT 1 FROM identity.role_assignment cwr JOIN core.workspace cw ON cw.id = cwr.workspace_id
+			                   WHERE cwr.user_id = o.id AND cw.customer_id = $1::uuid))))`, guardTenant).Scan(&remains); err != nil {
+			return err
+		}
+		if !remains {
+			return errLastTenantAdmin
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// isPlatformAccount reports whether userID, other than the caller's own
+// account, is a platform admin's or a platform-wide builder's — in a
+// tenant's database, by its platform reach in the control plane
+// (platformReachOf), as accountFacts reads it.
+func (h *handler) isPlatformAccount(ctx context.Context, act *actor, userID string) (bool, error) {
+	var self, platform bool
+	var sub string
+	if err := h.db.QueryRow(ctx, `
+		SELECT u.id = NULLIF($2, '')::uuid,
+		       EXISTS (SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin')
+		         OR `+platformWideBuilderSQL("u.id")+`,
+		       u.keycloak_sub
+		FROM identity."user" u WHERE u.id = $1::uuid`, userID, act.UserID).Scan(&self, &platform, &sub); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if self || platform {
+		return platform && !self, nil
+	}
+	reach, err := h.platformReachOf(ctx, []string{sub})
+	return reach[sub], err
+}
+
+// platformAccountRolesAllowed refuses, to anyone but a platform admin, a
+// change to the roles of a platform admin or a platform-wide builder, which
+// only a platform admin modifies (accountPermissionsFor,
+// addExistingAccount): the role endpoints used to let a tenant admin revoke
+// the developer grant of a platform admin's account in its tenant, and with
+// tenant_admin now a tenant admin's to revoke, that role too. Its own
+// account a caller changes as before.
+func (h *handler) platformAccountRolesAllowed(ctx context.Context, w http.ResponseWriter, act *actor, tiers adminTiers, userID string) bool {
+	if tiers.platform {
+		return true
+	}
+	if _, err := uuid.Parse(userID); err != nil {
+		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
+		return false
+	}
+	locked, err := h.isPlatformAccount(ctx, act, userID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	if locked {
+		jsonErr(w, fmt.Errorf("forbidden: a platform admin or platform-wide builder is modified only by a platform admin"), http.StatusForbidden)
+		return false
+	}
+	return true
 }

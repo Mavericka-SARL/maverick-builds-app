@@ -122,12 +122,12 @@ function ParallelRoutesEditor({ step, routeOptions, onChange }: {
   );
 }
 
-// Platform roles offered as step assignees alongside named business roles.
+// Tenant roles offered as step assignees alongside named business roles.
 // Limited to business_admin/business_user — the only roles with a Workflow
 // Inbox surface (Business/Business Admin console) to actually act on a step;
 // developer/tenant_admin/platform_admin have no such tab, so assigning a
 // step to them would create a task nobody can ever open.
-const ASSIGNABLE_PLATFORM_ROLES = ["business_admin", "business_user"] as const;
+const ASSIGNABLE_TENANT_ROLES = ["business_admin", "business_user"] as const;
 
 export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, onDelete, onClose }: {
   step: WorkflowStepDef;
@@ -195,11 +195,11 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
               {(() => {
                 const assigned = step.assignee_roles ?? [];
                 const namedRoleNames = businessRoles.map(r => r.name);
-                // Anything assigned that matches neither a platform role nor
+                // Anything assigned that matches neither a tenant role nor
                 // a known named role — e.g. a business_role that was since
                 // renamed/deleted — would otherwise vanish from view with no
                 // way to tell it's still set. Surface it instead of hiding it.
-                const unknown = assigned.filter(r => !ASSIGNABLE_PLATFORM_ROLES.includes(r as typeof ASSIGNABLE_PLATFORM_ROLES[number]) && !namedRoleNames.includes(r));
+                const unknown = assigned.filter(r => !ASSIGNABLE_TENANT_ROLES.includes(r as typeof ASSIGNABLE_TENANT_ROLES[number]) && !namedRoleNames.includes(r));
 
                 const toggle = (name: string) => {
                   const checked = assigned.includes(name);
@@ -220,10 +220,10 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px", background: "var(--color-surface-faint)", borderRadius: 6, border: "1px solid var(--color-border)" }}>
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-disabled)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
-                        Platform roles
+                        Tenant roles
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {ASSIGNABLE_PLATFORM_ROLES.map(role => roleCheckbox(role, role))}
+                        {ASSIGNABLE_TENANT_ROLES.map(role => roleCheckbox(role, role))}
                       </div>
                     </div>
                     {businessRoles.length > 0 && (
