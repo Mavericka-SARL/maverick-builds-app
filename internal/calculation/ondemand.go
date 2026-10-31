@@ -284,12 +284,13 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 	reads := newDimReads(ctx, env.meta, def, allDefs, metricDimIDs, fetch, rows, true)
 
 	// A text calculation reads a text metric by a plain reference
-	// (wa_employee_id & "|" & wa_type): an input's note or a calculation's
-	// text at the cell's own members of that metric's dimensions. Validation
-	// allows it nowhere else.
+	// (wa_employee_id & "|" & wa_type), and a number formula compares one
+	// (chk_status = "OK"): an input's note or a calculation's text at the
+	// cell's own members of that metric's dimensions. Validation allows it
+	// nowhere else.
 	texts := map[string]map[string]string{}
 	for _, depID := range def.DependsOnID {
-		if dep := allDefs[depID]; def.Text && dep.Text {
+		if dep := allDefs[depID]; dep != nil && dep.Text {
 			m, err := env.s.textMap(ctx, dep, env.modelID, env.revisionID)
 			if err != nil {
 				return nil, fmt.Errorf("load the text of %s: %w", dep.Name, err)
@@ -321,9 +322,11 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 	// failures.
 	// bind resolves the formula's variables at combo: its plain references,
 	// the text of text metrics it reads, and the cell's own member codes.
-	bind := func(combo map[string]string) (map[string]formula.Value, map[string]float64, error) {
+	// blank names the references with no value there (ISBLANK, x = "").
+	bind := func(combo map[string]string) (map[string]formula.Value, map[string]bool, map[string]float64, error) {
 		values := make(map[string]float64, len(def.DependsOnID))
 		notes := map[string]string{}
+		var blank map[string]bool
 		for _, depID := range def.DependsOnID {
 			depDef := allDefs[depID]
 			if parseErr == nil && !plain[strings.ToUpper(depDef.Name)] {
@@ -333,11 +336,17 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				notes[depDef.Name] = noteAt(depID, combo)
 				continue
 			}
-			v, _, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
+			v, found, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
 			if err != nil {
-				return nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+				return nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
 			values[depDef.Name] = v // bind unconditionally: preserves "0 on miss" formula-variable semantics
+			if !found {
+				if blank == nil {
+					blank = map[string]bool{}
+				}
+				blank[strings.ToUpper(depDef.Name)] = true
+			}
 		}
 		// Upper-cased keys, as EvalWithContext does: EvalNode does not.
 		vars := make(map[string]formula.Value, len(values)+len(combo))
@@ -353,7 +362,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				vars[strings.ToUpper(name)] = formula.StringVal(memberCode)
 			}
 		}
-		return vars, values, nil
+		return vars, blank, values, nil
 	}
 
 	// A text calculation on a time dimension is evaluated at its period
@@ -387,11 +396,11 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				shifted[k] = v
 			}
 			shifted[axis.dim.ID] = axis.periods[at].Code
-			vars, _, err := bind(shifted)
+			vars, blank, _, err := bind(shifted)
 			if err != nil {
 				return formula.ErrorVal(&formula.FormulaError{Code: "#REF!", Message: err.Error()})
 			}
-			return formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(shifted, useMemo), Time: timeAt(shifted, tc, useMemo)}, n)
+			return formula.EvalNode(&formula.EvalContext{Vars: vars, Blank: blank, Dim: reads.context(shifted, useMemo), Time: timeAt(shifted, tc, useMemo)}, n)
 		}
 		tc.Span = axis.span
 		return tc
@@ -399,7 +408,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 
 	evalCell := func(combo map[string]string, useMemo bool) (formula.Value, bool, error) {
 		reads.data = false
-		vars, values, bindErr := bind(combo)
+		vars, blank, values, bindErr := bind(combo)
 		if bindErr != nil {
 			return formula.Value{}, false, bindErr
 		}
@@ -417,7 +426,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 		if parseErr != nil {
 			return formula.Value{}, noData(), parseErr
 		}
-		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(combo, useMemo), Time: timeAt(combo, nil, useMemo)}, node))
+		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Blank: blank, Dim: reads.context(combo, useMemo), Time: timeAt(combo, nil, useMemo)}, node))
 		if result.IsError() {
 			// A blank or unknown member is a configuration problem at this
 			// cell, never an absence of data — even when nothing was read
@@ -444,4 +453,15 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 		}
 		return v, noData, err
 	}, nil
+}
+
+// readsTextMetric reports whether def's formula reads a text metric (a
+// number formula reads one only in a comparison or ISBLANK).
+func readsTextMetric(def *MetricDef, allDefs map[string]*MetricDef) bool {
+	for _, depID := range def.DependsOnID {
+		if dep := allDefs[depID]; dep != nil && dep.Text {
+			return true
+		}
+	}
+	return false
 }

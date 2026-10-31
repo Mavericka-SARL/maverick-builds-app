@@ -50,6 +50,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"create_dashboard_folder":   e.createDashboardFolder,
 		"update_dashboard_folder":   e.updateDashboardFolder,
 		"delete_dashboard_folder":   e.deleteDashboardFolder,
+		"publish_workflow_def":      e.publishWorkflowDef,
 		"archive_workflow_def":      e.archiveWorkflowDef,
 		"restore_workflow_def":      e.restoreWorkflowDef,
 		"duplicate_workflow_def":    e.duplicateWorkflowDef,
@@ -1027,6 +1028,37 @@ func (e *WriteExecutor) workflowLifecycleRef(ctx context.Context, raw json.RawMe
 	}
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM workflow.workflow_def WHERE id=$1::uuid`, id).Scan(&name)
 	return id, name, nil
+}
+
+// publishWorkflowDef is the Workflows tab's Publish, proposed for the
+// developer to confirm: the same checks (every step assigned, every
+// condition naming what exists), then the definition is published in the
+// working revision. The AI Developer could not publish at all, and a
+// rebuilt process stayed a draft nobody could start until the developer
+// found the button (restaurant model, 2026-10-31).
+func (e *WriteExecutor) publishWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var keys struct {
+		WorkflowDefID string `json:"workflow_def_id"`
+	}
+	if err := decodeParams(raw, &keys); isUnknownParam(err) {
+		return "", "", err
+	}
+	id, name, err := e.workflowLifecycleRef(ctx, raw)
+	if err != nil {
+		return "", "", err
+	}
+	ws := workflow.NewStoreOn(e.pool)
+	def, err := ws.GetWorkflowDefFull(ctx, id)
+	if err != nil {
+		return "", "", err
+	}
+	if verrs := append(workflow.ValidateDef(def), ws.CheckConditionNames(ctx, def)...); len(verrs) > 0 {
+		return "", "", fmt.Errorf("workflow '%s' cannot be published: %s", name, strings.Join(verrs, "; "))
+	}
+	if _, err := ws.PublishWorkflowDef(ctx, id, e.userID); err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("Workflow '%s' published in this revision: its rules and Start buttons start it where the revision is live", name), id, nil
 }
 
 // archiveWorkflowDef is POST /api/developer/workflows/{id}/archive: a

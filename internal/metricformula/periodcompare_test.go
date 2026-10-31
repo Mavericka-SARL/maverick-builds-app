@@ -36,6 +36,34 @@ func TestPeriodCodeComparedWithANumberIsRefused(t *testing.T) {
 	}
 }
 
+// SUMIFS(x, month, START()) tests period codes against a date and reads 0
+// everywhere; the AI Developer asked for it three times in the restaurant
+// rebuild. A criterion of text (a code, a ">=" range) stays allowed.
+func TestPeriodCriterionWithADateIsRefused(t *testing.T) {
+	f := setupDimFixture(t)
+	for _, text := range []string{
+		"SUMIFS(revenue, month, START())",
+		"SUMIFS(revenue, region, \"EMEA\", month, END())",
+		"COUNTIFS(month, START() + 31)",
+		"SUMIF(month, 3, revenue)",
+	} {
+		_, err := f.validate(t, "", "probe", text)
+		if err == nil || !strings.Contains(err.Error(), "period codes") {
+			t.Errorf("%s: err = %v, want the period-criterion refusal", text, err)
+		}
+	}
+	for _, text := range []string{
+		`SUMIFS(revenue, month, ">=2026-07")`,
+		`SUMIFS(revenue, month, "2026-01")`,
+		`SUMIFS(revenue, region, "EMEA")`,
+		"COUNTIFS(month, other)", // other may be a pick-list of months: its code
+	} {
+		if _, err := f.validate(t, "", "probe", text); err != nil {
+			t.Errorf("%s: refused: %v", text, err)
+		}
+	}
+}
+
 // Any format string used to be stored; "percent" then showed as a number.
 func TestValidMetricFormat(t *testing.T) {
 	for _, f := range []string{"", "number", "percentage", "currency", "boolean", "text"} {

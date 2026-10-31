@@ -46,6 +46,12 @@ type FormField struct {
 	// Core fields cannot be removed from the table while they are marked
 	// core.
 	Core bool `json:"core,omitempty"`
+	// Code marks a text field as the record's code, typed by the person
+	// (a ledger's account number, an outside system's id) where an
+	// auto-code field would number the records itself: required, unique in
+	// the table, and unchanged once saved. In a table keeping a dimension
+	// it is the member's code (CodeField).
+	Code bool `json:"code,omitempty"`
 	// History keeps each value the field takes, who gave it and when
 	// (runtime.record_field_history), shown with the record.
 	History bool `json:"history,omitempty"`
@@ -125,13 +131,28 @@ type FormDef struct {
 	ModelKeeps bool `json:"-"`
 }
 
-// CodeField is the table's first auto-code field, nil when it has none:
-// the code of the member a record is, in a table that keeps a dimension.
+// CodeField is the table's code field, nil when it has none: its first
+// auto-code field, else the text field marked as the code (FormField.Code)
+// — the code of the member a record is, in a table that keeps a dimension.
 func (f *FormDef) CodeField() *FormField {
 	for i := range f.Fields {
 		if f.Fields[i].Type == FieldAutoCode {
 			return &f.Fields[i]
 		}
+	}
+	for i := range f.Fields {
+		if f.Fields[i].Code {
+			return &f.Fields[i]
+		}
+	}
+	return nil
+}
+
+// TypedCodeField is the text field marked as the record's code, nil when
+// the table has none (or numbers its records with an auto-code field).
+func (f *FormDef) TypedCodeField() *FormField {
+	if c := f.CodeField(); c != nil && c.Type != FieldAutoCode {
+		return c
 	}
 	return nil
 }
@@ -215,6 +236,10 @@ type FormRecord struct {
 
 // ErrRecordNotFound is returned when a record does not exist.
 var ErrRecordNotFound = errors.New("record not found")
+
+// ErrCodeTaken refuses a record whose typed code (FormField.Code) another
+// record of its table has.
+var ErrCodeTaken = errors.New("code taken")
 
 // ErrRecordChanged is returned by the conditional writes (UpdateRecordFrom,
 // DeleteRecordFrom) when the record is gone or no longer in the status the
@@ -585,6 +610,22 @@ func (s *Store) CreateRecordThen(ctx context.Context, formID, userID, status str
 	`, formID, dataJSON, status, userID).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create record: %w", err)
+	}
+	if cf := form.TypedCodeField(); cf != nil {
+		// Two saves of one code at once both passed the check before the
+		// save: the second, waiting for the first here, finds its record.
+		code, _ := data[cf.Name].(string)
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, formID, code); err != nil {
+			return nil, err
+		}
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id = $1::uuid AND data->>$2 = $3`,
+			formID, cf.Name, code).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 1 {
+			return nil, fmt.Errorf("%w: %s %q is taken by another record of %s", ErrCodeTaken, firstNonEmpty(cf.Label, cf.Name), code, form.Label)
+		}
 	}
 	var createdBy *string
 	if userID != "" {

@@ -537,7 +537,9 @@ func (s *Scheduler) executePartition(
 	// A metric with very many cells is evaluated whole on the lean path
 	// (lean.go): it keeps no old values to compare with, so to a pass
 	// following written cells everything it holds may have changed.
-	lean := !def.Text && len(metricDimIDs[def.ID]) > 0 && rollup.LeafComboCount(allDims, metricDimIDs[def.ID]) >= leanCellsAt
+	// A number formula comparing a text metric binds that text per cell
+	// (evalOnDemand's texts), which the lean path does not.
+	lean := !def.Text && !readsTextMetric(def, allDefs) && len(metricDimIDs[def.ID]) > 0 && rollup.LeafComboCount(allDims, metricDimIDs[def.ID]) >= leanCellsAt
 	if lean && inc != nil {
 		inc.out = everywhere()
 		inc = nil

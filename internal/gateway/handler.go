@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -1535,146 +1536,46 @@ func (h *handler) builderAdminScope(ctx context.Context, a *actor) (all bool, cu
 	return false, reached, rows.Err()
 }
 
-// builderAdminReachesApp reports whether a's admin scope (builderAdminScope)
-// opens appID: an application of a tenant it is tenant admin of — on a
-// developer-only route, one its developer grants reach too.
-func (h *handler) builderAdminReachesApp(ctx context.Context, a *actor, appID string) (bool, error) {
-	if !onDeveloperRoute(ctx) {
-		t, err := h.loadAdminTiers(ctx, a)
-		return err == nil && t.tenantAdminOf(h.customerOfApplication(ctx, appID)), err
-	}
-	all, customerIDs, err := h.builderAdminScope(ctx, a)
-	if err != nil || all || len(customerIDs) == 0 {
-		return all, err
-	}
-	var ok bool
-	err = h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1 FROM core.application
-		    WHERE id=$1::uuid AND customer_id::text = ANY($2)
-		)
-	`, appID, customerIDs).Scan(&ok)
-	return ok, err
-}
-
-// builderAdminReachesModel is builderAdminReachesApp for a model.
-func (h *handler) builderAdminReachesModel(ctx context.Context, a *actor, modelID string) (bool, error) {
-	if !onDeveloperRoute(ctx) {
-		t, err := h.loadAdminTiers(ctx, a)
-		return err == nil && t.tenantAdminOf(h.customerOfModel(ctx, modelID)), err
-	}
-	all, customerIDs, err := h.builderAdminScope(ctx, a)
-	if err != nil || all || len(customerIDs) == 0 {
-		return all, err
-	}
-	var ok bool
-	err = h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1
-		    FROM core.model m
-		    JOIN core.application app ON app.id=m.application_id
-		    WHERE m.id=$1::uuid AND app.customer_id::text = ANY($2)
-		)
-	`, modelID, customerIDs).Scan(&ok)
-	return ok, err
-}
-
+// actorCanAccessApp reports whether a opens appID on the route ctx arrived
+// through (openableApps, where the rule is written once for gates, lists and
+// resolution alike).
+//
+// A tenant admin opens every application of the tenants it is tenant admin
+// of — on a developer-only route, of those its developer grants reach too
+// (builderAdminScope). Beyond them its roles decide, as they count on the
+// route (rolesReachApps): on a business route a workspace role held in
+// another tenant opens what it opens for anyone, on a
+// developer-or-administrator route a developer grant what it opens a
+// developer, and on an administrator-only route neither.
 func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string) (bool, error) {
-	// A platform-wide builder is a developer of every tenant, which opens
-	// nothing on an administrator-only route (adminTiers).
-	if a.hasRole("platform_admin") || (!onAdminRoute(ctx) && h.isGlobalBuilder(ctx, a)) {
-		return true, nil
-	}
-	if a.hasRole("tenant_admin") {
-		// A tenant admin opens every application of the tenants it is tenant
-		// admin of — on a developer-only route, of those its developer
-		// grants reach too (builderAdminScope). Beyond them its roles decide,
-		// as they count on the route (rolesReachApp): on a business route a
-		// workspace role held in another tenant opens what it opens for
-		// anyone, on a developer-or-administrator route a developer grant
-		// what it opens a developer, and on an administrator-only route
-		// neither.
-		if ok, err := h.builderAdminReachesApp(ctx, a, appID); err != nil || ok {
-			return ok, err
-		}
-	}
-	return h.rolesReachApp(ctx, a, appID)
+	open, err := h.openableApps(ctx, a, []string{appID})
+	return open[appID], err
+}
+
+// actorCanAccessModel is actorCanAccessApp for a model (openableModels).
+func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID string) (bool, error) {
+	open, err := h.openableModels(ctx, a, []string{modelID})
+	return open[modelID], err
 }
 
 // rolesReachApp reports whether a's roles open appID on the route ctx
-// arrived through (reachSQL), narrowed by its application and model grants:
-// an application with models opens only when one of them may be opened. One
-// with no model (an execution-mode application, made to run workflows) opens
-// for a role that reaches it, unless the account is narrowed to models —
-// until 2026-10-26 it opened for no role, so the tenant's developers could
-// not build the workflows it exists for (decided 2026-10-06).
+// arrived through, narrowed by its application and model grants
+// (rolesReachApps).
 func (h *handler) rolesReachApp(ctx context.Context, a *actor, appID string) (bool, error) {
-	var ok bool
-	err := h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1
-		    FROM core.application app
-		    LEFT JOIN core.workspace aw ON aw.id = app.workspace_id
-		    WHERE app.id=$1::uuid
-		      AND `+reachSQL(ctx, "app", "aw", "$2")+`
-		      AND (
-		          NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
-		          OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
-		      )
-		      AND (EXISTS (
-		          SELECT 1
-		          FROM core.model m
-		          WHERE m.application_id=app.id
-		            AND (
-		                NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-		                OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
-		            )
-		      ) OR (
-		          NOT EXISTS (SELECT 1 FROM core.model m0 WHERE m0.application_id=app.id)
-		          AND NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-		      ))
-		)
-	`, appID, a.UserID).Scan(&ok)
-	return ok, err
-}
-
-func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID string) (bool, error) {
-	if a.hasRole("platform_admin") || (!onAdminRoute(ctx) && h.isGlobalBuilder(ctx, a)) {
-		return true, nil
-	}
-	if a.hasRole("tenant_admin") {
-		// As in actorCanAccessApp: the admin scope (on a developer-only
-		// route, where the developer grants reach too), else the roles as
-		// they count on the route.
-		if ok, err := h.builderAdminReachesModel(ctx, a, modelID); err != nil || ok {
-			return ok, err
-		}
-	}
-	return h.rolesReachModel(ctx, a, modelID)
+	ids := canonicalIDs([]string{appID})
+	reached, err := h.rolesReachApps(ctx, a, ids.list)
+	open := map[string]bool{}
+	ids.mark(reached, open)
+	return open[appID], err
 }
 
 // rolesReachModel is rolesReachApp for a model.
 func (h *handler) rolesReachModel(ctx context.Context, a *actor, modelID string) (bool, error) {
-	var ok bool
-	err := h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1
-		    FROM core.model m
-		    JOIN core.application app ON app.id=m.application_id
-		    LEFT JOIN core.workspace aw ON aw.id = app.workspace_id
-		    WHERE m.id=$1::uuid
-		      AND `+reachSQL(ctx, "app", "aw", "$2")+`
-		      AND (
-		          NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
-		          OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
-		      )
-		      AND (
-		          NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-		          OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
-		      )
-		)
-	`, modelID, a.UserID).Scan(&ok)
-	return ok, err
+	ids := canonicalIDs([]string{modelID})
+	reached, err := h.rolesReachModels(ctx, a, ids.list)
+	open := map[string]bool{}
+	ids.mark(reached, open)
+	return open[modelID], err
 }
 
 // ── resource → scope authorization ───────────────────────────────────────────
@@ -4250,7 +4151,21 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, sErr, http.StatusInternalServerError)
 			return
 		}
-		scopedCells, scopedTotals, scopedWithheld := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics, cells, sr)
+		// A dimensionless input (a Control-style setting) has no cell key:
+		// the read above keeps it in totals only. The recompute reads it
+		// under its bare id (cellKeyOf), so it is handed over there; left
+		// out, every plain formula reading it saw 0 in a filtered read
+		// (opening_ppe + … / life: 208 instead of 32,351, found 2026-10-31).
+		inputCells, cloned := cells, false
+		for _, m := range allMetrics {
+			if v, ok := totals[m.ID]; ok && m.IsInput && len(metricDims[m.ID]) == 0 {
+				if !cloned {
+					inputCells, cloned = maps.Clone(cells), true
+				}
+				inputCells[m.ID] = v
+			}
+		}
+		scopedCells, scopedTotals, scopedWithheld := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics, inputCells, sr)
 		for k, v := range scopedCells {
 			cells[k] = v
 		}
@@ -5252,7 +5167,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			INSERT INTO workflow.automation_rule
 			  (application_id, name, description, trigger_type, workflow_name, enabled,
 			   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
-			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, revision_id)
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, revision_id)
 			SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 				wm.new_id,
 				(SELECT nf.id FROM model.form_def ofd
@@ -5265,7 +5180,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
 				          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
 				          HAVING count(*) = 1), ar.source_integration_id),
-				ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
+				ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import,
 				$2::uuid
 			FROM workflow.automation_rule ar
 			LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id
@@ -7277,161 +7192,163 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 	isScopedDeveloper := isDeveloper && !isPlatformAdmin && !h.isGlobalBuilder(ctx, act)
 	for i, t := range tenants {
 		tenants[i].PlanState = h.planStateFor(ctx, t.ID)
-		var aRows interface {
-			Next() bool
-			Scan(...any) error
-			Close()
+		tenants[i].Applications = []adminAppItem{}
+		// Every application of the tenant — belonging to it directly
+		// (customer_id) or through its workspace (workspace_id, customer_id
+		// NULL) — then the ones act opens on this route, and of each the
+		// models it opens (openableApps, openableModels: the gate's own rule).
+		// The list used to restate the gate per role and narrowed a tenant
+		// admin that is also a developer by its application and model grants,
+		// which never narrow the admin arm: an application of its own tenant
+		// it opened was missing here (2026-10-31).
+		order := "a.created_at"
+		if isScopedDeveloper && !grantOnly[t.ID] {
+			order = "a.name"
 		}
-		var err error
-		if grantOnly[t.ID] {
-			// A tenant only the account's grants reach: the granted
-			// applications (grantedAppSQL), whose models the grants narrow
-			// as a developer's (below).
-			aRows, err = h.db.Query(ctx, `
-				SELECT a.id::text, a.name, a.mode::text, a.status::text, a.description
-				FROM core.application a
-				LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
-				WHERE (a.customer_id=$1::uuid OR aw.customer_id=$1::uuid) AND `+grantedAppSQL("a", "$2::uuid")+`
-				ORDER BY a.created_at`, t.ID, act.UserID)
-		} else if isScopedDeveloper {
-			// Workspace-scoped developer: apps of tenants where they hold a
-			// role in any of the tenant's workspaces, filtered by explicit
-			// app/model access grants when present. An application belongs to
-			// this tenant either directly (customer_id set — customer-wide
-			// apps) or via its workspace (workspace_id set, customer_id
-			// NULL — the common case for workspace-scoped apps); matching
-			// customer_id alone made every workspace-scoped app invisible
-			// here regardless of role.
-			aRows, err = h.db.Query(ctx, `
-				SELECT DISTINCT a.id::text, a.name, a.mode::text, a.status::text, a.description
-					FROM core.application a
-					LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
-					WHERE (a.customer_id=$1::uuid OR aw.customer_id=$1::uuid)
-					  AND (EXISTS (
-					      SELECT 1 FROM identity.role_assignment ra
-					      JOIN core.workspace rw ON rw.id = ra.workspace_id
-					      WHERE ra.user_id=$2::uuid AND rw.customer_id = $1::uuid
-					  ) OR EXISTS (SELECT 1 FROM identity."user" u WHERE u.id=$2::uuid AND u.customer_id=$1::uuid)
-					    OR `+customerlessGrantTenantSQL("$2::uuid", "$1::uuid")+`)
-					  AND (
-					      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
-					      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=a.id)
-					  )
-					  -- An application without a model is still the developer's to
-					  -- see: creating that first model is their job.
-					  AND (NOT EXISTS (SELECT 1 FROM core.model WHERE application_id=a.id)
-					       OR EXISTS (
-					      SELECT 1 FROM core.model m
-					      WHERE m.application_id=a.id
-					        AND (
-					            NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-					            OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
-					        )
-					  ))
-					ORDER BY a.name
-				`, t.ID, act.UserID)
-		} else {
-			// Same customer_id-or-workspace fallback for platform_admin/tenant_admin.
-			aRows, err = h.db.Query(ctx, `
-				SELECT a.id::text, a.name, a.mode::text, a.status::text, a.description
-				FROM core.application a
-				LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
-				WHERE a.customer_id=$1::uuid OR aw.customer_id=$1::uuid
-				ORDER BY a.created_at`, t.ID)
+		apps, err := h.tenantApplications(ctx, t.ID, order)
+		if err == nil {
+			apps, err = h.openTenantApplications(ctx, act, apps)
 		}
 		if err != nil {
 			h.log.Warn().Err(err).Str("tenant", t.ID).Msg("applications of a tenant not listed")
-			tenants[i].Applications = []adminAppItem{}
 			continue
 		}
-		for aRows.Next() {
-			var ap adminAppItem
-			if err := aRows.Scan(&ap.ID, &ap.Name, &ap.Mode, &ap.Status, &ap.Description); err != nil {
-				continue
-			}
-			var mRows interface {
-				Next() bool
-				Scan(...any) error
-				Close()
-			}
-			// A platform admin who is also a developer sees every model:
-			// only a scoped developer's and a grant's are narrowed.
-			if isScopedDeveloper || grantOnly[t.ID] {
-				mRows, _ = h.db.Query(ctx, `
-						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
-						       (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
-						FROM core.model m
-						WHERE m.application_id=$1::uuid
-						  AND (
-						      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-						      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
-						  )
-						ORDER BY m.created_at,
-						         (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
-						         m.name, m.id
-					`, ap.ID, act.UserID)
-			} else {
-				// Models created in one transaction (sign-up's starter models) share a
-				// created_at; the application's default goes first among
-				// them, then name and id, so the list does not reshuffle.
-				mRows, _ = h.db.Query(ctx,
-					`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
-					        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
-					 FROM core.model WHERE application_id=$1::uuid
-					 ORDER BY created_at,
-					          (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
-					          name, id`, ap.ID)
-			}
-			// Read apart from the models, so a tenant whose sizes cannot be
-			// read still lists its models.
-			sizes := map[string]int64{}
-			if sRows, err := h.db.Query(ctx, `SELECT s.model_id::text, s.bytes FROM runtime.model_storage s
-				JOIN core.model m ON m.id = s.model_id WHERE m.application_id = $1::uuid`, ap.ID); err == nil {
-				for sRows.Next() {
-					var id string
-					var b int64
-					if sRows.Scan(&id, &b) == nil {
-						sizes[id] = b
-					}
-				}
-				sRows.Close()
-			}
-			if mRows != nil {
-				for mRows.Next() {
-					var m adminModelItem
-					_ = mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.Description, &m.IsDefault)
-					if b, ok := sizes[m.ID]; ok {
-						m.StorageBytes = &b
-					}
-					rRows, rErr := h.db.Query(ctx,
-						`SELECT id::text, name, created_at::text FROM model.revision WHERE model_id=$1::uuid ORDER BY created_at`, m.ID)
-					if rErr == nil {
-						for rRows.Next() {
-							var r adminRevisionItem
-							_ = rRows.Scan(&r.ID, &r.Name, &r.CreatedAt)
-							m.Revisions = append(m.Revisions, r)
-						}
-						rRows.Close()
-					}
-					if m.Revisions == nil {
-						m.Revisions = []adminRevisionItem{}
-					}
-					ap.Models = append(ap.Models, m)
-				}
-				mRows.Close()
-			}
-			if ap.Models == nil {
-				ap.Models = []adminModelItem{}
-			}
-			tenants[i].Applications = append(tenants[i].Applications, ap)
+		for j := range apps {
+			h.addModelDetails(ctx, apps[j].ID, apps[j].Models)
 		}
-		aRows.Close()
-		if tenants[i].Applications == nil {
-			tenants[i].Applications = []adminAppItem{}
-		}
+		tenants[i].Applications = apps
 	}
 
 	return tenants, nil
+}
+
+// tenantApplications is every application of tenant customerID, each with
+// every one of its models, in order (an SQL ORDER BY over
+// core.application a). addModelDetails adds what a listed model shows.
+func (h *handler) tenantApplications(ctx context.Context, customerID, order string) ([]adminAppItem, error) {
+	aRows, err := h.db.Query(ctx, `
+		SELECT a.id::text, a.name, a.mode::text, a.status::text, a.description
+		FROM core.application a
+		LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
+		WHERE a.customer_id=$1::uuid OR aw.customer_id=$1::uuid
+		ORDER BY `+order, customerID)
+	if err != nil {
+		return nil, err
+	}
+	var apps []adminAppItem
+	for aRows.Next() {
+		var ap adminAppItem
+		if err := aRows.Scan(&ap.ID, &ap.Name, &ap.Mode, &ap.Status, &ap.Description); err == nil {
+			apps = append(apps, ap)
+		}
+	}
+	aRows.Close()
+	if err := aRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range apps {
+		apps[i].Models = h.applicationModels(ctx, apps[i].ID)
+	}
+	return apps, nil
+}
+
+// applicationModels is every model of appID. Models created in one
+// transaction (sign-up's starter models) share a created_at; the
+// application's default goes first among them, then name and id, so the
+// list does not reshuffle.
+func (h *handler) applicationModels(ctx context.Context, appID string) []adminModelItem {
+	models := []adminModelItem{}
+	mRows, err := h.db.Query(ctx,
+		`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
+		        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
+		 FROM core.model WHERE application_id=$1::uuid
+		 ORDER BY created_at,
+		          (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
+		          name, id`, appID)
+	if err != nil {
+		return models
+	}
+	for mRows.Next() {
+		var m adminModelItem
+		if mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.Description, &m.IsDefault) == nil {
+			models = append(models, m)
+		}
+	}
+	mRows.Close()
+	return models
+}
+
+// addModelDetails adds to models, all of appID, their revisions and the
+// storage each takes.
+func (h *handler) addModelDetails(ctx context.Context, appID string, models []adminModelItem) {
+	// Read apart from the models, so a tenant whose sizes cannot be read
+	// still lists its models.
+	sizes := map[string]int64{}
+	if sRows, err := h.db.Query(ctx, `SELECT s.model_id::text, s.bytes FROM runtime.model_storage s
+		JOIN core.model m ON m.id = s.model_id WHERE m.application_id = $1::uuid`, appID); err == nil {
+		for sRows.Next() {
+			var id string
+			var b int64
+			if sRows.Scan(&id, &b) == nil {
+				sizes[id] = b
+			}
+		}
+		sRows.Close()
+	}
+	for i := range models {
+		if b, ok := sizes[models[i].ID]; ok {
+			models[i].StorageBytes = &b
+		}
+		models[i].Revisions = []adminRevisionItem{}
+		rRows, rErr := h.db.Query(ctx,
+			`SELECT id::text, name, created_at::text FROM model.revision WHERE model_id=$1::uuid ORDER BY created_at`, models[i].ID)
+		if rErr != nil {
+			continue
+		}
+		for rRows.Next() {
+			var r adminRevisionItem
+			if rRows.Scan(&r.ID, &r.Name, &r.CreatedAt) == nil {
+				models[i].Revisions = append(models[i].Revisions, r)
+			}
+		}
+		rRows.Close()
+	}
+}
+
+// openTenantApplications keeps the applications of apps that act opens on
+// the route ctx arrived through, each with only the models it opens
+// (openableApps, openableModels).
+func (h *handler) openTenantApplications(ctx context.Context, act *actor, apps []adminAppItem) ([]adminAppItem, error) {
+	var appIDs, modelIDs []string
+	for _, ap := range apps {
+		appIDs = append(appIDs, ap.ID)
+		for _, m := range ap.Models {
+			modelIDs = append(modelIDs, m.ID)
+		}
+	}
+	open, err := h.openableApps(ctx, act, appIDs)
+	if err != nil {
+		return nil, err
+	}
+	modelOpen, err := h.openableModels(ctx, act, modelIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := []adminAppItem{}
+	for _, ap := range apps {
+		if !open[ap.ID] {
+			continue
+		}
+		kept := []adminModelItem{}
+		for _, m := range ap.Models {
+			if modelOpen[m.ID] {
+				kept = append(kept, m)
+			}
+		}
+		ap.Models = kept
+		out = append(out, ap)
+	}
+	return out, nil
 }
 
 type userAssignment struct {
@@ -10200,162 +10117,119 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, apps)
 }
 
-// appsIn lists the applications a reaches in the database ctx is routed to,
-// with the models it may access in each.
+// appsIn lists the applications a opens in the database ctx is routed to
+// (openableAppsBy), each with the models it opens there (openableModels),
+// default first. An application with no model is listed only to a caller
+// whose scope opens it — a platform admin, a tenant admin of its tenant —
+// as it was before the list asked the gate: there is nothing in it to
+// switch to, and it is built from the developer's screens. The list used to
+// restate the gate in three queries of its own; one of them narrowed a
+// tenant admin's models by its grants while the gate does not, so a model it
+// opened was missing from the switcher and the connector (2026-10-31).
 func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
-	var rows interface {
-		Next() bool
-		Scan(...any) error
-		Close()
-		Err() error
-	}
-	var err error
-	platformWide := a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a)
-	var customerIDs []string
-	if !platformWide && a.hasRole("tenant_admin") {
-		_, ids, scopeErr := h.adminScopeCustomerIDs(ctx, a)
-		if scopeErr != nil {
-			return nil, scopeErr
-		}
-		customerIDs = ids
-	}
-	if platformWide {
-		rows, err = h.db.Query(ctx, `
-			SELECT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
-			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
-			FROM core.application a
-			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
-			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
-			ORDER BY w.name, a.name
-		`)
-	} else if len(customerIDs) > 0 {
-		// A tenant admin's tenants, plus whatever a workspace role held in
-		// another tenant opens for it (actorCanAccessApp).
-		rows, err = h.db.Query(ctx, `
-			SELECT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
-			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
-			FROM core.application a
-			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
-			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
-			WHERE a.customer_id::text = ANY($1)
-			   OR (`+reachSQL(ctx, "a", "w", "$2")+`
-			       AND (
-			           NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $2::uuid)
-			           OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $2::uuid AND application_id = a.id)
-			       )
-			       AND EXISTS (
-			           SELECT 1 FROM core.model m
-			           WHERE m.application_id = a.id
-			             AND (
-			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid)
-			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid AND model_id = m.id)
-			             )
-			       ))
-			ORDER BY w.name, a.name
-		`, customerIDs, a.UserID)
-	} else {
-		rows, err = h.db.Query(ctx, `
-			SELECT DISTINCT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
-			       COALESCE((
-			           SELECT m.name FROM core.model m
-			           WHERE m.application_id = a.id
-			             AND (
-			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid)
-			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid AND model_id = m.id)
-			             )
-			           ORDER BY (m.id = a.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
-			           LIMIT 1
-			       ), ''),
-			       COALESCE((
-			           SELECT m.active_revision_name FROM core.model m
-			           WHERE m.application_id = a.id
-			             AND (
-			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid)
-			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid AND model_id = m.id)
-			             )
-			           ORDER BY (m.id = a.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
-			           LIMIT 1
-			       ), ''),
-			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
-			FROM core.application a
-			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
-			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
-			WHERE `+reachSQL(ctx, "a", "w", "$1")+`
-			  AND (
-			      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid)
-			      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid AND application_id = a.id)
-			  )
-			  AND EXISTS (
-			      SELECT 1 FROM core.model m
-			      WHERE m.application_id = a.id
-			        AND (
-			            NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid)
-			            OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid AND model_id = m.id)
-			        )
-			  )
-			ORDER BY w.name, a.name
-		`, a.UserID)
-	}
+	rows, err := h.db.Query(ctx, `
+		SELECT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
+		       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
+		FROM core.application a
+		JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
+		    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
+		ORDER BY w.name, a.name
+	`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	apps := []appInfo{}
+	var candidates []appInfo
+	var ids []string
 	for rows.Next() {
 		var app appInfo
-		if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.Mode, &app.WorkspaceName, &app.ModelName, &app.ActiveRevision,
-			&app.TenantID, &app.TenantName); err != nil {
+		if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.Mode, &app.WorkspaceName, &app.TenantID, &app.TenantName); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		apps = append(apps, app)
+		candidates = append(candidates, app)
+		ids = append(ids, app.ID)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows.Close()
-	// Per-app accessible models (default first) for the model switcher.
-	// is_default is "IS TRUE": with no default set the comparison is NULL,
-	// which does not scan into a bool, and a row that fails to scan is
-	// skipped — an application whose default had been cleared (its default
-	// model deleted) listed no models at all.
-	for i := range apps {
-		mRows, mErr := h.db.Query(ctx, `
-			SELECT m.id::text, m.name, m.description,
-			       (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) IS TRUE,
-			       COALESCE(m.active_revision_name, '')
+	open, byScope, err := h.openableAppsBy(ctx, a, ids)
+	if err != nil {
+		return nil, err
+	}
+	var openIDs []string
+	for _, id := range ids {
+		if open[id] {
+			openIDs = append(openIDs, id)
+		}
+	}
+
+	// The models of those applications, in the switcher's order. is_default
+	// is "IS TRUE": with no default set the comparison is NULL, which does
+	// not scan into a bool, and a row that fails to scan is skipped — an
+	// application whose default had been cleared (its default model deleted)
+	// listed no models at all.
+	models := map[string][]appModelInfo{}
+	var modelIDs []string
+	if len(openIDs) > 0 {
+		mRows, err := h.db.Query(ctx, `
+			SELECT m.application_id::text, m.id::text, m.name, m.description,
+			       (m.id = app.default_model_id) IS TRUE, COALESCE(m.active_revision_name, '')
 			FROM core.model m
-			WHERE m.application_id = $1::uuid
-			  AND (
-			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid)
-			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid AND model_id = m.id)
-			  )
-			ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) IS TRUE DESC, m.created_at DESC, m.name, m.id
-		`, apps[i].ID, a.UserID)
-		if mErr != nil {
-			continue
+			JOIN core.application app ON app.id = m.application_id
+			WHERE m.application_id = ANY($1::uuid[])
+			ORDER BY (m.id = app.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
+		`, openIDs)
+		if err != nil {
+			return nil, err
 		}
 		for mRows.Next() {
+			var appID string
 			var mi appModelInfo
-			if mRows.Scan(&mi.ID, &mi.Name, &mi.Description, &mi.IsDefault, &mi.ActiveRevision) == nil {
-				apps[i].Models = append(apps[i].Models, mi)
+			if mRows.Scan(&appID, &mi.ID, &mi.Name, &mi.Description, &mi.IsDefault, &mi.ActiveRevision) == nil {
+				models[appID] = append(models[appID], mi)
+				modelIDs = append(modelIDs, mi.ID)
 			}
 		}
 		mRows.Close()
+		if err := mRows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	modelOpen, err := h.openableModels(ctx, a, modelIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	apps := []appInfo{}
+	for _, app := range candidates {
+		if !open[app.ID] {
+			continue
+		}
+		for _, m := range models[app.ID] {
+			if modelOpen[m.ID] {
+				app.Models = append(app.Models, m)
+			}
+		}
+		switch {
+		case len(app.Models) > 0:
+			app.ModelName, app.ActiveRevision = app.Models[0].Name, app.Models[0].ActiveRevision
+		case len(models[app.ID]) > 0 || !byScope[app.ID]:
+			// Models, none of them the caller's; or no model, and nothing to
+			// administer here.
+			continue
+		}
+		apps = append(apps, app)
 	}
 	return apps, nil
 }
 
 // pinModelForRevision switches a resolved model to the one owning revID —
-// but only within the same, already-authorized application, honoring
-// user_model_access. A foreign or unknown revision leaves modelID as-is.
-// See resolveDemoModelID for why: multi-model apps need the request's
-// revision to identify WHICH model the caller works in.
-func (h *handler) pinModelForRevision(ctx context.Context, userID, appID, modelID, revID string) string {
+// but only within the same, already-authorized application, and only to a
+// model a opens (openableModels). A foreign or unknown revision leaves
+// modelID as-is. See resolveDemoModelID for why: multi-model apps need the
+// request's revision to identify WHICH model the caller works in.
+func (h *handler) pinModelForRevision(ctx context.Context, a *actor, appID, modelID, revID string) string {
 	if revID == "" || appID == "" {
 		return modelID
 	}
@@ -10365,14 +10239,13 @@ func (h *handler) pinModelForRevision(ctx context.Context, userID, appID, modelI
 		FROM model.revision rev
 		JOIN core.model m ON m.id = rev.model_id
 		WHERE rev.id::text = $1 AND m.application_id = $2::uuid
-		  AND (
-		      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid)
-		      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid AND model_id=rev.model_id)
-		  )
-	`, revID, appID, userID).Scan(&revModel); err == nil {
-		return revModel
+	`, revID, appID).Scan(&revModel); err != nil {
+		return modelID
 	}
-	return modelID
+	if ok, err := h.actorCanAccessModel(ctx, a, revModel); err != nil || !ok {
+		return modelID
+	}
+	return revModel
 }
 
 // pinModelForBodyRevision is pinModelForRevision for endpoints whose
@@ -10387,7 +10260,7 @@ func (h *handler) pinModelForBodyRevision(ctx context.Context, r *http.Request, 
 	if err != nil {
 		return modelID
 	}
-	return h.pinModelForRevision(ctx, act.UserID, appID, modelID, revID)
+	return h.pinModelForRevision(ctx, act, appID, modelID, revID)
 }
 
 func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (string, error) {
@@ -10396,103 +10269,37 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 		return "", fmt.Errorf("%w: %w", errNotSignedIn, err)
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
-		var modelID string
-		// Every branch orders the same way: the application's default model,
-		// else the newest, else — for models created in one transaction,
-		// which share a created_at (sign-up's starter models) — name then id, so the
-		// same request never resolves two different models.
-		if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
-			err = h.db.QueryRow(ctx, `
-				SELECT m.id::text FROM core.model m
-				WHERE m.application_id = $1::uuid
-				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
-			`, appID).Scan(&modelID)
-		} else {
-			// A tenant admin's scope first; outside it on a business route
-			// (or for anyone else), the roles the caller holds —
-			// roleReachesAppSQL.
-			scoped := false
-			// On a developer-only route the admin scope counts only in the
-			// tenants the developer grants reach (builderAdminScope); the
-			// developer arms below decide the rest (developerRouteKey).
-			if act.hasRole("tenant_admin") {
-				all, customerIDs, scopeErr := h.builderAdminScope(ctx, act)
-				if scopeErr != nil {
-					return "", scopeErr
-				}
-				if all {
-					err = h.db.QueryRow(ctx, `
-						SELECT m.id::text FROM core.model m
-						WHERE m.application_id = $1::uuid
-						ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
-					`, appID).Scan(&modelID)
-					scoped = true
-				} else if len(customerIDs) > 0 {
-					err = h.db.QueryRow(ctx, `
-						SELECT m.id::text
-						FROM core.model m
-						JOIN core.application app ON app.id=m.application_id
-						WHERE app.id=$1::uuid AND app.customer_id::text = ANY($2)
-						ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
-					`, appID, customerIDs).Scan(&modelID)
-					scoped = err == nil
-				}
-			}
-			if !scoped {
-				// developer is a tenant-wide trusted role — the same breadth
-				// adminTenants already grants it when LISTING apps ("any
-				// workspace of this customer"). Matching only the app's own
-				// workspace here made a workspace-scoped app (customer_id
-				// NULL, the common case) visible in the Developer Console's
-				// app list but unopenable for any developer whose
-				// role_assignment lives in a different workspace of the same
-				// customer. business_user/business_admin stay
-				// workspace-scoped — that boundary between workspaces of one
-				// corporate tenant is intentional for operational roles.
-				err = h.db.QueryRow(ctx, `
-				SELECT m.id::text
-				FROM core.model m
-				JOIN core.application app ON app.id=m.application_id
-				LEFT JOIN core.workspace appws ON appws.id = app.workspace_id
-				WHERE app.id=$1::uuid
-				  AND `+reachSQL(ctx, "app", "appws", "$2")+`
-				  AND (
-				      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
-				      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
-				  )
-				  AND (
-				      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
-				      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
-				  )
-				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
-			`, appID, act.UserID).Scan(&modelID)
-			}
-		}
-		if err != nil {
+		// The first model of the application the caller opens on this route
+		// (openableModels, the gate's own rule): the default, the newest,
+		// name, id. It used to restate the gate in three queries of its own,
+		// which narrowed a tenant admin by its grants on some routes and not
+		// on others (2026-10-31).
+		modelID, err := h.firstOpenableModel(ctx, act, appID)
+		if err != nil || modelID == "" {
 			return "", errAccessDenied
 		}
-		// Every branch above resolves the app's NEWEST model — with no way
+		// Resolution used to take the app's NEWEST model — with no way
 		// for the caller to pick another one, creating a second model in an
 		// app made the first one's data vanish from every console view (the
 		// selected revision belonged to the "wrong" model and each query
 		// came back foreign/empty — reported live). When the request names
 		// a revision, that revision identifies the model the caller is
-		// actually working in; honoring it is safe because the branches
+		// actually working in; honoring it is safe because the resolution
 		// above already authorized the APP, and the join pins the revision's
 		// model to that same app (a foreign revision changes nothing).
 		// Explicit model selection (X-Model-Id, set by the Models tab's
-		// switcher): validated to the SAME already-authorized app and the
-		// caller's user_model_access — a foreign or inaccessible model id
+		// switcher): validated to the SAME already-authorized app and to a
+		// model the caller opens — a foreign or inaccessible model id
 		// changes nothing. The revision pin below still wins when a request
 		// names a revision (the developer console's more specific signal).
-		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act.UserID)
+		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act)
 		if hErr != nil {
 			return "", hErr
 		}
 		if hdrModel != "" {
 			modelID = hdrModel
 		}
-		modelID = h.pinModelForRevision(ctx, act.UserID, appID, modelID, r.URL.Query().Get("revision_id"))
+		modelID = h.pinModelForRevision(ctx, act, appID, modelID, r.URL.Query().Get("revision_id"))
 		return modelID, nil
 	}
 	// No application named: a request that has not chosen an application
@@ -10580,28 +10387,29 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 }
 
 // headerModelInApp returns the model the request's X-Model-Id names (the
-// model switcher's choice) when it is a model of appID the user may open,
-// "" when the request names none, and errModelNotOpen for any other id: a
-// foreign or inaccessible id is refused, never replaced by the default. The
-// caller has already authorized appID.
-func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, userID string) (string, error) {
+// model switcher's choice) when it is a model of appID that a opens
+// (openableModels), "" when the request names none, and errModelNotOpen for
+// any other id: a foreign or inaccessible id is refused, never replaced by
+// the default. The caller has already authorized appID.
+func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID string, a *actor) (string, error) {
 	hdrModel := r.Header.Get("X-Model-Id")
 	if hdrModel == "" {
 		return "", nil
 	}
-	var ok bool
+	var inApp bool
 	if err := h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM core.model m
-			WHERE m.id::text = $1 AND m.application_id = $2::uuid
-			  AND (
-			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid)
-			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid AND model_id=m.id)
-			  )
-		)
-	`, hdrModel, appID, userID).Scan(&ok); err != nil {
+		SELECT EXISTS (SELECT 1 FROM core.model m WHERE m.id::text = $1 AND m.application_id = $2::uuid)
+	`, hdrModel, appID).Scan(&inApp); err != nil {
 		return "", err
-	} else if !ok {
+	}
+	if !inApp {
+		return "", errModelNotOpen
+	}
+	ok, err := h.actorCanAccessModel(ctx, a, hdrModel)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
 		return "", errModelNotOpen
 	}
 	return hdrModel, nil
@@ -10939,11 +10747,13 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 	// /api/forms/{id}/sync — re-apply all live mappings for every record in this form
 	if len(parts) == 2 && parts[1] == "sync" && r.Method == http.MethodPost {
 		// A sync re-posts every record of the form, other people's
-		// included, so it is an administrator's (resolveFormRecordScope's
-		// admin): a caller who reaches the form but may not change others'
-		// records gets 403, anyone else the 404 a missing form gets. It was
-		// open to every caller who reached the form, and a reader's sync
-		// withdrew the postings their own write guard refused.
+		// included, so it is for a caller who may change every record
+		// (formRecordScope.changesEveryRecord: an administrator, or anyone
+		// with no member of a table everyone edits kept from them): a caller
+		// who reaches the form but may not change others' records gets 403,
+		// anyone else the 404 a missing form gets. It was open to every
+		// caller who reached the form, and a reader's sync withdrew the
+		// postings their own write guard refused.
 		act, err := h.resolveActor(ctx, r)
 		if err != nil {
 			jsonErr(w, err, http.StatusUnauthorized)
@@ -10958,8 +10768,8 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonRecordErr(w, errRecordNotReached, "table")
 			return
 		}
-		if !scope.admin {
-			jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application syncs a table's records"), http.StatusForbidden)
+		if !scope.changesEveryRecord() {
+			jsonErr(w, fmt.Errorf("forbidden: a table's records are synced by its administrator, or by someone who may change every record of it"), http.StatusForbidden)
 			return
 		}
 
@@ -11057,6 +10867,10 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			}
 			membersAdded := false
 			rec, err := store.CreateRecordThen(ctx, formID, userID, body.Status, body.Data, h.records().AfterRecordCreated(userID, &membersAdded))
+			if errors.Is(err, crudapp.ErrCodeTaken) {
+				jsonErr(w, err, http.StatusConflict)
+				return
+			}
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -11423,6 +11237,7 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 			MisfirePolicy       string `json:"misfire_policy"`
 			MaxRetries          int    `json:"max_retries"`
 			RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
+			FiresOnImport       *bool  `json:"fires_on_import"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -11445,6 +11260,13 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			jsonErr(w, err, ruleErrStatus(err))
 			return
+		}
+		if body.FiresOnImport != nil {
+			if err := store.SetRuleFiresOnImport(ctx, rule.ID, *body.FiresOnImport); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			rule.FiresOnImport = *body.FiresOnImport
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -14980,6 +14802,7 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 			MisfirePolicy       string `json:"misfire_policy"`
 			MaxRetries          int    `json:"max_retries"`
 			RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
+			FiresOnImport       *bool  `json:"fires_on_import"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -15001,6 +14824,13 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			jsonErr(w, err, ruleErrStatus(err))
 			return
+		}
+		if body.FiresOnImport != nil {
+			if err := store.SetRuleFiresOnImport(ctx, ruleID, *body.FiresOnImport); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			updated.FiresOnImport = *body.FiresOnImport
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -17082,7 +16912,7 @@ func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allo
 		`, appID).Scan(&appWorkspaceID, &customerID, &modelID); err != nil {
 			return "", "", err
 		}
-		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act.UserID)
+		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act)
 		if hErr != nil {
 			return "", "", hErr
 		}

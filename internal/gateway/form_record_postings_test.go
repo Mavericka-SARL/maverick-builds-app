@@ -66,6 +66,51 @@ func (f *recordFixture) waitPosted(label, mappingID, metricID string, wantPostin
 	}
 }
 
+// In a table everyone edits, a business user who may change every record
+// syncs it — the Controllers who load the ledger into it — and one with a
+// member of its fields read-only is refused (restaurant model, 2026-10-31).
+func TestFormSyncByWhoChangesEveryRecord(t *testing.T) {
+	f := setupRecordFixture(t)
+	ctx := context.Background()
+	mappingID, metricID := f.mapRecordsToMetric("approved")
+	var modelID, revID string
+	if err := f.pool.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.form_def WHERE id=$1::uuid`, f.formID).Scan(&modelID, &revID); err != nil {
+		t.Fatal(err)
+	}
+	var dimID, southID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id) VALUES ($1::uuid, 'region', 'sum', NULLIF($2,'')::uuid) RETURNING id::text`, modelID, revID).Scan(&dimID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'N', 'North')`, dimID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'S', 'South') RETURNING id::text`, dimID).Scan(&southID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE model.form_def SET edit_access = 'everyone',
+		       fields = fields || jsonb_build_array(jsonb_build_object('name', 'region', 'label', 'Region', 'type', 'dimension', 'dimension_id', $2::text))
+		WHERE id = $1::uuid`, f.formID, dimID); err != nil {
+		t.Fatal(err)
+	}
+	f.create(prBA, "approved", 10)
+	f.create(prBA, "approved", 20)
+	f.waitPosted("two approved records", mappingID, metricID, 2, 30)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'dimension_member', $2, 'read')`, f.userID[prPeer], southID); err != nil {
+		t.Fatal(err)
+	}
+
+	syncPath := "/api/forms/" + f.formID + "/sync"
+	raw := f.expect(http.StatusOK, http.MethodPost, syncPath, prOwner, nil)
+	if got := decodeObj(t, raw)["records_processed"]; got != float64(2) {
+		t.Errorf("the business user's sync processed %v record(s), want 2", got)
+	}
+	f.expect(http.StatusForbidden, http.MethodPost, syncPath, prPeer, nil)
+	if n, total := f.posted(mappingID, metricID); n != 2 || total != 30 {
+		t.Errorf("after the syncs: %d posting(s) totalling %v, want 2 totalling 30", n, total)
+	}
+}
+
 // TestFormSyncIsAnAdministrators — a sync re-posts every record of the
 // form, other people's included, so a business user who may only read them
 // is refused; the business admin and the developer sync.

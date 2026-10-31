@@ -314,7 +314,7 @@ func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef,
 		return 0, nil
 	}
 	if form.CodeField() == nil {
-		return 0, settingErr(400, "a table keeping a dimension needs an auto-code field: its codes are the members' codes")
+		return 0, settingErr(400, "a table keeping a dimension needs a code field — an auto-code field, or a text field marked as the code (\"code\": true) for codes given from outside, such as a ledger's account numbers: its codes are the members' codes")
 	}
 	if lf := form.Field(labelField); lf == nil || !crudapp.IsTextType(lf.Type) && lf.Type != "select" || lf.Type == crudapp.FieldURL {
 		return 0, settingErr(400, "member_label_field names the text field that labels each member (%q is not one)", labelField)

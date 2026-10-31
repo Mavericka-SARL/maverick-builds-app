@@ -26,6 +26,7 @@ func init() {
 		"IFERROR": fnIFERROR,
 		"IFNA":    fnIFNA,
 		"SWITCH":  fnSWITCH,
+		"ISBLANK": fnISBLANK,
 
 		// Math
 		"ABS":       fnABS,
@@ -163,6 +164,17 @@ func fnIFERROR(ctx *EvalContext, args []Node) Value {
 		return ctx.eval(args[1])
 	}
 	return v
+}
+
+// fnISBLANK is TRUE where its argument has no value: an input cell nobody
+// entered (EvalContext.Blank), an unset property, an empty text. An error
+// is not blank, as in Excel.
+func fnISBLANK(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("ISBLANK", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	v := ctx.evalOperand(args[0])
+	return BoolVal(v.IsBlank() || (v.Kind() == KindString && v.String() == ""))
 }
 
 func fnIFNA(ctx *EvalContext, args []Node) Value {

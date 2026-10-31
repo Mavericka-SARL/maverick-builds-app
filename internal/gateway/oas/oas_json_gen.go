@@ -7624,9 +7624,15 @@ func (s *AutomationRule) encodeFields(e *jx.Encoder) {
 			s.LastFireAt.Encode(e, json.EncodeDateTime)
 		}
 	}
+	{
+		if s.FiresOnImport.Set {
+			e.FieldStart("fires_on_import")
+			s.FiresOnImport.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAutomationRule = [20]string{
+var jsonFieldsNameOfAutomationRule = [21]string{
 	0:  "id",
 	1:  "application_id",
 	2:  "revision_id",
@@ -7647,6 +7653,7 @@ var jsonFieldsNameOfAutomationRule = [20]string{
 	17: "retry_backoff_seconds",
 	18: "next_fire_at",
 	19: "last_fire_at",
+	20: "fires_on_import",
 }
 
 // Decode decodes AutomationRule from json.
@@ -7876,6 +7883,16 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"last_fire_at\"")
 			}
+		case "fires_on_import":
+			if err := func() error {
+				s.FiresOnImport.Reset()
+				if err := s.FiresOnImport.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"fires_on_import\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -8067,9 +8084,15 @@ func (s *AutomationRuleRequest) encodeFields(e *jx.Encoder) {
 			s.RetryBackoffSeconds.Encode(e)
 		}
 	}
+	{
+		if s.FiresOnImport.Set {
+			e.FieldStart("fires_on_import")
+			s.FiresOnImport.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAutomationRuleRequest = [14]string{
+var jsonFieldsNameOfAutomationRuleRequest = [15]string{
 	0:  "name",
 	1:  "description",
 	2:  "trigger_type",
@@ -8084,6 +8107,7 @@ var jsonFieldsNameOfAutomationRuleRequest = [14]string{
 	11: "misfire_policy",
 	12: "max_retries",
 	13: "retry_backoff_seconds",
+	14: "fires_on_import",
 }
 
 // Decode decodes AutomationRuleRequest from json.
@@ -8234,6 +8258,16 @@ func (s *AutomationRuleRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"retry_backoff_seconds\"")
+			}
+		case "fires_on_import":
+			if err := func() error {
+				s.FiresOnImport.Reset()
+				if err := s.FiresOnImport.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"fires_on_import\"")
 			}
 		default:
 			return d.Skip()

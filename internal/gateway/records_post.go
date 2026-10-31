@@ -60,7 +60,7 @@ func (h *handler) repostTable(ctx context.Context, formID, userID string) (mappi
 }
 
 func (h *handler) dispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
-	h.records().DispatchRecordCreated(ctx, appID, revisionID, formID, recordID, status, userID)
+	h.records().DispatchRecordCreated(ctx, appID, revisionID, formID, recordID, status, userID, false)
 }
 
 func (h *handler) workflowSetsRecordStatus(ctx context.Context, recordID, status, byUserID string) {

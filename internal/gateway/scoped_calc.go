@@ -352,7 +352,9 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 		res.total, res.hasTotal, res.withheld = sr.persistedTotal(m, sm, ownDims, res.withheld)
 	case len(withheldLeaf) > 0:
 		res.withheld = append(res.withheld, m.ID) // no partial totals
-	case axis != nil && timeSummary == "none":
+	case axis != nil && timeSummary == "none" && len(leafPeriods(axis)) != 1:
+		// No total across periods; a scope of one period is that period
+		// (calculation.TimeSummaryOver).
 	default:
 		res.total, res.hasTotal = combineLeaves(leaves, axis, rule, timeSummary, singleLeafScope(rollupDims, ownDims))
 	}
@@ -662,6 +664,7 @@ func scopeOrdinaryMetric(
 	rule := calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)
 	evalCombo := func(combo map[string]string) (float64, error) {
 		values := make(map[string]float64, len(refs))
+		blank := map[string]bool{}
 		for _, ref := range refs {
 			refM, isMetric := byName[ref]
 			if !isMetric {
@@ -690,12 +693,15 @@ func scopeOrdinaryMetric(
 				values[refM.Name] = v
 				continue
 			}
-			v, _, err := rollup.ResolveTime(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
+			v, found, err := rollup.ResolveTime(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
 				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 			if err != nil {
 				return 0, err
 			}
 			values[refM.Name] = v
+			if !found {
+				blank[refM.Name] = true
+			}
 		}
 		namedDims := make(map[string]string, len(combo))
 		for dimID, code := range combo {
@@ -705,7 +711,7 @@ func scopeOrdinaryMetric(
 		}
 		// The member-metadata context (UNFILTERED): dim.property and PARENT
 		// compute exactly as in the scheduler.
-		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, namedDims, sr.cellContext(combo))
+		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, blank, namedDims, sr.cellContext(combo))
 	}
 	if isFormulaRule(rule) {
 		// Its readers evaluate it above its leaves (see evalCombo); each
@@ -819,6 +825,26 @@ func loadUserAccessRules(ctx context.Context, q writeguard.Querier, userID, revi
 // when the caller has hidden members — the read sets that decide what is
 // withheld from them. revisionMetrics is every metric of the revision,
 // hidden metrics included.
+// comparesText reports whether a number formula reads a text metric (in a
+// comparison or ISBLANK, the one way validation allows): its value is
+// served from its persisted rows, which the scheduler computed with the
+// text bound, never recomputed from number cells (the text would read 0).
+func comparesText(formulaText, format string, textNames map[string]bool) bool {
+	if format == metricformula.FormatText || len(textNames) == 0 {
+		return false
+	}
+	an, err := formula.Analyze(formulaText)
+	if err != nil {
+		return false
+	}
+	for _, ref := range an.References {
+		if textNames[strings.ToLower(ref.Name)] {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *handler) loadScopedReads(
 	ctx context.Context, modelID, revisionID string,
 	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
@@ -844,8 +870,14 @@ func (h *handler) loadScopedReads(
 	for d := range scopeSubtrees {
 		sr.Trimmed[d] = true
 	}
+	textNames := map[string]bool{}
 	for _, m := range allMetrics {
-		if m.IsInput || m.Formula == nil || !readset.Served(*m.Formula) {
+		if m.Format == metricformula.FormatText {
+			textNames[strings.ToLower(m.Name)] = true
+		}
+	}
+	for _, m := range allMetrics {
+		if m.IsInput || m.Formula == nil || (!readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames)) {
 			continue
 		}
 		rows, err := store.LoadCalcValueMap(ctx, modelID, revisionID, m.ID)

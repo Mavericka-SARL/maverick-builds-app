@@ -139,6 +139,23 @@ func (h *handler) administersModel(ctx context.Context, act *actor, modelID stri
 	return h.administersApp(ctx, act, modelID, appID)
 }
 
+// changesEveryRecord reports whether the caller may change every record of
+// the table: its administrator, or anyone who reaches a table everyone
+// edits, sees every record of it and has no member of its fields read-only
+// or hidden — the Controllers who load the ledger into it. They may sync
+// it: a sync re-posts each record under its own creator's access
+// (recordpost.post), so it changes nothing they could not change by saving
+// the records again.
+func (s formRecordScope) changesEveryRecord() bool {
+	if !s.reach || s.form == nil {
+		return false
+	}
+	if s.admin {
+		return true
+	}
+	return s.everyoneEdits() && !s.form.OwnRecordsOnly && !s.view.NarrowsForm(s.form)
+}
+
 // access is who the scope's caller is to rec.
 func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 	a := crudapp.RecordAccess{

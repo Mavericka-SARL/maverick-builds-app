@@ -926,12 +926,27 @@ type fullMetricDef struct {
 	// members of; "" for any other metric.
 	PicklistDimID string
 	DependsOnID   []string
+	// Text: a text metric (format text) — a number formula comparing one
+	// is served from its rows, never recomputed here (no text is bound).
+	Text bool
+}
+
+// readsText reports whether def's formula compares a text metric: it is
+// served from its persisted rows, as the scheduler computed it with the
+// text bound.
+func (cc *chartCalc) readsText(def *fullMetricDef) bool {
+	for _, dep := range def.DependsOnID {
+		if d := cc.defs[dep]; d != nil && d.Text {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revisionID string) (map[string]*fullMetricDef, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum'), time_summary,
-		       COALESCE(picklist_dimension_id::text,'')
+		       COALESCE(picklist_dimension_id::text,''), COALESCE(format,'') = 'text'
 		FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -941,7 +956,7 @@ func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revision
 	defs := make(map[string]*fullMetricDef)
 	for rows.Next() {
 		var d fullMetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary, &d.PicklistDimID); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary, &d.PicklistDimID, &d.Text); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -1055,7 +1070,7 @@ func (r *ChartResolver) evalCalcMetricVisited(
 	defer func() { delete(visited, metricID) }()
 
 	dimConditional := calculation.FormulaReferencesDims(def.Formula, cc.dimNames)
-	if readset.Served(def.Formula) {
+	if readset.Served(def.Formula) || cc.readsText(def) {
 		if !leafWise(def.AggRule, dimConditional) {
 			// The scheduler re-evaluates these rules (formula, rate, and a
 			// pure-ratio average — tsEvaluator.finish's useEval) AT the
@@ -1198,6 +1213,7 @@ func (r *ChartResolver) evalFormulaPoint(
 	visited map[string]bool,
 ) (float64, bool, error) {
 	varValues := make(map[string]float64, len(def.DependsOnID))
+	blank := map[string]bool{}
 	for _, depID := range def.DependsOnID {
 		depDef, ok := cc.defs[depID]
 		if !ok {
@@ -1211,6 +1227,8 @@ func (r *ChartResolver) evalFormulaPoint(
 			}
 			if ok {
 				val = v
+			} else {
+				blank[depDef.Name] = true
 			}
 		} else {
 			v, ok, err := r.evalCalcMetricVisited(ctx, depID, dimMembers, allDims, cc, visited)
@@ -1232,7 +1250,7 @@ func (r *ChartResolver) evalFormulaPoint(
 	if def.Formula == "" {
 		return 0, false, fmt.Errorf("empty formula")
 	}
-	v, err := calculation.EvaluateMetricWithDimContext(cc.meta, def.Name, def.Formula, varValues, namedDims, cc.meta.CellContext(dimMembers))
+	v, err := calculation.EvaluateMetricWithDimContext(cc.meta, def.Name, def.Formula, varValues, blank, namedDims, cc.meta.CellContext(dimMembers))
 	if errors.Is(err, calculation.ErrBlankResult) {
 		return 0, false, nil // no value there: no point, never a plotted 0
 	}

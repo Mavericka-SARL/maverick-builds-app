@@ -57,6 +57,7 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 			resolved[i] = s
 		}
 		out.problems = append(out.problems, aiassistant.PlanWorkflowProblems(ctx, tx, modelID, revID, resolved)...)
+		out.problems = append(out.problems, offGridReadProblems(ctx, tx, modelID, revID, resolved, created)...)
 	}
 	if err == nil && len(out.problems) == 0 {
 		out.warnings = planWarnings(ctx, tx, modelID, revID, steps)

@@ -27,7 +27,7 @@ type formPermissions struct {
 
 // formPermissions is what the scope's caller may do with its form's records.
 func (s formRecordScope) formPermissions() formPermissions {
-	p := formPermissions{Sync: s.reach && s.admin, CreateStatuses: []string{}}
+	p := formPermissions{Sync: s.changesEveryRecord(), CreateStatuses: []string{}}
 	create := s.createAccess()
 	if s.hasStatus() {
 		for _, st := range crudapp.RecordStatuses {

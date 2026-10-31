@@ -160,6 +160,14 @@ func scalarCatalogue() []catCase {
 		{`IFERROR(1/0)`, fails("#VALUE!")},
 		{`IFNA(IFS(FALSE, 1), 7)`, num(7)},
 		{`IFNA(1/0, 7)`, fails("#DIV/0!")}, // only #N/A is replaced
+		{`ISBLANK(blank_m)`, boolean(true)},
+		{`ISBLANK(zero)`, boolean(false)}, // an entered 0 is a value
+		{`ISBLANK(word)`, boolean(false)},
+		{`ISBLANK("")`, boolean(true)},   // an empty text: a text input with nothing entered
+		{`ISBLANK(1/0)`, boolean(false)}, // an error is not blank, as in Excel
+		{`IF(ISBLANK(blank_m), "open", "closed")`, text("open")},
+		{`blank_m = ""`, boolean(true)},
+		{`zero = ""`, boolean(false)},
 		{`SWITCH(2, 1, "one", 2, "two")`, text("two")},
 		{`SWITCH(3, 1, "one", 2, "two", "other")`, text("other")},
 		{`SWITCH(3, 1, "one", 2, "two")`, fails("#N/A")},
@@ -330,6 +338,33 @@ func TestCatalogueScalar(t *testing.T) {
 				t.Fatalf("%s: did not finish in 2s", c.formula)
 			}
 		})
+	}
+}
+
+// An input nobody entered is bound as 0 and named in Blank: arithmetic
+// reads 0, ISBLANK and a comparison read blank, so the Excel test
+// close_date = "" means "no date" instead of always FALSE.
+func TestBlankInputsReadBlankWhereBlanknessMatters(t *testing.T) {
+	ctx := &EvalContext{
+		Vars:  map[string]Value{"CLOSE_DATE": NumberVal(0), "OPEN_DATE": NumberVal(d(2026, 3, 1))},
+		Blank: map[string]bool{"CLOSE_DATE": true},
+	}
+	for _, c := range []catCase{
+		{`ISBLANK(close_date)`, boolean(true)},
+		{`ISBLANK(open_date)`, boolean(false)},
+		{`close_date = ""`, boolean(true)},
+		{`close_date <> ""`, boolean(false)},
+		{`"" = close_date`, boolean(true)},
+		{`close_date = 0`, boolean(true)}, // blank equals 0, as in Excel
+		{`close_date + 1`, num(1)},
+		{`IF(close_date = "", 1, 0)`, num(1)},
+		{`open_date <> ""`, boolean(true)},
+	} {
+		node, err := Parse(c.formula)
+		if err != nil {
+			t.Fatalf("%s: %v", c.formula, err)
+		}
+		c.want.check(t, c.formula, EvalNode(ctx, node))
 	}
 }
 

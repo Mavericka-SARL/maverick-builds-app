@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pause, Play, Pencil, Trash2 } from "lucide-react";
 import { api, type AutomationRule, type Execution, type FormDef, type GridDef, type WorkflowDefSummary , type IntegrationDef, type TriggerEventCatalogItem } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
-import { SectionHeader, Button, EmptyState, StatusBadge, IconButton, Field, TextInput, Select, useConfirm, type DesignTone } from "../../ui";
+import { SectionHeader, Button, EmptyState, StatusBadge, IconButton, Field, TextInput, Select, Checkbox, useConfirm, type DesignTone } from "../../ui";
 import { triggerTypeFromWorkflow, ruleTriggerFromWorkflow, useTriggerEvents } from "./workflowConstants";
 import { useCancelRun } from "./useCancelRun";
 
@@ -11,15 +11,19 @@ const EXEC_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success", running: "warning", failed: "danger", cancelled: "neutral",
 };
 
-type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string; cron_expr: string; timezone: string; misfire_policy: string };
+type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string; cron_expr: string; timezone: string; misfire_policy: string; fires_on_import: boolean };
 
 // The schedule fields go to the server only for a schedule rule: a cron
 // expression in the body (re)configures scheduling.
-const ruleBody = (r: RuleState) => r.trigger_type === "schedule" ? r : { ...r, cron_expr: undefined, timezone: undefined, misfire_policy: undefined };
+const ruleBody = (r: RuleState) => {
+  const recordRule = r.trigger_type === "form_submit" || r.trigger_type === "form_approval";
+  const body = { ...r, fires_on_import: recordRule ? r.fires_on_import : undefined };
+  return r.trigger_type === "schedule" ? body : { ...body, cron_expr: undefined, timezone: undefined, misfire_policy: undefined };
+};
 
 export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
   const qc = useQueryClient();
-  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip" };
+  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip", fires_on_import: true };
   const [showCreate, setShowCreate] = useState(false);
   const [newRule, setNewRule] = useState<RuleState>(empty);
   const [editId, setEditId] = useState<string | null>(null);
@@ -77,7 +81,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
 
   const startEdit = (r: AutomationRule) => {
     setEditId(r.id);
-    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "", cron_expr: r.cron_expr ?? "", timezone: r.timezone || "UTC", misfire_policy: r.misfire_policy || "skip" });
+    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "", cron_expr: r.cron_expr ?? "", timezone: r.timezone || "UTC", misfire_policy: r.misfire_policy || "skip", fires_on_import: r.fires_on_import ?? true });
   };
 
   // Find workflow summary for a rule, matching by name (legacy) or id
@@ -370,6 +374,13 @@ function RuleForm({
             {forms.map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
           </Select>
         </Field>
+      )}
+      {needsForm && (
+        <Checkbox
+          label="Also for records a file import creates (switch off to load existing records without starting a workflow for each)"
+          checked={rule.fires_on_import}
+          onChange={(e) => onChange({ ...rule, fires_on_import: e.target.checked })}
+        />
       )}
       {needsGrid && (
         <Field label="Source grid" description="optional — leave blank for any grid">

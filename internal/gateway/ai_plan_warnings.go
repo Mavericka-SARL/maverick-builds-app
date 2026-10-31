@@ -230,6 +230,14 @@ func recurringMistakeWarnings(ctx context.Context, tx pgx.Tx, modelID, revID str
 				}
 			}
 			if ones {
+				var name, label string
+				_ = tx.QueryRow(ctx, `
+					SELECT name, COALESCE(label,'') FROM model.metric_def
+					WHERE model_id=$1::uuid AND revision_id=$2::uuid AND (id::text=$3 OR lower(name)=lower($3))`,
+					modelID, revID, p.MetricID).Scan(&name, &label)
+				ones = looksLikeCount(cmp.Or(name, p.MetricID) + " " + label)
+			}
+			if ones {
 				out = append(out, fmt.Sprintf("%s: every one of the %d values of %s is 1 — if it counts rows, count them with COUNTIFS(<pick-list or dimension>, <criterion>) instead: a typed 1 has to be typed again for every row added later",
 					at, len(p.Values), p.MetricID))
 			}
@@ -303,17 +311,92 @@ func recurringMistakeWarnings(ctx context.Context, tx pgx.Tx, modelID, revID str
 }
 
 // looksLikeLevel: a name or label word naming a stock rather than a flow.
+// A flow word beside it wins: new_restaurant_opening_capex is spent in its
+// month, and "opening" there names an event, not an opening balance.
 func looksLikeLevel(name, label string) bool {
-	words := strings.FieldsFunc(strings.ToLower(name+" "+label), func(r rune) bool {
-		return r == '_' || r == ' ' || r == '-' || r == '.' || r == '(' || r == ')'
-	})
-	for _, w := range words {
+	level := false
+	for _, w := range nameWords(name + " " + label) {
 		switch w {
 		case "hc", "headcount", "fte", "ftes", "balance", "closing", "ending", "opening", "inventory", "stock":
+			level = true
+		case "capex", "cost", "costs", "expense", "expenses", "spend", "revenue", "sales", "fee", "fees",
+			"payment", "payments", "investment", "change", "movement", "increase", "decrease", "depreciation", "interest":
+			return false
+		}
+	}
+	return level
+}
+
+// looksLikeCount: a metric whose name says it counts rows (a row count, a
+// number of records) — where typed 1s should be a COUNTIFS. A 0/1 flag
+// (seas_event: 1 in the months with an event) is entered, not counted.
+func looksLikeCount(ref string) bool {
+	for _, w := range nameWords(ref) {
+		switch w {
+		case "count", "counts", "rows", "row", "records", "entries", "lines", "number", "num", "n":
 			return true
 		}
 	}
 	return false
+}
+
+func nameWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return r == '_' || r == ' ' || r == '-' || r == '.' || r == '(' || r == ')'
+	})
+}
+
+// offGridReadProblems names each formula the plan writes, on a metric on a
+// grid, that reads a metric on no grid. A metric on no grid has no
+// dimensions: read from a cell it is one value for the whole model, its
+// total over every month, scenario and member. gross_profit left on no grid
+// made ebitda and income tax read the model's total in every month
+// (15,019,051 instead of 19,512; 2026-10-31). Nothing else refuses it.
+func offGridReadProblems(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	var refs []string
+	for i, step := range steps {
+		if step.Tool != "create_metric" && step.Tool != "update_metric" {
+			continue
+		}
+		var p struct {
+			Name     string `json:"name"`
+			MetricID string `json:"metric_id"`
+			Formula  string `json:"formula"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil || strings.TrimSpace(p.Formula) == "" {
+			continue
+		}
+		refs = append(refs, strings.ToLower(p.Name), strings.ToLower(p.MetricID))
+		if i < len(created) && created[i] != "" {
+			refs = append(refs, created[i])
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT r.name, d.name
+		FROM model.metric_def r
+		JOIN model.calc_dependency cd ON cd.metric_id = r.id
+		JOIN model.metric_def d ON d.id = cd.depends_on_metric_id AND d.id <> r.id
+		WHERE r.model_id = $1::uuid AND r.revision_id = $2::uuid
+		  AND (lower(r.name) = ANY($3) OR r.id::text = ANY($3))
+		  AND EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = r.id)
+		  AND NOT EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = d.id)
+		ORDER BY r.name, d.name`, modelID, revID, refs)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var reader, offGrid string
+		if rows.Scan(&reader, &offGrid) == nil {
+			out = append(out, fmt.Sprintf("%s reads %s, which is on no grid: a metric on no grid has no dimensions, so every cell of %s would read its one total over the whole model — add %s to the grid %s is on (add_grid_metric) in this plan",
+				reader, offGrid, reader, offGrid, reader))
+		}
+	}
+	return out
 }
 
 // kpiTileWarnings names each KPI tile a plan adds or changes that adds up

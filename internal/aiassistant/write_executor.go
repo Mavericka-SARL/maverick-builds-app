@@ -3001,6 +3001,26 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			return "", "", fmt.Errorf("copy forms into new revision: %w", err)
 		}
 
+		// Point the copied form-posted facts at the draft's own mappings, as
+		// Step E2 of the developer-console duplicate does. Left on the source
+		// revision's mapping, the draft's first re-post (a record saved, a
+		// loader run) wrote its totals under the new mapping beside the
+		// copied ones, and every posted value counted twice (found live,
+		// 2026-10-31: a restaurant model's Jan–Jun actuals doubled after its
+		// July close). Separate Exec so the copied mappings are visible.
+		if _, err := tx.Exec(ctx, `
+			UPDATE runtime.fact_input nf
+			SET source_ref = n.id
+			FROM model.form_metric_mapping o
+			JOIN model.form_def od ON od.id = o.form_id
+			JOIN model.form_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
+			JOIN model.form_metric_mapping n ON n.form_id = nd.id AND n.name = o.name AND n.source_field = o.source_field
+			WHERE nf.model_id = $1::uuid AND nf.revision_id = $2::uuid
+			  AND nf.source_ref = o.id AND o.id <> n.id
+		`, e.modelID, newID); err != nil {
+			return "", "", fmt.Errorf("point copied postings at the new revision's mappings: %w", err)
+		}
+
 		// Copy dashboard folders first (dashboards below reference them by
 		// folder_id), then remap parent_id in a separate Exec once the new
 		// rows are visible. Mirrors Step F of the developer-console
@@ -3214,7 +3234,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				INSERT INTO workflow.automation_rule
 				  (application_id, name, description, trigger_type, workflow_name, enabled,
 				   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
-				   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, revision_id)
+				   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, revision_id)
 				SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 					wm.new_id,
 					(SELECT nf.id FROM model.form_def ofd
@@ -3227,7 +3247,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
 					          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
 					          HAVING count(*) = 1), ar.source_integration_id),
-					ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
+					ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import,
 					$2::uuid
 				FROM workflow.automation_rule ar
 				LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id
@@ -3425,6 +3445,38 @@ func (e *WriteExecutor) createWorkflowDef(ctx context.Context, raw json.RawMessa
 
 // ── update_workflow_def ───────────────────────────────────────────────────────
 
+// resolveContextDimensions puts the working revision's dimension ids into a
+// context schema's dimension variables, which the model fills with names
+// ("dimension_id": "month"). Stored as given, the workflow saved and then
+// failed to start with a server error (2026-10-31). Other keys are kept.
+func (e *WriteExecutor) resolveContextDimensions(ctx context.Context, schema json.RawMessage) (json.RawMessage, error) {
+	if len(schema) == 0 || string(schema) == "null" {
+		return schema, nil
+	}
+	var vars []map[string]any
+	if err := json.Unmarshal(schema, &vars); err != nil {
+		return nil, fmt.Errorf("context_schema must be a list of variables: %w", err)
+	}
+	changed := false
+	for _, v := range vars {
+		ref, _ := v["dimension_id"].(string)
+		if ref == "" {
+			continue
+		}
+		id, err := e.requireInModel(ctx, "dimension", ref)
+		if err != nil {
+			return nil, fmt.Errorf("context variable %v: %w", v["key"], err)
+		}
+		if id != ref {
+			v["dimension_id"], changed = id, true
+		}
+	}
+	if !changed {
+		return schema, nil
+	}
+	return json.Marshal(vars)
+}
+
 type updateWorkflowDefParams struct {
 	WorkflowDefID string          `json:"workflow_def_id"`
 	Name          string          `json:"name"`
@@ -3493,6 +3545,9 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 	}
 
 	ws := workflow.NewStoreOn(e.pool)
+	if p.ContextSchema, err = e.resolveContextDimensions(ctx, p.ContextSchema); err != nil {
+		return "", "", err
+	}
 	def, err := ws.UpdateWorkflowDefFull(ctx, p.WorkflowDefID, name, description, triggerEvent, subjectType, e.userID, p.Steps, p.ContextSchema, p.SubjectConfig)
 	if err != nil {
 		return "", "", fmt.Errorf("update workflow: %w", err)
@@ -3596,6 +3651,9 @@ func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) 
 	if p.Label == "" {
 		p.Label = p.Name
 	}
+	if err := e.resolveFieldRefs(ctx, p.Fields); err != nil {
+		return "", "", err
+	}
 	if err := crudapp.ValidateFields(p.Fields); err != nil {
 		return "", "", err
 	}
@@ -3616,6 +3674,32 @@ func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) 
 		return "", "", fmt.Errorf("table '%s' created, but: %w", p.Name, err)
 	}
 	return fmt.Sprintf("Table '%s' created (id: %s, %d field(s)%s%s)", p.Name, form.ID, len(p.Fields), ownRecordsNote(p.OwnRecordsOnly), settingsNote), form.ID, nil
+}
+
+// resolveFieldRefs puts the working revision's ids into the fields'
+// dimension and metric references, which the model often fills with names
+// ("dimension_id": "restaurant"). Stored as given, a name saved without
+// complaint and failed later, with a server error, at the first import or
+// record that read it (2026-10-31).
+func (e *WriteExecutor) resolveFieldRefs(ctx context.Context, fields []crudapp.FormField) error {
+	for i := range fields {
+		f := &fields[i]
+		if f.DimensionID != "" {
+			id, err := e.requireInModel(ctx, "dimension", f.DimensionID)
+			if err != nil {
+				return fmt.Errorf("field %s: %w", f.Name, err)
+			}
+			f.DimensionID = id
+		}
+		if f.MetricID != "" {
+			id, err := e.requireInModel(ctx, "metric", f.MetricID)
+			if err != nil {
+				return fmt.Errorf("field %s: %w", f.Name, err)
+			}
+			f.MetricID = id
+		}
+	}
+	return nil
 }
 
 func ownRecordsNote(on bool) string {
@@ -3682,6 +3766,9 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		_ = json.Unmarshal(curFieldsJSON, &fields)
 	}
 
+	if err := e.resolveFieldRefs(ctx, fields); err != nil {
+		return "", "", err
+	}
 	if err := crudapp.ValidateFields(fields); err != nil {
 		return "", "", err
 	}

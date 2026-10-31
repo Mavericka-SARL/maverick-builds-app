@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
@@ -122,6 +124,12 @@ func KeepServerValues(form *FormDef, current, data map[string]any) map[string]an
 		case FieldStatus:
 			delete(out, f.Name)
 		default:
+			// A typed code is unchanged once saved: it may be the code of
+			// a member, which data across the model is filed under.
+			if v, ok := current[f.Name].(string); f.Code && ok && v != "" {
+				out[f.Name] = v
+				continue
+			}
 			if _, sent := data[f.Name]; f.Hidden && !sent {
 				if v, ok := current[f.Name]; ok {
 					out[f.Name] = v
@@ -155,7 +163,7 @@ func IsTextType(t string) bool { return t == "text" || t == FieldURL || t == Fie
 // are within bounds.
 func ValidateFields(fields []FormField) error {
 	seen := map[string]bool{}
-	statuses := 0
+	statuses, codes := 0, 0
 	for i, f := range fields {
 		name := strings.TrimSpace(f.Name)
 		if name == "" {
@@ -167,6 +175,18 @@ func ValidateFields(fields []FormField) error {
 		seen[name] = true
 		if !fieldTypes[f.Type] {
 			return fmt.Errorf("field %q has type %q, which is not a field type (text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status)", name, f.Type)
+		}
+		if f.Code {
+			if f.Type != "text" {
+				return fmt.Errorf("field %q is marked as the code, which only a text field can be", name)
+			}
+			codes++
+		}
+		if f.Type == FieldAutoCode {
+			codes++
+		}
+		if codes > 1 {
+			return fmt.Errorf("a table has at most one code field: an auto-code field or a text field marked as the code")
 		}
 		switch f.Type {
 		case FieldStatus:
@@ -181,6 +201,14 @@ func ValidateFields(fields []FormField) error {
 			if f.CodeDigits < 0 || f.CodeDigits > maxCodeDigits {
 				return fmt.Errorf("the code digits of %q must be between 1 and %d", name, maxCodeDigits)
 			}
+		}
+		// A reference is an id: a name saved here failed later, with a server
+		// error, at the first import or record that read it.
+		if f.DimensionID != "" && uuid.Validate(f.DimensionID) != nil {
+			return fmt.Errorf("field %q: dimension_id %q is not a dimension's id", name, f.DimensionID)
+		}
+		if f.MetricID != "" && uuid.Validate(f.MetricID) != nil {
+			return fmt.Errorf("field %q: metric_id %q is not a metric's id", name, f.MetricID)
 		}
 		if err := validateFieldOptions(f, fields); err != nil {
 			return fmt.Errorf("field %q: %w", name, err)
@@ -315,8 +343,8 @@ func CheckFieldChange(before *FormDef, fields []FormField) error {
 		}
 	}
 	if before.KeepsDimension() {
-		if f, ok := has[before.CodeField().Name]; !ok || f.Type != FieldAutoCode {
-			return fmt.Errorf("the table keeps a dimension: its auto-code field %q holds the members' codes and stays", before.CodeField().Name)
+		if f, ok := has[before.CodeField().Name]; !ok || f.Type != before.CodeField().Type || f.Code != before.CodeField().Code {
+			return fmt.Errorf("the table keeps a dimension: its code field %q holds the members' codes and stays", before.CodeField().Name)
 		}
 		if f, ok := has[before.MemberLabelField]; before.MemberLabelField != "" && (!ok || !IsTextType(f.Type) && f.Type != "select") {
 			return fmt.Errorf("the table keeps a dimension: its field %q labels the members and stays a text field", before.MemberLabelField)

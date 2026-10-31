@@ -2591,6 +2591,7 @@ components:
         retry_backoff_seconds:  { type: integer }
         next_fire_at:           { type: string, format: date-time, nullable: true }
         last_fire_at:           { type: string, format: date-time, nullable: true }
+        fires_on_import:        { type: boolean, description: "A form_submit or form_approval rule also fires for the records a file import creates" }
 
     AutomationRuleRequest:
       type: object
@@ -2609,6 +2610,7 @@ components:
         misfire_policy:        { type: string, enum: [skip, fire_now], default: skip }
         max_retries:           { type: integer, default: 0 }
         retry_backoff_seconds: { type: integer, default: 60 }
+        fires_on_import:       { type: boolean, default: true, description: "false: a form_submit or form_approval rule leaves out the records a file import creates" }
 
     TriggerAutomationRequest:
       type: object

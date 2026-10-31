@@ -28,6 +28,13 @@
 <tr><td>IFNA(LOOKUP(sales, region, "XX"), -1)</td><td>missing member</td><td>-1</td></tr>
 <tr><td>IFNA(1 / 0, 7)</td><td>not #N/A</td><td>#DIV/0!</td></tr></table></div>
 
+<div class="fn"><h4><span class="sig" id="fn-ISBLANK">ISBLANK(value)</span></h4>
+<p>TRUE where <i>value</i> has no value: an input cell nobody entered, a property the member has none for, an empty text. An entered 0 is not blank, and an error is not blank. <code>x = ""</code> tests the same for a metric, as in Excel.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISBLANK(close_date), 1, 0)</td><td>still open: no close date entered</td><td>1 or 0</td></tr>
+<tr><td>IF(close_date = "", 1, 0)</td><td>the same, Excel's way</td><td>1 or 0</td></tr>
+<tr><td>ISBLANK(units)</td><td>units entered as 0</td><td>FALSE</td></tr></table></div>
+
 <div class="fn"><h4><span class="sig" id="fn-SWITCH">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
 <p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
 <table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>

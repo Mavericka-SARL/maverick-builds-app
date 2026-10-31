@@ -582,13 +582,39 @@ turn:
 			Tools:        tools,
 			OnToolArgs:   progress.onArgs,
 		}
+		// A call that sends nothing for aiCallIdleLimit is stopped and asked
+		// once more; the second silence ends the turn with an error.
 		var llmResp providers.ChatResponse
-		if sp, streamable := llmProvider.(providers.StreamingProvider); streamable {
-			llmResp, err = sp.ChatStream(turnCtx, chatReq, func(delta string) {
-				sendSSE("delta", map[string]string{"content": delta})
+		for attempt := 1; ; attempt++ {
+			var stalled bool
+			stalled, err = watchedAICall(turnCtx, aiCallIdleLimit(), func(callCtx context.Context, touch func()) error {
+				req := chatReq
+				req.OnToolArgs = func(name string, args []byte) {
+					touch()
+					if chatReq.OnToolArgs != nil {
+						chatReq.OnToolArgs(name, args)
+					}
+				}
+				var cErr error
+				if sp, streamable := llmProvider.(providers.StreamingProvider); streamable {
+					llmResp, cErr = sp.ChatStream(callCtx, req, func(delta string) {
+						touch()
+						sendSSE("delta", map[string]string{"content": delta})
+					})
+				} else {
+					llmResp, cErr = llmProvider.Chat(callCtx, req)
+				}
+				return cErr
 			})
-		} else {
-			llmResp, err = llmProvider.Chat(turnCtx, chatReq)
+			if !stalled {
+				break
+			}
+			if attempt == 2 {
+				err = fmt.Errorf("the AI provider sent nothing for %s, twice: %w", aiCallIdleLimit(), errAICallStalled)
+				break
+			}
+			log.Printf("AI call: session=%s sent nothing for %s, asked again", sessionID, aiCallIdleLimit())
+			sendSSE("tool_status", map[string]string{"tool": fmt.Sprintf("the AI provider sent nothing for %s — asking again", aiCallIdleLimit())})
 		}
 		if err != nil && stopTurn() {
 			return
@@ -609,6 +635,12 @@ turn:
 				nudged = true
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: proposeNudge})
+				continue
+			}
+			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && claimsUnproposedChange(llmResp.Message.Content) {
+				nudged = true
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
 				continue
 			}
 			finalReply = llmResp.Message.Content

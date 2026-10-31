@@ -81,6 +81,10 @@ function FieldOptions({ f, fields, onUpdate, keeper }: {
       <div style={row}>
         <Checkbox checked={!!f.hidden} onChange={e => onUpdate({ hidden: e.target.checked || undefined })} label="Hidden" />
         <Checkbox checked={!!f.core} onChange={e => onUpdate({ core: e.target.checked || undefined })} label="Core (cannot be removed)" />
+        {f.type === "text" && (
+          <Checkbox checked={!!f.code} onChange={e => onUpdate({ code: e.target.checked || undefined })}
+            label="The record's code (typed, unique, unchanged once saved)" />
+        )}
         {!serverFilled && <Checkbox checked={!!f.history} onChange={e => onUpdate({ history: e.target.checked || undefined })} label="Keep history" />}
         {f.type === "number" && (
           <Checkbox checked={f.format === "money"} onChange={e => onUpdate({ format: e.target.checked ? "money" : undefined })} label="Money" />
@@ -279,7 +283,7 @@ function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelFi
   forms: FormDef[];
   selfId?: string;
 }) {
-  const hasCode = fields.some(f => f.type === "autocode");
+  const hasCode = fields.some(f => f.type === "autocode" || (f.type === "text" && f.code));
   const labelFields = fields.filter(f => f.name && (f.type === "text" || f.type === "longtext" || f.type === "select"));
   const keptElsewhere = new Set(forms.filter(t => t.id !== selfId && t.keeps_dimension_id).map(t => t.keeps_dimension_id!));
   const keepable = dims.filter(d => d.dimension_type !== "time" && !keptElsewhere.has(d.id));
@@ -296,8 +300,8 @@ function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelFi
       </Field>
       <Field label="Records are the members of a dimension"
         description={hasCode
-          ? "Each record is one member: its auto code is the member's code, the label field its name. Access rules on the members restrict who sees which records — and every record of another table naming them — and other tables link to a record with a field on the dimension."
-          : "Add an Auto code field first: its codes are the members' codes."}>
+          ? "Each record is one member: its code (the auto code, or the text field marked as the code) is the member's code, the label field its name. Access rules on the members restrict who sees which records — and every record of another table naming them — and other tables link to a record with a field on the dimension."
+          : "Add an Auto code field, or mark a text field as the record's code (for codes from outside, such as account numbers), first: its codes are the members' codes."}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Select value={keeps} onChange={e => onKeeps(e.target.value)} disabled={!hasCode} style={{ width: 220 }} aria-label="Dimension the records are">
             <option value="">— none —</option>

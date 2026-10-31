@@ -3137,6 +3137,8 @@ type AutomationRule struct {
 	RetryBackoffSeconds int                            `json:"retry_backoff_seconds"`
 	NextFireAt          OptNilDateTime                 `json:"next_fire_at"`
 	LastFireAt          OptNilDateTime                 `json:"last_fire_at"`
+	// A form_submit or form_approval rule also fires for the records a file import creates.
+	FiresOnImport OptBool `json:"fires_on_import"`
 }
 
 // GetID returns the value of ID.
@@ -3239,6 +3241,11 @@ func (s *AutomationRule) GetLastFireAt() OptNilDateTime {
 	return s.LastFireAt
 }
 
+// GetFiresOnImport returns the value of FiresOnImport.
+func (s *AutomationRule) GetFiresOnImport() OptBool {
+	return s.FiresOnImport
+}
+
 // SetID sets the value of ID.
 func (s *AutomationRule) SetID(val uuid.UUID) {
 	s.ID = val
@@ -3339,6 +3346,11 @@ func (s *AutomationRule) SetLastFireAt(val OptNilDateTime) {
 	s.LastFireAt = val
 }
 
+// SetFiresOnImport sets the value of FiresOnImport.
+func (s *AutomationRule) SetFiresOnImport(val OptBool) {
+	s.FiresOnImport = val
+}
+
 func (*AutomationRule) createAutomationRuleRes() {}
 func (*AutomationRule) updateAutomationRuleRes() {}
 
@@ -3403,6 +3415,8 @@ type AutomationRuleRequest struct {
 	MisfirePolicy       OptAutomationRuleRequestMisfirePolicy `json:"misfire_policy"`
 	MaxRetries          OptInt                                `json:"max_retries"`
 	RetryBackoffSeconds OptInt                                `json:"retry_backoff_seconds"`
+	// False: a form_submit or form_approval rule leaves out the records a file import creates.
+	FiresOnImport OptBool `json:"fires_on_import"`
 }
 
 // GetName returns the value of Name.
@@ -3475,6 +3489,11 @@ func (s *AutomationRuleRequest) GetRetryBackoffSeconds() OptInt {
 	return s.RetryBackoffSeconds
 }
 
+// GetFiresOnImport returns the value of FiresOnImport.
+func (s *AutomationRuleRequest) GetFiresOnImport() OptBool {
+	return s.FiresOnImport
+}
+
 // SetName sets the value of Name.
 func (s *AutomationRuleRequest) SetName(val OptString) {
 	s.Name = val
@@ -3543,6 +3562,11 @@ func (s *AutomationRuleRequest) SetMaxRetries(val OptInt) {
 // SetRetryBackoffSeconds sets the value of RetryBackoffSeconds.
 func (s *AutomationRuleRequest) SetRetryBackoffSeconds(val OptInt) {
 	s.RetryBackoffSeconds = val
+}
+
+// SetFiresOnImport sets the value of FiresOnImport.
+func (s *AutomationRuleRequest) SetFiresOnImport(val OptBool) {
+	s.FiresOnImport = val
 }
 
 type AutomationRuleRequestMisfirePolicy string

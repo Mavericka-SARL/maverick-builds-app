@@ -1285,6 +1285,8 @@ export interface FormField {
   hidden?: boolean;
   /** Cannot be removed from the table while marked core. */
   core?: boolean;
+  /** A text field holding the record's code, typed by the person (a ledger's account number): required, unique, unchanged once saved. */
+  code?: boolean;
   /** Each change is kept and shown with the record. */
   history?: boolean;
   /** A dimension field naming a member a table keeps: what deleting that record does to this one. */
@@ -1709,6 +1711,8 @@ export interface AutomationRule {
   misfire_policy?: "skip" | "fire_now";
   next_fire_at?: string;
   last_fire_at?: string;
+  /** form_submit / form_approval rules: also for the records a file import creates. */
+  fires_on_import?: boolean;
 }
 
 // ── Workflow Definitions ──────────────────────────────────────────────────────
@@ -2823,7 +2827,7 @@ export const api = {
 
   deleteAutomationRule: (ruleId: string) =>
     apiFetch<{ status: string }>(`/api/automation/rules/${ruleId}`, { method: "DELETE" }),
-  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string }) =>
+  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean }) =>
     apiFetch<AutomationRule>(`/api/automation/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   // Answers the same whether the address already had an account (which is
@@ -2907,7 +2911,7 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/revisions/${id}`, { method: "DELETE" }),
 
   listAutomationRules: (revisionId?: string) => apiFetch<AutomationRule[]>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string }, revisionId?: string) =>
+  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean }, revisionId?: string) =>
     apiFetch<AutomationRule>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
   triggerRule: (ruleId: string, payload?: Record<string, string>) =>
     apiFetch<Execution>(`/api/automation/trigger/${ruleId}`, { method: "POST", body: JSON.stringify({ payload: payload ?? {} }) }),

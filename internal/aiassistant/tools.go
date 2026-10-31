@@ -144,7 +144,7 @@ var WriteToolNames = []string{
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
 	"set_tags", "create_revision", StartNewDraftTool,
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
-	"archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
+	"publish_workflow_def", "archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
 	"create_form_def", "update_form_def", "delete_form_def",
 	"create_automation_rule", "update_automation_rule", "delete_automation_rule",
 	"create_business_role", "update_business_role", "delete_business_role", "set_role_dashboards",

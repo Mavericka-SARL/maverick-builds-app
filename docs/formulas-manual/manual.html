@@ -310,7 +310,7 @@
 <tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
 <tr><td>Text</td><td>Quoted literals, a bare dimension (the member code), text properties, text functions</td><td><code>#VALUE!</code> (<code>1 + "a"</code>)</td></tr>
 <tr><td>TRUE / FALSE</td><td>Comparisons, <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>IF</code> with no else</td><td>1 / 0 (<code>TRUE + TRUE</code> = 2)</td></tr>
-<tr><td>Blank</td><td>A property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none</td><td>0</td></tr>
+<tr><td>Blank</td><td>An input cell nobody entered (read as 0 in arithmetic, blank in a comparison and in <code>ISBLANK</code>); a property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none</td><td>0</td></tr>
 <tr><td>Error</td><td>A failed operation (chapter 5)</td><td>The error travels on</td></tr>
 </table>
 
@@ -318,7 +318,7 @@
 <ul>
   <li><b>Text ignores case</b>: <code>"abc" = "ABC"</code> is TRUE; <code>"apple" &lt; "Banana"</code> is TRUE. Member codes compare the same way: <code>region = "de"</code> is TRUE in the DE row.</li>
   <li><b>A number against text compares as text</b>: <code>1 = "1"</code> is TRUE, so a numeric member code <code>"100"</code> equals <code>100</code>. (Excel says FALSE.)</li>
-  <li><b>Blank equals 0 and ""</b>: <code>region = ""</code> is TRUE at a total.</li>
+  <li><b>Blank equals 0 and ""</b>: <code>region = ""</code> is TRUE at a total, and <code>close_date = ""</code> is TRUE where no close date was entered. An entered 0 is a number, not blank: <code>0 = ""</code> is FALSE.</li>
   <li><b>Numbers compare on their 15 significant digits</b>, as in Excel. Decimal arithmetic in binary leaves tiny remainders beyond that, which comparisons ignore: <code>0.1 + 0.2 = 0.3</code> is TRUE, and so is <code>1 / 3 * 3 = 1</code>; <code>1.00000000000001 = 1</code> is FALSE. The same holds for SUMIFS criteria and for a number used as a member code. A remainder on its own is still a number, though: <code>IF(0.1 + 0.2 - 0.3, 1, 0)</code> is 1, because the difference is 5.55e-17, not 0 (Excel agrees); compare with <code>=</code> instead.</li>
 </ul>
 
@@ -378,6 +378,13 @@
 <tr><td>IFERROR(revenue / units, 0)</td><td>any error</td><td>0 when units = 0</td></tr>
 <tr><td>IFNA(LOOKUP(sales, region, "XX"), -1)</td><td>missing member</td><td>-1</td></tr>
 <tr><td>IFNA(1 / 0, 7)</td><td>not #N/A</td><td>#DIV/0!</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig" id="fn-ISBLANK">ISBLANK(value)</span></h4>
+<p>TRUE where <i>value</i> has no value: an input cell nobody entered, a property the member has none for, an empty text. An entered 0 is not blank, and an error is not blank. <code>x = ""</code> tests the same for a metric, as in Excel.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISBLANK(close_date), 1, 0)</td><td>still open: no close date entered</td><td>1 or 0</td></tr>
+<tr><td>IF(close_date = "", 1, 0)</td><td>the same, Excel's way</td><td>1 or 0</td></tr>
+<tr><td>ISBLANK(units)</td><td>units entered as 0</td><td>FALSE</td></tr></table></div>
 
 <div class="fn"><h4><span class="sig" id="fn-SWITCH">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
 <p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
@@ -744,7 +751,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
-<tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: its cells hold notes, which formulas do not read</td><td>Keep the notes for people; count with a pick-list or a number beside them</td></tr>
+<tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell</td><td>Compare it: <code>IF(act_comment = "", 0, 1)</code> counts the commented rows, <code>IF(chk_status = "OK", 1, 0)</code> the accepted months (not beside a time function)</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
 <tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>
@@ -783,7 +790,7 @@ closing = opening + flow           time summary: last</pre>
 <h3>Not available</h3>
 <ul>
   <li>Cell addresses and ranges (<code>A1</code>, <code>A1:B9</code>), external workbooks, array formulas, named ranges, the <code>%</code> suffix.</li>
-  <li>XLOOKUP, VLOOKUP, INDEX, MATCH (use LOOKUP by member), SUMPRODUCT, VALUE, ISBLANK, ISNUMBER, ISERROR and the other IS… functions (use IFERROR, IFNA, or <code>x = ""</code> for blank), functions listing a member's children (LOOKUP of the parent already combines them).</li>
+  <li>XLOOKUP, VLOOKUP, INDEX, MATCH (use LOOKUP by member), SUMPRODUCT, VALUE, ISNUMBER, ISERROR and the other IS… functions except ISBLANK (use IFERROR or IFNA), functions listing a member's children (LOOKUP of the parent already combines them).</li>
   <li>The time functions POST, SPREAD, PROFILE and WEEKVALUE; MOVINGSUM windows that are not literals; mapping between two time dimensions.</li>
   <li>Text or date results stored as such: every result is a number.</li>
   <li>Formulas on form fields. Forms post into input metrics; formulas live on calculated metrics.</li>
@@ -835,6 +842,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-IFNA">IFNA</a></td><td>IFNA(value, fallback)</td><td>Replaces #N/A</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-IFS">IFS</a></td><td>IFS(condition, value, …)</td><td>First true condition</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-INT">INT</a></td><td>INT(x)</td><td>Rounds down to a whole number</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-ISBLANK">ISBLANK</a></td><td>ISBLANK(value)</td><td>No value entered</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-LAG">LAG</a></td><td>LAG(x, n, substitute [, mode])</td><td>x n periods back</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>

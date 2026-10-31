@@ -114,6 +114,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 	var staged []stagedRecord
 	memberLeaves := NewMemberCache()
 	today := time.Now().UTC().Format("2006-01-02")
+	codeRows := map[string]int{} // typed code → the row that first gives it
 
 	for _, row := range req.Rows {
 		data := map[string]any{}
@@ -153,6 +154,17 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 				rowValid = false
 			} else {
 				status = statusRaw
+			}
+		}
+		if cf := form.TypedCodeField(); cf != nil && rowValid {
+			if code, _ := data[cf.Name].(string); code != "" {
+				if first, dup := codeRows[code]; dup {
+					errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[cf.Name],
+						Message: fmt.Sprintf("%s %q is also on row %d: a code is one record's", firstNonEmpty(cf.Label, cf.Name), code, first)})
+					rowValid = false
+				} else {
+					codeRows[code] = row.RowNumber
+				}
 			}
 		}
 		if !rowValid {
@@ -225,7 +237,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 	// records exist now whatever happens to the request.
 	dispatchCtx := context.WithoutCancel(ctx)
 	for _, rec := range recs {
-		ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator)
+		ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator, true)
 	}
 	return created, errs, nil
 }

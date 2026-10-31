@@ -82,25 +82,37 @@ type ownerEntry struct {
 }
 
 func (h *handler) cachedOwner(kind, id string, lookup func() string) string {
-	key := kind + ":" + id
-	now := time.Now()
-	h.ownerMu.Lock()
-	if e, ok := h.owners[key]; ok && now.Before(e.expires) {
-		h.ownerMu.Unlock()
-		return e.customerID
+	if cid, ok := h.ownerFromCache(kind, id); ok {
+		return cid
 	}
-	h.ownerMu.Unlock()
 	cid := lookup()
-	if cid == "" {
-		return ""
+	h.ownerToCache(kind, id, cid)
+	return cid
+}
+
+// ownerFromCache is the cached tenant of the object kind:id, while it is
+// fresh.
+func (h *handler) ownerFromCache(kind, id string) (string, bool) {
+	h.ownerMu.Lock()
+	defer h.ownerMu.Unlock()
+	if e, ok := h.owners[kind+":"+id]; ok && time.Now().Before(e.expires) {
+		return e.customerID, true
+	}
+	return "", false
+}
+
+// ownerToCache keeps customerID as the tenant of the object kind:id; an
+// object found in no tenant is not kept, so it is asked about again.
+func (h *handler) ownerToCache(kind, id, customerID string) {
+	if customerID == "" {
+		return
 	}
 	h.ownerMu.Lock()
+	defer h.ownerMu.Unlock()
 	if h.owners == nil || len(h.owners) > 20000 {
 		h.owners = map[string]ownerEntry{}
 	}
-	h.owners[key] = ownerEntry{customerID: cid, expires: now.Add(ownerCacheTTL)}
-	h.ownerMu.Unlock()
-	return cid
+	h.owners[kind+":"+id] = ownerEntry{customerID: customerID, expires: time.Now().Add(ownerCacheTTL)}
 }
 
 // customerOfApplication is the tenant an application belongs to, directly
@@ -390,6 +402,33 @@ func deleteStatus(err error) int {
 // deleteAndRemeasure runs one delete of a model's structure (a revision, a
 // metric) with flushStatsSQL in its transaction, then remeasureStorage.
 func (h *handler) deleteAndRemeasure(ctx context.Context, customerID, sql string, args ...any) error {
+	// A delete that meets a recalculation of what it deletes (a revision
+	// whose pass is writing its results) can lose a deadlock to it; the
+	// pass's write fails and the delete, tried again, goes through. It used
+	// to answer 500 (TestRecentImportsListsTheOpenRevisionsImportsOnly,
+	// deleting a revision a moment after an import into it).
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err = h.deleteAndRemeasureOnce(ctx, customerID, sql, args...); !isDeadlock(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+		}
+	}
+	return err
+}
+
+// isDeadlock reports a transaction Postgres ended to break a deadlock or a
+// serialization conflict: one that succeeds when tried again.
+func isDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001")
+}
+
+func (h *handler) deleteAndRemeasureOnce(ctx context.Context, customerID, sql string, args ...any) error {
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		return err

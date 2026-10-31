@@ -87,13 +87,28 @@ func TestFormPostingsFollowRunsAndDeletes(t *testing.T) {
 		t.Errorf("workflow instances after importing a submitted record: %d, want %d", n, before+1)
 	}
 
+	// Switched off for imported records (fires_on_import), the rule leaves
+	// out the next import's record: loading records that already exist need
+	// not start one workflow per row (2026-10-31).
+	if _, err := f.pool.Exec(ctx, `UPDATE workflow.automation_rule SET fires_on_import = false WHERE name = 'On submit' AND application_id = $1::uuid`, f.appID); err != nil {
+		t.Fatal(err)
+	}
+	afterImport := instances()
+	if status, raw := run("staff,amt,status\nSTAFF_A1,4,submitted\n"); status != http.StatusOK {
+		t.Fatalf("run of a submitted record: %d %s", status, raw)
+	}
+	time.Sleep(1500 * time.Millisecond) // the dispatch runs in the background
+	if n := instances(); n != afterImport {
+		t.Errorf("workflow instances after an import the rule leaves out: %d, want %d", n, afterImport)
+	}
+
 	// A row naming no member of the staff dimension is refused, and nothing
 	// of that file is created.
 	if status, raw := run("staff,amt,status\nSTAFF_A2,1,approved\nSTAFF_ZZ,1,approved\n"); status != http.StatusUnprocessableEntity || !strings.Contains(raw, "STAFF_ZZ") {
 		t.Errorf("run naming an unknown member: %d %s, want 422 naming it", status, raw)
 	}
-	if n := countRows(t, f.rollupFixture, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, f.formID); n != 3 {
-		t.Errorf("records after a refused run = %d, want 3", n)
+	if n := countRows(t, f.rollupFixture, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, f.formID); n != 4 { // A2, A1, B1 and the second A1
+		t.Errorf("records after a refused run = %d, want 4", n)
 	}
 
 	// Retargeting the mapping moves its total to the new metric.

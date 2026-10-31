@@ -2081,6 +2081,10 @@ type AutomationRule struct {
 	SourceIntegrationID string    `json:"source_integration_id,omitempty"`
 	Enabled             bool      `json:"enabled"`
 	CreatedAt           time.Time `json:"created_at"`
+	// FiresOnImport: a record rule (form_submit, form_approval) also fires
+	// for the records a file import creates. On unless switched off: moving
+	// existing data into a table need not start one workflow per row.
+	FiresOnImport bool `json:"fires_on_import"`
 
 	// Schedule config — only meaningful when TriggerType == "schedule".
 	CronExpr            string     `json:"cron_expr,omitempty"`
@@ -2233,6 +2237,7 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 
 	var id string
 	var createdAt time.Time
+	var firesOnImport bool
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.automation_rule
 		    (application_id, revision_id, name, description, trigger_type, workflow_name,
@@ -2254,9 +2259,9 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 		        max_retries    = EXCLUDED.max_retries,
 		        retry_backoff_seconds = EXCLUDED.retry_backoff_seconds,
 		        next_fire_at   = EXCLUDED.next_fire_at
-		RETURNING id::text, created_at
+		RETURNING id::text, created_at, fires_on_import
 	`, appID, revisionID, name, description, triggerType, workflowName, workflowDefID, sourceFormID, sourceGridID,
-		cronExpr, timezone, misfirePolicy, maxRetries, retryBackoff, nextFireAt, sourceIntegrationID).Scan(&id, &createdAt)
+		cronExpr, timezone, misfirePolicy, maxRetries, retryBackoff, nextFireAt, sourceIntegrationID).Scan(&id, &createdAt, &firesOnImport)
 	if err != nil {
 		return nil, fmt.Errorf("create automation rule: %w", err)
 	}
@@ -2280,6 +2285,7 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 		MaxRetries:          maxRetries,
 		RetryBackoffSeconds: retryBackoff,
 		NextFireAt:          nextFireAt,
+		FiresOnImport:       firesOnImport,
 	}, nil
 }
 
@@ -2293,7 +2299,7 @@ func (s *Store) ListAutomationRules(ctx context.Context, appID, revisionID strin
 		       COALESCE(source_integration_id::text,''),
 		       enabled, created_at,
 		       COALESCE(cron_expr,''), timezone, misfire_policy, max_retries, retry_backoff_seconds,
-		       next_fire_at, last_fire_at
+		       next_fire_at, last_fire_at, fires_on_import
 		FROM workflow.automation_rule
 		WHERE application_id = $1::uuid
 		  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
@@ -2312,7 +2318,7 @@ func (s *Store) ListAutomationRules(ctx context.Context, appID, revisionID strin
 			&r.SourceIntegrationID,
 			&r.Enabled, &r.CreatedAt,
 			&r.CronExpr, &r.Timezone, &r.MisfirePolicy, &r.MaxRetries, &r.RetryBackoffSeconds,
-			&r.NextFireAt, &r.LastFireAt); err != nil {
+			&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport); err != nil {
 			return nil, err
 		}
 		rules = append(rules, &r)
@@ -2901,6 +2907,7 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 		  AND trigger_type = $2::workflow.trigger_type
 		  AND enabled = true
 		  AND ($4 = '' OR revision_id IS NULL OR revision_id::text = $4)
+		  AND ($5 = '' OR fires_on_import)
 		  AND (
 		      (trigger_type IN ('form_submit','form_approval') AND (source_form_id IS NULL OR ($3 <> '' AND source_form_id::text = $3)))
 		      OR (trigger_type = 'grid_change'                 AND (source_grid_id IS NULL OR ($3 <> '' AND source_grid_id::text = $3)))
@@ -2908,7 +2915,7 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 		          AND (source_integration_id IS NULL OR ($3 <> '' AND source_integration_id::text = $3)))
 		      OR trigger_type NOT IN ('form_submit','form_approval','grid_change','integration_completed','integration_failed')
 		  )
-	`, appID, triggerType, sourceID, revisionID)
+	`, appID, triggerType, sourceID, revisionID, payload["record_source"])
 	if err != nil {
 		return
 	}
@@ -3049,7 +3056,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 		          COALESCE(source_integration_id::text,''),
 		          enabled, created_at,
 		          COALESCE(cron_expr,''), timezone, misfire_policy, max_retries, retry_backoff_seconds,
-		          next_fire_at, last_fire_at
+		          next_fire_at, last_fire_at, fires_on_import
 	`, ruleID, name, description, triggerType, workflowName, workflowDefID, sourceFormID, sourceGridID, enabled,
 		cronExpr, timezone, misfirePolicy, maxRetries, retryBackoff, nextFireAt, sourceIntegrationID).Scan(
 		&r.ID, &r.ApplicationID, &r.RevisionID, &r.Name, &r.Description,
@@ -3057,9 +3064,16 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 		&r.SourceIntegrationID,
 		&r.Enabled, &r.CreatedAt,
 		&r.CronExpr, &r.Timezone, &r.MisfirePolicy, &r.MaxRetries, &r.RetryBackoffSeconds,
-		&r.NextFireAt, &r.LastFireAt,
+		&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport,
 	)
 	return &r, err
+}
+
+// SetRuleFiresOnImport sets whether a record rule also fires for the
+// records a file import creates (AutomationRule.FiresOnImport).
+func (s *Store) SetRuleFiresOnImport(ctx context.Context, ruleID string, on bool) error {
+	_, err := s.db.Exec(ctx, `UPDATE workflow.automation_rule SET fires_on_import = $2 WHERE id = $1::uuid`, ruleID, on)
+	return err
 }
 
 func (s *Store) ListExecutions(ctx context.Context, appID string, limit int) ([]*Execution, error) {

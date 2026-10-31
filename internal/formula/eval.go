@@ -14,6 +14,11 @@ type CustomFunc func(ctx *EvalContext, args []Node) Value
 type EvalContext struct {
 	// Vars maps upper-cased identifier names to Values.
 	Vars map[string]Value
+	// Blank names the variables (upper-cased) bound as 0 because their cell
+	// has no value. Arithmetic reads them as 0; ISBLANK and a comparison
+	// read them blank, so x = "" is TRUE where nothing was entered, as in
+	// Excel. nil: every bound variable has a value.
+	Blank map[string]bool
 	// Funcs overrides or extends built-in functions (keys should be UPPER-CASE).
 	Funcs map[string]CustomFunc
 	// Time is the current time coordinate, set by a caller evaluating a
@@ -76,6 +81,16 @@ func (ctx *EvalContext) safeEval(node Node) (v Value) {
 	return ctx.eval(node)
 }
 
+// evalOperand is eval for an operand whose blankness matters (a
+// comparison, ISBLANK): a variable named in Blank reads blank, not the 0
+// it is bound as.
+func (ctx *EvalContext) evalOperand(node Node) Value {
+	if id, ok := node.(*Ident); ok && ctx != nil && ctx.Blank[strings.ToUpper(id.Name)] {
+		return BlankVal()
+	}
+	return ctx.eval(node)
+}
+
 // eval evaluates a node within a context.
 func (ctx *EvalContext) eval(node Node) Value {
 	switch n := node.(type) {
@@ -124,8 +139,8 @@ func (ctx *EvalContext) evalBinary(n *BinaryExpr) Value {
 	// Comparison operators
 	switch n.Op {
 	case "=", "<>", "<", "<=", ">", ">=":
-		left := ctx.eval(n.Left)
-		right := ctx.eval(n.Right)
+		left := ctx.evalOperand(n.Left)
+		right := ctx.evalOperand(n.Right)
 		if left.IsError() {
 			return left
 		}

@@ -192,6 +192,7 @@ function ToolIcon({ tool }: { tool: string }) {
     case "create_workflow_def":
     case "update_workflow_def":
     case "restore_workflow_def":
+    case "publish_workflow_def":
     case "duplicate_workflow_def": return <Workflow {...props} />;
     case "archive_workflow_def": return <Archive {...props} />;
     case "delete_metric":
@@ -241,6 +242,7 @@ const TOOL_LABELS: Record<string, string> = {
   update_dashboard_folder: "Update dashboard folder", delete_dashboard_folder: "Delete dashboard folder",
   update_dashboard: "Update dashboard", delete_dashboard: "Delete dashboard",
   update_dashboard_widget: "Update dashboard widget", delete_dashboard_widget: "Delete dashboard widget",
+  publish_workflow_def: "Publish workflow",
   archive_workflow_def: "Archive workflow", restore_workflow_def: "Restore workflow",
   duplicate_workflow_def: "Duplicate workflow", update_business_role: "Rename business role",
   delete_business_role: "Delete business role", set_role_dashboards: "Set role dashboards",

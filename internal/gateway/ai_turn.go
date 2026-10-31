@@ -111,6 +111,31 @@ const proposeNudge = "(Sent by the server, not the developer.) Your plan went ba
 	"Do not ask the developer whether to propose — confirming the proposal is how they answer. Call propose_actions now with the whole corrected plan; " +
 	"if a step cannot be fixed, propose the steps that pass and say which you left out."
 
+// unproposedNudge goes back once when a turn ends with no proposal but its
+// reply says the model was changed or a proposal is coming: nothing in the
+// model changes until a proposal is confirmed. gpt-5-mini ended five stages
+// of the restaurant rebuild that way ("I have created the Fleet metrics",
+// "I will now propose the P&L"), and the developer saw nothing to confirm.
+const unproposedNudge = "(Sent by the server, not the developer.) You ended this turn without proposing anything, so nothing in the model has changed — " +
+	"although your reply says it has, or that a proposal follows. If the developer asked for changes, call propose_actions now with the whole plan; " +
+	"if part of it cannot be done, propose the rest and say plainly which part you left out and why. If they asked only a question, answer it without saying anything was changed."
+
+// claimsUnproposedChange reports whether a reply, ending a turn that
+// proposed nothing, says the model was changed or announces a proposal.
+func claimsUnproposedChange(reply string) bool {
+	r := strings.ToLower(reply)
+	for _, p := range []string{"i have created", "i've created", "i have added", "i've added", "i have updated", "i've updated",
+		"i have made the", "i've made the", "i have set", "i've set", "i have fixed", "i've fixed", "i have removed", "i've removed",
+		"has been created", "have been created", "has been added", "have been added", "has been updated", "have been updated",
+		"changes have been made", "changes are in place", "is now in place", "are now in place",
+		"i will now propose", "i'll now propose", "i will propose", "i'll propose", "next i will propose", "here is the plan", "here's the plan"} {
+		if strings.Contains(r, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // asksToPropose reports whether a reply asks the developer's leave to
 // propose — "Confirm and I will post it", "If you want me to proceed …",
 // "Shall I propose …?", as gpt-5-mini ended stage after stage — rather than

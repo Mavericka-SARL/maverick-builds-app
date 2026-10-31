@@ -322,6 +322,10 @@ type AutomationRule struct {
 	MisfirePolicy       string `json:"misfire_policy,omitempty"`
 	MaxRetries          int    `json:"max_retries,omitempty"`
 	RetryBackoffSeconds *int   `json:"retry_backoff_seconds,omitempty"`
+	// FiresOnImport: false when the rule leaves out the records a file
+	// import creates (migration 152); a package without it fires for them,
+	// as every rule did.
+	FiresOnImport *bool `json:"fires_on_import,omitempty"`
 }
 
 type Fact struct {
@@ -811,7 +815,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT ar.id::text, ar.name, COALESCE(ar.description,''), ar.trigger_type::text, ar.workflow_name, ar.enabled,
 		       ar.workflow_def_id::text, ar.source_form_id::text, ar.source_grid_id::text, ar.source_integration_id::text,
-		       COALESCE(ar.cron_expr,''), ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds
+		       COALESCE(ar.cron_expr,''), ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
+		       ar.fires_on_import
 		FROM workflow.automation_rule ar
 		WHERE ar.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (ar.revision_id=$2::uuid OR ar.revision_id IS NULL)
@@ -823,9 +828,10 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var ar AutomationRule
 		var backoff int
+		var firesOnImport bool
 		if err := rows.Scan(&ar.ID, &ar.Name, &ar.Description, &ar.TriggerType, &ar.WorkflowName, &ar.Enabled,
 			&ar.WorkflowDefID, &ar.SourceFormID, &ar.SourceGridID, &ar.SourceIntegrationID,
-			&ar.CronExpr, &ar.Timezone, &ar.MisfirePolicy, &ar.MaxRetries, &backoff); err != nil {
+			&ar.CronExpr, &ar.Timezone, &ar.MisfirePolicy, &ar.MaxRetries, &backoff, &firesOnImport); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -835,6 +841,9 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 			ar.Timezone, ar.MisfirePolicy, ar.MaxRetries = "", "", 0
 		} else {
 			ar.RetryBackoffSeconds = &backoff
+		}
+		if !firesOnImport {
+			ar.FiresOnImport = &firesOnImport // the default (true) is left out
 		}
 		pkg.AutomationRules = append(pkg.AutomationRules, ar)
 	}
@@ -2297,14 +2306,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			INSERT INTO workflow.automation_rule
 			  (application_id, revision_id, name, description, trigger_type, workflow_name, enabled,
 			   workflow_def_id, source_form_id, source_grid_id,
-			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds)
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import)
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE(NULLIF($5::text,''),'manual')::workflow.trigger_type, $6, COALESCE($7::bool, true),
 			        $8::uuid, $9::uuid, $10::uuid,
-			        NULLIF($11,''), COALESCE(NULLIF($12,''),'UTC'), COALESCE(NULLIF($13,''),'skip'), $14, COALESCE($15::int, 60))
+			        NULLIF($11,''), COALESCE(NULLIF($12,''),'UTC'), COALESCE(NULLIF($13,''),'skip'), $14, COALESCE($15::int, 60),
+			        COALESCE($16::bool, true))
 			RETURNING id::text`,
 			appID, revisionID, ar.Name, ar.Description, ar.TriggerType, ar.WorkflowName, ar.Enabled,
 			wfID, formID, gridID,
-			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds).Scan(&newRuleID); err != nil {
+			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds, ar.FiresOnImport).Scan(&newRuleID); err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
 		if ar.ID != "" {

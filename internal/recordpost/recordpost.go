@@ -39,6 +39,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
@@ -221,6 +222,24 @@ type AccessView struct {
 	// hiddenMetricNames: the names and labels of the metrics of the table's
 	// revision hidden from the person.
 	hiddenMetricNames []string
+}
+
+// NarrowsForm reports whether the view keeps any member of form's
+// dimension fields from the person — read-only or hidden: some record of
+// the table is then not theirs to change.
+func (v *AccessView) NarrowsForm(form *crudapp.FormDef) bool {
+	if v == nil {
+		return false
+	}
+	for _, f := range form.Fields {
+		if f.DimensionID == "" {
+			continue
+		}
+		if len(v.readCodes[f.DimensionID]) > 0 || len(v.hiddenCodes[f.DimensionID]) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // AccessViewFor resolves userID's access rules against form's revision.
@@ -516,6 +535,19 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			delete(data, f.Name)
 			v, has = nil, false
 		}
+		if f.Code {
+			if saved, _ := current[f.Name].(string); saved != "" {
+				continue // a saved code stays (crudapp.KeepServerValues)
+			}
+			if p, err := ps.typedCodeProblem(ctx, form, f, v); err != nil {
+				return nil, err
+			} else if p != "" {
+				bad(f, "%s", p)
+				continue
+			}
+			data[f.Name] = strings.TrimSpace(fmt.Sprint(v))
+			continue
+		}
 		if v == nil {
 			if has {
 				delete(data, f.Name)
@@ -767,6 +799,13 @@ func (m formMapping) value(data map[string]any) (float64, bool) {
 		return n, err == nil
 	case int:
 		return float64(v), true
+	case string:
+		// A date posts as the serial a date-format cell stores (DATE()'s):
+		// a restaurant's opening date travels from its record into the
+		// grid instead of being typed there again (2026-10-31).
+		if iso, ok := parseRecordDate(v); ok {
+			return formula.DateSerial(iso)
+		}
 	}
 	return 0, false
 }
@@ -1330,6 +1369,24 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 		mappingID, targetMetricID); err != nil {
 		return fmt.Errorf("delete existing fact rows: %w", err)
 	}
+	// And this mapping's totals copied in from another revision but still
+	// tagged with that revision's mapping (an AI draft copied them so until
+	// 2026-10-31): the rows this rebuild replaces, which the delete above
+	// cannot see. Left, each copied revision counted every posting twice
+	// after its first re-post, and nothing in the app took the copies out.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM runtime.fact_input fi
+		USING model.form_metric_mapping cur, model.form_def cf,
+		      model.form_metric_mapping o, model.form_def of
+		WHERE cur.id = $1::uuid AND cf.id = cur.form_id
+		  AND fi.metric_id = $2::uuid AND fi.revision_id = cur.revision_id
+		  AND o.id = fi.source_ref AND o.id <> cur.id
+		  AND o.model_id = cur.model_id AND o.revision_id IS DISTINCT FROM cur.revision_id
+		  AND o.name = cur.name AND o.source_field = cur.source_field
+		  AND of.id = o.form_id AND of.name = cf.name`,
+		mappingID, targetMetricID); err != nil {
+		return fmt.Errorf("delete copied fact rows: %w", err)
+	}
 
 	if len(aggs) > 0 {
 		// Resolve user ID for entered_by FK — use passed userID if valid, else any real user.
@@ -1436,11 +1493,15 @@ func (ps *Poster) repost(ctx context.Context, formID, userID string) (int, error
 // DispatchRecordCreated fires, in the background, the form_submit automation
 // rules for a new record (DispatchEventRules fires them for a submitted
 // record only), and form_approval for one created approved — for a record
-// created through the API and one a form import creates alike.
-func (ps *Poster) DispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
+// created through the API and one a form import creates alike, except the
+// rules switched off for imported records (fires_on_import) when imported.
+func (ps *Poster) DispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string, imported bool) {
 	bgCtx := context.WithoutCancel(ctx)
 	go func() {
 		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": status}
+		if imported {
+			payload["record_source"] = "import"
+		}
 		ps.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
 		if status == crudapp.StatusApproved {
 			ps.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
@@ -1472,6 +1533,36 @@ func (ps *Poster) WorkflowRecordStatus(ctx context.Context, recordID, status, by
 		ActorUserID: byUserID, ApplicationID: appID, ResourceType: "form_record", ResourceID: recordID,
 		Metadata: map[string]string{"form_id": formID, "status": status, "previous_status": previous, "set_by": "workflow"},
 	})
+}
+
+// typedCodeProblem is what is wrong with v as the typed code of a new
+// record of form (crudapp.FormField.Code), "" when nothing is: a code is
+// given, holds no ":" (it may become a member code, and cell keys join
+// codes with it) and no other record of the table has it.
+func (ps *Poster) typedCodeProblem(ctx context.Context, form *crudapp.FormDef, f crudapp.FormField, v any) (string, error) {
+	label := firstNonEmpty(f.Label, f.Name)
+	code := ""
+	if v != nil {
+		code = strings.TrimSpace(fmt.Sprint(v))
+	}
+	switch {
+	case code == "":
+		return fmt.Sprintf("%s is required: it is the record's code", label), nil
+	case strings.Contains(code, ":"):
+		return fmt.Sprintf("%s %q holds a \":\", which a code cannot", label, code), nil
+	case len([]rune(code)) > 64:
+		return fmt.Sprintf("%s is longer than 64 characters", label), nil
+	}
+	var taken bool
+	if err := ps.db(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM runtime.form_record WHERE form_id = $1::uuid AND data->>$2 = $3)`,
+		form.ID, f.Name, code).Scan(&taken); err != nil {
+		return "", err
+	}
+	if taken {
+		return fmt.Sprintf("%s %q is taken: another record of %s has it", label, code, form.Label), nil
+	}
+	return "", nil
 }
 
 // FormMemberProblem says why raw is no member a dimension field of a record

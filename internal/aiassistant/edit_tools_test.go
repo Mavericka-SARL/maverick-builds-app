@@ -570,6 +570,27 @@ func TestWorkflowLifecycle(t *testing.T) {
 	}
 }
 
+// publish_workflow_def runs the Publish button's checks: a workflow with no
+// steps is refused, one with an assigned step is published in the working
+// revision.
+func TestPublishWorkflowDef(t *testing.T) {
+	h := newEditHarness(t)
+	h.exec = aiassistant.NewWriteExecutorWithActor(h.pool, h.modelID, h.revID, h.user())
+	h.must("create_workflow_def", map[string]any{"name": "Empty", "trigger_event": "manual"})
+	if _, _, err := h.run("publish_workflow_def", map[string]any{"workflow_def_id": "Empty"}); err == nil || !strings.Contains(err.Error(), "cannot be published") {
+		t.Errorf("an empty workflow was published: %v", err)
+	}
+	h.must("create_business_role", map[string]any{"name": "Finance Review"})
+	h.must("create_workflow_def", map[string]any{"name": "Expense", "trigger_event": "manual"})
+	h.must("update_workflow_def", map[string]any{"workflow_def_id": "Expense", "steps": []map[string]any{
+		{"id": "a", "name": "Review", "type": "approval", "assignee_roles": []string{"Finance Review"},
+			"routes": map[string]string{"approve": "end-completed", "reject": "end-rejected"}}}})
+	h.must("publish_workflow_def", map[string]any{"workflow_def_id": "Expense"})
+	if r := h.scalar(`SELECT COALESCE(revision_id::text,'') || '|' || status FROM workflow.workflow_def WHERE name='Expense'`); r != h.revID+"|published" {
+		t.Errorf("Expense is %s, want published in the working revision", r)
+	}
+}
+
 func TestBusinessRoleEdits(t *testing.T) {
 	h := newEditHarness(t)
 	h.exec = aiassistant.NewWriteExecutorWithActor(h.pool, h.modelID, h.revID, h.user())

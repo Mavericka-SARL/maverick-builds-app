@@ -16,6 +16,7 @@ import (
 var arity = map[string][2]int{
 	"IF": {2, 3}, "IFS": {2, -1}, "AND": {1, -1}, "OR": {1, -1}, "NOT": {1, 1},
 	"IFERROR": {2, 2}, "IFNA": {2, 2}, "SWITCH": {3, -1},
+	"ISBLANK": {1, 1},
 
 	"ABS": {1, 1}, "INT": {1, 1}, "ROUND": {2, 2}, "ROUNDUP": {2, 2}, "ROUNDDOWN": {2, 2},
 	"CEILING": {2, 2}, "FLOOR": {2, 2}, "MOD": {2, 2}, "POWER": {2, 2}, "SQRT": {1, 1},

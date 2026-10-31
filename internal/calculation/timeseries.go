@@ -151,8 +151,14 @@ func TimeSummary(method string, vals []float64) (float64, bool) {
 
 // TimeSummaryOver is TimeSummary over a reduction of `periods` periods, of
 // which vals are those with a value: an average counts a period with no
-// value as 0 (rollup.CombineTimeOver).
+// value as 0 (rollup.CombineTimeOver). A reduction of one period is that
+// period's value whatever the method: 'none' means no total across periods,
+// and a pin on one month crosses none (its total read empty while its cell
+// had the value, found 2026-10-31).
 func TimeSummaryOver(method string, vals []float64, periods int) (float64, bool) {
+	if periods == 1 && len(vals) == 1 {
+		return vals[0], true
+	}
 	if method == "average" && len(vals) > 0 {
 		return rollup.CombineTimeOver(vals, periods, "average"), true
 	}
@@ -247,7 +253,7 @@ type tsEvaluator struct {
 	// had been computed there (opening_cash binds closing_cash at t while
 	// only ever reading it at t-1). A pinned-leaf Resolve is one map lookup,
 	// so the recurrence path simply re-resolves.
-	varsMemo map[string]map[string]float64
+	varsMemo map[string]boundValues
 	// plain holds the UPPER-CASE names the formula reads as plain values;
 	// a dependency read only as a LOOKUP / *IFS / *VALUE source is never
 	// bound. nil (a formula that does not parse) binds every dependency.
@@ -283,7 +289,7 @@ func (s *Scheduler) newTSEvaluator(
 		allDims: allDims, metricDims: metricDimIDs, dimIDToName: dimIDToName, allDefs: allDefs,
 		fetch: make(map[string]rollup.RawValue, len(def.DependsOnID)),
 		rows:  map[string]*exactSource{},
-		memo:  map[memoKey]formula.Value{}, varsMemo: map[string]map[string]float64{},
+		memo:  map[memoKey]formula.Value{}, varsMemo: map[string]boundValues{},
 	}
 	env := newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs)
 	for _, depID := range def.DependsOnID {
@@ -335,26 +341,33 @@ func (s *Scheduler) newTSEvaluator(
 
 // vars resolves every dependency at combo (which may pin non-leaf members —
 // rollup.Resolve aggregates them) and binds dimension names to member codes.
-func (e *tsEvaluator) vars(combo map[string]string) (map[string]formula.Value, map[string]float64, error) {
+func (e *tsEvaluator) vars(combo map[string]string) (map[string]formula.Value, map[string]bool, map[string]float64, error) {
 	key := dimKey(combo)
-	values, ok := e.varsMemo[key]
+	bound, ok := e.varsMemo[key]
 	if !ok {
-		values = make(map[string]float64, len(e.def.DependsOnID))
+		bound.values = make(map[string]float64, len(e.def.DependsOnID))
 		for _, depID := range e.def.DependsOnID {
 			depDef := e.allDefs[depID]
 			if e.plain != nil && !e.plain[strings.ToUpper(depDef.Name)] {
 				continue // read only through LOOKUP / *IFS / *VALUE
 			}
-			v, _, err := resolveDependency(e.ctx, e.allDims, depDef, e.metricDims[depID], combo, e.fetch[depID], e.rows[depID])
+			v, found, err := resolveDependency(e.ctx, e.allDims, depDef, e.metricDims[depID], combo, e.fetch[depID], e.rows[depID])
 			if err != nil {
-				return nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+				return nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
-			values[depDef.Name] = v
+			bound.values[depDef.Name] = v
+			if !found {
+				if bound.blank == nil {
+					bound.blank = map[string]bool{}
+				}
+				bound.blank[strings.ToUpper(depDef.Name)] = true
+			}
 		}
 		if e.varsMemo != nil {
-			e.varsMemo[key] = values
+			e.varsMemo[key] = bound
 		}
 	}
+	values := bound.values
 	vars := make(map[string]formula.Value, len(values)+len(combo))
 	for k, v := range values {
 		vars[strings.ToUpper(k)] = formula.NumberVal(v)
@@ -364,7 +377,14 @@ func (e *tsEvaluator) vars(combo map[string]string) (map[string]formula.Value, m
 			vars[strings.ToUpper(name)] = formula.StringVal(code)
 		}
 	}
-	return vars, values, nil
+	return vars, bound.blank, values, nil
+}
+
+// boundValues are a coordinate's resolved dependency values, and the names
+// among them with no value there (formula.EvalContext.Blank).
+type boundValues struct {
+	values map[string]float64
+	blank  map[string]bool
 }
 
 // evalCtx builds the evaluation context at combo/pos. Its EvalAt re-enters
@@ -375,7 +395,7 @@ func (e *tsEvaluator) evalCtx(combo map[string]string, pos int, parent *formula.
 		shifted[k] = v
 	}
 	shifted[e.axis.dim.ID] = e.axis.periods[pos].Code
-	vars, raw, err := e.vars(shifted)
+	vars, blank, raw, err := e.vars(shifted)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -412,7 +432,7 @@ func (e *tsEvaluator) evalCtx(combo map[string]string, pos int, parent *formula.
 	// time dimension and PARENT of a leaf period see the period evaluated,
 	// and a LOOKUP inside LAG reads at the lagged period.
 	dim := e.reads.context(shifted, !e.noMemo)
-	return &formula.EvalContext{Vars: vars, Time: tc, Dim: dim}, raw, nil
+	return &formula.EvalContext{Vars: vars, Blank: blank, Time: tc, Dim: dim}, raw, nil
 }
 
 // summarize fulfils TimeEvalContext.Summarize (YEARVALUE and its

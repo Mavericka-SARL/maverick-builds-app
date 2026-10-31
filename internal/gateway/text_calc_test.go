@@ -50,6 +50,11 @@ func TestTextCalculations(t *testing.T) {
 	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "reads_text", "formula": `LEN(act_key)`, "revision_id": rev}); status != http.StatusBadRequest || !strings.Contains(raw, "TEXT_METRIC_IN_FORMULA") {
 		t.Errorf("a number formula reading a calculated text: %d %s, want TEXT_METRIC_IN_FORMULA", status, raw)
 	}
+	// A number formula compares a text at the cell (a count of "Large"
+	// actions); arithmetic on it stays refused above.
+	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "is_large", "formula": `IF(act_size = "Large", 1, 0)`, "revision_id": rev}); status != http.StatusOK {
+		t.Errorf("a number formula comparing a calculated text: %d %s, want it saved", status, raw)
+	}
 	// A text calculation reads a text input's note and another text
 	// calculation by name; not as a criteria range.
 	refKey := must("POST", "/api/developer/metrics", map[string]any{"name": "act_ref_key", "formula": `act_ref & "|" & act_type`, "format": "text", "revision_id": rev})

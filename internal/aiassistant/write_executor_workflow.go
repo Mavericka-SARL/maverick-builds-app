@@ -161,12 +161,26 @@ type automationRuleParams struct {
 	MisfirePolicy       string `json:"misfire_policy"`
 	MaxRetries          int    `json:"max_retries"`
 	RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
+	FiresOnImport       *bool  `json:"fires_on_import"`
+}
+
+// importNote says, when the plan set it, whether a record rule also fires
+// for the records a file import creates.
+func importNote(firesOnImport *bool) string {
+	switch {
+	case firesOnImport == nil:
+		return ""
+	case *firesOnImport:
+		return ", also for imported records"
+	default:
+		return ", not for records a file import creates"
+	}
 }
 
 // ruleBinding resolves the workflow a rule fires. The rule is stored bound
 // by NAME unless the definition is already published: the store refuses an
-// id binding to an unpublished definition, and the assistant cannot publish
-// (that stays a developer's click). Binding by name is what the engine's own
+// id binding to an unpublished definition, and the assistant publishes one
+// only by a publish_workflow_def step, usually later in the same plan. Binding by name is what the engine's own
 // fireRule falls back to, scoped to the rule's revision, so the rule becomes
 // live the moment the developer publishes — no second proposal needed.
 func (e *WriteExecutor) ruleBinding(ctx context.Context, p automationRuleParams) (workflowName, workflowDefID, note string, err error) {
@@ -270,7 +284,12 @@ func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMe
 			return "", "", fmt.Errorf("disable automation rule: %w", err)
 		}
 	}
-	msg := fmt.Sprintf("Automation rule '%s' created (id: %s, trigger: %s, starts workflow '%s')", p.Name, rule.ID, p.TriggerType, workflowName)
+	if p.FiresOnImport != nil {
+		if err := workflow.NewStoreOn(e.pool).SetRuleFiresOnImport(ctx, rule.ID, *p.FiresOnImport); err != nil {
+			return "", "", fmt.Errorf("set fires_on_import: %w", err)
+		}
+	}
+	msg := fmt.Sprintf("Automation rule '%s' created (id: %s, trigger: %s, starts workflow '%s'%s)", p.Name, rule.ID, p.TriggerType, workflowName, importNote(p.FiresOnImport))
 	if note != "" {
 		msg += " — " + note
 	}
@@ -328,11 +347,16 @@ func (e *WriteExecutor) updateAutomationRule(ctx context.Context, raw json.RawMe
 	if err != nil {
 		return "", "", fmt.Errorf("update automation rule: %w", err)
 	}
+	if p.FiresOnImport != nil {
+		if err := workflow.NewStoreOn(e.pool).SetRuleFiresOnImport(ctx, rule.ID, *p.FiresOnImport); err != nil {
+			return "", "", fmt.Errorf("set fires_on_import: %w", err)
+		}
+	}
 	state := "enabled"
 	if !rule.Enabled {
 		state = "disabled"
 	}
-	msg := fmt.Sprintf("Automation rule '%s' updated (trigger: %s, starts workflow '%s', %s)", rule.Name, rule.TriggerType, rule.WorkflowName, state)
+	msg := fmt.Sprintf("Automation rule '%s' updated (trigger: %s, starts workflow '%s', %s%s)", rule.Name, rule.TriggerType, rule.WorkflowName, state, importNote(p.FiresOnImport))
 	if note != "" {
 		msg += " — " + note
 	}

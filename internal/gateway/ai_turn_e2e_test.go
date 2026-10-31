@@ -303,6 +303,22 @@ func TestSendMessage_TurnTimeLimit(t *testing.T) {
 	}
 }
 
+// A reply that says the model was changed, or that a proposal follows, is
+// told apart from an answer that changes nothing.
+func TestClaimsUnproposedChange(t *testing.T) {
+	for reply, want := range map[string]bool{
+		"I have created the Fleet metrics and placed them on the grid.":  true,
+		"Next I will propose the P&L lines.":                             true,
+		"The depreciation metric has been updated to use CUMULATE.":      true,
+		"Depreciation is opening PP&E plus capex, over the useful life.": false,
+		"Which scenario should the ramp read?":                           false,
+	} {
+		if got := claimsUnproposedChange(reply); got != want {
+			t.Errorf("claimsUnproposedChange(%q) = %v, want %v", reply, got, want)
+		}
+	}
+}
+
 func TestAsksToPropose(t *testing.T) {
 	for reply, want := range map[string]bool{
 		"I'm ready to propose the full plan. Confirm and I will post it.":                      true,
@@ -386,6 +402,51 @@ func TestSendMessage_WarnsOfRecurringMistakes(t *testing.T) {
 		"ending_hc looks like a level", `time_summary "last"`, `the grid widget "Monthly Summary" shows all 14 metrics of Plan`} {
 		if !strings.Contains(results[0], w) {
 			t.Errorf("the warnings lack %q:\n%s", w, results[0])
+		}
+	}
+}
+
+// A plan whose formula reads a metric on no grid goes back as a problem: a
+// metric on no grid is one value for the whole model, so ebitda read the
+// model's whole gross profit in every month (restaurant rebuild,
+// 2026-10-31). Placed on the grid, the same plan is proposed. A flag of
+// typed 1s is no counter and an opening capex no level: neither is warned.
+func TestSendMessage_RefusesReadOfMetricOnNoGrid(t *testing.T) {
+	month := map[string]any{"tool": "create_dimension", "description": "Months", "params": map[string]any{"name": "period",
+		"members": []map[string]any{{"code": "M1", "label": "M1"}, {"code": "M2", "label": "M2"}, {"code": "M3", "label": "M3"},
+			{"code": "M4", "label": "M4"}, {"code": "M5", "label": "M5"}}}}
+	ones := []map[string]any{}
+	for _, c := range []string{"M1", "M2", "M3", "M4", "M5"} {
+		ones = append(ones, map[string]any{"members": map[string]string{"period": c}, "value": 1})
+	}
+	plan := func(placed bool) []map[string]any {
+		gpGrid := []string{"revenue", "seas_event", "opening_capex", "ebitda"}
+		if placed {
+			gpGrid = append(gpGrid, "gross_profit")
+		}
+		return []map[string]any{
+			month,
+			turnMetricStep("revenue", map[string]any{"is_input": true}),
+			turnMetricStep("seas_event", map[string]any{"is_input": true}),
+			turnMetricStep("opening_capex", map[string]any{"is_input": true}),
+			turnMetricStep("gross_profit", map[string]any{"is_input": false, "formula": "revenue * 0.6"}),
+			turnMetricStep("ebitda", map[string]any{"is_input": false, "formula": "gross_profit - 10"}),
+			{"tool": "create_grid", "description": "P&L", "params": map[string]any{"name": "PnL", "dimensions": []string{"period"}, "metrics": gpGrid}},
+			{"tool": "write_input_values", "description": "Events", "params": map[string]any{"metric_id": "seas_event", "values": ones}},
+		}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan(false)...), proposeResp("c2", plan(true)...), proposeResp("c3", plan(true)...)}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("build it"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
+		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
+	}
+	results := toolResults(t, env)
+	if len(results) < 1 || !strings.Contains(results[0], "ebitda reads gross_profit, which is on no grid") {
+		t.Fatalf("the first plan was not refused for reading a metric on no grid:\n%q", results)
+	}
+	for _, r := range results[1:] {
+		if strings.Contains(r, "on no grid") || strings.Contains(r, "seas_event is 1") || strings.Contains(r, "opening_capex looks like a level") {
+			t.Errorf("the placed plan was refused or warned of: %s", r)
 		}
 	}
 }

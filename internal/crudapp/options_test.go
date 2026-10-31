@@ -13,7 +13,7 @@ func TestFieldOptionsAreChecked(t *testing.T) {
 			{Name: "kind", Label: "Kind", Type: "select", Options: []string{"A", "B"}},
 			{Name: "due", Label: "Due", Type: "date"},
 			{Name: "amount", Label: "Amount", Type: "number"},
-			{Name: "region", Label: "Region", Type: "dimension", DimensionID: "d1"},
+			{Name: "region", Label: "Region", Type: "dimension", DimensionID: "00000000-0000-0000-0000-0000000000d1"},
 		}, extra...)
 	}
 	ok := [][]FormField{
@@ -21,7 +21,7 @@ func TestFieldOptionsAreChecked(t *testing.T) {
 		base(FormField{Name: "when", Label: "When", Type: "date", Default: "today", Deadline: true, DoneField: "kind", DoneValues: []string{"B"}}),
 		base(FormField{Name: "pick", Label: "Pick", Type: "select", Options: []string{"x", "y"}, Default: "y", RequiredWith: "title"}),
 		base(FormField{Name: "money", Label: "Money", Type: "number", Format: "money", Default: 1.5, History: true, Core: true}),
-		base(FormField{Name: "link", Label: "Link", Type: "dimension", DimensionID: "d2", OnDelete: OnDeleteCascade}),
+		base(FormField{Name: "link", Label: "Link", Type: "dimension", DimensionID: "00000000-0000-0000-0000-0000000000d2", OnDelete: OnDeleteCascade}),
 		base(FormField{Name: "secret", Label: "Secret", Type: "number", Hidden: true, Required: true, Default: 1}),
 	}
 	for i, fields := range ok {

@@ -150,8 +150,9 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if node, pErr := formula.Parse(req.Formula); pErr == nil {
-		if err := checkPeriodComparisons(node, rd); err != nil {
+	parsed, _ := formula.Parse(req.Formula)
+	if parsed != nil {
+		if err := checkPeriodComparisons(parsed, rd); err != nil {
 			return nil, err
 		}
 	}
@@ -178,13 +179,19 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 			LIMIT 1
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID, &textMetric)
 		readsText := req.Text && ref.IsDirect() && !ref.Dimensional && !criteriaRange(an, ref.Name)
+		// A number formula compares a text metric at the cell: only there,
+		// and not across periods (no time function binds its text).
+		if !req.Text && err == nil && textMetric && ref.IsDirect() && !ref.Dimensional && !criteriaRange(an, ref.Name) &&
+			!an.UsesTimeSeries && parsed != nil && textComparedOnly(parsed, ref.Name) {
+			readsText = true
+		}
 		if err == nil && textMetric && !readsText {
 			// Its cells hold text beside a 0 (a note, or a calculated
 			// text): a number formula would read 0.
 			if req.Text {
 				return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a text calculation reads it only by name at the cell (not through LOOKUP, *IFS or a time offset)", ref.Name)
 			}
-			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: its cells hold text, which only a calculation of format text reads", ref.Name)
+			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell — IF(%s = \"OK\", 1, 0) — not in arithmetic, a function, LOOKUP or with a time function", ref.Name, ref.Name)
 		}
 		if err == nil {
 			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))

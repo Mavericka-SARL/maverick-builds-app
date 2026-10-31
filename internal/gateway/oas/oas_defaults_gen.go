@@ -40,6 +40,10 @@ func (s *AutomationRuleRequest) setDefaults() {
 		val := int(60)
 		s.RetryBackoffSeconds.SetTo(val)
 	}
+	{
+		val := bool(true)
+		s.FiresOnImport.SetTo(val)
+	}
 }
 
 // setDefaults set default value of fields.
