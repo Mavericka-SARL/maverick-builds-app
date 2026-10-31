@@ -7,6 +7,7 @@ import { PersonaSwitcher } from "../shell/PersonaSwitcher";
 import { PlanBanner } from "../shell/PlanBanner";
 import { UserMenu } from "../shell/UserMenu";
 import { useBusinessSection } from "../consoles/business/BusinessConsole";
+import { useModelSwitches } from "../consoles/business/modelSelection";
 import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
@@ -28,6 +29,7 @@ export default function UnifiedConsole() {
   useBrandRefresh(persona);
   const ids = useMemo(() => enabledSections(userRoles), [userRoles]);
   const [chosen, setTab] = useState<string>("");
+  const switches = useModelSwitches();
   // A remembered choice from a section the user (no longer) holds falls
   // back to the landing tab of their first section.
   const tab = resolveTab(chosen, ids);
@@ -78,7 +80,9 @@ export default function UnifiedConsole() {
       sidebarFooter={<PersonaSwitcher />}
     >
       <PlanBanner />
-      <PageErrorBoundary key={tab}>{owner?.render(tab)}</PageErrorBoundary>
+      {/* A model switch opens the page again in the new model; the sidebar
+          and header stay (consoles/business/modelSelection). */}
+      <PageErrorBoundary key={`${tab}#${switches}`}>{owner?.render(tab)}</PageErrorBoundary>
     </AppShell>
     </ConsolePageContext.Provider>
   );

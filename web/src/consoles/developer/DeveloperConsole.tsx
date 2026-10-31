@@ -18,6 +18,7 @@ import { DashboardsTab } from "./DashboardsTab";
 import { RolesTab } from "../business-admin/BusinessAdminConsole";
 import { PageLayout, LoadingState, ErrorState, SELECTED_APP_KEY, useConfirm } from "../../ui";
 import { setLiveEditGuard } from "../../api/liveEdit";
+import { useModelSwitches } from "../business/modelSelection";
 import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 
 // ── Section ───────────────────────────────────────────────────────────────────
@@ -69,6 +70,17 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
   // since, or no longer this person's to build): Build opens on the
   // application's default instead.
   const [goneRevisionId, setGoneRevisionId] = useState("");
+  // A model switch in place (modelSelection) may open another application:
+  // Build then opens that application's kept revision, as a reload did.
+  const switches = useModelSwitches();
+  const [seenSwitches, setSeenSwitches] = useState(switches);
+  if (seenSwitches !== switches) {
+    setSeenSwitches(switches);
+    const kept = storedWorkingRevision();
+    setRevisionId(kept.id);
+    setRevisionName(kept.name);
+    setGoneRevisionId("");
+  }
 
   const handleSelectRevision = (id: string, name: string) => {
     setRevisionId(id);

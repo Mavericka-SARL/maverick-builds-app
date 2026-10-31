@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type AppInfo, type DemoContext } from "../../api/client";
 import { Select } from "../../ui";
-import { selectModel } from "./modelSelection";
+import { useSelectModel } from "./modelSelection";
 
 /**
  * Picks which of the caller's models the Dashboards view shows. Lists every
@@ -10,6 +10,7 @@ import { selectModel } from "./modelSelection";
  */
 export function ModelSwitcher({ ctx }: { ctx: DemoContext }) {
   const { data: apps = [] } = useQuery({ queryKey: ["apps"], queryFn: api.getApps });
+  const selectModel = useSelectModel();
   const list = apps as AppInfo[];
   const models = list.flatMap(app => (app.models ?? []).map(m => ({ app, model: m })));
   if (models.length <= 1) return null;
@@ -22,7 +23,7 @@ export function ModelSwitcher({ ctx }: { ctx: DemoContext }) {
   function onChange(modelId: string) {
     const hit = models.find(x => x.model.id === modelId);
     if (!hit || modelId === ctx.model_id) return;
-    selectModel(hit.app.id, hit.model.id, hit.model.is_default);
+    selectModel(hit.app.id, hit.model.id);
   }
 
   return (

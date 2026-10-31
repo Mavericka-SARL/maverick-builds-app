@@ -559,7 +559,7 @@ function UploadStep({
             >
               <option value="">— select revision —</option>
               {(revisions as DevRevision[]).map(r => (
-                <option key={r.id} value={r.id}>{r.name}<Txt>{r.is_active ? " (active)" : ""}</Txt></option>
+                <option key={r.id} value={r.id}>{`${r.name}${r.is_active ? " (active)" : ""}`}</option>
               ))}
             </Select>
           </Field>
@@ -888,7 +888,7 @@ function MapColumnsStep({
                       <option value="">(ignore)</option>
                       {fieldOptions.map(o => (
                         <option key={o.value} value={o.value}>
-                          {o.label}<Txt>{o.required ? " *" : ""}</Txt>
+                          {`${o.label}${o.required ? " *" : ""}`}
                         </option>
                       ))}
                       {allowProperties && <option value="property:">new property…</option>}

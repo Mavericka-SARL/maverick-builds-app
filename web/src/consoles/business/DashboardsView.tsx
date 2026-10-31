@@ -5,7 +5,7 @@ import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChi
 import { flattenFolders, UNFILED_LABEL } from "../developer/folderTree";
 import { DashboardWidgetGrid } from "./DashboardWidgets";
 import { ModelSwitcher } from "./ModelSwitcher";
-import { selectModel } from "./modelSelection";
+import { useSelectModel } from "./modelSelection";
 import { clearPendingDashboard, findModel, parseDashboardLink, peekPendingDashboard, sameName, setPendingDashboard } from "./dashboardLinks";
 import { ConsolePageContext, PAGE_SCHEME, pageLinkName } from "../../router/pageLinks";
 
@@ -19,12 +19,13 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
   const [filterFolder, setFilterFolder] = useState("");
   const [activeDashId, setActiveDashId] = useState<string | null>(null);
   // A dashboard: link into this model from another one (dashboardLinks):
-  // the console reloaded into this model, and the dashboard it named opens
+  // the console switched to this model, and the dashboard it named opens
   // first. Read once, then forgotten, so a later reload opens as usual.
   const [linkedName, setLinkedName] = useState<string | null>(() => peekPendingDashboard(ctx.model_id));
   useEffect(() => { clearPendingDashboard(); }, []);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const selectModel = useSelectModel();
   const openPage = useContext(ConsolePageContext);
 
   const { data: dashboardsRaw = [], isLoading } = useQuery({
@@ -106,7 +107,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
     }
     if (hit.model.id === ctx.model_id) return openHere(target.dashboard);
     setPendingDashboard(hit.model.id, target.dashboard);
-    selectModel(hit.app.id, hit.model.id, hit.model.is_default);
+    selectModel(hit.app.id, hit.model.id);
   }
 
   const { data: detail, isLoading: detailLoading } = useQuery({

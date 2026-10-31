@@ -1,19 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type AppInfo, type AppModelInfo } from "../../api/client";
 import { Button, LoadingState, EmptyState, StatusBadge, Txt } from "../../ui";
-import { SELECTED_APP_KEY, SELECTED_MODEL_KEY, selectModel } from "./modelSelection";
+import { SELECTED_APP_KEY, SELECTED_MODEL_KEY, useSelectModel } from "./modelSelection";
 
 export function AppsTab() {
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["apps"], queryFn: api.getApps });
+  const selectModel = useSelectModel();
   const currentId = localStorage.getItem(SELECTED_APP_KEY) ?? "";
 
   const currentModelId = localStorage.getItem(SELECTED_MODEL_KEY) ?? "";
 
+  // Another application opens at its default model.
   function select(id: string) {
     if (id === currentId) return;
-    localStorage.setItem(SELECTED_APP_KEY, id);
-    localStorage.removeItem(SELECTED_MODEL_KEY);
-    window.location.reload();
+    selectModel(id, null);
   }
 
   if (isLoading) return <LoadingState />;
@@ -88,7 +88,7 @@ export function AppsTab() {
                           {isActiveModel ? (
                             <StatusBadge tone="brand">Working here</StatusBadge>
                           ) : (
-                            <Button size="sm" onClick={e => { e.stopPropagation(); selectModel(app.id, m.id, m.is_default); }}>
+                            <Button size="sm" onClick={e => { e.stopPropagation(); selectModel(app.id, m.id); }}>
                               Open
                             </Button>
                           )}

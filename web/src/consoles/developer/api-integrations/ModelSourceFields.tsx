@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type ApiModelSource } from "../../../api/client";
-import { Checkbox, Field, InlineAlert, Select, Txt } from "../../../ui";
+import { Checkbox, Field, InlineAlert, Select } from "../../../ui";
 
 // The model-link side of the Request step: a grid of another model of this
 // tenant, read in that model's active revision as the link's owner — the
@@ -84,7 +84,7 @@ export function ModelSourceFields({ source, onSource }: {
                     value={filters[d.name] ?? []}
                     onChange={e => setFilter(d.name, Array.from(e.target.selectedOptions, o => o.value))}>
                     {(d.members ?? []).map(m => (
-                      <option key={m.code} value={m.code}>{m.code}<Txt>{m.label && m.label !== m.code ? ` — ${m.label}` : ""}</Txt></option>
+                      <option key={m.code} value={m.code}>{`${m.code}${m.label && m.label !== m.code ? ` — ${m.label}` : ""}`}</option>
                     ))}
                   </Select>
                 </label>
