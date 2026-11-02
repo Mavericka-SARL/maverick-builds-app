@@ -5,7 +5,8 @@ import { DashboardContextSyncContext } from "./dashboardContextSync";
 // claims their selector, every synced widget follows the bar. initial: the
 // bar's opening members, in the shared pool from the first render so widgets
 // adopt them instead of seeding their own defaults.
-export function DashboardContextSyncProvider({ children, reserved, initial }: { children: ReactNode; reserved?: string[]; initial?: Record<string, string> }) {
+// followBar: told the slot of each widget that follows the bar.
+export function DashboardContextSyncProvider({ children, reserved, initial, followBar }: { children: ReactNode; reserved?: string[]; initial?: Record<string, string>; followBar?: (slot: string) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...initial }));
   const setValue = useCallback((dimId: string, code: string) => {
     setValues(prev => (prev[dimId] === code ? prev : { ...prev, [dimId]: code }));
@@ -33,8 +34,8 @@ export function DashboardContextSyncProvider({ children, reserved, initial }: { 
 
   const barDims = useMemo(() => [...reservedSet], [reservedSet]);
   const value = useMemo(
-    () => ({ values, setValue, claimSelector, releaseSelectors, barDims }),
-    [values, setValue, claimSelector, releaseSelectors, barDims],
+    () => ({ values, setValue, claimSelector, releaseSelectors, barDims, followBar }),
+    [values, setValue, claimSelector, releaseSelectors, barDims, followBar],
   );
   return <DashboardContextSyncContext.Provider value={value}>{children}</DashboardContextSyncContext.Provider>;
 }

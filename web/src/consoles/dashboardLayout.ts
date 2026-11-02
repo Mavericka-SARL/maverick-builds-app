@@ -18,6 +18,9 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
   // of tiles stays aligned as in Design and a tile carrying selectors grows
   // instead of clipping its value.
   "text",
+  // A workflow's status shows every step: drawn at least as tall as
+  // designed, taller rather than scrolling half of them out of sight.
+  "workflow_status",
 ]);
 
 // Button widgets: intrinsic beside a taller sibling, but drawn at their

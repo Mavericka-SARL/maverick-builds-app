@@ -442,6 +442,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/dashboards", "developer", dev(h.developerDashboards))
 	register("PATCH", "/api/developer/dashboards/{id}", "developer", dev(h.developerDashboardAction))
 	register("PUT", "/api/developer/dashboards/order", "developer", dev(h.reorderDashboards))
+	register("POST", "/api/developer/dashboards/{id}/arrange", "developer", dev(h.arrangeDashboard))
 	register("DELETE", "/api/developer/dashboards/{id}", "developer", dev(h.developerDashboardAction))
 	register("POST", "/api/developer/dashboards/{id}/widgets", "developer", dev(h.developerDashboardAction))
 	register("PATCH", "/api/developer/dashboards/{id}/widgets/{widgetId}", "developer", dev(h.developerDashboardAction))

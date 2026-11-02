@@ -155,8 +155,12 @@ const (
 	// dashboards (PUT /api/developer/dashboards/order); the metadata carries
 	// the whole new order.
 	EventDashboardsReordered EventType = "dashboard.reordered"
-	EventWidgetUpdated       EventType = "widget.updated"
-	EventWidgetDeleted       EventType = "widget.deleted"
+	// EventDashboardArranged: a developer laid a dashboard's widgets out in
+	// rows (POST /api/developer/dashboards/{id}/arrange); the metadata
+	// carries the rows.
+	EventDashboardArranged EventType = "dashboard.arranged"
+	EventWidgetUpdated     EventType = "widget.updated"
+	EventWidgetDeleted     EventType = "widget.deleted"
 
 	// Batch 4 — Developer Console, workflow-authoring + integration +
 	// migration surfaces. EventWorkflowPublished/Archived are deliberately

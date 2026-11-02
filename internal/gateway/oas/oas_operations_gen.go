@@ -16,6 +16,7 @@ const (
 	AdminListModelLinksOperation             OperationName = "AdminListModelLinks"
 	AdminSwitchModelLinkOperation            OperationName = "AdminSwitchModelLink"
 	ArchiveWorkflowOperation                 OperationName = "ArchiveWorkflow"
+	ArrangeDashboardOperation                OperationName = "ArrangeDashboard"
 	BackfillFormMappingOperation             OperationName = "BackfillFormMapping"
 	CancelIntegrationRunOperation            OperationName = "CancelIntegrationRun"
 	CancelWorkflowInstanceOperation          OperationName = "CancelWorkflowInstance"

@@ -77,3 +77,63 @@ func (h *handler) reorderDashboards(w http.ResponseWriter, r *http.Request) {
 	})
 	jsonOK(w, map[string]string{"status": "ok"})
 }
+
+// ── POST /api/developer/dashboards/{id}/arrange ────────────────────────────
+// arrangeDashboard lays a dashboard's widgets out: {rows (every widget once,
+// row by row from the top), weights?}. The edit is modeledit.ArrangeDashboard,
+// which the AI Developer's arrange_dashboard runs too. Developer only, in a
+// model the caller may build in; a dashboard outside the caller's scope
+// answers 404 like an unknown one.
+func (h *handler) arrangeDashboard(w http.ResponseWriter, r *http.Request) {
+	ctx := withBuilderRoute(r.Context())
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	dashID := strings.TrimSpace(r.PathValue("id"))
+	var body struct {
+		Rows    [][]string  `json:"rows"`
+		Weights [][]float64 `json:"weights"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Rows) == 0 {
+		jsonErr(w, fmt.Errorf("rows is required: every widget of the dashboard, row by row"), http.StatusBadRequest)
+		return
+	}
+	var modelID string
+	if err := h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&modelID); err != nil {
+		jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
+		return
+	}
+	allowed, err := h.actorCanAccessModel(ctx, act, modelID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
+		return
+	}
+	n, err := modeledit.ArrangeDashboard(ctx, h.db, dashID, body.Rows, body.Weights)
+	if err != nil {
+		var le *modeledit.LayoutError
+		if errors.As(err, &le) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		jsonErr(w, fmt.Errorf("arrange dashboard: %w", err), http.StatusInternalServerError)
+		return
+	}
+	revisionID, appID := h.dashboardScope(ctx, dashID)
+	rows := make([]string, len(body.Rows))
+	for i, row := range body.Rows {
+		rows[i] = strings.Join(row, ",")
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryModelChange, EventType: auditlog.EventDashboardArranged,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ApplicationID: appID, ResourceType: "dashboard", ResourceID: dashID, RevisionID: revisionID,
+		Metadata: map[string]string{"rows": strings.Join(rows, " | ")},
+	})
+	jsonOK(w, map[string]any{"status": "ok", "widgets": n})
+}

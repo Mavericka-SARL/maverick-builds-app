@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useReducer, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
 import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
@@ -317,6 +317,12 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     qc.invalidateQueries({ queryKey: ["user-dashboards"] });
     qc.invalidateQueries({ queryKey: ["user-dashboard-detail"] });
   };
+  // Arrange: the rows as they stand, each widget sized to what it shows and
+  // spaced evenly (the saved layout; unsaved moves are saved or cancelled first).
+  const arrange = useMutation({
+    mutationFn: () => api.arrangeDashboard(dashId, groupWidgetsIntoRows(dash?.widgets ?? []).map(row => row.map(w => w.id))),
+    onSuccess: invalidateAll,
+  });
 
   const markSaved = () => {
     setSaveStatus("saved");
@@ -640,6 +646,12 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               <FilterChip active={showBar} onClick={() => { setShowBar(v => !v); setShowAdd(false); }}>
                 Selector bar<Txt>{(dash?.selector_bar?.length ?? 0) > 0 ? ` (${dash?.selector_bar?.length})` : ""}</Txt>
               </FilterChip>
+              <FilterChip disabled={isDirty || arrange.isPending || (dash?.widgets?.length ?? 0) === 0}
+                title={isDirty ? "Save or cancel the changes first" : "Keep the rows, size every widget to what it shows and space them evenly"}
+                onClick={() => arrange.mutate()}>
+                {arrange.isPending ? "Arranging…" : "Arrange"}
+              </FilterChip>
+              {arrange.isError && <span style={{ color: "var(--color-danger)", fontSize: 12 }}>{(arrange.error as Error).message}</span>}
             </>
           )}
         </ToolbarGroup>

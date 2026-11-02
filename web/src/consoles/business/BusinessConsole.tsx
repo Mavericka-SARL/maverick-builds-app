@@ -66,7 +66,9 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
     render: (active) => {
       const local = localTab(active);
       return (
-        <PageLayout>
+        // A dashboard scrolls sideways by itself; without a scroll box of
+        // the page's own its selector bar stays in view as the window scrolls.
+        <PageLayout className={local === "dashboards" ? "mvx-page--flow" : undefined}>
           {isLoading && <LoadingState label="Connecting…" />}
           {error && <ErrorState message={`Cannot reach gateway: ${(error as Error).message}`} />}
           {ctx && local === "dashboards" && (

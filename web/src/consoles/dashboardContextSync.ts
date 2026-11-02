@@ -13,9 +13,26 @@ export interface DashboardContextSyncValue {
   // The dimensions on the dashboard's selector bar (empty without one): no
   // widget claims their selector, and a KPI in "bar" mode is scoped by them.
   barDims: string[];
+  // A widget that follows a bar dimension says so, by its dashboard slot:
+  // the dashboard draws the bar above the first one, next to what it changes.
+  followBar?: (slot: string) => void;
 }
 
 export const DashboardContextSyncContext = createContext<DashboardContextSyncValue | undefined>(undefined);
+
+// The dashboard widget a component renders in (its id), for followBar.
+export const DashboardSlotContext = createContext<string | undefined>(undefined);
+
+// useFollowsBar reports the widget's slot to the dashboard once it follows
+// the selector bar (a KPI in "bar" mode; grids and charts through
+// useSelectorOwnership).
+export function useFollowsBar(follows: boolean) {
+  const sync = useContext(DashboardContextSyncContext);
+  const slot = useContext(DashboardSlotContext);
+  useEffect(() => {
+    if (follows && slot) sync?.followBar?.(slot);
+  }, [follows, slot, sync]);
+}
 
 // useWidgetContextSync mirrors a shared, dashboard-wide selection into a
 // widget's OWN existing context/filterSel state, rather than returning a
@@ -39,6 +56,13 @@ export const DashboardContextSyncContext = createContext<DashboardContextSyncVal
 export function useSelectorOwnership(syncEnabled: boolean): (dimId: string) => boolean {
   const sync = useContext(DashboardContextSyncContext);
   const widgetId = useId();
+  // A bar dimension asked about is one this widget filters by (not on an
+  // axis): it follows the bar. Set during render, reported after it.
+  const followsBar = useRef(false);
+  const slot = useContext(DashboardSlotContext);
+  useEffect(() => {
+    if (followsBar.current && slot) sync?.followBar?.(slot);
+  });
   // Dims this widget successfully claimed, so the effect can RE-claim them:
   // StrictMode runs setup→cleanup→setup on mount, and a cleanup that only
   // released would leave the registry empty until this widget's next render —
@@ -54,7 +78,7 @@ export function useSelectorOwnership(syncEnabled: boolean): (dimId: string) => b
   const active = syncEnabled && sync !== undefined;
   return useCallback(
     (dimId: string) => {
-      if (sync?.barDims.includes(dimId)) return false;
+      if (sync?.barDims.includes(dimId)) { followsBar.current = true; return false; }
       if (!active || !sync) return true;
       const owns = sync.claimSelector(dimId, widgetId);
       if (owns) claimedRef.current.add(dimId);

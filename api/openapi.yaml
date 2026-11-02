@@ -6122,6 +6122,53 @@ paths:
                   status: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/developer/dashboards/{id}/arrange:
+    post:
+      operationId: arrangeDashboard
+      tags: [Developer Console]
+      summary: Lay a dashboard's widgets out in rows (developer only)
+      description: >-
+        rows lists every widget of the dashboard once, row by row from the top. A row's widgets stand side by side,
+        left to right, sharing the 1100px canvas by weights (the same shape as rows; left out, equal) with 20px
+        between them; rows stack 20px apart. Each widget gets the height of what it shows: a KPI tile 120, a
+        button 40, a chart 360, a records table or board 420, a grid its header and rows (up to 640, taller ones
+        scroll inside), a text its lines, a workflow's status its steps. Audited as dashboard.arranged. A
+        dashboard outside the caller's scope answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: array
+                    items: { type: string, format: uuid }
+                weights:
+                  type: array
+                  items:
+                    type: array
+                    items: { type: number }
+      responses:
+        "200":
+          description: Widgets placed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  widgets: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/developer/dashboards/{id}:
     patch:
       operationId: updateDashboard

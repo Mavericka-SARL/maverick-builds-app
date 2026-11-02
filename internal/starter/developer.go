@@ -552,6 +552,28 @@ Press **New session** and describe what you want. **Attach a document** adds a p
 
 Ask it how something works, too. It reads your model — formulas, grids, workflows, and each dashboard's text and widgets — and the platform's manuals, and answers from them.`, 372),
 
+		devText(`## Get good results from it
+
+**Before you start**
+
+- **One task per session.** Press **New session** for each new piece of work. A long session — a few dozen turns — starts to drift and repeat earlier tasks.
+- **Give it the source.** Attach the workbook or specification you are building from, and say what to take from it.
+- **Say what you want in the model's own terms:** the dimensions and their members, what people type in and what is calculated, the time grain and scenarios, units and currency, who does what. "Revenue = units × price per product and month, in EUR, for Base and Downside" beats "add revenue".
+- **Pick a model to suit the job** under **AI Settings**: a larger model for building a whole model from a workbook, a small one for small changes.
+
+**While it builds**
+
+- **Build in stages and confirm each:** structure (dimensions, metrics, grids), then calculations, then data, then pages, then workflows and roles. Check the numbers of a stage before asking for the next.
+- **Keep requests to a size it can finish:** one page, one workflow, one group of metrics. "Fix the Management dashboard" works better than "fix every page".
+- **Read every Action plan before you confirm it.** Each one has already been tried in a trial run: a plan that would fail, or that leaves a page overlapping, cramped or without its selector bar, goes back to the AI Developer before you see it. What it could not settle shows as a warning on the plan; ask it to fix the warning, or to explain a step, before you confirm.
+- **Ask for pages the way people use them:** a *Start here* page first, with the workflow buttons, their status and a short guide; a selector bar for the scenario and period; KPI tiles over a chart over the grids. It sets the page order and lays out each page with **Arrange**, which you can also press yourself in the dashboard designer.
+
+**Checking its work**
+
+- Open the draft in **Developer › Developer Models** and look through it: the numbers in the grids against your source, each page in **Preview**, every workflow's steps and roles.
+- **Say exactly what is wrong:** "the Net revenue tile shows €99.4M; it should be FY 2026 for Base". It corrects the same draft.
+- If a draft has gone astray, **Discard** it and start a new session from your working revision rather than patching it.`, 640),
+
 		devText(`## Where its changes land
 
 The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from your working revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
@@ -562,7 +584,7 @@ Three kinds of change are not revision-scoped and take effect as soon as you con
 
 ## What stays with you
 
-Publishing and test-running workflows, making a revision live or deleting one, the business default, who is in a role, users, the REST API and Google Sheets connectors and their runs, and the business data itself — except that it imports a spreadsheet you attach to the chat, and writes single input values such as a setting, into its draft. [What the AI Developer can and cannot do](`+publicDocs+`AI_DEVELOPER.md) lists it all.`, 304),
+Test-running workflows, making a revision live or deleting one, the business default, who is in a role, users, the REST API and Google Sheets connectors and their runs, and the business data itself — except that it imports a spreadsheet you attach to the chat, and writes single input values such as a setting, into its draft. Publishing a workflow it proposes as a step, and your confirmation publishes it. [What the AI Developer can and cannot do](`+publicDocs+`AI_DEVELOPER.md) lists it all.`, 304),
 
 		devText(`## Going live
 

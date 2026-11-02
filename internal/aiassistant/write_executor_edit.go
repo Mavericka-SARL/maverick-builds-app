@@ -38,6 +38,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"reorder_dimension_members": e.reorderDimensionMembers,
 		"reorder_grid_metrics":      e.reorderGridMetrics,
 		"reorder_dashboards":        e.reorderDashboards,
+		"arrange_dashboard":         e.arrangeDashboard,
 		"update_grid":               e.updateGrid,
 		"delete_grid":               e.deleteGrid,
 		"remove_grid_metric":        e.removeGridMetric,
@@ -291,6 +292,47 @@ func (e *WriteExecutor) reorderDashboards(ctx context.Context, raw json.RawMessa
 		return "", "", fmt.Errorf("reorder dashboards: %w", err)
 	}
 	return fmt.Sprintf("Dashboards reordered: %s", strings.Join(names, ", ")), "", nil
+}
+
+// arrangeDashboard is POST /api/developer/dashboards/{id}/arrange: every
+// widget of the dashboard placed in rows from the top, side by side in a row,
+// each as tall as what it shows (modeledit.ArrangeDashboard).
+func (e *WriteExecutor) arrangeDashboard(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DashboardID string      `json:"dashboard_id"`
+		Rows        [][]string  `json:"rows"`
+		Weights     [][]float64 `json:"weights"`
+	}
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DashboardID == "" || len(p.Rows) == 0 {
+		return "", "", fmt.Errorf("dashboard_id and rows (every widget of the dashboard, row by row from the top) are required")
+	}
+	dashID, err := e.requireInModel(ctx, "dashboard", p.DashboardID)
+	if err != nil {
+		return "", "", err
+	}
+	rows := make([][]string, len(p.Rows))
+	for i, row := range p.Rows {
+		for _, ref := range row {
+			id, err := e.requireInModel(ctx, "dashboard_widget", ref)
+			if err != nil {
+				return "", "", err
+			}
+			rows[i] = append(rows[i], id)
+		}
+	}
+	n, err := modeledit.ArrangeDashboard(ctx, e.pool, dashID, rows, p.Weights)
+	if err != nil {
+		var le *modeledit.LayoutError
+		if errors.As(err, &le) {
+			return "", "", fmt.Errorf("%w (list_dashboards shows its widgets)", err)
+		}
+		return "", "", fmt.Errorf("arrange dashboard: %w", err)
+	}
+	return fmt.Sprintf("Dashboard arranged: %d widgets in %d rows", n, len(rows)), dashID, nil
 }
 
 // generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate:
@@ -744,6 +786,18 @@ func validateWidgetContent(widgetType string, content *string) error {
 	return imagedata.Validate("the image", *content, imagedata.MaxWidgetBytes)
 }
 
+// textWidgetContent gives a text widget's Markdown its line breaks when they
+// came escaped once too often: content with no line break but "\n" in it
+// (a guide that rendered as one heading, "Guide\n\nWho does what:\n- FP&A …",
+// 2026-11-01).
+func textWidgetContent(widgetType string, content *string) *string {
+	if widgetType != "text" || content == nil || strings.Contains(*content, "\n") || !strings.Contains(*content, `\n`) {
+		return content
+	}
+	s := strings.NewReplacer(`\r\n`, "\n", `\n`, "\n").Replace(*content)
+	return &s
+}
+
 // updateDashboardWidget is PATCH /api/developer/dashboards/{id}/widgets/{w}:
 // only the fields the step carries change.
 func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -778,6 +832,13 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 	if err := validateWidgetContent(widgetType, p.Content); err != nil {
 		return "", "", err
 	}
+	p.Content = textWidgetContent(widgetType, p.Content)
+	// A title given shows, as on a new widget, unless show_title says not:
+	// titles set on charts afterwards stayed hidden (2026-11-01).
+	if p.Title != nil && strings.TrimSpace(*p.Title) != "" && p.ShowTitle == nil {
+		on := true
+		p.ShowTitle = &on
+	}
 	var props *string
 	if len(p.WidgetProps) > 0 && string(p.WidgetProps) != "null" {
 		// Merged into what the widget has, not put in its place: live, the
@@ -799,6 +860,17 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 			return "", "", mErr
 		}
 		p.WidgetProps = merged
+		if widgetType == "grid" {
+			gridRef := ""
+			if p.RefID != nil {
+				gridRef = *p.RefID
+			} else {
+				_ = e.pool.QueryRow(ctx, `SELECT COALESCE(ref_id::text, '') FROM model.dashboard_widget WHERE id=$1::uuid`, widgetID).Scan(&gridRef)
+			}
+			if err := modeledit.CheckGridWidgetView(ctx, e.pool, gridRef, merged); err != nil {
+				return "", "", err
+			}
+		}
 		if widgetType == "chart" {
 			remapped, err := e.remapChartProps(ctx, p.WidgetProps)
 			if err != nil {

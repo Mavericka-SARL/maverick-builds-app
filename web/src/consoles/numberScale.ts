@@ -30,6 +30,9 @@ export function scaleFor(scale: NumberScale | undefined, value?: number): Scale 
       const a = Math.abs(value ?? 0);
       if (a >= 1e9) return { div: 1e9, suffix: "B", unit: "billions", decimals: 1 };
       if (a >= 1e6) return { div: 1e6, suffix: "M", unit: "millions", decimals: 1 };
+      // Whole from a thousand up: €124,685, not €124,684.89; an average
+      // ticket of €24.38 keeps its cents.
+      if (a >= 1e3) return { div: 1, suffix: "", unit: "", decimals: 0 };
       return NONE;
     }
     default:

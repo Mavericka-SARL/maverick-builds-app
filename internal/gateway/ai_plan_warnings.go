@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 )
 
 // planWarnings are the plan check's warnings: formulas a plan writes that
@@ -346,6 +348,40 @@ func nameWords(s string) []string {
 	})
 }
 
+// unorderedPagesProblems holds a plan that adds dashboards to an order: while
+// a dashboard of the revision has no place in it, the tabs show those
+// alphabetically after the ordered ones, and with none ordered everyone lands
+// on whichever name sorts first ("Actuals & checks" before "Start here",
+// 2026-11-01). The prompt asks for reorder_dashboards; this makes it so.
+func unorderedPagesProblems(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep) []string {
+	adds := false
+	for _, step := range steps {
+		adds = adds || step.Tool == "create_dashboard"
+	}
+	if !adds {
+		return nil
+	}
+	var total int
+	var unordered []string
+	var first string
+	err := tx.QueryRow(ctx, `
+		SELECT count(*),
+		       COALESCE(array_agg(name ORDER BY name) FILTER (WHERE sort_order IS NULL), '{}'),
+		       COALESCE((array_agg(name ORDER BY sort_order NULLS LAST, name))[1], '')
+		FROM model.dashboard_def WHERE revision_id = $1::uuid`, revID).Scan(&total, &unordered, &first)
+	if err != nil || total < 2 || len(unordered) == 0 {
+		return nil
+	}
+	names := make([]string, len(unordered))
+	for i, n := range unordered {
+		names[i] = strconv.Quote(n)
+	}
+	return []string{fmt.Sprintf("dashboards %s have no place in the order: the tabs show them alphabetically after the "+
+		"ordered ones, and everyone lands on %q. Add reorder_dashboards with every dashboard of the revision once: "+
+		"the guide page (Start here) first, the pages in the order the work goes, the developer's page last",
+		strings.Join(names, ", "), first)}
+}
+
 // offGridReadProblems names each formula the plan writes, on a metric on a
 // grid, that reads a metric on no grid. A metric on no grid has no
 // dimensions: read from a cell it is one value for the whole model, its
@@ -533,4 +569,370 @@ func currencyWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, ste
 		out = append(out, fmt.Sprintf("step %d (%s %s): a currency amount without format_currency: %s", i+1, step.Tool, name, hint))
 	}
 	return out
+}
+
+// dashboardLayoutProblems holds every dashboard a plan touches to a layout
+// people can read, as the console draws it: rows from the top (widgets
+// within 20px of a row's top share it), side by side on 20px columns. The
+// AI build's management dashboard (2026-11-01) had a fourth tile dropped to
+// a row of its own, a chart half-way down a row drawn under it, a one-row
+// grid in a 600px box, a nine-row grid in 170px, KPI tiles following a
+// selector bar the page did not have, and a text line "Selectors:
+// Scenario=Base" with each widget choosing its own scenario.
+func dashboardLayoutProblems(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	var problems []string
+	for id := range touchedDashboards(ctx, tx, revID, steps, created) {
+		p, _ := oneDashboardLayoutProblems(ctx, tx, id)
+		problems = append(problems, p...)
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+// dashboardLayoutWarnings: the warnings of the dashboards a plan touches.
+func dashboardLayoutWarnings(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	var warnings []string
+	for id := range touchedDashboards(ctx, tx, revID, steps, created) {
+		_, w := oneDashboardLayoutProblems(ctx, tx, id)
+		warnings = append(warnings, w...)
+	}
+	sort.Strings(warnings)
+	return warnings
+}
+
+// otherDashboardsWarnings names, once, the dashboards a plan touching
+// dashboards leaves with layout problems ("fix every page" fixed the four
+// with a "Selectors:" line and left three cramped, 2026-11-01).
+func otherDashboardsWarnings(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	touched := touchedDashboards(ctx, tx, revID, steps, created)
+	if len(touched) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM model.dashboard_def WHERE revision_id = $1::uuid ORDER BY `+modeledit.DashboardOrderSQL(""), revID)
+	if err != nil {
+		return nil
+	}
+	var others []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil && !touched[id] {
+			others = append(others, id)
+		}
+	}
+	rows.Close()
+	var out []string
+	for _, id := range others {
+		if p, _ := oneDashboardLayoutProblems(ctx, tx, id); len(p) > 0 {
+			out = append(out, p[0]+fmt.Sprintf(" (and %d more on that page) — the plan leaves this page as it is", len(p)-1))
+		}
+	}
+	return out
+}
+
+// touchedDashboards: the dashboards a plan creates or changes, by id.
+func touchedDashboards(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep, created []string) map[string]bool {
+	touched := map[string]bool{}
+	find := func(ref string) {
+		var id string
+		if tx.QueryRow(ctx, `SELECT id::text FROM model.dashboard_def WHERE revision_id = $1::uuid
+			AND (id::text = $2 OR lower(name) = lower($2)) LIMIT 1`, revID, strings.TrimSpace(ref)).Scan(&id) == nil {
+			touched[id] = true
+		}
+	}
+	for i, step := range steps {
+		var p struct {
+			DashboardID string `json:"dashboard_id"`
+			WidgetID    string `json:"widget_id"`
+		}
+		_ = json.Unmarshal(step.Params, &p)
+		switch step.Tool {
+		case "create_dashboard":
+			if i < len(created) && created[i] != "" {
+				find(created[i])
+			}
+		case "add_dashboard_widget", "update_dashboard", "arrange_dashboard":
+			find(p.DashboardID)
+		case "update_dashboard_widget":
+			var id string
+			if tx.QueryRow(ctx, `SELECT dashboard_id::text FROM model.dashboard_widget WHERE id::text = $1`, p.WidgetID).Scan(&id) == nil {
+				touched[id] = true
+			}
+		}
+	}
+	return touched
+}
+
+type layoutWidget struct {
+	id, typ, title, ref, content, label string
+	props                               json.RawMessage
+	x, y, w, h                          int
+	shown                               bool
+}
+
+func (w layoutWidget) name() string {
+	if w.title != "" {
+		return fmt.Sprintf("%s %q", w.typ, w.title)
+	}
+	return fmt.Sprintf("%s %s", w.typ, w.id)
+}
+
+// oneDashboardLayoutProblems: what a plan must fix on one dashboard, and what
+// goes back to the model once as a warning (titles and tiles that mislead
+// but do not break the page: refused together across ten pages, they left
+// gpt-5-mini without a plan after its retries, 2026-11-01).
+func oneDashboardLayoutProblems(ctx context.Context, tx pgx.Tx, dashID string) (problems, warnings []string) {
+	var dashName string
+	var barRaw json.RawMessage
+	if tx.QueryRow(ctx, `SELECT name, COALESCE(selector_bar, '[]'::jsonb) FROM model.dashboard_def WHERE id = $1::uuid`, dashID).Scan(&dashName, &barRaw) != nil {
+		return nil, nil
+	}
+	var bar []struct {
+		DimensionID string `json:"dimension_id"`
+	}
+	_ = json.Unmarshal(barRaw, &bar)
+	onBar := map[string]bool{}
+	for _, e := range bar {
+		onBar[e.DimensionID] = true
+	}
+	rows, err := tx.Query(ctx, `SELECT w.id::text, w.widget_type, COALESCE(w.title, ''), COALESCE(w.ref_id::text, ''), COALESCE(w.content, ''),
+		COALESCE(w.widget_props, '{}'::jsonb), COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 300), COALESCE(w.size_h, 0),
+		COALESCE(w.show_title, false), COALESCE(NULLIF(m.label, ''), m.name, '')
+		FROM model.dashboard_widget w LEFT JOIN model.metric_def m ON w.widget_type = 'metric_kpi' AND m.id::text = w.ref_id::text
+		WHERE w.dashboard_id = $1::uuid ORDER BY w.pos_y, w.pos_x`, dashID)
+	if err != nil {
+		return nil, nil
+	}
+	var ws []layoutWidget
+	for rows.Next() {
+		var w layoutWidget
+		if rows.Scan(&w.id, &w.typ, &w.title, &w.ref, &w.content, &w.props, &w.x, &w.y, &w.w, &w.h, &w.shown, &w.label) == nil {
+			ws = append(ws, w)
+		}
+	}
+	rows.Close()
+	var out, warns []string
+	say := func(format string, args ...any) {
+		out = append(out, fmt.Sprintf("dashboard %q: ", dashName)+fmt.Sprintf(format, args...))
+	}
+	warn := func(format string, args ...any) {
+		warns = append(warns, fmt.Sprintf("dashboard %q: ", dashName)+fmt.Sprintf(format, args...))
+	}
+	const arrange = " — arrange_dashboard {\"dashboard_id\", \"rows\": [[widget ids, left to right], …]} places and sizes every widget"
+
+	// Rows as the console groups them.
+	type row struct {
+		top, bottom int
+		items       []layoutWidget
+	}
+	var grouped []*row
+	for _, w := range ws {
+		var r *row
+		for _, g := range grouped {
+			if abs(g.top-w.y) <= 20 {
+				r = g
+				break
+			}
+		}
+		if r == nil {
+			for _, g := range grouped {
+				if w.y > g.top+20 && w.y < g.bottom {
+					say("%s starts at y=%d, inside the row at y=%d (to y=%d): rows stack, so it is drawn below that whole row"+arrange, w.name(), w.y, g.top, g.bottom)
+					break
+				}
+			}
+			r = &row{top: w.y}
+			grouped = append(grouped, r)
+		}
+		r.items = append(r.items, w)
+		r.bottom = max(r.bottom, w.y+max(w.h, 40))
+	}
+	col := func(px int) int { return int(math.Round(float64(px) / 20)) }
+	for _, g := range grouped {
+		for i := 0; i < len(g.items); i++ {
+			a := g.items[i]
+			if a.x+a.w > 1200 {
+				say("%s reaches x=%d, past the 1200px canvas: the page scrolls sideways"+arrange, a.name(), a.x+a.w)
+			}
+			for j := i + 1; j < len(g.items); j++ {
+				b := g.items[j]
+				if col(a.x) < col(b.x+b.w) && col(b.x) < col(a.x+a.w) {
+					say("%s and %s overlap in the row at y=%d: one is pushed to a row of its own"+arrange, a.name(), b.name(), g.top)
+				}
+			}
+		}
+	}
+
+	// Sizes against content.
+	for _, w := range ws {
+		if w.typ != "grid" {
+			continue
+		}
+		need := modeledit.WidgetHeight(ctx, tx, w.typ, w.ref, w.props, w.content)
+		switch {
+		case w.h > 0 && w.h+80 < min(need, 400):
+			say("%s is %dpx tall for rows that need about %dpx: they scroll inside a cramped box"+arrange, w.name(), w.h, need)
+		case w.h > need+160:
+			say("%s is %dpx tall for rows that need about %dpx: the rest of the box is empty"+arrange, w.name(), w.h, need)
+		}
+	}
+
+	// Selectors: tiles following a bar the page lacks; a dimension each
+	// widget picks on its own.
+	for _, w := range ws {
+		var p struct {
+			Mode string `json:"kpi_context_mode"`
+		}
+		_ = json.Unmarshal(w.props, &p)
+		if w.typ == "metric_kpi" && p.Mode == "bar" && len(bar) == 0 {
+			say("%s follows the selector bar, but the dashboard has none, so it adds up every scenario and period — give the dashboard a selector_bar (update_dashboard)", w.name())
+		}
+		var sc struct {
+			Scope *struct {
+				DimensionID string `json:"dimension_id"`
+				Member      string `json:"member_code"`
+			} `json:"kpi_scope"`
+		}
+		_ = json.Unmarshal(w.props, &sc)
+		if w.typ == "metric_kpi" && (p.Mode == "bar" || p.Mode == "") && sc.Scope != nil && onBar[sc.Scope.DimensionID] {
+			warn("%s pins %s on a dimension the selector bar sets: the bar wins, so the tile repeats the bar's figure — compare with \"kpi_compare\" {dimension_id, member_code} on the tile it repeats, or remove it", w.name(), sc.Scope.Member)
+		}
+		if t := strings.TrimSpace(w.content); w.typ == "text" && len(bar) > 0 && !strings.Contains(t, "\n") &&
+			strings.HasPrefix(strings.ToLower(strings.TrimLeft(t, "#*_ ")), "selector") {
+			say("the text %q stands in for selectors the bar now shows: delete it (delete_dashboard_widget %s)", t, w.id)
+		}
+		if (w.typ == "chart" || w.typ == "grid") && (strings.TrimSpace(w.title) == "" || !w.shown) {
+			say("the %s %s shows no title: give it one saying what it shows, with the unit (\"title\" and \"show_title\": true on update_dashboard_widget)", w.typ, w.id)
+		}
+	}
+	// The same tile twice (renamed "(secondary)" to read differently), a
+	// tile adding up every month of every year (the bar without the period:
+	// €33.3M for two years), a title that only repeats its grid's name.
+	sameTile := map[string][]string{}
+	for _, w := range ws {
+		switch w.typ {
+		case "metric_kpi":
+			var k struct {
+				Mode    string          `json:"kpi_context_mode"`
+				Scope   json.RawMessage `json:"kpi_scope"`
+				Compare json.RawMessage `json:"kpi_compare"`
+			}
+			_ = json.Unmarshal(w.props, &k)
+			key := w.ref + "|" + k.Mode + "|" + string(k.Scope) + "|" + string(k.Compare)
+			sameTile[key] = append(sameTile[key], w.name())
+			if k.Mode != "bar" && k.Mode != "" {
+				continue
+			}
+			var scopeDim string
+			var sc struct {
+				Scope *struct {
+					DimensionID string `json:"dimension_id"`
+				} `json:"kpi_scope"`
+			}
+			if json.Unmarshal(w.props, &sc) == nil && sc.Scope != nil {
+				scopeDim = sc.Scope.DimensionID
+			}
+			trows, err := tx.Query(ctx, `SELECT DISTINCT d.id::text, d.name FROM model.grid_metric gm
+				JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+				JOIN model.dimension_def d ON d.id = gd.dimension_id
+				WHERE gm.metric_id::text = $1 AND d.dimension_type = 'time'`, w.ref)
+			if err != nil {
+				continue
+			}
+			for trows.Next() {
+				var did, dname string
+				if trows.Scan(&did, &dname) == nil && !onBar[did] && did != scopeDim && len(bar) > 0 {
+					warn("%s adds up every %s of every year: put %s on the selector bar (opening on the current year) or pin a period", w.name(), dname, dname)
+				}
+			}
+			trows.Close()
+		case "chart", "grid":
+			var gridName string
+			if w.title != "" && tx.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id::text = $1`, w.ref).Scan(&gridName) == nil {
+				bare := func(t string) string {
+					t = strings.ToLower(strings.TrimSpace(t))
+					if i := strings.IndexAny(t, ",("); i > 0 {
+						t = strings.TrimSpace(t[:i])
+					}
+					return t
+				}
+				if bare(w.title) == bare(gridName) && w.typ == "chart" {
+					warn("the chart %q is titled by its grid's name: say what it shows — the metric and the unit (\"EBITDA by month, EUR\")", w.title)
+				}
+			}
+		}
+	}
+	for _, names := range sameTile {
+		if len(names) > 1 {
+			warn("%s show the same figure: keep one; a comparison is \"kpi_compare\" on that tile, not a second tile", strings.Join(names, ", "))
+		}
+	}
+
+	// Tiles that read alike: the same metric twice (actual and its variance)
+	// both said "NET REVENUE".
+	reads := map[string][]string{}
+	for _, w := range ws {
+		if w.typ != "metric_kpi" {
+			continue
+		}
+		label := w.label
+		if w.shown && strings.TrimSpace(w.title) != "" {
+			label = w.title
+		}
+		reads[strings.ToLower(strings.TrimSpace(label))] = append(reads[strings.ToLower(strings.TrimSpace(label))], w.id)
+	}
+	for label, ids := range reads {
+		if label != "" && len(ids) > 1 {
+			warn("%d KPI tiles read %q (%s): title each by what it shows (\"Net revenue vs budget, EUR\") with \"title\" and \"show_title\": true", len(ids), label, strings.Join(ids, ", "))
+		}
+	}
+	pickers := map[string][]string{}
+	for _, w := range ws {
+		if (w.typ != "grid" && w.typ != "chart") || w.ref == "" {
+			continue
+		}
+		axes := map[string]bool{}
+		var p struct {
+			DefaultView *struct {
+				Rows []string `json:"rows"`
+				Cols []string `json:"cols"`
+			} `json:"default_view"`
+			Chart struct {
+				DimensionID string `json:"dimension_id"`
+				SeriesDim   string `json:"series_dimension_id"`
+			} `json:"chart"`
+		}
+		_ = json.Unmarshal(w.props, &p)
+		if p.DefaultView != nil {
+			for _, d := range append(p.DefaultView.Rows, p.DefaultView.Cols...) {
+				axes[d] = true
+			}
+		}
+		axes[p.Chart.DimensionID], axes[p.Chart.SeriesDim] = true, true
+		drows, err := tx.Query(ctx, `SELECT gd.dimension_id::text, d.name FROM model.grid_dimension gd
+			JOIN model.dimension_def d ON d.id = gd.dimension_id
+			WHERE gd.grid_id = $1::uuid AND (SELECT count(*) FROM model.dimension_member m WHERE m.dimension_id = gd.dimension_id) > 1`, w.ref)
+		if err != nil {
+			continue
+		}
+		for drows.Next() {
+			var did, dname string
+			if drows.Scan(&did, &dname) == nil && !axes[did] && !onBar[did] {
+				pickers[dname] = append(pickers[dname], w.name())
+			}
+		}
+		drows.Close()
+	}
+	for dim, who := range pickers {
+		if len(who) >= 2 {
+			say("%d widgets each draw their own %s selector (%s): put %s on the dashboard's selector_bar (update_dashboard) so one selector drives them all", len(who), dim, strings.Join(who, ", "), dim)
+		}
+	}
+	return out, warns
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

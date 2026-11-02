@@ -74,6 +74,17 @@ type Handler interface {
 	//
 	// POST /api/developer/workflows/{id}/archive
 	ArchiveWorkflow(ctx context.Context, params ArchiveWorkflowParams) (*WorkflowDefFull, error)
+	// ArrangeDashboard implements arrangeDashboard operation.
+	//
+	// Rows lists every widget of the dashboard once, row by row from the top. A row's widgets stand side
+	// by side, left to right, sharing the 1100px canvas by weights (the same shape as rows; left out,
+	// equal) with 20px between them; rows stack 20px apart. Each widget gets the height of what it
+	// shows: a KPI tile 120, a button 40, a chart 360, a records table or board 420, a grid its header
+	// and rows (up to 640, taller ones scroll inside), a text its lines, a workflow's status its steps.
+	// Audited as dashboard.arranged. A dashboard outside the caller's scope answers 404.
+	//
+	// POST /api/developer/dashboards/{id}/arrange
+	ArrangeDashboard(ctx context.Context, req *ArrangeDashboardReq, params ArrangeDashboardParams) (ArrangeDashboardRes, error)
 	// BackfillFormMapping implements backfillFormMapping operation.
 	//
 	// Re-apply a table-to-metric mapping against all already-submitted records.

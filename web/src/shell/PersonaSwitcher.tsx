@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Select } from "../ui";
 import { useAuth } from "../auth/useAuth";
@@ -39,6 +40,16 @@ export function PersonaSwitcher() {
     enabled: DEV_MODE,
     staleTime: 15_000,
   });
+
+  // Nobody chosen yet means the demo seed's dept_head. On a database without
+  // the demo seed that person does not exist and every call fails with 401,
+  // so start as the first person of a tenant instead (anyone listed if no
+  // tenant has people). A stored person who has gone stays as chosen.
+  useEffect(() => {
+    if (persona !== "dept_head" || !personas?.length || personas.some((p) => p.key === persona)) return;
+    setPersona((personas.find((p) => p.tenant) ?? personas[0]).key);
+    window.location.reload();
+  }, [personas, persona, setPersona]);
 
   if (!DEV_MODE) return null;
 

@@ -2965,6 +2965,10 @@ export const api = {
   // order the Dashboards page shows its tabs (the first is where people land).
   reorderDashboards: (dashboardIds: string[]) =>
     apiFetch<{ status: string }>("/api/developer/dashboards/order", { method: "PUT", body: JSON.stringify({ dashboard_ids: dashboardIds }) }),
+  // Every widget placed in rows from the top: side by side in a row, equal
+  // widths with 20px between, each as tall as what it shows.
+  arrangeDashboard: (dashboardId: string, rows: string[][]) =>
+    apiFetch<{ status: string; widgets: number }>(`/api/developer/dashboards/${dashboardId}/arrange`, { method: "POST", body: JSON.stringify({ rows }) }),
 
   // ── Dashboard folders ────────────────────────────────────────────────────
   listFolders: (revisionId?: string) =>

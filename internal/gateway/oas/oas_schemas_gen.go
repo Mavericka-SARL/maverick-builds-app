@@ -2658,6 +2658,66 @@ func (s *AiToolCallArguments) init() AiToolCallArguments {
 	return m
 }
 
+type ArrangeDashboardBadRequest Error
+
+func (*ArrangeDashboardBadRequest) arrangeDashboardRes() {}
+
+type ArrangeDashboardNotFound Error
+
+func (*ArrangeDashboardNotFound) arrangeDashboardRes() {}
+
+type ArrangeDashboardOK struct {
+	Status  OptString `json:"status"`
+	Widgets OptInt    `json:"widgets"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ArrangeDashboardOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetWidgets returns the value of Widgets.
+func (s *ArrangeDashboardOK) GetWidgets() OptInt {
+	return s.Widgets
+}
+
+// SetStatus sets the value of Status.
+func (s *ArrangeDashboardOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetWidgets sets the value of Widgets.
+func (s *ArrangeDashboardOK) SetWidgets(val OptInt) {
+	s.Widgets = val
+}
+
+func (*ArrangeDashboardOK) arrangeDashboardRes() {}
+
+type ArrangeDashboardReq struct {
+	Rows    [][]uuid.UUID `json:"rows"`
+	Weights [][]float64   `json:"weights"`
+}
+
+// GetRows returns the value of Rows.
+func (s *ArrangeDashboardReq) GetRows() [][]uuid.UUID {
+	return s.Rows
+}
+
+// GetWeights returns the value of Weights.
+func (s *ArrangeDashboardReq) GetWeights() [][]float64 {
+	return s.Weights
+}
+
+// SetRows sets the value of Rows.
+func (s *ArrangeDashboardReq) SetRows(val [][]uuid.UUID) {
+	s.Rows = val
+}
+
+// SetWeights sets the value of Weights.
+func (s *ArrangeDashboardReq) SetWeights(val [][]float64) {
+	s.Weights = val
+}
+
 // The shape actually returned by GET /api/admin/audit (auditEventItem in internal/gateway/handler.
 // go). The endpoint accepts no query parameters despite the SQL comment structure suggesting filters
 // — it unconditionally returns the 200 most recent events.

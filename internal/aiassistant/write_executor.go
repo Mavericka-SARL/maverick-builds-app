@@ -2550,6 +2550,7 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	if err := validateWidgetContent(p.WidgetType, p.Content); err != nil {
 		return "", "", err
 	}
+	p.Content = textWidgetContent(p.WidgetType, p.Content)
 	if (p.WidgetType == "form" || p.WidgetType == "board") && p.RefID != nil {
 		if err := modeledit.CheckRecordWidgetProps(ctx, e.pool, p.WidgetType, *p.RefID, p.WidgetProps); err != nil {
 			return "", "", err
@@ -2584,6 +2585,31 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		}
 		if err := modeledit.CheckGridWidgetMetrics(ctx, e.pool, gridRef, p.WidgetProps); err != nil {
 			return "", "", err
+		}
+		if err := modeledit.CheckGridWidgetView(ctx, e.pool, gridRef, p.WidgetProps); err != nil {
+			return "", "", err
+		}
+	}
+	// No place given: under the dashboard's widgets, the canvas wide and as
+	// tall as what it shows, for arrange_dashboard to put in its row.
+	if !hasParam(raw, "pos_x") && !hasParam(raw, "pos_y") {
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(max(pos_y + size_h) + $2, 0) FROM model.dashboard_widget
+			WHERE dashboard_id = $1::uuid`, p.DashboardID, modeledit.WidgetGap).Scan(&p.PosY)
+		if !hasParam(raw, "size_w") {
+			p.SizeW = modeledit.CanvasWidth
+		}
+		if !hasParam(raw, "size_h") {
+			ref, content, props := "", "", json.RawMessage(nil)
+			if p.RefID != nil {
+				ref = *p.RefID
+			}
+			if p.Content != nil {
+				content = *p.Content
+			}
+			if len(p.WidgetProps) > 0 {
+				props = p.WidgetProps
+			}
+			p.SizeH = modeledit.WidgetHeight(ctx, e.pool, p.WidgetType, ref, props, content)
 		}
 	}
 	if p.SizeW < 20 {
@@ -4288,4 +4314,14 @@ func (e *WriteExecutor) startNewDraft(params json.RawMessage) (string, string, e
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	return "A new draft is started when the developer confirms", "", nil
+}
+
+// hasParam: whether a step's params carry key at their top level.
+func hasParam(raw json.RawMessage, key string) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return false
+	}
+	_, ok := m[key]
+	return ok
 }

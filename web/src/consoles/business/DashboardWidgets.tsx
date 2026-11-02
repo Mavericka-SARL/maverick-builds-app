@@ -1,12 +1,12 @@
-import React, { useContext, useEffect, useRef, useState } from "react";
-import { serialToISO } from "../dateSerial";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { serialToLocal } from "../dateSerial";
 import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
 import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { ContextSelectors } from "../dashboard/ChartWidget";
-import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
+import { DashboardContextSyncContext, DashboardSlotContext, useFollowsBar, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
@@ -38,25 +38,37 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, on
   const width = columns * 20;
   const bar = (selectorBar ?? []).filter(e => e.dimension_id);
   const barKey = bar.map(e => `${e.dimension_id}=${e.default ?? ""}`).join(",");
+  // The bar is part of the key: a changed bar (the designer's Preview)
+  // starts the shared selection, and who follows it, again.
   return (
-    // The bar is part of the key: a changed bar (the designer's Preview)
-    // starts the shared selection again from its defaults.
-    <DashboardContextSyncProvider
-      key={`${dashboardId ?? "default"}|${barKey}`}
-      reserved={bar.map(e => e.dimension_id)}
-      initial={Object.fromEntries(bar.filter(e => e.default).map(e => [e.dimension_id, e.default as string]))}
-    >
-      {bar.length > 0 && <DashboardSelectorBar entries={bar} ctx={ctx} />}
-      {/* maxWidth pins the rendered dashboard to the design canvas's
-          coordinate space (CANVAS_MIN_W in DashboardCanvas.tsx), so a
-          widget designed at 600px wide IS 600px wide here — previously the
-          60-column grid spanned the whole viewport and silently scaled
-          every widget up on wide monitors, making Preview disagree with
-          Design (reported live). Below that width the grid still shrinks
-          proportionally, so nothing overflows on smaller screens. */}
-      <div style={{ overflowX: "auto" }}>
+    <DashboardBody key={`${dashboardId ?? "default"}|${barKey}`} widgets={widgets} ctx={ctx} bar={bar}
+      columns={columns} width={width} onOpenInstance={onOpenInstance} />
+  );
+}
+
+function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { widgets: DashboardWidget[]; ctx: DemoContext; bar: SelectorBarEntry[]; columns: number; width: number; onOpenInstance?: (instanceId: string) => void }) {
+  // The bar stands above the first row with a widget that follows it, so a
+  // changed selector shows its effect right below it; rows above (a grid
+  // with the scenarios as columns, text) ignore it. Until a widget says it
+  // follows (they load first), and with none, it stands at the top. It stays
+  // in view from there while the page scrolls.
+  const [follows, setFollows] = useState<ReadonlySet<string>>(() => new Set());
+  const followBar = useCallback((slot: string) => {
+    setFollows(prev => (prev.has(slot) ? prev : new Set(prev).add(slot)));
+  }, []);
+  const rows = groupWidgetsIntoRows(widgets);
+  const barRow = Math.max(0, rows.findIndex(row => row.some(w => follows.has(w.id))));
+  const segment = (part: DashboardWidget[][], key: string) => part.length > 0 && (
+    // maxWidth pins the rendered dashboard to the design canvas's
+    // coordinate space (CANVAS_MIN_W in DashboardCanvas.tsx), so a
+    // widget designed at 600px wide IS 600px wide here — previously the
+    // 60-column grid spanned the whole viewport and silently scaled
+    // every widget up on wide monitors, making Preview disagree with
+    // Design (reported live). Below that width the grid still shrinks
+    // proportionally, so nothing overflows on smaller screens.
+    <div key={key} style={{ overflowX: "auto" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width, maxWidth: width }}>
-        {groupWidgetsIntoRows(widgets).map((row, i) => (
+        {part.map((row, i) => (
           <div key={i} style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 20px)` }}>
             {row.map(widget => (
               <div
@@ -69,8 +81,12 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, on
                   widget.widget_type !== "metric_kpi" && widget.widget_props?.background === "white" ? "mvx-dash-cell--card" : "",
                 ].filter(Boolean).join(" ")}
                 style={{
+                  // Both edges rounded to the 20px columns, the span between
+                  // them: rounding the width alone gave tiles at 275px steps
+                  // a column too many, and the fourth of a row dropped to a
+                  // row of its own.
                   "--dash-col-start": Math.round((widget.pos_x || 0) / 20) + 1,
-                  "--dash-col-span": Math.max(1, Math.round((widget.size_w || 300) / 20)),
+                  "--dash-col-span": Math.max(1, Math.round(((widget.pos_x || 0) + (widget.size_w || 300)) / 20) - Math.round((widget.pos_x || 0) / 20)),
                   minWidth: 0, padding: "0 8px",
                   // A designed size_h is EXACT, not a minimum: taller
                   // content scrolls inside its widget (overflow auto — the
@@ -98,23 +114,37 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, on
                       }),
                 } as unknown as React.CSSProperties}
               >
-                <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
+                <DashboardSlotContext.Provider value={widget.id}>
+                  <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
+                </DashboardSlotContext.Provider>
               </div>
             ))}
           </div>
         ))}
       </div>
-      </div>
+    </div>
+  );
+  return (
+    <DashboardContextSyncProvider
+      reserved={bar.map(e => e.dimension_id)}
+      initial={Object.fromEntries(bar.filter(e => e.default).map(e => [e.dimension_id, e.default as string]))}
+      followBar={bar.length > 0 ? followBar : undefined}
+    >
+      {segment(rows.slice(0, barRow), "above")}
+      {bar.length > 0 && <DashboardSelectorBar entries={bar} ctx={ctx} below={barRow > 0} />}
+      {/* Two parts, not one: the bar sticks to the page only outside a
+          sideways-scrolling box. */}
+      {segment(rows.slice(barRow), "below")}
     </DashboardContextSyncProvider>
   );
 }
 
 // The dashboard's selector bar: one selector per dimension the developer chose,
-// drawn once above every widget. It drives the dashboard's shared selection
+// drawn once, above the first widget that follows it. It drives the dashboard's shared selection
 // directly; no widget draws a selector of its own for these dimensions, and
 // every grid and chart (sync_context false too) and every KPI in "sync" or
 // "bar" mode follows it.
-function DashboardSelectorBar({ entries, ctx }: { entries: SelectorBarEntry[]; ctx: DemoContext }) {
+function DashboardSelectorBar({ entries, ctx, below }: { entries: SelectorBarEntry[]; ctx: DemoContext; below?: boolean }) {
   const sync = useContext(DashboardContextSyncContext);
   // The same model-wide meta read the KPI tiles use (shared cache): every
   // dimension with the members this viewer may see.
@@ -157,7 +187,7 @@ function DashboardSelectorBar({ entries, ctx }: { entries: SelectorBarEntry[]; c
 
   if (!sync || dims.length === 0) return null;
   return (
-    <div className="mvx-selector-bar" role="toolbar" aria-label="Dashboard selectors">
+    <div className={below ? "mvx-selector-bar mvx-selector-bar--below" : "mvx-selector-bar"} role="toolbar" aria-label="Dashboard selectors">
       <ContextSelectors
         dims={dims as unknown as ChartContextDim[]}
         context={sync.values}
@@ -302,6 +332,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   // total over the rest. Without a bar (or none of its dimensions on the
   // metric) that is the whole-model total.
   const barDimsOfMetric = mode === "bar" ? (sync?.barDims ?? []).filter(id => metric?.dimension_ids?.includes(id)) : [];
+  useFollowsBar(barDimsOfMetric.length > 0);
   const barScope: Record<string, string> = Object.fromEntries(
     barDimsOfMetric.filter(id => sync?.values[id]).map(id => [id, sync!.values[id]]),
   );
@@ -384,7 +415,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
       : fmt === "boolean"
       ? (v ? "Yes" : "No")
       : fmt === "date"
-      ? (v === 0 ? "—" : serialToISO(v))
+      ? (v === 0 ? "—" : serialToLocal(v))
       : fmt === "currency"
       ? `${n < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(n).toLocaleString("en-US", digits)}${sc.suffix}`
       : fmt === "percentage"

@@ -140,15 +140,19 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
     data.series.forEach(s => { row[s.label] = s.values[i] ?? null; });
     return row;
   });
+  // Every category labelled while each has room for its two-line label;
+  // a narrow chart labels every n-th (24 months in 275px overlapped).
+  const [plotWidth, setPlotWidth] = useState(0);
+  const every = plotWidth > 0 ? Math.max(1, Math.ceil((data.categories.length * 40) / Math.max(1, plotWidth - 80))) : 1;
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
       <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
         {/* Every category labelled while there are few enough to read; a long run keeps the axis's own spacing. */}
         {data.categories.length <= 24
-          ? <XAxis dataKey="name" interval={0} height={36} tick={<CategoryTick />} />
+          ? <XAxis dataKey="name" interval={every - 1} height={36} tick={<CategoryTick />} />
           : <XAxis dataKey="name" tick={{ fontSize: 11 }} />}
         <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />

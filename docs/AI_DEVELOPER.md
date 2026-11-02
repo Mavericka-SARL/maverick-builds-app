@@ -247,7 +247,39 @@ calculation and notification stores are built on the transaction
 (`NewStoreOn`, `pkg/dbx`), a file import into a dimension writes its members
 into it and one into a grid resolves its values against the model as the
 plan's earlier steps leave it, and a form integration's posting counts what
-it would post. A step that uses a failed step's result is not run.
+it would post. A step that uses a failed step's result is not run. Once every
+step runs, the whole plan is checked as well: a plan that adds a dashboard
+while any dashboard of the revision has no place in the order fails, naming
+them and the page everyone would land on, until it carries
+`reorder_dashboards` (`unorderedPagesProblems`). A text widget's Markdown sent
+with `\n` but no line break gets its line breaks (`textWidgetContent`). The
+prompt's *The pages people use* describes the pages of the published models
+(the Models category of the public repository's Discussions) for the model to
+follow: *Start here* first with the workflow buttons, their status and the
+guide, the results, the input pages, *How to adapt · Developer* last.
+
+**Dashboard layout.** `arrange_dashboard {dashboard_id, rows, weights?}` is
+the designer's **Arrange** (`POST /api/developer/dashboards/{id}/arrange`,
+`modeledit.ArrangeDashboard`): every widget once, row by row; a row's widgets
+side by side over the 1100px canvas with 20px between them, each as tall as
+what it shows (`modeledit.WidgetHeight`: a KPI tile 120, a button 40, a chart
+360, a records table 540, a grid its header and rows up to 640, a text its
+lines, a workflow's status its steps). A widget added without a place lands
+under the dashboard's widgets, full width, so it never overlaps; a grid
+widget's `default_view` naming a dimension its grid lacks is refused
+(`CheckGridWidgetView`); a title set on `update_dashboard_widget` shows unless
+`show_title` says not. For every dashboard a plan touches the check refuses a
+widget drawn under a row it starts inside, one past the canvas, overlapping
+ones, a grid box far shorter or taller than its rows, KPI tiles in `bar` mode
+without a bar, a chart or grid without a shown title, and a dimension two or
+more widgets choose on their own while the bar lacks it
+(`dashboardLayoutProblems`); it warns once of tiles adding up every period of
+every year, of identical tiles, of tiles that read alike, of a tile pinned on
+a bar dimension and of a chart titled by its grid's name, and names the other
+pages that still have problems (`dashboardLayoutWarnings`,
+`otherDashboardsWarnings`). The prompt's *Rules for each thing you build* is a
+checklist per object (dimension, metric, grid, dashboard, widget, workflow,
+rule, table, loader, roles), marking what the check enforces.
 
 **The history** is replayed on every model call, so turns before the last two
 keep their messages but not their bulk: a tool result or tool-call argument

@@ -140,7 +140,7 @@ var WriteToolNames = []string{
 	"create_grid", "update_grid", "delete_grid",
 	"add_grid_metric", "remove_grid_metric", "reorder_grid_metrics", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",
 	"create_dashboard_folder", "update_dashboard_folder", "delete_dashboard_folder",
-	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards",
+	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards", "arrange_dashboard",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
 	"set_tags", "create_revision", StartNewDraftTool,
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",

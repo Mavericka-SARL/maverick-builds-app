@@ -5,6 +5,7 @@
 // sort and pages cover every record the person may see, not one page.
 import type { DevDimension, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
 import { localToday, statusFieldOf } from "../../api/client";
+import { isoToLocal } from "../dateSerial";
 
 /** A sortable, filterable column of the list. */
 export interface ListColumn {
@@ -120,6 +121,7 @@ export function displayValue(f: FormField | undefined, value: unknown, dims: Dev
     return m ? (m.label || m.name) : String(value);
   }
   if (f.type === "boolean") return value === true || value === "true" ? "Yes" : "No";
+  if (f.type === "date" && typeof value === "string") return isoToLocal(value);
   if (f.format === "money" && typeof value === "number") return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
   return String(value);

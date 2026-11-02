@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, Download, FileSpreadsheet, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
+  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, Download, FileSpreadsheet, FileText, History, LayoutDashboard, LayoutGrid, Link2, ListTree, Paperclip,
   Pencil, Plus, Puzzle, Rocket, Ruler, Search, Settings, Table2, Trash2, Users, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import { ExportDownloadButton } from "../ExportDownloadButton";
@@ -182,6 +182,7 @@ function ToolIcon({ tool }: { tool: string }) {
     case "reorder_dimension_members": return <ArrowUpDown {...props} />;
     case "reorder_grid_metrics": return <ArrowUpDown {...props} />;
     case "reorder_dashboards": return <ArrowUpDown {...props} />;
+    case "arrange_dashboard": return <LayoutGrid {...props} />;
     case "create_grid":
     case "add_grid_metric":
     case "add_grid_dimension":   return <Table2 {...props} />;
@@ -237,7 +238,7 @@ const TOOL_LABELS: Record<string, string> = {
   start_new_draft: "Start a new draft",
   delete_dimension: "Delete dimension", delete_dimension_member: "Delete dimension member",
   generate_time_members: "Generate time periods", update_grid: "Rename grid", delete_grid: "Delete grid",
-  remove_grid_metric: "Remove grid metric", reorder_grid_metrics: "Reorder grid metrics", reorder_dashboards: "Reorder dashboards", remove_grid_dimension: "Remove grid dimension",
+  remove_grid_metric: "Remove grid metric", reorder_grid_metrics: "Reorder grid metrics", reorder_dashboards: "Reorder dashboards", arrange_dashboard: "Arrange dashboard", remove_grid_dimension: "Remove grid dimension",
   update_grid_dimension: "Set grid display level", create_dashboard_folder: "Create dashboard folder",
   update_dashboard_folder: "Update dashboard folder", delete_dashboard_folder: "Delete dashboard folder",
   update_dashboard: "Update dashboard", delete_dashboard: "Delete dashboard",

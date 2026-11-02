@@ -1118,6 +1118,13 @@
   overflow-y: auto;
 }
 
+/* The window scrolls the page; a scroll box of the page's own (overflow-y
+   auto, never scrolling) held every sticky element inside it in place. A
+   page whose content scrolls sideways by itself (a dashboard) goes without. */
+.mvx-page--flow {
+  overflow: visible;
+}
+
 .mvx-page--narrow {
   max-width: 960px;
 }
@@ -2142,6 +2149,13 @@ tr:hover .mvx-member-label__actions,
   text-align: left;
 }
 
+/* A date cell: as wide as the browser's date format and its calendar button
+   (a 78px box showed "01/07/20"). */
+.mvx-cell-input[type="date"] {
+  width: auto;
+  min-width: 128px;
+}
+
 /* A pick-list cell: a member chosen from a list. */
 .mvx-cell-select {
   width: auto;
@@ -2782,7 +2796,8 @@ tr:hover .mvx-member-label__actions,
 }
 
 /* A dashboard's selector bar: the selectors every synced widget follows,
-   drawn once above the widgets and kept in view while the page scrolls. */
+   drawn once above the first widget that follows it and kept in view from
+   there while the page scrolls. */
 .mvx-selector-bar {
   position: sticky;
   top: 0;
@@ -2796,6 +2811,7 @@ tr:hover .mvx-member-label__actions,
   background: var(--color-page);
   border-bottom: 1px solid var(--color-border);
 }
+.mvx-selector-bar--below { margin-top: 12px; }
 
 /* ── Records: deadlines, and the board widget (cards in columns) ─────────── */
 .mvx-overdue { color: var(--color-danger-text); font-weight: 600; }

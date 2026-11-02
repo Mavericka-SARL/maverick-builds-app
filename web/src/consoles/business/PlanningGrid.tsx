@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { serialToISO, isoToSerial } from "../dateSerial";
+import { serialToISO, serialToLocal, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
 import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
@@ -1581,6 +1581,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         <input
           value={dispVal} placeholder="—"
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
+          // As wide as its value (€44,000.00 or every digit while typing),
+          // never narrower than the usual box: the column grows with it.
+          style={{ width: `max(78px, calc(${dispVal.length}ch + 14px))` }}
           aria-invalid={badInput?.key === key || undefined}
           onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
           // A scaled grid shows 1,061.6 (thousands); typing starts from
@@ -2050,7 +2053,7 @@ function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>):
 
 function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale): string {
   if (n == null) return "—";
-  if (m.format === "date") return n === 0 ? "—" : serialToISO(n);
+  if (m.format === "date") return n === 0 ? "—" : serialToLocal(n);
   let d = m.format_decimals ?? 0;
   // A grid's number_scale (thousands, millions) divides every amount alike;
   // its caption says the unit once.

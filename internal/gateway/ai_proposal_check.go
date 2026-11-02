@@ -58,6 +58,8 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		}
 		out.problems = append(out.problems, aiassistant.PlanWorkflowProblems(ctx, tx, modelID, revID, resolved)...)
 		out.problems = append(out.problems, offGridReadProblems(ctx, tx, modelID, revID, resolved, created)...)
+		out.problems = append(out.problems, unorderedPagesProblems(ctx, tx, revID, resolved)...)
+		out.problems = append(out.problems, dashboardLayoutProblems(ctx, tx, revID, resolved, created)...)
 	}
 	if err == nil && len(out.problems) == 0 {
 		out.warnings = planWarnings(ctx, tx, modelID, revID, steps)
@@ -68,6 +70,8 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		}
 		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, currencyWarnings(ctx, tx, modelID, revID, resolved)...)
+		out.warnings = append(out.warnings, dashboardLayoutWarnings(ctx, tx, revID, resolved, created)...)
+		out.warnings = append(out.warnings, otherDashboardsWarnings(ctx, tx, revID, resolved, created)...)
 	}
 	return out, err
 }

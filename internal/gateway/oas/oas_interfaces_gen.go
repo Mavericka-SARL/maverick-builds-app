@@ -29,6 +29,10 @@ type AdminSwitchModelLinkRes interface {
 	adminSwitchModelLinkRes()
 }
 
+type ArrangeDashboardRes interface {
+	arrangeDashboardRes()
+}
+
 type CancelIntegrationRunRes interface {
 	cancelIntegrationRunRes()
 }

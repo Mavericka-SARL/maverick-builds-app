@@ -51,6 +51,7 @@ var operationRolesBearerAuth = map[string][]string{
 	AdminListModelLinksOperation:             []string{},
 	AdminSwitchModelLinkOperation:            []string{},
 	ArchiveWorkflowOperation:                 []string{},
+	ArrangeDashboardOperation:                []string{},
 	BackfillFormMappingOperation:             []string{},
 	CancelIntegrationRunOperation:            []string{},
 	CancelWorkflowInstanceOperation:          []string{},

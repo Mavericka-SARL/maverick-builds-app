@@ -387,7 +387,7 @@ func TestSendMessage_WarnsOfRecurringMistakes(t *testing.T) {
 		map[string]any{"tool": "create_grid", "description": "Plan", "params": map[string]any{"name": "Plan", "dimensions": []string{"period"}, "metrics": append([]string{"ending_hc"}, many...)}},
 		map[string]any{"tool": "create_dashboard", "description": "Summary", "params": map[string]any{"name": "Summary"}},
 		map[string]any{"tool": "add_dashboard_widget", "description": "Summary grid", "params": map[string]any{"dashboard_id": "Summary", "widget_type": "grid", "ref_id": "Plan",
-			"title": "Monthly Summary", "pos_x": 0, "pos_y": 0, "size_w": 600, "size_h": 300}},
+			"title": "Monthly Summary", "pos_x": 0, "pos_y": 0, "size_w": 600, "size_h": 640}}, // a box its 14 rows fit (the layout check)
 	)
 	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan...), proposeResp("c2", plan...)}}
 	env := newAITurnEnv(t, fake)

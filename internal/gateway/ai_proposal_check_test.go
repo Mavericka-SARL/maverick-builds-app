@@ -518,3 +518,129 @@ func TestThePlanCheckTakesACarriedForwardPair(t *testing.T) {
 		}
 	}
 }
+
+// TestThePlanCheckHoldsNewPagesToAnOrder: a plan that adds pages without
+// reorder_dashboards leaves them alphabetical and lands everyone on the
+// first name (the AI build opened on "Actuals & checks", 2026-11-01); the
+// check sends it back, and the same plan with the order passes.
+func TestThePlanCheckHoldsNewPagesToAnOrder(t *testing.T) {
+	f := newPlanFixture(t, &multiScriptProvider{})
+	sess := f.session(t)
+	plan := func(ordered bool) []aiassistant.ProposalStep {
+		var steps []aiassistant.ProposalStep
+		add := func(tool string, params map[string]any) {
+			b, _ := json.Marshal(params)
+			steps = append(steps, aiassistant.ProposalStep{Tool: tool, Description: tool, Params: b})
+		}
+		add("create_dashboard", map[string]any{"name": "Actuals & checks"})
+		add("create_dashboard", map[string]any{"name": "Start here"})
+		if ordered {
+			add("reorder_dashboards", map[string]any{"dashboards": []string{"Start here", "Actuals & checks"}})
+		}
+		return steps
+	}
+	check, err := f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan(false))
+	all := strings.Join(check.problems, "\n")
+	if err != nil || !strings.Contains(all, `dashboards "Actuals & checks", "Start here" have no place in the order`) ||
+		!strings.Contains(all, `everyone lands on "Actuals & checks"`) || !strings.Contains(all, "reorder_dashboards") {
+		t.Fatalf("unordered pages passed the check: %v %q", err, check.problems)
+	}
+	check, err = f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan(true))
+	if err != nil || len(check.problems) > 0 {
+		t.Errorf("the ordered pages were refused: %v %q", err, check.problems)
+	}
+}
+
+// TestThePlanCheckHoldsADashboardToItsLayout: a chart starting inside
+// the row above (drawn under that whole row) and tiles following a bar the
+// page lacks are refused; the same widgets ending in arrange_dashboard, on a
+// page with a bar, pass — arranged in rows, equal widths, 20px apart. Tiles
+// at 275px steps share a row (the console rounds both edges; rounding the
+// width gave the fourth a row of its own).
+func TestThePlanCheckHoldsADashboardToItsLayout(t *testing.T) {
+	f := newPlanFixture(t, &multiScriptProvider{})
+	sess := f.session(t)
+	var dashStep int
+	plan := func(arranged bool) []aiassistant.ProposalStep {
+		var steps []aiassistant.ProposalStep
+		add := func(tool string, params map[string]any) int {
+			b, _ := json.Marshal(params)
+			steps = append(steps, aiassistant.ProposalStep{Tool: tool, Description: tool, Params: b})
+			return len(steps)
+		}
+		metrics := []string{"revenue_eur", "costs_eur", "margin_eur", "cash_eur"}
+		for _, m := range metrics {
+			add("create_metric", map[string]any{"name": m, "is_input": true, "format": "currency", "format_currency": "EUR", "agg_rule": "sum"})
+		}
+		grid := add("create_grid", map[string]any{"name": "Revenue"})
+		add("add_grid_dimension", map[string]any{"grid_id": ref(grid), "dimension_id": "Cost Center"})
+		for _, m := range metrics {
+			add("add_grid_metric", map[string]any{"grid_id": ref(grid), "metric_id": m})
+		}
+		dash := map[string]any{"name": "Board"}
+		if arranged {
+			dash["selector_bar"] = []map[string]any{{"dimension": "Cost Center"}}
+		}
+		dashStep = add("create_dashboard", dash)
+		var tiles []string
+		for i, m := range metrics {
+			tiles = append(tiles, ref(add("add_dashboard_widget", map[string]any{"dashboard_id": ref(dashStep), "widget_type": "metric_kpi", "ref_id": m,
+				"title": fmt.Sprintf("Tile %d", i+1), "pos_x": 275 * i, "pos_y": 0, "size_w": 275, "size_h": 120,
+				"widget_props": map[string]any{"kpi_context_mode": "bar"}})))
+		}
+		chart := func(title string, x, y, h int) string {
+			return ref(add("add_dashboard_widget", map[string]any{"dashboard_id": ref(dashStep), "widget_type": "chart", "ref_id": ref(grid), "title": title,
+				"pos_x": x, "pos_y": y, "size_w": 550, "size_h": h,
+				"widget_props": map[string]any{"chart": map[string]any{"chart_type": "bar", "dimension_id": "Cost Center", "metric_ids": []string{"revenue_eur"}}}}))
+		}
+		c1, c2 := chart("Revenue by centre, EUR", 0, 140, 320), chart("Low", 550, 300, 160)
+		if arranged {
+			add("arrange_dashboard", map[string]any{"dashboard_id": ref(dashStep), "rows": [][]string{tiles, {c1, c2}}})
+		}
+		return steps
+	}
+	check, err := f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan(false))
+	all := strings.Join(check.problems, "\n")
+	for _, want := range []string{
+		`chart "Low" starts at y=300, inside the row at y=140`,
+		`metric_kpi "Tile 1" follows the selector bar, but the dashboard has none`,
+		"arrange_dashboard",
+	} {
+		if err != nil || !strings.Contains(all, want) {
+			t.Errorf("no problem %q: %v\n%s", want, err, all)
+		}
+	}
+	check, err = f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan(true))
+	if err != nil || len(check.problems) > 0 {
+		t.Fatalf("the arranged dashboard was refused: %v %q", err, check.problems)
+	}
+
+	// Run: rows from the top, equal widths, 20px gaps, heights by content.
+	tx, err := f.h.db.For(f.ctx).Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(f.ctx) }()
+	out, created, err := f.h.runStepsOn(f.ctx, tx, sess.ID, f.modelID, f.revID, f.devID, plan(true))
+	if err != nil || len(out.problems) > 0 {
+		t.Fatalf("run: %v %q", err, out.problems)
+	}
+	var got []string
+	rows, err := tx.Query(f.ctx, `SELECT title, pos_x, pos_y, size_w, size_h FROM model.dashboard_widget
+		WHERE dashboard_id = $1::uuid ORDER BY pos_y, pos_x`, created[dashStep-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var title string
+		var x, y, w, h int
+		_ = rows.Scan(&title, &x, &y, &w, &h)
+		got = append(got, fmt.Sprintf("%s %d,%d %dx%d", title, x, y, w, h))
+	}
+	rows.Close()
+	want := []string{"Tile 1 0,0 260x120", "Tile 2 280,0 260x120", "Tile 3 560,0 260x120", "Tile 4 840,0 260x120",
+		"Revenue by centre, EUR 0,140 540x360", "Low 560,140 540x360"}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("arranged:\n got %v\nwant %v", got, want)
+	}
+}
