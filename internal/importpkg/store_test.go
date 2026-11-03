@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -381,5 +382,33 @@ func TestFullReloadOnlyDeletesWhatTheActorMayWrite(t *testing.T) {
 	rows.Close()
 	if len(values) != 1 || values[0] != 99 {
 		t.Errorf("writable cell after full_reload = %v, want exactly [99]", values)
+	}
+}
+
+// TestDescribeJobDatesTheJobFromItsStart: described after a long commit, a
+// job starts when its import began — not that much earlier again, which put
+// it before the import made just before it in Recent Imports.
+func TestDescribeJobDatesTheJobFromItsStart(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, modelID, _ := insertFixtures(t, store)
+
+	started := time.Now()
+	job, err := store.CreateImportJob(ctx, modelID, "", "file://test.csv", userID, nil)
+	if err != nil {
+		t.Fatalf("CreateImportJob: %v", err)
+	}
+	time.Sleep(700 * time.Millisecond) // the commit
+	if err := store.DescribeJob(ctx, job.Id, importpkg.JobDetails{TargetType: "grid", TargetName: "Plan", StartedAt: started}); err != nil {
+		t.Fatalf("DescribeJob: %v", err)
+	}
+	fetched, err := store.GetImportJob(ctx, job.Id)
+	if err != nil {
+		t.Fatalf("GetImportJob: %v", err)
+	}
+	if got := fetched.CreatedAt.AsTime(); got.Before(started.Add(-300*time.Millisecond)) || got.After(job.CreatedAt.AsTime()) {
+		t.Errorf("created_at %v: want the import's start %v (not before it by the commit's 700ms, not after the insert %v)",
+			got, started, job.CreatedAt.AsTime())
 	}
 }

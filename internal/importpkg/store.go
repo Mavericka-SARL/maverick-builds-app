@@ -66,8 +66,11 @@ func (s *Store) CreateImportJob(ctx context.Context, modelID, revisionID, fileUR
 // records, named as it was then — how (a grid's import mode), and from which
 // of the person's files. StartedAt, when set, is when the import began, so
 // the line's duration covers reading and checking the file, not only the
-// commit. The job's times stay on the database's clock — the time already
-// spent is taken off its start — as the gateway's may differ from it.
+// commit. The job's times stay on the database's clock — the time spent
+// since StartedAt is taken off the database's now — as the gateway's may
+// differ from it. Taken off the job's insert time instead, it moved a job
+// described after a long commit before the import made just before it, and
+// Recent Imports listed the two out of order (2026-11-02).
 type JobDetails struct {
 	TargetType string // "grid", "dimension" or "table"
 	TargetName string
@@ -81,7 +84,7 @@ func (s *Store) DescribeJob(ctx context.Context, jobID string, d JobDetails) err
 	_, err := s.pool.Exec(ctx, `
 		UPDATE import.import_job
 		SET target_type = $2, target_name = $3, import_mode = $4, file_name = $5,
-		    created_at = created_at - make_interval(secs => $6)
+		    created_at = LEAST(created_at, now() - make_interval(secs => $6))
 		WHERE id = $1::uuid
 	`, jobID, d.TargetType, d.TargetName, d.Mode, JobFileName(d.FileName), spentSince(d.StartedAt))
 	return err
