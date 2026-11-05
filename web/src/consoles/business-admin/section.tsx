@@ -11,7 +11,7 @@ type Tab = "inbox" | "history" | "roles" | "access" | "models";
 
 const TAB_LABELS: Record<Tab, string> = {
   inbox: "Workflow Inbox",
-  history: "History",
+  history: "Workflow History",
   roles: "Roles",
   access: "Access Rules",
   models: "Models",
@@ -21,7 +21,7 @@ const SECTION: SectionId = "business-admin";
 
 /**
  * The business_admin section of the console: Business Admin › Workflow Inbox
- * (the approvals it decides), History, Roles, Access Rules, Models — the
+ * (the approvals it decides), Workflow History, Roles, Access Rules, Models — the
  * inbox and Models only for someone without the user role, whose User group
  * already has them. Dashboards come from the user role alone. A tenant
  * admin's own group (Applications with model export/import, Users, Audit
@@ -45,7 +45,7 @@ export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput
         label: "Business Admin",
         items: [
           ...(isUser ? [] : [{ id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> }]),
-          { id: t("history"), label: "History", icon: <History size={16} /> },
+          { id: t("history"), label: "Workflow History", icon: <History size={16} /> },
           { id: t("roles"), label: "Roles", icon: <Shield size={16} /> },
           { id: t("access"), label: "Access Rules", icon: <KeyRound size={16} /> },
           ...(isUser ? [] : [{ id: t("models"), label: "Models", icon: <Boxes size={16} /> }]),

@@ -157,7 +157,7 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 
 **Business Admin** is where you set things up:
 
-- **History** — the latest requests, with every decision and comment; where you unstick one
+- **Workflow History** — the latest requests, with every decision and comment; where you unstick one
 - **Roles** — groups of people, and which dashboards each group may open
 - **Access Rules** — per person, which numbers they may change, only read, or not see
 - **Models** — which model you are working in, and which revision of it is live`, 316),
@@ -183,7 +183,7 @@ func baTheModel() modeltransfer.Dashboard {
 	return baPage("ba-dash-2-model", "2 · The model you work in",
 		baText(`# The model you work in
 
-**Dashboards** (with the records on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in: the **Model** in the bar at the top of the page names it, beside the **Revision**. The inbox and **History** are different: they list requests from every model at once.`, 156),
+**Dashboards** (with the records on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in: the **Model** in the bar at the top of the page names it, beside the **Revision**. The inbox and **Workflow History** are different: they list requests from every model at once.`, 156),
 
 		baText(`## Switching models
 
@@ -334,7 +334,7 @@ A company-wide round — one about no particular member or record, such as a pla
 
 		baText(`## History
 
-**Business Admin › History** shows the 50 most recent requests, newest first, with each step's decision and comment. It covers the application you have open, or your whole workspace if you have not opened one, and leaves out a developer's test runs. Narrow it with **Search by workflow name…** and **All statuses**. Each request has its own status list and **Apply**:
+**Business Admin › Workflow History** shows the 50 most recent requests, newest first, with each step's decision and comment. It covers the application you have open, or your whole workspace if you have not opened one, and leaves out a developer's test runs. Narrow it with **Search by workflow name…** and **All statuses**. Each request has its own status list and **Apply**:
 
 - **Cancelled** stops a stuck request: its open steps are skipped and its lock is released.
 - **Running** reopens a finished one and puts its most recent step back in the inbox.
@@ -349,7 +349,7 @@ Records — requests, expenses, deals — have no screen of their own: a develop
 
 		baText(`## Notifications and cell history
 
-The bell at the top of the page collects what workflows send you: notification steps, and reminders when a task you can act on falls due — if a tenant admin has turned on **Task reminders** under **Tenant admin › Notification delivery**. A notification about a request opens it in **History**.
+The bell at the top of the page collects what workflows send you: notification steps, and reminders when a task you can act on falls due — if a tenant admin has turned on **Task reminders** under **Tenant admin › Notification delivery**. A notification about a request opens it in **Workflow History**.
 
 To see who changed a number, right-click an input cell in a grid: its history lists every value it has held, when, by whom and how. Cell history is part of the Enterprise Edition; on other editions the panel says so. See [cell history](`+publicDocs+`CELL_HISTORY.md) and [editions](`+publicDocs+`LICENSING.md).
 

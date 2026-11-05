@@ -2450,6 +2450,18 @@ func (UnimplementedHandler) SetDefaultModel(ctx context.Context, params SetDefau
 	return r, ht.ErrNotImplemented
 }
 
+// SetModelDateFormat implements setModelDateFormat operation.
+//
+// Date_format is one of DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY, D MMM YYYY, or "" to leave
+// it to each reader's browser. Grid cells, KPI tiles, record lists and the date fields people type
+// into follow it. Not revision-scoped: it applies to the model at once, and a model package carries
+// it. Audited as model.updated. A model outside the caller's scope answers 404.
+//
+// PUT /api/developer/models/{id}/date-format
+func (UnimplementedHandler) SetModelDateFormat(ctx context.Context, req *SetModelDateFormatReq, params SetModelDateFormatParams) (r SetModelDateFormatRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // SetUserAccessRules implements setUserAccessRules operation.
 //
 // Replace the full set of a user's dimension/metric access rules.

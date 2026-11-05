@@ -7,6 +7,8 @@ import {
 } from "../../api/client";
 import { Button, Dialog, Field, IconButton, InlineAlert, LoadingState, Select, useConfirm } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
+import { useDateFormat } from "../dateFormat";
+import { isoToLocal } from "../dateSerial";
 import { FormFieldInput, RecordStatusBadge } from "./RecordFieldInput";
 import { canCreateRecords, createStatusesOf, createStatusFor } from "./formPermissions";
 import {
@@ -25,18 +27,19 @@ export function RecordFieldValue({ f, data, dims, metrics, onOpenMember }: {
   /** Set where a member a table keeps may be opened as its record (a deal's account). */
   onOpenMember?: (f: FormField, code: string) => void;
 }) {
+  const dateFormat = useDateFormat();
   const value = data[f.name];
   if (onOpenMember && f.type === "dimension" && typeof value === "string" && value !== "") {
     return (
       <button type="button" className="mvx-link-button" onClick={e => { e.stopPropagation(); onOpenMember(f, value); }}>
-        {displayValue(f, value, dims, metrics)}
+        {displayValue(f, value, dims, metrics, dateFormat)}
       </button>
     );
   }
   if (f.type === "url" && typeof value === "string" && value !== "") {
     return <a href={value} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{value.replace(/^https?:\/\//, "")}</a>;
   }
-  const text = displayValue(f, value, dims, metrics);
+  const text = displayValue(f, value, dims, metrics, dateFormat);
   if (isOverdue(f, data)) {
     return <span className="mvx-overdue" title="Overdue">{text} · overdue</span>;
   }
@@ -246,12 +249,14 @@ export function RecordHistorySection({ form, recordId, dims }: { form: FormDef; 
     queryFn: () => api.recordHistory(recordId),
     enabled: tracked,
   });
+  const dateFormat = useDateFormat();
   if (!tracked) return null;
   const show = (fieldName: string, v: unknown): string => {
     if (v === null || v === undefined || v === "") return "—";
     if (typeof v === "object" && v && (v as { hidden?: boolean }).hidden) return "(hidden)";
     const f = form.fields.find(x => x.name === fieldName);
     if (f?.type === "dimension") return memberLabels(dims, f.dimension_id).get(String(v)) ?? String(v);
+    if (f?.type === "date" && typeof v === "string") return isoToLocal(v, dateFormat);
     return String(v);
   };
   return (
@@ -265,7 +270,7 @@ export function RecordHistorySection({ form, recordId, dims }: { form: FormDef; 
         <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
           {data.history.map((h, i) => (
             <li key={i}>
-              <span className="mvx-admin-muted">{localDateTime(h.changed_at)}</span>{" "}
+              <span className="mvx-admin-muted">{localDateTime(h.changed_at, dateFormat)}</span>{" "}
               {h.field_label}: {h.old === null ? <strong>{show(h.field, h.new)}</strong> : <>{show(h.field, h.old)} → <strong>{show(h.field, h.new)}</strong></>}
               {h.changed_by_name && <span className="mvx-admin-muted"> · {h.changed_by_name}</span>}
             </li>
@@ -410,6 +415,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
 }) {
   const { form, initialData } = step;
   const qc = useQueryClient();
+  const dateFormat = useDateFormat();
   const isNew = !step.record;
   // The record as the server now has it: the list it was opened from may be older.
   const { data: live } = useQuery({
@@ -510,7 +516,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
         )}
       </div>
       <span className="mvx-admin-muted" style={{ fontSize: 11 }}>
-        Created {localDateTime(record.created_at)} · updated {localDateTime(record.updated_at)}
+        Created {localDateTime(record.created_at, dateFormat)} · updated {localDateTime(record.updated_at, dateFormat)}
       </span>
     </div>
   ) : null;

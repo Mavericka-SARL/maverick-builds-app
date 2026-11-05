@@ -1,8 +1,9 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { serialToLocal } from "../dateSerial";
+import { DateFormatContext, useDateFormat } from "../dateFormat";
 import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Check as CheckIcon } from "lucide-react";
+import { Check as CheckIcon, Maximize2, X as XIcon } from "lucide-react";
 import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { ContextSelectors } from "../dashboard/ChartWidget";
@@ -41,10 +42,17 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, on
   // The bar is part of the key: a changed bar (the designer's Preview)
   // starts the shared selection, and who follows it, again.
   return (
-    <DashboardBody key={`${dashboardId ?? "default"}|${barKey}`} widgets={widgets} ctx={ctx} bar={bar}
-      columns={columns} width={width} onOpenInstance={onOpenInstance} />
+    // The model's date format, for every widget that shows or takes a date.
+    <DateFormatContext.Provider value={ctx.date_format ?? ""}>
+      <DashboardBody key={`${dashboardId ?? "default"}|${barKey}`} widgets={widgets} ctx={ctx} bar={bar}
+        columns={columns} width={width} onOpenInstance={onOpenInstance} />
+    </DateFormatContext.Provider>
   );
 }
+
+// The widgets a full-screen view helps: tables, charts and long texts — not a
+// tile or a button.
+const FULL_SCREEN_TYPES = new Set(["grid", "chart", "form", "board", "text", "image", "workflow_status"]);
 
 function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { widgets: DashboardWidget[]; ctx: DemoContext; bar: SelectorBarEntry[]; columns: number; width: number; onOpenInstance?: (instanceId: string) => void }) {
   // The bar stands above the first row with a widget that follows it, so a
@@ -58,6 +66,20 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
   }, []);
   const rows = groupWidgetsIntoRows(widgets);
   const barRow = Math.max(0, rows.findIndex(row => row.some(w => follows.has(w.id))));
+  // One widget at a time fills the screen beside the left panel (the button
+  // on its top edge); the close button or Escape returns. The widget is the
+  // same one, moved into a fixed frame: a grid keeps its layout and search.
+  const [full, setFull] = useState<{ id: string; left: number } | null>(null);
+  const sidebarEdge = () => document.querySelector(".mvx-app-shell__sidebar")?.getBoundingClientRect().right ?? 0;
+  const isFull = full !== null;
+  useEffect(() => {
+    if (!isFull) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(null); };
+    const onResize = () => setFull(f => (f ? { ...f, left: sidebarEdge() } : f));
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onResize); };
+  }, [isFull]);
   const segment = (part: DashboardWidget[][], key: string) => part.length > 0 && (
     // maxWidth pins the rendered dashboard to the design canvas's
     // coordinate space (CANVAS_MIN_W in DashboardCanvas.tsx), so a
@@ -107,7 +129,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                     : widget.size_h && BUTTON_WIDGET_TYPES.has(widget.widget_type)
                     ? { height: widget.size_h, alignSelf: "start" as const }
                     : widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type)
-                    ? { height: widget.size_h, overflow: "auto" as const, alignSelf: "start" as const }
+                    ? { height: widget.size_h, alignSelf: "start" as const } // scrolls inside its frame
                     : {
                         minHeight: widget.size_h || (widget.widget_type === "chart" ? 360 : undefined),
                         alignSelf: INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type) ? ("start" as const) : ("stretch" as const),
@@ -115,7 +137,31 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                 } as unknown as React.CSSProperties}
               >
                 <DashboardSlotContext.Provider value={widget.id}>
-                  <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
+                  {FULL_SCREEN_TYPES.has(widget.widget_type) && full?.id !== widget.id && (
+                    <button type="button" className="mvx-dash-cell__expand" title="Full screen"
+                      aria-label={`Full screen: ${widget.title || widget.widget_type.replace(/_/g, " ")}`}
+                      onClick={() => setFull({ id: widget.id, left: sidebarEdge() })}>
+                      <Maximize2 size={13} />
+                    </button>
+                  )}
+                  <div key="frame" className={full?.id === widget.id ? "mvx-dash-full" : "mvx-dash-cell__frame"}
+                    style={full?.id === widget.id ? { left: full.left } : { overflow: widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type) && !BUTTON_WIDGET_TYPES.has(widget.widget_type) && widget.widget_type !== "metric_kpi" ? "auto" : undefined }}
+                    role={full?.id === widget.id ? "dialog" : undefined} aria-modal={full?.id === widget.id || undefined}
+                    aria-label={full?.id === widget.id ? (widget.title || widget.widget_type) : undefined}>
+                    {full?.id === widget.id && (
+                      <div key="head" className="mvx-dash-full__head">
+                        {/* The widget's own title bar names it when it has one. */}
+                        {!(widget.show_title && widget.title) && <span className="mvx-dash-full__title">{widget.title || widget.widget_type.replace(/_/g, " ")}</span>}
+                        {bar.length > 0 && <DashboardSelectorBar entries={bar} ctx={ctx} inline />}
+                        <button type="button" className="mvx-dash-full__close" aria-label="Close full screen" title="Close (Esc)" onClick={() => setFull(null)}>
+                          <XIcon size={16} />
+                        </button>
+                      </div>
+                    )}
+                    <div key="body" className={full?.id === widget.id ? "mvx-dash-full__body" : "mvx-dash-cell__body"}>
+                      <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
+                    </div>
+                  </div>
                 </DashboardSlotContext.Provider>
               </div>
             ))}
@@ -144,7 +190,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
 // directly; no widget draws a selector of its own for these dimensions, and
 // every grid and chart (sync_context false too) and every KPI in "sync" or
 // "bar" mode follows it.
-function DashboardSelectorBar({ entries, ctx, below }: { entries: SelectorBarEntry[]; ctx: DemoContext; below?: boolean }) {
+function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: SelectorBarEntry[]; ctx: DemoContext; below?: boolean; inline?: boolean }) {
   const sync = useContext(DashboardContextSyncContext);
   // The same model-wide meta read the KPI tiles use (shared cache): every
   // dimension with the members this viewer may see.
@@ -187,7 +233,7 @@ function DashboardSelectorBar({ entries, ctx, below }: { entries: SelectorBarEnt
 
   if (!sync || dims.length === 0) return null;
   return (
-    <div className={below ? "mvx-selector-bar mvx-selector-bar--below" : "mvx-selector-bar"} role="toolbar" aria-label="Dashboard selectors">
+    <div className={inline ? "mvx-selector-bar mvx-selector-bar--inline" : below ? "mvx-selector-bar mvx-selector-bar--below" : "mvx-selector-bar"} role="toolbar" aria-label="Dashboard selectors">
       <ContextSelectors
         dims={dims as unknown as ChartContextDim[]}
         context={sync.values}
@@ -239,7 +285,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
-      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
         <FormWidgetPanel formId={widget.ref_id} ctx={ctx} title={widget.show_title && widget.title ? widget.title : undefined} newRecordButton={!!widget.widget_props?.new_record_button}
           fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort} />
       </div>
@@ -290,6 +336,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
 }
 
 export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricId: string; ctx: DemoContext; widgetProps?: WidgetProps; title?: string }) {
+  const dateFormat = useDateFormat();
   const staticScope = widgetProps?.kpi_scope;
   // How this tile picks its context, set by the developer in the widget
   // editor. Legacy widgets (no explicit mode) infer it from the old fields so
@@ -415,7 +462,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
       : fmt === "boolean"
       ? (v ? "Yes" : "No")
       : fmt === "date"
-      ? (v === 0 ? "—" : serialToLocal(v))
+      ? (v === 0 ? "—" : serialToLocal(v, dateFormat))
       : fmt === "currency"
       ? `${n < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(n).toLocaleString("en-US", digits)}${sc.suffix}`
       : fmt === "percentage"

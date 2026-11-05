@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { serialToISO, serialToLocal, isoToSerial } from "../dateSerial";
+import { serialToISO, serialToLocal, isoToSerial, parseDateText } from "../dateSerial";
+import { useDateFormat } from "../dateFormat";
+import { DateInput } from "../DateInput";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
 import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
@@ -14,6 +16,7 @@ import { invalidateModelData, refreshAfterRecalc } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
 import { parseCellNumber } from "./cellNumber";
+import { cellAt, cellsBetween, copyText, editableIn, parseClipboard, pastedDate, toClipboard } from "./cellClipboard";
 
 // ── Grid actions menu ─────────────────────────────────────────────────────────
 
@@ -620,6 +623,110 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   });
 
   const [editing, setEditing]   = useState<Record<string, string>>({});
+  // The model's date format: date cells are shown and typed in it.
+  const dateFormat = useDateFormat();
+
+  // ── Copy and paste, as a spreadsheet does (cellClipboard.ts) ──────────────
+  // Shift+click selects the cells between the one in hand and the one
+  // clicked; ⌘/Ctrl+C copies them as tab-separated lines; ⌘/Ctrl+V pastes
+  // one value into every selected cell, or a block (from Excel, Sheets or
+  // another grid) from the cell in hand down and across, in one write.
+  const [sel, setSel] = useState<{ a: string; b: string } | null>(null);
+  const [pasteNote, setPasteNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const cellEl = (k: string) => scrollRef.current?.querySelector<HTMLElement>(`[data-cell="${CSS.escape(k)}"]`) ?? null;
+  const selectedCells = (): HTMLTableCellElement[][] => {
+    if (!sel) return [];
+    const a = cellEl(sel.a), b = cellEl(sel.b);
+    return a && b ? cellsBetween(a, b) : [];
+  };
+  // The selection's highlight, on the table cells themselves (React does
+  // not manage data-sel, so a re-render keeps it).
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    root.querySelectorAll("td[data-sel]").forEach(td => td.removeAttribute("data-sel"));
+    if (!sel || sel.a === sel.b) return;
+    const a = root.querySelector(`[data-cell="${CSS.escape(sel.a)}"]`), b = root.querySelector(`[data-cell="${CSS.escape(sel.b)}"]`);
+    if (a && b) cellsBetween(a, b).flat().forEach(td => td.setAttribute("data-sel", "1"));
+  });
+  const pasteBatch = useMutation({
+    mutationFn: (cells: { metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; member?: string; clear?: boolean }[]) =>
+      api.writebackBatch({ model_id: ctx.model_id, revision_id: ctx.revision_id, recalc: "background", cells }),
+    onSuccess: () => invalidateModelData(qc),
+  });
+  function onGridMouseDown(e: React.MouseEvent) {
+    const target = (e.target as Element).closest<HTMLElement>("[data-cell]");
+    if (!target) return;
+    const k = target.dataset.cell!;
+    const inHand = (document.activeElement as HTMLElement | null)?.dataset?.cell;
+    if (e.shiftKey && (sel?.a || inHand)) {
+      e.preventDefault();
+      setSel({ a: sel?.a ?? inHand!, b: k });
+      return;
+    }
+    setSel({ a: k, b: k });
+  }
+  function onGridCopy(e: React.ClipboardEvent) {
+    const block = selectedCells();
+    if (block.length === 0 || (block.length === 1 && block[0].length <= 1)) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", toClipboard(block.map(row => row.map(copyText))));
+    setPasteNote({ tone: "ok", text: `Copied ${block.length} × ${block[0].length} cells.` });
+  }
+  function onGridPaste(e: React.ClipboardEvent) {
+    const target = (e.target as Element).closest<HTMLElement>("[data-cell]");
+    if (!target) return;
+    const values = parseClipboard(e.clipboardData.getData("text/plain"));
+    const block = selectedCells();
+    const many = block.length > 1 || (block[0]?.length ?? 0) > 1;
+    const one = values.length === 1 && values[0].length === 1;
+    if (one && !many) return; // one value into one cell: typed as pasted, saved on leaving
+    e.preventDefault();
+    // Where each value goes: one value into every selected cell, or the block
+    // from the selection's (or the cell in hand's) top-left, down and across.
+    const pairs: [HTMLElement, string][] = [];
+    let skipped = 0;
+    if (one) {
+      block.flat().forEach(td => { const el = editableIn(td); if (el) pairs.push([el, values[0][0]]); else skipped++; });
+    } else {
+      const start = many ? block[0][0] : target;
+      values.forEach((row, r) => row.forEach((v, c) => {
+        const el = editableIn(cellAt(start, r, c));
+        if (el) pairs.push([el, v]); else skipped++;
+      }));
+    }
+    const cells: { metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; member?: string; clear?: boolean }[] = [];
+    const shown: Record<string, number | null> = {};
+    for (const [el, raw] of pairs) {
+      const v = raw.trim();
+      const base = { metric_id: el.dataset.metric!, dim_codes: JSON.parse(el.dataset.codes ?? "{}") as Record<string, string> };
+      if (v === "") { cells.push({ ...base, clear: true }); shown[el.dataset.cell!] = null; continue; }
+      switch (el.dataset.kind) {
+        case "number": {
+          const n = parseCellNumber(v);
+          if (n === null) { setPasteNote({ tone: "error", text: `Nothing pasted: “${v}” is not a number.` }); return; }
+          cells.push({ ...base, value: n }); shown[el.dataset.cell!] = n;
+          break;
+        }
+        case "date": {
+          const iso = (dateFormat ? parseDateText(v, dateFormat) : null) ?? pastedDate(v);
+          if (!iso) { setPasteNote({ tone: "error", text: `Nothing pasted: “${v}” is not a date.` }); return; }
+          cells.push({ ...base, text: iso });
+          break;
+        }
+        case "picklist": cells.push({ ...base, member: v }); break;
+        default: cells.push({ ...base, text: v });
+      }
+    }
+    if (cells.length === 0) { setPasteNote({ tone: "error", text: "Nothing pasted: no cell there takes input." }); return; }
+    if (cells.length > 500) { setPasteNote({ tone: "error", text: `Nothing pasted: ${cells.length} cells at once; paste up to 500.` }); return; }
+    setPending(p => ({ ...p, ...shown }));
+    pasteBatch.mutate(cells, {
+      onSuccess: () => setPasteNote({ tone: "ok", text: `Pasted ${cells.length} cell${cells.length === 1 ? "" : "s"}${skipped ? `; ${skipped} read-only or total cell${skipped === 1 ? "" : "s"} left as they were` : ""}.` }),
+      onError: (err) => setPasteNote({ tone: "error", text: `Nothing pasted: ${(err as Error).message}` }),
+      onSettled: () => setPending(p => { const n = { ...p }; Object.keys(shown).forEach(k => delete n[k]); return n; }),
+    });
+  }
   // A cell whose text is not a number: it keeps the text, outlined, and the
   // grid says it was not saved (it used to revert silently).
   const [badInput, setBadInput] = useState<{ key: string; raw: string } | null>(null);
@@ -719,6 +826,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       cells: overlay(cellsData?.cells ?? {}, pending),
       texts: overlay(cellsData?.texts ?? {}, pendingText),
       totals: cellsData?.totals ?? {},
+      // Which metrics a table of records posts into come with the cells.
+      posted_from: cellsData?.posted_from ?? {},
     };
   }, [gridMeta, cellsData, pending, pendingText]);
   // Cells (and totals, by bare metric id) the server withholds from this
@@ -752,7 +861,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // from the API or the AI Developer): a missing zone is empty.
       const rows = defaultView.rows ?? [], cols = defaultView.cols ?? [], context = defaultView.context ?? [];
       setPivotRows(rows.filter(validId));
-      setPivotCols(cols.filter(validId));
+      // Metrics the layout places nowhere are drawn across the columns: they
+      // are listed there, so Pivot data offers them to drag (to Context, to
+      // name one metric once instead of over every column). Unlisted, they
+      // could not be moved at all (2026-11-05).
+      const metricsPlaced = [...rows, ...cols, ...context].includes(METRICS_ID);
+      setPivotCols([...cols.filter(validId), ...(metricsPlaced ? [] : [METRICS_ID])]);
       // A dimension the saved layout puts in no zone (a layout naming only
       // its pins in filter_sel) is a context selector at its pinned member,
       // never dropped: dropped, every cell key missed it and read nothing.
@@ -1310,6 +1424,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // With the metric in a context selector the header row under the columns
   // has nothing to name; it shows only when it also holds the corner label.
   const metricHeaderRow = !metricsInContext || (!hasColDims && !hasColHierarchy);
+  // Metrics placed before every column dimension (Columns: Metrics, Month)
+  // head the columns, each spanning its months; placed after them (or
+  // nowhere), they sit under each column. Their place in Columns was ignored,
+  // so moving Metrics first changed nothing (2026-11-05).
+  const metricsOuter = !metricsInRows && !metricsInContext && hasColDims && pivotCols.indexOf(METRICS_ID) === 0;
+  // The value columns in order: a column combination and a metric each, and
+  // whether a stronger line separates it from the one before.
+  const colSlots: { cc: DimMember[]; m: Metric; edge: boolean }[] = metricsOuter
+    ? gridMetrics.flatMap((m, mi) => effectiveColCombos.map((cc, ci) => ({ cc, m, edge: mi > 0 && ci === 0 })))
+    : effectiveColCombos.flatMap((cc, ci) => gridMetrics.map((m, mi) => ({ cc, m, edge: hasColDims && ci > 0 && mi === 0 })));
   // One metric to choose is no choice: its name shows as text instead.
   const metricChoice = metricsInContext && visibleMetrics.length > 1;
   // Nothing for the toolbar row but the ··· menu: no row, the menu moves to
@@ -1476,20 +1600,28 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // there's nothing meaningful to write back.
     const closed = cellClosed(m, fc);
     const lockReason = isParent ? "" : cellLock(m, fc);
-    const isReadOnly = isParent || closed || !!lockReason || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
+    // A metric a table of records posts into: its records change it, not
+    // typing (a value typed over a posting was added to it).
+    const postedFrom = g.posted_from?.[m.id] ?? "";
+    const isReadOnly = isParent || closed || !!lockReason || !!postedFrom || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
 
     const isText = isTextMetric(m);
     const note = isText ? (g.texts?.[key] ?? "") : "";
     const tone = toneClass(cellTone(m, fc, val));
+    // What a copy or paste needs of an editable cell (cellClipboard.ts).
+    const pasteAttrs = (kind: "number" | "text" | "date" | "picklist", raw: string) => ({
+      "data-cell": key, "data-kind": kind, "data-metric": m.id, "data-raw": raw,
+      "data-codes": JSON.stringify(Object.fromEntries(dims.map((d, i) => [d.id, fc[i]?.code ?? ""]))),
+    });
     if (isReadOnly) {
       return (
         <td
           className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
           style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
-          title={isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
+          title={isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : postedFrom ? `From the records of ${postedFrom}: change them there. Right-click for history` : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
-          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val, gridScale)}
+          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val, gridScale, dateFormat)}
         </td>
       );
     }
@@ -1502,6 +1634,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           <input
             value={isActive ? editing[key] : note} placeholder="—"
             aria-label={`${m.label ?? m.name} — note`}
+            {...pasteAttrs("text", note)}
             className={["mvx-cell-input", "mvx-cell-input--text", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
             onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
             onBlur={() => commitCell(m, fc)}
@@ -1512,28 +1645,27 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     }
 
     if (m.format === "date") {
-      // A date: picked, stored as its serial (what DATE() gives); emptied,
-      // the cell clears.
-      const iso = val != null && val !== 0 ? serialToISO(val) : "";
+      // A date: picked or typed (in the model's date format), stored as its
+      // serial (what DATE() gives); emptied, the cell clears. What is typed
+      // stays the field's own until it is left or Enter pressed: written on
+      // every change, typing a year wrote years 2, 20 and 202 on the way to
+      // 2027 and each came back into the half-typed field (it read 1607).
+      const stored = val != null && val !== 0 ? serialToISO(val) : "";
+      const writeDate = (iso: string) => {
+        const dim_codes: Record<string, string> = {};
+        dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
+        if (iso === "") {
+          setPending((p) => ({ ...p, [key]: null }));
+          writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, clear: true });
+          return;
+        }
+        setPending((p) => ({ ...p, [key]: isoToSerial(iso) }));
+        writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, text: iso });
+      };
       return (
         <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
-          <input
-            type="date"
-            className="mvx-cell-input"
-            aria-label={`${m.label ?? m.name} — date`}
-            value={iso}
-            onChange={e => {
-              const dim_codes: Record<string, string> = {};
-              dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
-              if (e.target.value === "") {
-                setPending((p) => ({ ...p, [key]: null }));
-                writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, clear: true });
-                return;
-              }
-              setPending((p) => ({ ...p, [key]: isoToSerial(e.target.value) }));
-              writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, text: e.target.value });
-            }}
-          />
+          <DateInput value={stored} format={dateFormat} className="mvx-cell-input" ariaLabel={`${m.label ?? m.name} — date`}
+            {...pasteAttrs("date", stored)} onCommit={writeDate} />
         </td>
       );
     }
@@ -1547,6 +1679,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           <select
             className="mvx-cell-input mvx-cell-select"
             aria-label={`${m.label ?? m.name} — choose a member`}
+            {...pasteAttrs("picklist", (m.picklist_options ?? []).find(o => String(o.key) === current)?.label ?? "")}
             value={current}
             onChange={e => {
               const dim_codes: Record<string, string> = {};
@@ -1585,10 +1718,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           // never narrower than the usual box: the column grows with it.
           style={{ width: `max(78px, calc(${dispVal.length}ch + 14px))` }}
           aria-invalid={badInput?.key === key || undefined}
+          {...pasteAttrs("number", val != null ? String(val) : "")}
           onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
           // A scaled grid shows 1,061.6 (thousands); typing starts from
-          // every digit of the value, never from the scaled figure.
-          onFocus={() => { if (gridScale.div !== 1 && scales(m.format) && editing[key] === undefined && val != null) setEditing(p => ({ ...p, [key]: fmtMetric(m, val) })); }}
+          // every digit of the value, never from the scaled figure. The whole
+          // value is selected, so what is typed or pasted replaces it ("€0"
+          // and a pasted "€10,000.00" made "€0€10,000.00.00").
+          onFocus={(e) => {
+            const input = e.currentTarget;
+            if (gridScale.div !== 1 && scales(m.format) && editing[key] === undefined && val != null) setEditing(p => ({ ...p, [key]: fmtMetric(m, val) }));
+            requestAnimationFrame(() => { if (document.activeElement === input) input.select(); });
+          }}
           onBlur={() => commitCell(m, fc)}
           onKeyDown={e => e.key === "Enter" && commitCell(m, fc)}
         />
@@ -1630,7 +1770,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         title={recalcPending ? "Recalculating — this value is about to change" : undefined}
         style={{ ...td, textAlign: "right", borderLeft }}
       >
-        {fmtMetric(m, v, gridScale)}
+        {fmtMetric(m, v, gridScale, dateFormat)}
       </td>
     );
   }
@@ -1701,7 +1841,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {/* ── Grid table ── */}
-        <div ref={scrollRef} aria-busy={cellsLoading || undefined} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }}>
+        <div ref={scrollRef} aria-busy={cellsLoading || undefined} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }}
+          onMouseDownCapture={onGridMouseDown} onCopy={onGridCopy} onPaste={onGridPaste}
+          onKeyDown={e => { if (e.key === "Escape") setSel(null); }}>
 
           {metricsInRows ? (
             /* Metrics in ROWS */
@@ -1791,6 +1933,48 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             <table className="mvx-grid-frozen" style={{ borderCollapse: "collapse", fontSize: 13, width: "100%",
               minWidth: Math.max(500, effectiveColCombos.length * numMetrics * 86 + (hasRowDims ? 160 : 80)) }}>
               <thead>
+                {metricsOuter ? (<>
+                  <tr style={{ background: "var(--color-surface-faint)", borderBottom: "1px solid var(--color-grid-col-header-border)" }}>
+                    <th style={{ ...th, minWidth: 160 }} rowSpan={1 + (hasColHierarchy && colHeaderLevels ? colHeaderLevels.length : 1)}>
+                      {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
+                    </th>
+                    {gridMetrics.map((m, mi) => (
+                      <th key={m.id} colSpan={effectiveColCombos.length}
+                        style={{ ...th, textAlign: "center", borderLeft: mi > 0 ? "1px solid var(--color-border)" : undefined,
+                          color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
+                        {m.label}
+                        <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>
+                      </th>
+                    ))}
+                  </tr>
+                  {hasColHierarchy && colHeaderLevels ? colHeaderLevels.map((level, li) => (
+                    <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
+                      {gridMetrics.flatMap((m, mi) => level.map((cell, ci) => (
+                        <th key={`${m.id}-${cell.member.code}-${cell.isTotal ? "total" : "self"}-${ci}`}
+                          {...(cell.isTotal ? {} : pickProps(colDims[0]?.id, colDims[0]?.name, cell.member.code, cell.member.label))}
+                          colSpan={cell.colSpan} rowSpan={cell.rowSpan}
+                          style={{ ...th, textAlign: "center", minWidth: 82 * cell.colSpan,
+                            borderLeft: ci > 0 ? "1px solid var(--color-grid-col-header-border)" : mi > 0 ? "1px solid var(--color-border)" : undefined,
+                            color: cell.isTotal ? "var(--color-text-quiet)" : (cell.colSpan > 1 ? "var(--color-grid-col-header-text)" : "var(--color-text-strong)"),
+                            fontWeight: cell.isTotal ? 700 : (cell.colSpan > 1 ? 600 : 500), fontStyle: cell.isTotal ? "italic" : undefined,
+                            background: cell.colSpan > 1 ? "var(--color-grid-col-header-bg)" : "var(--color-grid-col-header-bg-soft)",
+                            fontSize: cell.colSpan > 1 ? 12 : 11 }}>
+                          {cell.isTotal ? "Total" : cell.member.label}
+                        </th>
+                      )))}
+                    </tr>
+                  )) : (
+                    <tr style={{ background: "var(--color-grid-col-header-bg)", borderBottom: "2px solid var(--color-border)" }}>
+                      {gridMetrics.flatMap((m, mi) => effectiveColCombos.map((cc, ci) => (
+                        <th key={`${m.id}-${comboKey(cc)}`} {...pickComboProps(cc, colDims)}
+                          style={{ ...th, textAlign: "right", minWidth: 82, color: "var(--color-grid-col-header-text)", fontSize: 12,
+                            borderLeft: ci === 0 && mi > 0 ? "1px solid var(--color-border)" : undefined }}>
+                          {cc.map(x => x.label).join(" / ")}
+                        </th>
+                      )))}
+                    </tr>
+                  )}
+                </>) : (<>
                 {hasColHierarchy && colHeaderLevels ? (
                   colHeaderLevels.map((level, li) => (
                     <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
@@ -1849,6 +2033,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     ))
                   )}
                 </tr>}
+              </>)}
               </thead>
               <tbody>
                 {(hasRowHierarchy && flatRowEntries
@@ -1875,14 +2060,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                               )}
                             <Txt>{maintainedRowDim && isLeaf && !member.formula ? <MemberLabel dim={maintainedRowDim} member={member} /> : member.label}</Txt>
                           </td>
-                          {effectiveColCombos.flatMap((cc, ci) => {
+                          {colSlots.map(({ cc, m, edge }) => {
                             const fc = fullCombo(rc, cc);
-                            const bl = hasColDims && ci > 0 ? "1px solid var(--color-border)" : undefined;
-                            return gridMetrics.map(m =>
-                              m.is_input
-                                ? <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{inputCell(m, fc, ci > 0 && gridMetrics[0]?.id === m.id ? bl : undefined)}</React.Fragment>
-                                : <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{calcCell(m, fc, ci > 0 && gridMetrics[0]?.id === m.id ? bl : undefined)}</React.Fragment>
-                            );
+                            const bl = edge ? "1px solid var(--color-border)" : undefined;
+                            return m.is_input
+                              ? <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{inputCell(m, fc, bl)}</React.Fragment>
+                              : <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{calcCell(m, fc, bl)}</React.Fragment>;
                           })}
                         </tr>
                       );
@@ -1896,14 +2079,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                               ? <MemberLabel dim={maintainedRowDim} member={rc[0]} />
                               : rc.map(m => m.label).join(" / ")}
                         </td>
-                        {effectiveColCombos.flatMap((cc, ci) => {
+                        {colSlots.map(({ cc, m, edge }) => {
                           const fc = fullCombo(rc, cc);
-                          const bl = hasColDims && ci > 0 ? "1px solid var(--color-border)" : undefined;
-                          return gridMetrics.map(m =>
-                            m.is_input
-                              ? <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{inputCell(m, fc, ci > 0 && gridMetrics[0]?.id === m.id ? bl : undefined)}</React.Fragment>
-                              : <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{calcCell(m, fc, ci > 0 && gridMetrics[0]?.id === m.id ? bl : undefined)}</React.Fragment>
-                          );
+                          const bl = edge ? "1px solid var(--color-border)" : undefined;
+                          return m.is_input
+                            ? <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{inputCell(m, fc, bl)}</React.Fragment>
+                            : <React.Fragment key={`${comboKey(cc)}-${m.id}`}>{calcCell(m, fc, bl)}</React.Fragment>;
                         })}
                       </tr>
                     ))
@@ -1912,19 +2093,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 {!hasRowHierarchy && rowCombos.length > 1 && (
                   <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-surface-faint)" }}>
                     <td style={{ ...td, fontWeight: 700 }}>Total</td>
-                    {effectiveColCombos.flatMap((cc, ci) =>
-                      gridMetrics.map(m => {
-                        const bl = hasColDims && ci > 0 && gridMetrics[0]?.id === m.id ? "1px solid var(--color-border)" : undefined;
+                    {colSlots.map(({ cc, m, edge }) => {
+                        const bl = edge ? "1px solid var(--color-border)" : undefined;
                         const total = colTotal(m.id, cc);
                         return (
                           <td key={`tot-${comboKey(cc)}-${m.id}`}
                             className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
                             style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
-                            {fmtMetric(m, total, gridScale)}
+                            {fmtMetric(m, total, gridScale, dateFormat)}
                           </td>
                         );
-                      })
-                    )}
+                      })}
                   </tr>
                 )}
               </tbody>
@@ -1937,6 +2116,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           {gridMetrics.some(m => !m.is_input) && <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--calc" />Calculated</span>}
           <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--readonly" />Read-only / total</span>
           {pushSync && <span>Click a row or column label to select it in synced widgets</span>}
+          {gridMetrics.some(m => m.is_input) && <span>Shift+click selects cells; ⌘/Ctrl+C and ⌘/Ctrl+V copy and paste them, also from a spreadsheet</span>}
           {!toolbarRow && (
             <span style={{ marginLeft: "auto" }}>
               <GridActionsMenu
@@ -1950,6 +2130,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           )}
         </div>
         {writeback.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Saving…</p>}
+        {pasteBatch.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Pasting…</p>}
+        {!pasteBatch.isPending && pasteNote && (
+          <p className={`mvx-grid-status mvx-grid-status--${pasteNote.tone === "error" ? "error" : "saving"}`} role={pasteNote.tone === "error" ? "alert" : "status"}>{pasteNote.text}</p>
+        )}
         {!writeback.isPending && recalcPending && <p className="mvx-grid-status mvx-grid-status--saving" role="status">Recalculating…</p>}
         {writeback.isError && <p className="mvx-grid-status mvx-grid-status--error">Save failed: {(writeback.error as Error).message}</p>}
         {badInput && editing[badInput.key] !== undefined && (
@@ -2051,9 +2235,9 @@ function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>):
   return out;
 }
 
-function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale): string {
+function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale, dateFormat = ""): string {
   if (n == null) return "—";
-  if (m.format === "date") return n === 0 ? "—" : serialToLocal(n);
+  if (m.format === "date") return n === 0 ? "—" : serialToLocal(n, dateFormat);
   let d = m.format_decimals ?? 0;
   // A grid's number_scale (thousands, millions) divides every amount alike;
   // its caption says the unit once.

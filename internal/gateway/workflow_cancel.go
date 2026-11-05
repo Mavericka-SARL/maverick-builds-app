@@ -2,7 +2,7 @@ package gateway
 
 // Cancelling a running workflow instance (owner request, 2026-10-10): a
 // developer or a business admin stops a run started by mistake — from
-// Developer › Triggers' execution log, or Business Admin › History. Both
+// Developer › Triggers' execution log, or Business Admin › Workflow History. Both
 // doors run workflow.Store.CancelInstance, so the instance, its open steps
 // and the execution that started it end the same way, and the people the
 // run involved are told.

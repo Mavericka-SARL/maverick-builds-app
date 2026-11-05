@@ -145,7 +145,7 @@ func TestCancelRunningWorkflowInstance(t *testing.T) {
 		t.Errorf("the starter's notifications %v, want one", notes)
 	}
 
-	// Business Admin › History's status override cancels the same way.
+	// Business Admin › Workflow History's status override cancels the same way.
 	inst, exec = start(f.devID)
 	if status, body := f.do(t, "PATCH", "/api/workflow/instances/"+inst, f.baSub, map[string]string{"status": "cancelled"}); status != http.StatusOK {
 		t.Fatalf("override: %d %v", status, body)

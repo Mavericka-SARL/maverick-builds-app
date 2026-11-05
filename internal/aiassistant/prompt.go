@@ -654,7 +654,9 @@ from a page.
 
 ## Table integration
 A table's numbers reach the model only through a table integration (list_form_integrations). Without one, a
-table is data entry into nowhere — propose one whenever you create a table that carries an amount.
+table is data entry into nowhere — propose one whenever you create a table that carries an amount. Its target
+metric then takes values from the records only: its cells are read-only and write_input_values into it is
+refused, so post into a metric of its own (actuals), never into one people type (a plan or a driver).
 create_form_integration: {"form_id", "name", "source_field" (the number field, or a date field into a date-format metric), "target_metric_id" (the
 metric it posts into), "dimension_mappings": {"<dimension id or name>": "<field name>"} (which field supplies
 each dimension's member — the field must be a "dimension" field of that dimension), "aggregation" ("sum"
@@ -923,6 +925,9 @@ new pages the same way unless the developer asks for something else:
 
 ## Rules for each thing you build
 Hold every object to its rules before proposing it (* = the plan check refuses a plan that breaks it):
+- Dates: set_date_format {"date_format": "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD" | "DD.MM.YYYY" | "D MMM YYYY"
+  | ""} sets how the whole model writes and reads dates (not revision-scoped; "" = each reader's browser). Set it
+  when the workbook or the developer shows the readers' convention (5 March as 05/03/2026: DD/MM/YYYY).
 - Dimension: member codes short and upper case, labels people read; a hierarchy under a root total ("All
   restaurants"); a time dimension's periods by generate_time_members (months under quarters under years); the
   comparisons of a scenario or version dimension as calculated members ("Downside vs Base").

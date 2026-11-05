@@ -141,6 +141,9 @@ export interface GridData {
   totals: Record<string, number>;  // "metricId" -> aggregate
   /** Text metrics' cells (format "text"), keyed as `cells`; a dimensionless one by its bare id. */
   texts?: Record<string, string>;
+  // Each metric a table of records posts into, to that table: its cells take
+  // no typed value — the records change them.
+  posted_from?: Record<string, string>;
   /**
    * Cells the server refuses to show this viewer because computing them reads
    * a member the viewer cannot see (fail-closed, FORMULA_CALCULATION_INSTRUCTIONS
@@ -524,6 +527,9 @@ export interface DemoContext {
   revision_id: string;
   revision: string;
   actor: Actor;
+  // How the model writes dates (DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY,
+  // D MMM YYYY); absent: the reader's browser decides.
+  date_format?: string;
 }
 
 export interface Metric {
@@ -1093,6 +1099,8 @@ export interface AdminModel {
   // The app's business-default model — what business consoles resolve.
   is_default?: boolean;
   revisions: AdminRevision[];
+  /** How the model's dates read (DD/MM/YYYY, …); "" for each reader's browser format. */
+  date_format?: string;
   /** Its share of the tenant's storage as last measured; absent on an edition without a storage limit. */
   storage_bytes?: number;
 }
@@ -2422,6 +2430,10 @@ export const api = {
   // A number in value, a text metric's note in text, or clear: true to empty the cell (blank, not 0).
   // recalc "background": answer once stored; the grid read reports
   // recalc_pending until the dependents are recalculated.
+  // Up to 500 cells of one model, all or nothing, one recalculation: a
+  // block pasted into a grid.
+  writebackBatch: (body: { model_id: string; revision_id: string; recalc?: "background"; cells: { metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; member?: string; clear?: boolean }[] }) =>
+    apiFetch<{ status: string; cells?: number; cleared?: number; recalculating?: boolean }>("/api/cells/batch", { method: "POST", body: JSON.stringify(body) }),
   writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean; recalc?: "background" }) =>
     apiFetch<{ status: string; recalculating?: boolean }>("/api/cells", {
       method: "POST",
@@ -2965,6 +2977,9 @@ export const api = {
   // order the Dashboards page shows its tabs (the first is where people land).
   reorderDashboards: (dashboardIds: string[]) =>
     apiFetch<{ status: string }>("/api/developer/dashboards/order", { method: "PUT", body: JSON.stringify({ dashboard_ids: dashboardIds }) }),
+  // How a model writes dates for its readers ("" = each reader's browser).
+  setModelDateFormat: (modelId: string, dateFormat: string) =>
+    apiFetch<{ status: string; date_format: string }>(`/api/developer/models/${modelId}/date-format`, { method: "PUT", body: JSON.stringify({ date_format: dateFormat }) }),
   // Every widget placed in rows from the top: side by side in a row, equal
   // widths with 20px between, each as tall as what it shows.
   arrangeDashboard: (dashboardId: string, rows: string[][]) =>

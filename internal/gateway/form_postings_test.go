@@ -169,3 +169,60 @@ func countRows(t *testing.T, f *rollupFixture, sql string, args ...any) int {
 	}
 	return n
 }
+
+// TestTypingIntoAPostedCellIsRefused: a metric a table of records posts into
+// takes no typed value — typed over €85,746.50 of posted POS sales, 90,000
+// was added to it (2026-11-05). The write names the table; clearing a typed
+// value stays allowed; the grid names the metric's table.
+func TestTypingIntoAPostedCellIsRefused(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	ctx := context.Background()
+	dev := "rollup-test-approver"
+	call := func(method, path string, body any) (int, string) {
+		t.Helper()
+		return doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+	}
+	var coord string
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		err := f.pool.QueryRow(ctx, `SELECT dim_members::text FROM runtime.fact_input WHERE source_ref=$1::uuid LIMIT 1`, f.mappingID).Scan(&coord)
+		if err == nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	if coord == "" {
+		t.Fatal("the fixture posted nothing")
+	}
+	var codes map[string]string
+	_ = json.Unmarshal([]byte(coord), &codes)
+	cell := func(extra map[string]any) map[string]any {
+		body := map[string]any{"model_id": f.modelID, "revision_id": f.workingRevID, "metric_id": f.amountMetricID, "dim_codes": codes}
+		for k, v := range extra {
+			body[k] = v
+		}
+		return body
+	}
+	typed := func() int {
+		return countRows(t, f.rollupFixture, `SELECT count(*) FROM runtime.fact_input WHERE metric_id=$1::uuid AND source_ref IS NULL AND dim_members=$2::jsonb`, f.amountMetricID, coord)
+	}
+	before := typed()
+	if status, raw := call("POST", "/api/cells", cell(map[string]any{"value": 90000})); status != http.StatusForbidden || !strings.Contains(raw, "comes from the records of") {
+		t.Errorf("typing into a posted cell: %d %s, want 403 naming its table", status, raw)
+	}
+	if status, raw := call("POST", "/api/cells/batch", map[string]any{"model_id": f.modelID, "revision_id": f.workingRevID,
+		"cells": []any{map[string]any{"metric_id": f.amountMetricID, "dim_codes": codes, "value": 1}}}); status == http.StatusOK || !strings.Contains(raw, "comes from the records of") {
+		t.Errorf("pasting into a posted cell: %d %s, want it refused naming its table", status, raw)
+	}
+	if n := typed(); n != before {
+		t.Errorf("typed values over the posting: %d, were %d", n, before)
+	}
+	if status, raw := call("POST", "/api/cells", cell(map[string]any{"clear": true})); status != http.StatusOK {
+		t.Errorf("clearing a posted cell's typed value: %d %s", status, raw)
+	}
+	status, raw := call("GET", "/api/grid?revision_id="+f.workingRevID+"&grid_def_id="+f.gridStaffID, nil)
+	var g struct {
+		PostedFrom map[string]string `json:"posted_from"`
+	}
+	if status != http.StatusOK || json.Unmarshal([]byte(raw), &g) != nil || g.PostedFrom[f.amountMetricID] == "" {
+		t.Errorf("the grid's posted metrics: %d %v", status, g.PostedFrom)
+	}
+}

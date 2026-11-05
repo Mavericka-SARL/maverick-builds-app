@@ -1,3 +1,5 @@
+import { DateInput } from "../DateInput";
+import { useDateFormat } from "../dateFormat";
 import { Plus as PlusIcon } from "lucide-react";
 import { type Metric, type DevDimension, type DevDimensionMember, type FormField } from "../../api/client";
 import { Button, Select, TextInput, NumberInput, StatusBadge, Textarea } from "../../ui";
@@ -46,6 +48,7 @@ export function FormFieldInput({
   onCreateLinked?: () => void;
   linkedLabel?: string;
 }) {
+  const dateFormat = useDateFormat();
   if (f.type === "autocode") {
     // The server gives the code; nobody types it.
     return <TextInput id={id} value={value ? String(value) : "Given when the record is saved"} readOnly disabled style={{ width: "100%" }} />;
@@ -122,10 +125,14 @@ export function FormFieldInput({
       <Textarea id={id} rows={3} value={String(value ?? "")} onChange={e => onChange(e.target.value)} style={{ width: "100%" }} />
     );
   }
+  if (f.type === "date") {
+    return <DateInput value={String(value ?? "").slice(0, 10)} format={dateFormat} className="mvx-input" style={{ width: "100%" }}
+      ariaLabel={f.label || f.name} data-field={f.name} onCommit={iso => onChange(iso)} />;
+  }
   return (
     <TextInput
       id={id}
-      type={f.type === "number" ? "number" : f.type === "date" ? "date" : f.type === "url" ? "url" : "text"}
+      type={f.type === "number" ? "number" : f.type === "url" ? "url" : "text"}
       step={f.type === "number" && f.format === "money" ? "0.01" : undefined}
       placeholder={f.type === "url" ? "https://…" : undefined}
       value={String(value ?? "")}

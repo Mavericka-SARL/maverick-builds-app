@@ -74,6 +74,7 @@
 <tr><td>Card actions</td><td><b>Preview</b> (what would be posted), <b>Backfill</b> (post existing records now), <b>Delete</b> (confirm <b>Delete integration?</b>: "stops future postings"). A postings table lists record, revision, dimensions, value and time.</td></tr>
 </table>
 <p>Posted values are ordinary input values: they recalculate dependents and obey access rules and locks. Metric-typed fields ("By name") let one table feed different metrics per record.</p>
+<p>A metric a table posts into takes its values from the records only. Its cells show read-only in every grid ("From the records of POS sales: change them there"), and a value typed, pasted, imported from a file or written by the AI Developer or the chat connector is refused with the same message: a typed value was added to a posted total, or hidden by it, and stood as an actual no record explains. Change the records, or post a plan into a metric of its own. Clearing a cell (an empty value) stays allowed, to remove a value typed before.</p>
 <h3 id="integrations-data-export">Data Export</h3>
 <p>A data export is a saved, re-downloadable file of one grid's values in the format another system expects. <b>New export</b> opens the editor; its preview updates as you change it, and an export that cannot be produced lists every reason and cannot be saved.</p>
 <table>

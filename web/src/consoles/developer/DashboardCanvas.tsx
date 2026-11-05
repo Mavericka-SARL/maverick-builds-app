@@ -1196,7 +1196,10 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
         </div>
 
         {/* ── Properties panel ── */}
+        {/* Level with the selected widget, not at the canvas's top: a widget
+            far down the page opened its properties a scroll away. */}
         {mode === "design" && selectedWidget && (
+          <div className="mvx-property-panel-dock" style={{ marginTop: getRect(selectedWidget).y }}>
           <PropertyPanel
             title="Widget Properties"
             className="mvx-property-panel--floating"
@@ -2129,6 +2132,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </>);
             })()}
           </PropertyPanel>
+          </div>
         )}
       </div>
 

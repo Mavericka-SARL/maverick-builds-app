@@ -1,3 +1,4 @@
+import { useDateFormat } from "../dateFormat";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Filter, Lock, Plus as PlusIcon } from "lucide-react";
@@ -35,6 +36,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
   newRecordButton?: boolean;
   title?: string;
 }) {
+  const dateFormat = useDateFormat();
   const qc = useQueryClient();
   const colField = form.fields.find(f => f.name === settings.column_field);
   const sumField = settings.sum_field ? form.fields.find(f => f.name === settings.sum_field) : undefined;
@@ -224,7 +226,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                 <div className="mvx-board__cards">
                   {cards.map(rec => {
                     const movable = !!rec.permissions?.edit;
-                    const cardTitle = titleField ? displayValue(titleField, rec.data[titleField.name], dims, metrics) : recordTitle(form, rec);
+                    const cardTitle = titleField ? displayValue(titleField, rec.data[titleField.name], dims, metrics, dateFormat) : recordTitle(form, rec);
                     return (
                       <article key={rec.id} className="mvx-board__card" draggable={movable}
                         aria-label={cardTitle}

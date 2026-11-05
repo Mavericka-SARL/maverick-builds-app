@@ -346,9 +346,12 @@ type Package struct {
 	ModelName  string    `json:"model_name"`
 	// ModelDescription is the model's description, recreated on import.
 	ModelDescription string `json:"model_description,omitempty"`
-	StorageType      string `json:"storage_type"`
-	RevisionName     string `json:"revision_name"`
-	FactsPolicy      string `json:"facts_policy"`
+	// DateFormat is how the model writes dates (modeledit.DateFormats);
+	// empty leaves it to the reader's browser.
+	DateFormat   string `json:"date_format,omitempty"`
+	StorageType  string `json:"storage_type"`
+	RevisionName string `json:"revision_name"`
+	FactsPolicy  string `json:"facts_policy"`
 	// IncludeData says whether runtime data (fact values and form records)
 	// travels with the definitions. A definitions-only package recreates
 	// the model's structure — dimensions, metrics, grids, forms, mappings,
@@ -434,8 +437,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		pkg.FactsPolicy = "definitions_only"
 	}
 	if err := q.QueryRow(ctx,
-		`SELECT name, description, storage_type::text FROM core.model WHERE id=$1::uuid`, modelID,
-	).Scan(&pkg.ModelName, &pkg.ModelDescription, &pkg.StorageType); err != nil {
+		`SELECT name, description, storage_type::text, date_format FROM core.model WHERE id=$1::uuid`, modelID,
+	).Scan(&pkg.ModelName, &pkg.ModelDescription, &pkg.StorageType, &pkg.DateFormat); err != nil {
 		return nil, fmt.Errorf("model not found: %w", err)
 	}
 
@@ -1703,8 +1706,8 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	}
 
 	if err = tx.QueryRow(ctx,
-		`INSERT INTO core.model (application_id, name, description, storage_type) VALUES ($1::uuid, $2, $3, $4::core.storage_type) RETURNING id::text`,
-		req.ApplicationID, modelName, pkg.ModelDescription, storageType).Scan(&modelID); err != nil {
+		`INSERT INTO core.model (application_id, name, description, storage_type, date_format) VALUES ($1::uuid, $2, $3, $4::core.storage_type, $5) RETURNING id::text`,
+		req.ApplicationID, modelName, pkg.ModelDescription, storageType, importedDateFormat(pkg.DateFormat)).Scan(&modelID); err != nil {
 		return "", "", fmt.Errorf("create model: %w", err)
 	}
 	if revisionID, err = importRevision(ctx, tx, modelID, revisionName, pkg, importerID); err != nil {
@@ -2473,4 +2476,15 @@ func uniqueName(used map[string]bool, name string) string {
 	}
 	used[out] = true
 	return out
+}
+
+// importedDateFormat keeps a package's date format when it is one a model
+// may take (modeledit.DateFormats), else leaves it to the reader's browser.
+func importedDateFormat(f string) string {
+	for _, ok := range modeledit.DateFormats {
+		if f == ok {
+			return f
+		}
+	}
+	return ""
 }

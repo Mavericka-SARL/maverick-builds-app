@@ -745,6 +745,10 @@ type SetDefaultModelRes interface {
 	setDefaultModelRes()
 }
 
+type SetModelDateFormatRes interface {
+	setModelDateFormatRes()
+}
+
 type SetUserAccessRulesRes interface {
 	setUserAccessRulesRes()
 }

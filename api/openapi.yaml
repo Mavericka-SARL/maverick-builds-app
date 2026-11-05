@@ -625,6 +625,11 @@ components:
         model_id: { type: string, format: uuid }
         revision: { type: string }
         actor:    { $ref: "#/components/schemas/Actor" }
+        date_format:
+          type: string
+          description: >-
+            How the model writes dates: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY or D MMM YYYY.
+            Omitted: the reader's browser decides.
 
     Metric:
       type: object
@@ -700,6 +705,13 @@ components:
           type: object
           description: "metricId to its aggregate across the grid"
           additionalProperties: { type: number }
+        posted_from:
+          type: object
+          description: >-
+            Each metric a table of records posts into, by id, to that table's name: its cells take no
+            typed value (a write is refused with 403 naming the table; clearing a typed value stays
+            allowed). Omitted when empty.
+          additionalProperties: { type: string }
         withheld:
           type: array
           items: { type: string }
@@ -1716,6 +1728,7 @@ components:
         storage_type:    { type: string }
         active_revision: { type: string, nullable: true }
         revisions:       { type: array, items: { $ref: "#/components/schemas/AdminRevisionItem" } }
+        date_format:     { type: string, description: "How the model's dates read (DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY or D MMM YYYY); empty for each reader's browser format" }
         storage_bytes:   { type: integer, format: int64, description: "The model's share of the tenant's storage — its rows in the data tables times each table's bytes per row — as the usage sweep last measured it; absent on an edition without a storage limit, or before the first measurement" }
 
     AdminApp:
@@ -6280,6 +6293,42 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
 
+  /api/developer/models/{id}/date-format:
+    put:
+      operationId: setModelDateFormat
+      tags: [Developer Console]
+      summary: Set how a model writes dates for its readers (developer only)
+      description: >-
+        date_format is one of DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY, D MMM YYYY, or "" to leave it to
+        each reader's browser. Grid cells, KPI tiles, record lists and the date fields people type into follow it.
+        Not revision-scoped: it applies to the model at once, and a model package carries it. Audited as
+        model.updated. A model outside the caller's scope answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date_format]
+              properties:
+                date_format: { type: string }
+      responses:
+        "200":
+          description: Date format set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  date_format: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/developer/models/{id}/set-default:
     post:
       operationId: setDefaultModel

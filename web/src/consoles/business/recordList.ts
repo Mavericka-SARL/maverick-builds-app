@@ -5,7 +5,7 @@
 // sort and pages cover every record the person may see, not one page.
 import type { DevDimension, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
 import { localToday, statusFieldOf } from "../../api/client";
-import { isoToLocal } from "../dateSerial";
+import { formatIsoDate, isoToLocal } from "../dateSerial";
 
 /** A sortable, filterable column of the list. */
 export interface ListColumn {
@@ -112,7 +112,7 @@ export function memberLabels(dims: DevDimension[], dimensionId?: string): Map<st
 }
 
 /** How a stored value reads in the list: a member's or metric's name, Yes/No, a grouped number. */
-export function displayValue(f: FormField | undefined, value: unknown, dims: DevDimension[], metrics: Metric[]): string {
+export function displayValue(f: FormField | undefined, value: unknown, dims: DevDimension[], metrics: Metric[], dateFormat = ""): string {
   if (value === null || value === undefined || value === "") return "—";
   if (!f) return String(value);
   if (f.type === "dimension") return memberLabels(dims, f.dimension_id).get(String(value)) ?? String(value);
@@ -121,7 +121,7 @@ export function displayValue(f: FormField | undefined, value: unknown, dims: Dev
     return m ? (m.label || m.name) : String(value);
   }
   if (f.type === "boolean") return value === true || value === "true" ? "Yes" : "No";
-  if (f.type === "date" && typeof value === "string") return isoToLocal(value);
+  if (f.type === "date" && typeof value === "string") return isoToLocal(value, dateFormat);
   if (f.format === "money" && typeof value === "number") return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
   return String(value);
@@ -191,7 +191,7 @@ export function statusLabel(status: string): string {
 }
 
 /** A filter as a chip reads it: "Region is Europe". */
-export function describeFilter(filter: RecordFilter, cols: ListColumn[], dims: DevDimension[], metrics: Metric[]): string {
+export function describeFilter(filter: RecordFilter, cols: ListColumn[], dims: DevDimension[], metrics: Metric[], dateFormat = ""): string {
   const col = cols.find(c => c.key === filter.field);
   const label = col?.label ?? filter.field;
   const op = filterOps(col?.kind ?? "text").find(o => o.op === (filter.op ?? "eq"));
@@ -200,11 +200,11 @@ export function describeFilter(filter: RecordFilter, cols: ListColumn[], dims: D
   }
   if (filter.op === "in" || filter.op === "not_in") {
     const values = filter.values ?? (Array.isArray(filter.value) ? filter.value : [filter.value]);
-    const shown = values.map(v => (col?.kind === "status" ? statusLabel(String(v ?? "")) : displayValue(col?.field, v, dims, metrics))).join(", ");
+    const shown = values.map(v => (col?.kind === "status" ? statusLabel(String(v ?? "")) : displayValue(col?.field, v, dims, metrics, dateFormat))).join(", ");
     return `${label} ${filter.op === "in" ? "is one of" : "is not one of"} ${shown}`;
   }
   if (!op?.takesValue) return `${label} ${op?.label ?? filter.op}`;
-  const shown = col?.kind === "status" ? statusLabel(String(filter.value ?? "")) : displayValue(col?.field, filter.value, dims, metrics);
+  const shown = col?.kind === "status" ? statusLabel(String(filter.value ?? "")) : displayValue(col?.field, filter.value, dims, metrics, dateFormat);
   return `${label} ${op.label} ${shown}`;
 }
 
@@ -253,16 +253,17 @@ export function cellClass(c: ListColumn): string | undefined {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
-/** A moment's local date as date fields show theirs: 2026-10-18. */
-export function localDate(ts: string): string {
+/** A moment's local date as date fields show theirs: 2026-10-18, or in the model's date format. */
+export function localDate(ts: string, dateFormat = ""): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const iso = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return dateFormat ? formatIsoDate(iso, dateFormat) : iso;
 }
 
 /** A moment's local date and time, in the same form: 2026-10-18 09:43. */
-export function localDateTime(ts: string): string {
+export function localDateTime(ts: string, dateFormat = ""): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  return `${localDate(ts)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${localDate(ts, dateFormat)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }

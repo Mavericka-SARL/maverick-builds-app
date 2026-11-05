@@ -2095,7 +2095,68 @@
    inline style. */
 .mvx-dash-cell {
   grid-column: var(--dash-col-start) / span var(--dash-col-span);
+  position: relative;
 }
+
+/* A widget's frame: as tall as its cell, scrolling a designed height. */
+.mvx-dash-cell__frame,
+.mvx-dash-cell__body { height: 100%; }
+
+/* The full-screen button on a widget's top edge, shown on hover or focus. */
+.mvx-dash-cell__expand {
+  position: absolute;
+  top: -10px;
+  right: 14px;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.mvx-dash-cell:hover .mvx-dash-cell__expand,
+.mvx-dash-cell__expand:focus-visible { opacity: 1; }
+
+/* One widget filling the screen beside the left panel. */
+.mvx-dash-full {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px;
+  background: var(--color-page);
+  box-shadow: -1px 0 0 var(--color-border);
+}
+.mvx-dash-full__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+}
+.mvx-dash-full__title { font-size: 15px; font-weight: 600; color: var(--color-text-strong); }
+.mvx-dash-full__close {
+  margin-left: auto;
+  display: inline-flex;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-badge);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.mvx-dash-full__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.mvx-selector-bar--inline { position: static; margin: 0; padding: 0; border: none; background: transparent; }
 
 /* KPI tiles are size containers so their value text can scale with the
    tile itself (cqi units) instead of the viewport — a dashboard is
@@ -2155,6 +2216,59 @@ tr:hover .mvx-member-label__actions,
   width: auto;
   min-width: 128px;
 }
+
+/* A date typed in the model's date format (DateInput.tsx): the text field,
+   a calendar button, and the browser's date field it opens, unseen. */
+.mvx-date-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.mvx-date-input .mvx-cell-input { width: 92px; }
+.mvx-date-input:has(.mvx-input) { display: flex; }
+.mvx-date-input .mvx-input { flex: 1 1 auto; min-width: 0; }
+.mvx-date-input[aria-invalid="true"] input,
+.mvx-date-input input[aria-invalid="true"] { border-color: var(--color-danger); }
+.mvx-date-input__pick {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.mvx-date-input__pick:hover { color: var(--color-text-strong); }
+.mvx-date-input__native {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Cells selected for copy and paste (Shift+click in a grid). */
+td[data-sel] {
+  background: var(--color-brand-50) !important;
+  box-shadow: inset 0 0 0 1px var(--color-brand-500);
+}
+td[data-sel] .mvx-cell-input { background: transparent; }
+
+/* A records widget: its head, search and filters keep their height; the list
+   takes the rest of the box and scrolls inside it. */
+.mvx-records-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.mvx-records-fill > * { flex-shrink: 0; }
+.mvx-records-fill > .mvx-table-wrap { flex-shrink: 1; }
 
 /* A pick-list cell: a member chosen from a list. */
 .mvx-cell-select {
@@ -2348,6 +2462,15 @@ tr:hover .mvx-member-label__actions,
   align-self: flex-start;
   font-size: 13px;
 }
+
+/* The designer's properties panel, level with the selected widget (its
+   margin-top) and no taller than the screen: its body scrolls instead. */
+.mvx-property-panel-dock {
+  align-self: flex-start;
+  flex-shrink: 0;
+  display: flex;
+}
+.mvx-property-panel-dock .mvx-property-panel--floating { max-height: calc(100vh - 120px); }
 
 /* Small uppercase section label inside property panels */
 .mvx-prop-section {

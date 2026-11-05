@@ -39,6 +39,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"reorder_grid_metrics":      e.reorderGridMetrics,
 		"reorder_dashboards":        e.reorderDashboards,
 		"arrange_dashboard":         e.arrangeDashboard,
+		"set_date_format":           e.setDateFormat,
 		"update_grid":               e.updateGrid,
 		"delete_grid":               e.deleteGrid,
 		"remove_grid_metric":        e.removeGridMetric,
@@ -292,6 +293,28 @@ func (e *WriteExecutor) reorderDashboards(ctx context.Context, raw json.RawMessa
 		return "", "", fmt.Errorf("reorder dashboards: %w", err)
 	}
 	return fmt.Sprintf("Dashboards reordered: %s", strings.Join(names, ", ")), "", nil
+}
+
+// setDateFormat is PUT /api/developer/models/{id}/date-format: how the
+// model writes dates for its readers (modeledit.DateFormats).
+func (e *WriteExecutor) setDateFormat(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DateFormat *string `json:"date_format"`
+	}
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DateFormat == nil {
+		return "", "", fmt.Errorf("date_format is required: one of %s, or \"\" for each reader's browser", strings.Join(modeledit.DateFormats[1:], ", "))
+	}
+	if err := modeledit.SetDateFormat(ctx, e.pool, e.modelID, *p.DateFormat); err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(*p.DateFormat) == "" {
+		return "Dates written as each reader's browser writes them", "", nil
+	}
+	return fmt.Sprintf("Dates written %s", strings.TrimSpace(*p.DateFormat)), "", nil
 }
 
 // arrangeDashboard is POST /api/developer/dashboards/{id}/arrange: every

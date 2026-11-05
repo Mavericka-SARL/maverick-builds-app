@@ -398,6 +398,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// Developer-only endpoints
 	register("GET", "/api/developer/applications", "developer_or_admin", devOrAdm(h.adminTenants))
 	register("POST", "/api/developer/models/{id}/set-default", "developer", dev(h.developerSetDefaultModel))
+	register("PUT", "/api/developer/models/{id}/date-format", "developer", dev(h.developerSetDateFormat))
 	register("POST", "/api/developer/applications", "developer_or_admin", devOrAdm(h.adminTenants))
 	register("GET", "/api/developer/revisions", "developer", dev(h.developerRevisions))
 	register("POST", "/api/developer/revisions", "developer", dev(h.developerRevisions))
@@ -1699,6 +1700,9 @@ type demoContext struct {
 	RevisionID string `json:"revision_id"`
 	Revision   string `json:"revision"`
 	Actor      *actor `json:"actor"`
+	// DateFormat is how the model writes dates (modeledit.DateFormats; ""
+	// leaves it to the reader's browser).
+	DateFormat string `json:"date_format,omitempty"`
 }
 
 // errRevisionNotInModel reports that the caller explicitly asked for a
@@ -1856,12 +1860,15 @@ func (h *handler) demo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var dateFormat string
+	_ = h.db.QueryRow(ctx, `SELECT date_format FROM core.model WHERE id = $1::uuid`, modelID).Scan(&dateFormat)
 	jsonOK(w, demoContext{
 		AppID:      appID,
 		ModelID:    modelID,
 		RevisionID: revisionID,
 		Revision:   scenario,
 		Actor:      a,
+		DateFormat: dateFormat,
 	})
 }
 
@@ -3052,8 +3059,12 @@ type gridResponse struct {
 	Cells         map[string]float64 `json:"cells"`          // "metricId:code1[:code2...]" composite key, keyed per each metric's OWN grid dims
 	// Texts holds the text metrics' cells, keyed as cells (a dimensionless
 	// one by its bare ID). Omitted when empty.
-	Texts  map[string]string  `json:"texts,omitempty"`
-	Totals map[string]float64 `json:"totals"` // "metricId" -> aggregate
+	Texts map[string]string `json:"texts,omitempty"`
+	// PostedFrom maps each metric a table of records posts into to that
+	// table: its cells take no typed value (writeguard.PostedReason).
+	// Omitted when empty.
+	PostedFrom map[string]string  `json:"posted_from,omitempty"`
+	Totals     map[string]float64 `json:"totals"` // "metricId" -> aggregate
 	// Withheld lists the calculated values withheld from this caller
 	// (contract C7): cell keys in the cells format, and bare metric IDs for
 	// totals. Such a value exists but reads a member the caller cannot see;
@@ -3726,6 +3737,9 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// row a hidden-member caller can't see contributes to neither.
 	cells := make(map[string]float64)
 	var texts map[string]string // text metrics' cells (text_cells.go)
+	// The metrics a table of records posts into, each with its table
+	// (posted_cells.go): their cells take no typed value.
+	var postedFrom map[string]string
 	totals := make(map[string]float64)
 	var withheld []string // calculated values withheld from this caller (contract C7)
 	// meta_only skips ALL cell/calc work — the client fetches dimensions and
@@ -4000,6 +4014,16 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				}
 				texts[k] = v
 			}
+			var inputMetrics []string
+			for _, m := range allMetrics {
+				if m.IsInput {
+					inputMetrics = append(inputMetrics, m.ID)
+				}
+			}
+			if postedFrom, err = h.loadPostedMetrics(ctx, revisionID, inputMetrics); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -4244,6 +4268,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		Departments:        depts,
 		Cells:              cells,
 		Texts:              texts,
+		PostedFrom:         postedFrom,
 		Totals:             totals,
 		Withheld:           withheld,
 		AccessRules:        gridAccessRules{DimMembers: visibleRules(dimRules), Metrics: visibleRules(metricRules)},
@@ -6890,6 +6915,9 @@ type adminModelItem struct {
 	// resolves when no revision pins another model.
 	IsDefault bool                `json:"is_default"`
 	Revisions []adminRevisionItem `json:"revisions"`
+	// How the model's dates read ("DD/MM/YYYY", …; "" for the reader's
+	// browser): what the developer set (modeledit.SetDateFormat).
+	DateFormat string `json:"date_format"`
 	// The model's share of the tenant's storage as the edition-limits sweep
 	// last measured it (internal/plan); absent where the edition sets no
 	// storage limit, or before the first measurement.
@@ -7261,7 +7289,7 @@ func (h *handler) applicationModels(ctx context.Context, appID string) []adminMo
 	models := []adminModelItem{}
 	mRows, err := h.db.Query(ctx,
 		`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
-		        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
+		        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE, date_format
 		 FROM core.model WHERE application_id=$1::uuid
 		 ORDER BY created_at,
 		          (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
@@ -7271,7 +7299,7 @@ func (h *handler) applicationModels(ctx context.Context, appID string) []adminMo
 	}
 	for mRows.Next() {
 		var m adminModelItem
-		if mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.Description, &m.IsDefault) == nil {
+		if mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.Description, &m.IsDefault, &m.DateFormat) == nil {
 			models = append(models, m)
 		}
 	}

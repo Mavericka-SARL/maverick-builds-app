@@ -262,6 +262,7 @@ var operationRolesBearerAuth = map[string][]string{
 	SetActiveRevisionOperation:               []string{},
 	SetBARoleDashboardsOperation:             []string{},
 	SetDefaultModelOperation:                 []string{},
+	SetModelDateFormatOperation:              []string{},
 	SetUserAccessRulesOperation:              []string{},
 	StartIntegrationOAuthOperation:           []string{},
 	StartWorkflowInstanceOperation:           []string{},

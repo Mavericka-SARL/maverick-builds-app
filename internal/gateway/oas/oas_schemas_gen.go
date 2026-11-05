@@ -924,6 +924,9 @@ type AdminModel struct {
 	StorageType    string              `json:"storage_type"`
 	ActiveRevision NilString           `json:"active_revision"`
 	Revisions      []AdminRevisionItem `json:"revisions"`
+	// How the model's dates read (DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY or D MMM YYYY); empty
+	// for each reader's browser format.
+	DateFormat OptString `json:"date_format"`
 	// The model's share of the tenant's storage — its rows in the data tables times each table's bytes
 	// per row — as the usage sweep last measured it; absent on an edition without a storage limit, or
 	// before the first measurement.
@@ -960,6 +963,11 @@ func (s *AdminModel) GetRevisions() []AdminRevisionItem {
 	return s.Revisions
 }
 
+// GetDateFormat returns the value of DateFormat.
+func (s *AdminModel) GetDateFormat() OptString {
+	return s.DateFormat
+}
+
 // GetStorageBytes returns the value of StorageBytes.
 func (s *AdminModel) GetStorageBytes() OptInt64 {
 	return s.StorageBytes
@@ -993,6 +1001,11 @@ func (s *AdminModel) SetActiveRevision(val NilString) {
 // SetRevisions sets the value of Revisions.
 func (s *AdminModel) SetRevisions(val []AdminRevisionItem) {
 	s.Revisions = val
+}
+
+// SetDateFormat sets the value of DateFormat.
+func (s *AdminModel) SetDateFormat(val OptString) {
+	s.DateFormat = val
 }
 
 // SetStorageBytes sets the value of StorageBytes.
@@ -8898,6 +8911,9 @@ type DemoContext struct {
 	ModelID  uuid.UUID `json:"model_id"`
 	Revision string    `json:"revision"`
 	Actor    Actor     `json:"actor"`
+	// How the model writes dates: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY or D MMM YYYY. Omitted:
+	// the reader's browser decides.
+	DateFormat OptString `json:"date_format"`
 }
 
 // GetAppID returns the value of AppID.
@@ -8920,6 +8936,11 @@ func (s *DemoContext) GetActor() Actor {
 	return s.Actor
 }
 
+// GetDateFormat returns the value of DateFormat.
+func (s *DemoContext) GetDateFormat() OptString {
+	return s.DateFormat
+}
+
 // SetAppID sets the value of AppID.
 func (s *DemoContext) SetAppID(val uuid.UUID) {
 	s.AppID = val
@@ -8938,6 +8959,11 @@ func (s *DemoContext) SetRevision(val string) {
 // SetActor sets the value of Actor.
 func (s *DemoContext) SetActor(val Actor) {
 	s.Actor = val
+}
+
+// SetDateFormat sets the value of DateFormat.
+func (s *DemoContext) SetDateFormat(val OptString) {
+	s.DateFormat = val
 }
 
 func (*DemoContext) getDemoRes() {}
@@ -13957,6 +13983,10 @@ type GridData struct {
 	RecalcPending OptBool `json:"recalc_pending"`
 	// MetricId to its aggregate across the grid.
 	Totals GridDataTotals `json:"totals"`
+	// Each metric a table of records posts into, by id, to that table's name: its cells take no typed
+	// value (a write is refused with 403 naming the table; clearing a typed value stays allowed).
+	// Omitted when empty.
+	PostedFrom OptGridDataPostedFrom `json:"posted_from"`
 	// Calculated values withheld from this caller because they read a dimension member the caller cannot
 	// see: cell keys in the cells format, and bare metric IDs for totals. They are absent from cells and
 	// totals; a client must not rebuild a parent value from children when any of them is withheld.
@@ -14020,6 +14050,11 @@ func (s *GridData) GetRecalcPending() OptBool {
 // GetTotals returns the value of Totals.
 func (s *GridData) GetTotals() GridDataTotals {
 	return s.Totals
+}
+
+// GetPostedFrom returns the value of PostedFrom.
+func (s *GridData) GetPostedFrom() OptGridDataPostedFrom {
+	return s.PostedFrom
 }
 
 // GetWithheld returns the value of Withheld.
@@ -14092,6 +14127,11 @@ func (s *GridData) SetTotals(val GridDataTotals) {
 	s.Totals = val
 }
 
+// SetPostedFrom sets the value of PostedFrom.
+func (s *GridData) SetPostedFrom(val OptGridDataPostedFrom) {
+	s.PostedFrom = val
+}
+
 // SetWithheld sets the value of Withheld.
 func (s *GridData) SetWithheld(val []string) {
 	s.Withheld = val
@@ -14122,6 +14162,20 @@ func (s *GridDataCells) init() GridDataCells {
 	m := *s
 	if m == nil {
 		m = map[string]float64{}
+		*s = m
+	}
+	return m
+}
+
+// Each metric a table of records posts into, by id, to that table's name: its cells take no typed
+// value (a write is refused with 403 naming the table; clearing a typed value stays allowed).
+// Omitted when empty.
+type GridDataPostedFrom map[string]string
+
+func (s *GridDataPostedFrom) init() GridDataPostedFrom {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
 		*s = m
 	}
 	return m
@@ -22758,6 +22812,52 @@ func (o OptGridAccessRules) Or(d GridAccessRules) GridAccessRules {
 	return d
 }
 
+// NewOptGridDataPostedFrom returns new OptGridDataPostedFrom with value set to v.
+func NewOptGridDataPostedFrom(v GridDataPostedFrom) OptGridDataPostedFrom {
+	return OptGridDataPostedFrom{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGridDataPostedFrom is optional GridDataPostedFrom.
+type OptGridDataPostedFrom struct {
+	Value GridDataPostedFrom
+	Set   bool
+}
+
+// IsSet returns true if OptGridDataPostedFrom was set.
+func (o OptGridDataPostedFrom) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGridDataPostedFrom) Reset() {
+	var v GridDataPostedFrom
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGridDataPostedFrom) SetTo(v GridDataPostedFrom) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGridDataPostedFrom) Get() (v GridDataPostedFrom, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGridDataPostedFrom) Or(d GridDataPostedFrom) GridDataPostedFrom {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGridDataTexts returns new OptGridDataTexts with value set to v.
 func NewOptGridDataTexts(v GridDataTexts) OptGridDataTexts {
 	return OptGridDataTexts{
@@ -29901,6 +30001,55 @@ func (s *SetDefaultModelOK) SetStatus(val OptString) {
 }
 
 func (*SetDefaultModelOK) setDefaultModelRes() {}
+
+type SetModelDateFormatBadRequest Error
+
+func (*SetModelDateFormatBadRequest) setModelDateFormatRes() {}
+
+type SetModelDateFormatNotFound Error
+
+func (*SetModelDateFormatNotFound) setModelDateFormatRes() {}
+
+type SetModelDateFormatOK struct {
+	Status     OptString `json:"status"`
+	DateFormat OptString `json:"date_format"`
+}
+
+// GetStatus returns the value of Status.
+func (s *SetModelDateFormatOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetDateFormat returns the value of DateFormat.
+func (s *SetModelDateFormatOK) GetDateFormat() OptString {
+	return s.DateFormat
+}
+
+// SetStatus sets the value of Status.
+func (s *SetModelDateFormatOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetDateFormat sets the value of DateFormat.
+func (s *SetModelDateFormatOK) SetDateFormat(val OptString) {
+	s.DateFormat = val
+}
+
+func (*SetModelDateFormatOK) setModelDateFormatRes() {}
+
+type SetModelDateFormatReq struct {
+	DateFormat string `json:"date_format"`
+}
+
+// GetDateFormat returns the value of DateFormat.
+func (s *SetModelDateFormatReq) GetDateFormat() string {
+	return s.DateFormat
+}
+
+// SetDateFormat sets the value of DateFormat.
+func (s *SetModelDateFormatReq) SetDateFormat(val string) {
+	s.DateFormat = val
+}
 
 // Ref: #/components/schemas/SetRoleDashboardsRequest
 type SetRoleDashboardsRequest struct {

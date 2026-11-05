@@ -12,6 +12,11 @@ const PAD = 24;
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 2.5;
 const ZOOM_STEP = 1.2;
+// The focus view: a metric, what it reads and what reads it, readable on one
+// screen — columns of at most FOCUS_ROWS, closer together than the full graph.
+const FOCUS_ROWS = 6;
+const FOCUS_COL_GAP = 120;
+const FOCUS_ROW_GAP = 24;
 
 function truncateLabel(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
@@ -20,6 +25,7 @@ function truncateLabel(s: string, max: number): string {
 export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridDef[]; dims: DevDimension[] }) {
   const [zoom, setZoom] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
+  const [focus, setFocus] = useState(false);
   const [search, setSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -42,12 +48,20 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
   }
 
   const depthMap: Record<string, number> = {};
-
+  // A metric can read itself through others across time — an opening balance
+  // is LAG of the closing one, which adds to the opening — a loop a formula
+  // may hold. The walk stops at a metric it is still inside: without that it
+  // never ended, and the page stopped with "Maximum call stack size
+  // exceeded" (the restaurant model's cash and balances, 2026-11-05).
+  const visiting = new Set<string>();
   function depth(name: string): number {
     if (depthMap[name] !== undefined) return depthMap[name];
+    if (visiting.has(name)) return 0;
     const m = model.metrics.find((x) => x.name === name);
     if (!m || m.is_input) return (depthMap[name] = 0);
+    visiting.add(name);
     const d = 1 + Math.max(0, ...m.depends_on.map(depth));
+    visiting.delete(name);
     depthMap[name] = d;
     return d;
   }
@@ -73,15 +87,44 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
 
   const maxCol = Math.max(...Object.keys(cols).map(Number));
   const maxRow = Math.max(...Object.values(cols).map((c) => c.length));
-  const svgW = PAD * 2 + (maxCol + 1) * (NODE_W + COL_GAP) - COL_GAP + NODE_W;
-  const svgH = PAD * 2 + maxRow * (NODE_H + ROW_GAP);
+  const fullW = PAD * 2 + (maxCol + 1) * (NODE_W + COL_GAP) - COL_GAP + NODE_W;
+  const fullH = PAD * 2 + maxRow * (NODE_H + ROW_GAP);
+
+  // The focus view's layout around one metric: what it reads on the left,
+  // the metric, what reads it on the right; a long side wraps into more
+  // columns of at most FOCUS_ROWS, each column centred on the tallest.
+  const focusLayout = (name: string) => {
+    const m = model.metrics.find((x) => x.name === name);
+    const known = new Set(model.metrics.map((x) => x.name));
+    const up = [...new Set(m?.depends_on ?? [])].filter((d) => d !== name && known.has(d));
+    const down = model.metrics.filter((o) => o.name !== name && o.depends_on.includes(name)).map((o) => o.name);
+    const split = (xs: string[]) => Array.from({ length: Math.ceil(xs.length / FOCUS_ROWS) }, (_, i) => xs.slice(i * FOCUS_ROWS, (i + 1) * FOCUS_ROWS));
+    const columns = [...split(up), [name], ...split(down)];
+    const tallest = Math.max(...columns.map((c) => c.length));
+    const pos: Record<string, { x: number; y: number }> = {};
+    columns.forEach((col, c) => col.forEach((n, r) => {
+      pos[n] = {
+        x: PAD + c * (NODE_W + FOCUS_COL_GAP),
+        y: PAD + ((tallest - col.length) / 2 + r) * (NODE_H + FOCUS_ROW_GAP),
+      };
+    }));
+    return {
+      pos,
+      w: PAD * 2 + columns.length * NODE_W + (columns.length - 1) * FOCUS_COL_GAP,
+      h: PAD * 2 + tallest * NODE_H + (tallest - 1) * FOCUS_ROW_GAP,
+    };
+  };
+  const focused = focus && selected ? focusLayout(selected) : null;
+  const layout = focused?.pos ?? positions;
+  const svgW = focused?.w ?? fullW;
+  const svgH = focused?.h ?? fullH;
 
   const edges: { from: string; to: string; x1: number; y1: number; x2: number; y2: number }[] = [];
   model.metrics.forEach((m) => {
-    const to = positions[m.name];
+    const to = layout[m.name];
     if (!to) return;
     m.depends_on.forEach((dep) => {
-      const from = positions[dep];
+      const from = layout[dep];
       if (!from) return;
       edges.push({
         from: dep, to: m.name,
@@ -122,6 +165,22 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
     });
   };
 
+  // Into the focus view around name, zoomed so it reads on one screen (never
+  // above 100%), or back to the whole graph.
+  const showFocus = (name: string | null) => {
+    if (!name) {
+      setFocus(false);
+      setZoom(1);
+      return;
+    }
+    const el = scrollRef.current;
+    const { w, h } = focusLayout(name);
+    const fit = el ? Math.min(1, el.clientWidth / w, el.clientHeight / h) : 1;
+    setFocus(true);
+    setZoom(clampZoom(fit));
+    requestAnimationFrame(() => el?.scrollTo({ left: 0, top: 0 }));
+  };
+
   const searchMatches = search.trim()
     ? model.metrics.filter(m =>
         m.label.toLowerCase().includes(search.trim().toLowerCase()) ||
@@ -129,6 +188,7 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
     : [];
   const jumpTo = (name: string) => {
     setSelected(name);
+    if (focus) { showFocus(name); return; }
     // Reading scroll geometry is fine synchronously; the zoom bump (if
     // any) applies via state and the scroll uses the target zoom value.
     const targetZoom = Math.max(zoom, 1);
@@ -153,6 +213,14 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
     return () => el.removeEventListener("wheel", onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- zoomBy only wraps a setState updater
   }, []);
+
+  // Escape leaves the focus view.
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setFocus(false); setZoom(1); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focus]);
 
   return (
     <div style={{ position: "relative" }}>
@@ -199,7 +267,14 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
           {Math.round(zoom * 100)}%
         </span>
         <IconButton aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(ZOOM_STEP)}><ZoomIn size={15} /></IconButton>
-        <IconButton aria-label="Reset zoom" title="Reset zoom" onClick={() => setZoom(1)}><Maximize size={15} /></IconButton>
+        <IconButton
+          aria-label={selected ? (focus ? "Show the whole graph" : "Show only what connects to the selected metric") : "Reset zoom"}
+          title={selected ? (focus ? "Back to the whole graph (Esc)" : "Only this metric, what it reads and what reads it, on one screen") : "Reset zoom"}
+          aria-pressed={focus || undefined}
+          onClick={() => (selected ? showFocus(focus ? null : selected) : setZoom(1))}
+        >
+          <Maximize size={15} />
+        </IconButton>
       </div>
       <div ref={scrollRef} style={{ overflow: "auto", maxHeight: "calc(100vh - 220px)" }}>
         <svg
@@ -207,7 +282,7 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
           height={svgH * zoom}
           viewBox={`0 0 ${svgW} ${svgH}`}
           style={{ display: "block" }}
-          onClick={() => setSelected(null)}
+          onClick={() => { setSelected(null); if (focus) showFocus(null); }}
         >
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -232,7 +307,7 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
             );
           })}
           {model.metrics.map((m) => {
-            const pos = positions[m.name];
+            const pos = layout[m.name];
             if (!pos) return null;
             const { gridNames, dimNames } = connectionsFor(m.id);
             const gridsLabel = gridNames.length ? truncateLabel(gridNames.join(", "), 26) : "No grid";
@@ -247,6 +322,11 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
                 style={{ cursor: "pointer" }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  // In the focus view a click moves the focus to that metric.
+                  if (focus) {
+                    if (m.name !== selected) { setSelected(m.name); showFocus(m.name); }
+                    return;
+                  }
                   setSelected((cur) => (cur === m.name ? null : m.name));
                 }}
               >

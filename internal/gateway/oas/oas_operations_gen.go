@@ -247,6 +247,7 @@ const (
 	SetActiveRevisionOperation               OperationName = "SetActiveRevision"
 	SetBARoleDashboardsOperation             OperationName = "SetBARoleDashboards"
 	SetDefaultModelOperation                 OperationName = "SetDefaultModel"
+	SetModelDateFormatOperation              OperationName = "SetModelDateFormat"
 	SetUserAccessRulesOperation              OperationName = "SetUserAccessRules"
 	SignupOperation                          OperationName = "Signup"
 	SsoDiscoverOperation                     OperationName = "SsoDiscover"

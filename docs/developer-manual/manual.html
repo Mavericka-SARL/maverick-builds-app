@@ -198,7 +198,7 @@
 <tr><td>CRUD</td><td>Tables of records, record-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
 </table>
-<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Developer</b> group (AI Developer, Metrics, Dimensions, Records, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and, unless an administration group already has Users, the <b>Govern</b> group (Users). business_user adds the <b>User</b> group (Dashboards, Workflow Inbox, My History, Models), business_admin the <b>Business Admin</b> group, and a tenant or platform administrator sees the administration groups.</p>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Developer</b> group (AI Developer, Metrics, Dimensions, Records, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and, unless an administration group already has Users, the <b>Govern</b> group (Users). business_user adds the <b>User</b> group (Dashboards, Workflow Inbox, My Workflow History, Models), business_admin the <b>Business Admin</b> group, and a tenant or platform administrator sees the administration groups.</p>
 <h3 id="platform-the-five-roles">The five roles</h3>
 <table>
 <tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
@@ -339,6 +339,7 @@
 <tr><td><b>Edit</b> (application or model)</td><td>For the same administrators, on each application and model they administer. Change the <b>name</b>, or write a <b>Description</b> of what it is for, up to 300 characters. The description shows under the name here and on the business users' <b>Apps</b> screen, where they choose a model; it travels with the model when it is exported.</td></tr>
 <tr><td><b>New revision</b></td><td>Type a name, press Enter or <b>Save</b>. The new revision is a full copy of the model's current state (see Concepts › Revisions).</td></tr>
 <tr><td><b>Set as business default</b> / badge <b>business default</b></td><td>Business consoles (dashboards, workflows, grids) open the default model of an application. With several models in one application, pick which one users get.</td></tr>
+<tr><td><b>Dates</b> (on each model)</td><td>How the model's dates read for everyone using it: <b>DD/MM/YYYY</b> (31/12/2026), <b>MM/DD/YYYY</b> (12/31/2026), <b>YYYY-MM-DD</b>, <b>DD.MM.YYYY</b> or <b>D MMM YYYY</b> (31 Dec 2026), in grids, tables of records, KPI tiles and filters. Date fields are then typed in that order, and their calendar button still picks a date. <b>Each browser's format</b>, the default, shows every user the format of their own browser, which for many is US English (month first). The choice travels with the model when it is exported; the AI Developer sets it with <code>set_date_format</code>.</td></tr>
 </table>
 <h3 id="models-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
@@ -738,7 +739,7 @@
 <tr><td>Enable / Disable icon</td><td>Disabling stops the rule from firing (button or event) until re-enabled; running instances are unaffected — stop one with <b>Cancel</b>. Disabling asks for confirmation.</td></tr>
 <tr><td>Edit, Delete</td><td>Inline edit; delete confirms <b>Delete rule?</b>.</td></tr>
 <tr><td><b>Execution Log</b></td><td>Recent runs: id, status (completed, running, failed, cancelled), instance, started. Refreshes every 8 s.</td></tr>
-<tr><td><b>Cancel</b> (a running run)</td><td>Stops a run started by mistake: <b>Cancel this run?</b> takes an optional <b>Reason</b>, then <b>Cancel run</b>. The run's open steps leave everyone's inbox, the run reads <i>cancelled</i> here and in Business Admin › History, and the people the open steps were assigned to and the person who started it get a notification quoting the reason (a test run notifies nobody). Steps already decided keep their effect: values an approval posted stay. A business admin cancels the same way from History by setting the status to <b>Cancelled</b>. The pause icon on a rule only stops <i>new</i> runs.</td></tr>
+<tr><td><b>Cancel</b> (a running run)</td><td>Stops a run started by mistake: <b>Cancel this run?</b> takes an optional <b>Reason</b>, then <b>Cancel run</b>. The run's open steps leave everyone's inbox, the run reads <i>cancelled</i> here and in Business Admin › Workflow History, and the people the open steps were assigned to and the person who started it get a notification quoting the reason (a test run notifies nobody). Steps already decided keep their effect: values an approval posted stay. A business admin cancels the same way from Workflow History by setting the status to <b>Cancelled</b>. The pause icon on a rule only stops <i>new</i> runs.</td></tr>
 </table>
 <figure><img src="img/32-trigger-new-rule.png" width="1140" height="900" alt="New rule form with name, workflow, trigger type and description"><figcaption>The rule form. The trigger type follows the chosen workflow's event.</figcaption></figure>
 <h3 id="triggers-rules-and-behaviour">Rules and behaviour</h3>
@@ -824,6 +825,7 @@
 <tr><td>Card actions</td><td><b>Preview</b> (what would be posted), <b>Backfill</b> (post existing records now), <b>Delete</b> (confirm <b>Delete integration?</b>: "stops future postings"). A postings table lists record, revision, dimensions, value and time.</td></tr>
 </table>
 <p>Posted values are ordinary input values: they recalculate dependents and obey access rules and locks. Metric-typed fields ("By name") let one table feed different metrics per record.</p>
+<p>A metric a table posts into takes its values from the records only. Its cells show read-only in every grid ("From the records of POS sales: change them there"), and a value typed, pasted, imported from a file or written by the AI Developer or the chat connector is refused with the same message: a typed value was added to a posted total, or hidden by it, and stood as an actual no record explains. Change the records, or post a plan into a metric of its own. Clearing a cell (an empty value) stays allowed, to remove a value typed before.</p>
 <h3 id="integrations-data-export">Data Export</h3>
 <p>A data export is a saved, re-downloadable file of one grid's values in the format another system expects. <b>New export</b> opens the editor; its preview updates as you change it, and an export that cannot be produced lists every reason and cannot be saved.</p>
 <table>

@@ -191,6 +191,16 @@ func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, 
 	} else if reason != "" {
 		return preparedCell{}, refuseCell(http.StatusForbidden, "%s", reason)
 	}
+	// A cell a table of records posts into takes its value from the records;
+	// clearing one removes only a typed value.
+	clears := req.Clear || (req.Text != nil && *req.Text == "") || (req.Member != nil && *req.Member == "")
+	if !clears {
+		if reason, err := writeguard.PostedReason(ctx, h.db.For(ctx), revisionID, []writeguard.Cell{{MetricID: req.MetricID, DimCodes: req.DimCodes}}); err != nil {
+			return preparedCell{}, refuseCell(http.StatusInternalServerError, "write guard: %v", err)
+		} else if reason != "" {
+			return preparedCell{}, refuseCell(http.StatusForbidden, "%s", reason)
+		}
+	}
 
 	// A pick-list cell holds a member of its dimension (the value must be
 	// one's key, or Member names one), a text metric's cell its text, and

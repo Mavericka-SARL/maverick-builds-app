@@ -57,11 +57,13 @@ func TestDeveloperRecalculatesARevision(t *testing.T) {
 		t.Fatalf("recalculate: %d %v, want 1 calculated metric recalculating", status, body)
 	}
 	waitFor("the requested recalculation", func() bool { v, ok := value(); return ok && v == 42 })
-	var state string
-	_ = f.pool.QueryRow(ctx, `SELECT status::text FROM runtime.metric_partition_state WHERE metric_id = $1::uuid`, calcID).Scan(&state)
-	if state != "clean" {
-		t.Errorf("the partition is %q after the recalculation, want clean", state)
-	}
+	// A pass writes its results and then marks its partition clean, so the
+	// value can be read a moment before the partition is.
+	waitFor("the partition marked clean", func() bool {
+		var state string
+		_ = f.pool.QueryRow(ctx, `SELECT status::text FROM runtime.metric_partition_state WHERE metric_id = $1::uuid`, calcID).Scan(&state)
+		return state == "clean"
+	})
 	if row := f.latestAuditEvent(t, "revision.recalculated"); row.resourceID != f.revID {
 		t.Errorf("revision.recalculated resource_id = %s, want %s", row.resourceID, f.revID)
 	}

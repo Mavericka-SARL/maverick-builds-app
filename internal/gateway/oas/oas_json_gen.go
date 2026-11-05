@@ -2611,6 +2611,12 @@ func (s *AdminModel) encodeFields(e *jx.Encoder) {
 		e.ArrEnd()
 	}
 	{
+		if s.DateFormat.Set {
+			e.FieldStart("date_format")
+			s.DateFormat.Encode(e)
+		}
+	}
+	{
 		if s.StorageBytes.Set {
 			e.FieldStart("storage_bytes")
 			s.StorageBytes.Encode(e)
@@ -2618,14 +2624,15 @@ func (s *AdminModel) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfAdminModel = [7]string{
+var jsonFieldsNameOfAdminModel = [8]string{
 	0: "id",
 	1: "name",
 	2: "description",
 	3: "storage_type",
 	4: "active_revision",
 	5: "revisions",
-	6: "storage_bytes",
+	6: "date_format",
+	7: "storage_bytes",
 }
 
 // Decode decodes AdminModel from json.
@@ -2710,6 +2717,16 @@ func (s *AdminModel) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revisions\"")
+			}
+		case "date_format":
+			if err := func() error {
+				s.DateFormat.Reset()
+				if err := s.DateFormat.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"date_format\"")
 			}
 		case "storage_bytes":
 			if err := func() error {
@@ -23780,13 +23797,20 @@ func (s *DemoContext) encodeFields(e *jx.Encoder) {
 		e.FieldStart("actor")
 		s.Actor.Encode(e)
 	}
+	{
+		if s.DateFormat.Set {
+			e.FieldStart("date_format")
+			s.DateFormat.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfDemoContext = [4]string{
+var jsonFieldsNameOfDemoContext = [5]string{
 	0: "app_id",
 	1: "model_id",
 	2: "revision",
 	3: "actor",
+	4: "date_format",
 }
 
 // Decode decodes DemoContext from json.
@@ -23843,6 +23867,16 @@ func (s *DemoContext) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"actor\"")
+			}
+		case "date_format":
+			if err := func() error {
+				s.DateFormat.Reset()
+				if err := s.DateFormat.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"date_format\"")
 			}
 		default:
 			return d.Skip()
@@ -34956,6 +34990,12 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 		s.Totals.Encode(e)
 	}
 	{
+		if s.PostedFrom.Set {
+			e.FieldStart("posted_from")
+			s.PostedFrom.Encode(e)
+		}
+	}
+	{
 		if s.Withheld != nil {
 			e.FieldStart("withheld")
 			e.ArrStart()
@@ -34989,7 +35029,7 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGridData = [14]string{
+var jsonFieldsNameOfGridData = [15]string{
 	0:  "revision_id",
 	1:  "metrics",
 	2:  "all_metrics",
@@ -35000,10 +35040,11 @@ var jsonFieldsNameOfGridData = [14]string{
 	7:  "texts",
 	8:  "recalc_pending",
 	9:  "totals",
-	10: "withheld",
-	11: "access_rules",
-	12: "workflow_locks",
-	13: "rollup_source_grid_id",
+	10: "posted_from",
+	11: "withheld",
+	12: "access_rules",
+	13: "workflow_locks",
+	14: "rollup_source_grid_id",
 }
 
 // Decode decodes GridData from json.
@@ -35154,6 +35195,16 @@ func (s *GridData) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"totals\"")
+			}
+		case "posted_from":
+			if err := func() error {
+				s.PostedFrom.Reset()
+				if err := s.PostedFrom.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"posted_from\"")
 			}
 		case "withheld":
 			if err := func() error {
@@ -35320,6 +35371,62 @@ func (s GridDataCells) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *GridDataCells) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GridDataPostedFrom) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GridDataPostedFrom) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes GridDataPostedFrom from json.
+func (s *GridDataPostedFrom) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GridDataPostedFrom to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GridDataPostedFrom")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GridDataPostedFrom) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GridDataPostedFrom) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -51449,6 +51556,40 @@ func (s *OptGridAccessRules) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes GridDataPostedFrom as json.
+func (o OptGridDataPostedFrom) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes GridDataPostedFrom from json.
+func (o *OptGridDataPostedFrom) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGridDataPostedFrom to nil")
+	}
+	o.Set = true
+	o.Value = make(GridDataPostedFrom)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGridDataPostedFrom) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGridDataPostedFrom) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes GridDataTexts as json.
 func (o OptGridDataTexts) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -63816,6 +63957,258 @@ func (s *SetDefaultModelOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *SetDefaultModelOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes SetModelDateFormatBadRequest as json.
+func (s *SetModelDateFormatBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes SetModelDateFormatBadRequest from json.
+func (s *SetModelDateFormatBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SetModelDateFormatBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = SetModelDateFormatBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SetModelDateFormatBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SetModelDateFormatBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes SetModelDateFormatNotFound as json.
+func (s *SetModelDateFormatNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes SetModelDateFormatNotFound from json.
+func (s *SetModelDateFormatNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SetModelDateFormatNotFound to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = SetModelDateFormatNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SetModelDateFormatNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SetModelDateFormatNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *SetModelDateFormatOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *SetModelDateFormatOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Status.Set {
+			e.FieldStart("status")
+			s.Status.Encode(e)
+		}
+	}
+	{
+		if s.DateFormat.Set {
+			e.FieldStart("date_format")
+			s.DateFormat.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfSetModelDateFormatOK = [2]string{
+	0: "status",
+	1: "date_format",
+}
+
+// Decode decodes SetModelDateFormatOK from json.
+func (s *SetModelDateFormatOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SetModelDateFormatOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "status":
+			if err := func() error {
+				s.Status.Reset()
+				if err := s.Status.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "date_format":
+			if err := func() error {
+				s.DateFormat.Reset()
+				if err := s.DateFormat.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"date_format\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode SetModelDateFormatOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SetModelDateFormatOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SetModelDateFormatOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *SetModelDateFormatReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *SetModelDateFormatReq) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("date_format")
+		e.Str(s.DateFormat)
+	}
+}
+
+var jsonFieldsNameOfSetModelDateFormatReq = [1]string{
+	0: "date_format",
+}
+
+// Decode decodes SetModelDateFormatReq from json.
+func (s *SetModelDateFormatReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SetModelDateFormatReq to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "date_format":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.DateFormat = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"date_format\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode SetModelDateFormatReq")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfSetModelDateFormatReq) {
+					name = jsonFieldsNameOfSetModelDateFormatReq[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SetModelDateFormatReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SetModelDateFormatReq) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

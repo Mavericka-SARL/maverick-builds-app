@@ -73,8 +73,8 @@ test("business_user + business_admin: the user role's User group and the admin s
   await expect(nav(page, "Dashboards")).toHaveCount(1);
   await expect(nav(page, "Workflow Inbox")).toHaveCount(1);
   await expect(nav(page, "Models")).toHaveCount(1);
-  await expect(nav(page, "My History")).toBeVisible();
-  await expect(nav(page, "History")).toBeVisible();
+  await expect(nav(page, "My Workflow History")).toBeVisible();
+  await expect(nav(page, "Workflow History")).toBeVisible();
   await expect(nav(page, "Roles")).toBeVisible();
 });
 
@@ -83,7 +83,7 @@ test("business_admin alone: the admin screens, and no dashboards — those come 
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
   await expect(nav(page, "Dashboards")).toHaveCount(0);
-  for (const screen of ["Workflow Inbox", "History", "Roles", "Access Rules", "Models"]) {
+  for (const screen of ["Workflow Inbox", "Workflow History", "Roles", "Access Rules", "Models"]) {
     await expect(nav(page, screen)).toBeVisible();
   }
 });

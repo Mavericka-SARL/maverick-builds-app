@@ -415,6 +415,11 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 		return nil, fmt.Errorf("write guard: %w", gErr)
 	} else if reason != "" {
 		return nil, fmt.Errorf("%w: %s", ErrWriteDenied, reason)
+	} else if reason, gErr := writeguard.PostedReason(ctx, s.pool, revisionID, closedCells); gErr != nil {
+		return nil, fmt.Errorf("write guard: %w", gErr)
+	} else if reason != "" {
+		// A cell a table of records posts into takes its value from them.
+		return nil, fmt.Errorf("%w: %s", ErrWriteDenied, reason)
 	}
 
 	// Metric-level access — CheckWriteMetrics above covers the workflow

@@ -1710,6 +1710,15 @@ type Handler interface {
 	//
 	// POST /api/developer/models/{id}/set-default
 	SetDefaultModel(ctx context.Context, params SetDefaultModelParams) (SetDefaultModelRes, error)
+	// SetModelDateFormat implements setModelDateFormat operation.
+	//
+	// Date_format is one of DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD.MM.YYYY, D MMM YYYY, or "" to leave
+	// it to each reader's browser. Grid cells, KPI tiles, record lists and the date fields people type
+	// into follow it. Not revision-scoped: it applies to the model at once, and a model package carries
+	// it. Audited as model.updated. A model outside the caller's scope answers 404.
+	//
+	// PUT /api/developer/models/{id}/date-format
+	SetModelDateFormat(ctx context.Context, req *SetModelDateFormatReq, params SetModelDateFormatParams) (SetModelDateFormatRes, error)
 	// SetUserAccessRules implements setUserAccessRules operation.
 	//
 	// Replace the full set of a user's dimension/metric access rules.

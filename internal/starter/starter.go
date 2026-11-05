@@ -374,7 +374,9 @@ You cannot type over a calculated number: the formula is the single answer to ho
 
 The card on the left is the cost of the whole year; the one on the right is headcount at the end of Q4. The grid below is the real thing, with the whole company above its two teams.
 
-Click one of the boxed cells in a *Headcount* row — the legend under the grid calls them *Editable* — type a different number and press Enter. *Cost* in the same column answers at once, and so do the *Whole company* rows, the *Total* column and the cost card. *Cost* is marked CALC: the platform works it out, and you cannot type there or in any total.`, 188)
+Click one of the boxed cells in a *Headcount* row — the legend under the grid calls them *Editable* — type a different number and press Enter. *Cost* in the same column answers at once, and so do the *Whole company* rows, the *Total* column and the cost card. *Cost* is marked CALC: the platform works it out, and you cannot type there or in any total.
+
+To change several cells at once, click one, Shift+click another to select the cells between them, and paste (⌘/Ctrl+V): one value fills them all, and a block copied from a spreadsheet or another grid lands as it was copied. ⌘/Ctrl+C copies a selection the same way.`, 236)
 
 	// Team on the rows, so Whole company is a visible total above its teams;
 	// quarters across, so FY 2026 is a visible total column.

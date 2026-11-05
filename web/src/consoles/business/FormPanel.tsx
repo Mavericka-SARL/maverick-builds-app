@@ -8,6 +8,8 @@ import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
 import { cellClass, defaultsOf, describeFilter, filterOps, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
 import { RecordStatusBadge } from "./RecordFieldInput";
+import { useDateFormat } from "../dateFormat";
+import { DateInput } from "../DateInput";
 import { DeleteRecordButton, RecordDialog, RecordFields, RecordFieldValue } from "./RecordLinks";
 
 const PAGE = 50;
@@ -27,6 +29,7 @@ export function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }
   const ops = filterOps(col?.kind ?? "text");
   const [op, setOp] = useState<FilterOp>(ops[0].op);
   const [value, setValue] = useState<string>("");
+  const dateFormat = useDateFormat();
   const opDef = ops.find(o => o.op === op) ?? ops[0];
   const pickKey = (k: string) => {
     setKey(k);
@@ -81,10 +84,12 @@ export function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }
         {metrics.filter(m => m.is_input).map(m => <option key={m.id} value={m.name}>{m.label || m.name}</option>)}
       </Select>
     );
+  } else if ((col?.kind === "date" || col?.kind === "datetime") && !counts) {
+    input = <DateInput ariaLabel="Value" value={value} format={dateFormat} onCommit={setValue} className="mvx-input" style={{ width: 160 }} />;
   } else {
     input = (
       <TextInput aria-label={counts ? "Days" : "Value"} value={value} onChange={e => setValue(e.target.value)} style={{ width: counts ? 80 : 160 }}
-        type={col?.kind === "number" || counts ? "number" : col?.kind === "date" || col?.kind === "datetime" ? "date" : "text"} />
+        type={col?.kind === "number" || counts ? "number" : "text"} />
     );
   }
   return (
@@ -131,6 +136,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   fixedSort?: { field: string; desc?: boolean };
 }) {
   const qc = useQueryClient();
+  const dateFormat = useDateFormat();
   const formId = form.id;
   const hasStatus = !!statusFieldOf(form);
   const cols = useMemo(() => listColumns(form, columns), [form, columns]);
@@ -312,8 +318,12 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   const filtered = search !== "" || filters.length > 0 || (fixedFilters?.length ?? 0) > 0;
   const statusChoices = page?.statuses ?? (hasStatus ? ["draft", "submitted", "approved", "rejected"] : []);
 
+  // The panel fills its widget's box: the head and filters keep their
+  // height and the list takes the rest, scrolling inside it. A list capped at
+  // 360px ran 60px past a 420px box, its last record under the box's edge
+  // (a ninth restaurant added and not to be seen, 2026-11-05).
   return (
-    <div>
+    <div className="mvx-records-fill">
       <div>
         <div className="mvx-panel-head">
           <div className="mvx-panel-head__titles">
@@ -324,7 +334,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 {(fixedFilters ?? []).map((f, i) => (
                   <React.Fragment key={i}>
                     <Txt>{i > 0 && " · "}</Txt>
-                    <span aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics)}`}>{describeFilter(f, allCols, dims, metrics)}</span>
+                    <span aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics, dateFormat)}`}>{describeFilter(f, allCols, dims, metrics, dateFormat)}</span>
                   </React.Fragment>
                 ))}
               </span>
@@ -431,9 +441,9 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
             Filter
           </Button>
           {filters.map((f, i) => (
-            <FilterChip key={i} active aria-label={`Remove filter: ${describeFilter(f, cols, dims, metrics)}`}
+            <FilterChip key={i} active aria-label={`Remove filter: ${describeFilter(f, cols, dims, metrics, dateFormat)}`}
               onClick={() => setFilters(fs => fs.filter((_, j) => j !== i))} onClear={() => setFilters(fs => fs.filter((_, j) => j !== i))}>
-              {describeFilter(f, cols, dims, metrics)}
+              {describeFilter(f, cols, dims, metrics, dateFormat)}
             </FilterChip>
           ))}
         </FilterBarGroup>
@@ -452,7 +462,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
 
       {/* Records table */}
       {recLoading ? <LoadingState /> : (
-        <div className="mvx-table-wrap" style={{ overflowY: "auto", maxHeight: 360, marginBottom: 12 }}>
+        <div className="mvx-table-wrap" style={{ overflowY: "auto", flex: "1 1 auto", minHeight: 120, marginBottom: 12 }}>
           <table className="mvx-table mvx-table--compact">
             <thead>
               <tr>
@@ -505,7 +515,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                         );
                       }
                       if (c.key === "created_at") {
-                        return <td key={c.key} className="mvx-admin-muted mvx-cell--nowrap">{localDate(rec.created_at)}</td>;
+                        return <td key={c.key} className="mvx-admin-muted mvx-cell--nowrap">{localDate(rec.created_at, dateFormat)}</td>;
                       }
                       return <td key={c.key} className={cellClass(c)}>{c.field ? <RecordFieldValue form={form} f={c.field} data={rec.data} dims={dims} metrics={metrics} /> : String(rec.data[c.key] ?? "—")}</td>;
                     })}

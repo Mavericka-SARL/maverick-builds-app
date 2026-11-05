@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant, type ApiError } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
+import { DATE_FORMATS, formatIsoDate } from "../dateSerial";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle, Txt } from "../../ui";
 
 function DevModelRevisions({
@@ -337,6 +338,17 @@ export function DevApplicationsTab({
     },
   });
 
+  // How a model's dates read for everyone using it: grids, tables of
+  // records, KPIs and date fields.
+  const setDateFormat = useMutation({
+    mutationFn: ({ modelId, tenantId, dateFormat }: { modelId: string; tenantId: string; dateFormat: string }) =>
+      withTenant(tenantId, () => api.setModelDateFormat(modelId, dateFormat)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dev-applications"] });
+      qc.invalidateQueries({ queryKey: ["demo"] });
+    },
+  });
+
   const apps = tenants.flatMap((t) => t.applications ?? []);
   // The list spans every database the caller reaches; an action on a row is
   // addressed to the row's tenant.
@@ -434,6 +446,17 @@ export function DevApplicationsTab({
                       Set as business default
                     </Button>
                   )}
+                  <Select
+                    value={m.date_format ?? ""}
+                    aria-label={`Date format of model ${m.name}`}
+                    title="How dates read for everyone using this model: grids, tables of records, KPIs and date fields"
+                    style={{ width: 210, marginLeft: "auto", height: 28 }}
+                    disabled={setDateFormat.isPending}
+                    onChange={(e) => setDateFormat.mutate({ modelId: m.id, tenantId: tenantOfApp.get(app.id) ?? "", dateFormat: e.target.value })}
+                  >
+                    <option value="">Dates: each browser's format</option>
+                    {DATE_FORMATS.map((f) => <option key={f} value={f}>Dates: {f} ({formatIsoDate("2026-12-31", f)})</option>)}
+                  </Select>
                 </div>
                 {m.description && <p className="mvx-admin-muted" style={{ margin: "2px 0 6px" }}>{m.description}</p>}
                 {editing === `model:${m.id}` && (

@@ -18,7 +18,7 @@ const SECTION: SectionId = "business";
 
 /**
  * The user role's section of the console (key business_user): User ›
- * Dashboards, Workflow Inbox, My History, Models — whatever other roles the
+ * Dashboards, Workflow Inbox, My Workflow History, Models — whatever other roles the
  * person holds (see router/sections.ts).
  */
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
@@ -50,7 +50,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
       items: [
         { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
         { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
-        { id: t("history"), label: "My History", icon: <HistoryIcon size={16} /> },
+        { id: t("history"), label: "My Workflow History", icon: <HistoryIcon size={16} /> },
         { id: t("models"), label: "Models", icon: <Boxes size={16} /> },
       ],
     }],
