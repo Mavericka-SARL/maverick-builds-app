@@ -6,7 +6,7 @@ import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type 
 import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
-import { cellClass, defaultsOf, describeFilter, filterOps, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
+import { cellClass, defaultsOf, describeFilter, filterOps, inSentence, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
 import { RecordStatusBadge } from "./RecordFieldInput";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
@@ -502,7 +502,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                               <Select
                                 value={rec.status}
                                 onChange={(e) => updateStatus.mutate({ id: rec.id, status: e.target.value })}
-                                aria-label={`Record ${c.label.toLowerCase()}`}
+                                aria-label={`Record ${inSentence(c.label)}`}
                               >
                                 {statuses.options.map((s) => (
                                   <option key={s} value={s} disabled={s === ""}>{statusLabel(s)}</option>

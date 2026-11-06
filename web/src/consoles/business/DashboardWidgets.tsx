@@ -98,6 +98,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                 className={[
                   "mvx-dash-cell",
                   widget.widget_type === "metric_kpi" ? "mvx-dash-cell--kpi" : "",
+                  BUTTON_WIDGET_TYPES.has(widget.widget_type) ? "mvx-dash-cell--button" : "",
                   // Developer-chosen surface (widget_props.background): a card
                   // for a bare widget type, or nothing at all.
                   widget.widget_type !== "metric_kpi" && widget.widget_props?.background === "white" ? "mvx-dash-cell--card" : "",
@@ -559,7 +560,8 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
   // configured sheet on every run — so its button syncs on click instead of
   // opening a picker. The list is how the widget learns the type.
   const { data: integrations = [] } = useQuery({ queryKey: ["integrations"], queryFn: () => api.listIntegrations() });
-  const type = (integrations as IntegrationDef[]).find(i => i.id === integrationId)?.type;
+  const integration = (integrations as IntegrationDef[]).find(i => i.id === integrationId);
+  const type = integration?.type;
   const isSheets = type === "google_sheets";
   // An export downloads a file built from this user's own view of the grid.
   const isExport = type === "file_export";
@@ -577,6 +579,10 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
     },
     onError: (err) => setResult({ message: (err as Error).message }),
   });
+
+  // A load this person could not put anything in (its table's records or
+  // its grid's inputs are not theirs to change) is not offered at all.
+  if (integration?.may_run === false) return null;
 
   if (isExport) {
     return (
@@ -660,6 +666,10 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, corners, ct
   const trigger = useMutation({
     mutationFn: () => api.triggerRule(ruleId, { model_id: ctx.model_id, revision_id: ctx.revision_id, ...staticContext }),
   });
+
+  // A workflow this person may not start (its "who starts it") is not
+  // offered at all: the server would refuse the click.
+  if (rule?.may_run === false) return null;
 
   // Explicit states, rather than a button that looks live and fails on click.
   const blocked =

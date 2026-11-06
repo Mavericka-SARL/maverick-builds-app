@@ -1,8 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../../api/client";
 import type { WorkflowStepDef } from "../../api/client";
 import { StepTypeIcon, Field } from "./WorkflowShared";
 import { STEP_TYPE_LABELS, inputStyle } from "./workflowConstants";
+import { RolePicker } from "./RolePicker";
 
 const CONDITION_OPERATORS = [
   { value: "equals", label: "equals" },
@@ -122,13 +121,6 @@ function ParallelRoutesEditor({ step, routeOptions, onChange }: {
   );
 }
 
-// Tenant roles offered as step assignees alongside named business roles.
-// Limited to business_admin/business_user — the only roles with a Workflow
-// Inbox surface (Business/Business Admin console) to actually act on a step;
-// developer/tenant_admin/platform_admin have no such tab, so assigning a
-// step to them would create a task nobody can ever open.
-const ASSIGNABLE_TENANT_ROLES = ["business_admin", "business_user"] as const;
-
 export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, onDelete, onClose }: {
   step: WorkflowStepDef;
   allSteps: WorkflowStepDef[];
@@ -137,12 +129,6 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const { data: businessRoles = [] } = useQuery({
-    queryKey: ["workflow-roles", applicationId],
-    queryFn: () => api.listWorkflowRoles(applicationId),
-    staleTime: 60_000,
-    enabled: !!applicationId,
-  });
   const routeOptions = [
     { value: "", label: "— select —" },
     ...allSteps.filter(s => s.id !== step.id).map(s => ({ value: s.id, label: s.name })),
@@ -192,68 +178,7 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
         {(step.type === "task" || step.type === "approval") && (
           <>
             <Field label={step.type === "approval" ? "Approver roles" : "Assignee roles"}>
-              {(() => {
-                const assigned = step.assignee_roles ?? [];
-                const namedRoleNames = businessRoles.map(r => r.name);
-                // Anything assigned that matches neither a tenant role nor
-                // a known named role — e.g. a business_role that was since
-                // renamed/deleted — would otherwise vanish from view with no
-                // way to tell it's still set. Surface it instead of hiding it.
-                const unknown = assigned.filter(r => !ASSIGNABLE_TENANT_ROLES.includes(r as typeof ASSIGNABLE_TENANT_ROLES[number]) && !namedRoleNames.includes(r));
-
-                const toggle = (name: string) => {
-                  const checked = assigned.includes(name);
-                  setRole(checked ? assigned.filter(x => x !== name) : [...assigned, name]);
-                };
-
-                const roleCheckbox = (key: string, label: string) => {
-                  const checked = assigned.includes(key);
-                  return (
-                    <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
-                      {label}
-                    </label>
-                  );
-                };
-
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px", background: "var(--color-surface-faint)", borderRadius: 6, border: "1px solid var(--color-border)" }}>
-                    <div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-disabled)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
-                        Tenant roles
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {ASSIGNABLE_TENANT_ROLES.map(role => roleCheckbox(role, role))}
-                      </div>
-                    </div>
-                    {businessRoles.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-disabled)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
-                          Named roles
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {businessRoles.map(r => roleCheckbox(r.name, r.name))}
-                        </div>
-                      </div>
-                    )}
-                    {unknown.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-danger)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
-                          Assigned but unrecognized
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {unknown.map(role => roleCheckbox(role, role))}
-                        </div>
-                      </div>
-                    )}
-                    {businessRoles.length === 0 && (
-                      <div style={{ fontSize: 11, color: "var(--color-disabled)" }}>
-                        Need a named team (e.g. "Budget Approvers")? Create one in Admin → Roles.
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+              <RolePicker applicationId={applicationId} value={step.assignee_roles ?? []} onChange={setRole} />
             </Field>
             <Field label="SLA hours">
               <input

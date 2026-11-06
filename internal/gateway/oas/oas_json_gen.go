@@ -7860,6 +7860,12 @@ func (s *AutomationRule) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *AutomationRule) encodeFields(e *jx.Encoder) {
 	{
+		if s.MayRun.Set {
+			e.FieldStart("may_run")
+			s.MayRun.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("id")
 		json.EncodeUUID(e, s.ID)
 	}
@@ -7967,28 +7973,29 @@ func (s *AutomationRule) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfAutomationRule = [21]string{
-	0:  "id",
-	1:  "application_id",
-	2:  "revision_id",
-	3:  "name",
-	4:  "description",
-	5:  "trigger_type",
-	6:  "workflow_name",
-	7:  "workflow_def_id",
-	8:  "source_form_id",
-	9:  "source_grid_id",
-	10: "source_integration_id",
-	11: "enabled",
-	12: "created_at",
-	13: "cron_expr",
-	14: "timezone",
-	15: "misfire_policy",
-	16: "max_retries",
-	17: "retry_backoff_seconds",
-	18: "next_fire_at",
-	19: "last_fire_at",
-	20: "fires_on_import",
+var jsonFieldsNameOfAutomationRule = [22]string{
+	0:  "may_run",
+	1:  "id",
+	2:  "application_id",
+	3:  "revision_id",
+	4:  "name",
+	5:  "description",
+	6:  "trigger_type",
+	7:  "workflow_name",
+	8:  "workflow_def_id",
+	9:  "source_form_id",
+	10: "source_grid_id",
+	11: "source_integration_id",
+	12: "enabled",
+	13: "created_at",
+	14: "cron_expr",
+	15: "timezone",
+	16: "misfire_policy",
+	17: "max_retries",
+	18: "retry_backoff_seconds",
+	19: "next_fire_at",
+	20: "last_fire_at",
+	21: "fires_on_import",
 }
 
 // Decode decodes AutomationRule from json.
@@ -8000,8 +8007,18 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
+		case "may_run":
+			if err := func() error {
+				s.MayRun.Reset()
+				if err := s.MayRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"may_run\"")
+			}
 		case "id":
-			requiredBitSet[0] |= 1 << 0
+			requiredBitSet[0] |= 1 << 1
 			if err := func() error {
 				v, err := json.DecodeUUID(d)
 				s.ID = v
@@ -8013,7 +8030,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"id\"")
 			}
 		case "application_id":
-			requiredBitSet[0] |= 1 << 1
+			requiredBitSet[0] |= 1 << 2
 			if err := func() error {
 				v, err := json.DecodeUUID(d)
 				s.ApplicationID = v
@@ -8035,7 +8052,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"revision_id\"")
 			}
 		case "name":
-			requiredBitSet[0] |= 1 << 3
+			requiredBitSet[0] |= 1 << 4
 			if err := func() error {
 				v, err := d.Str()
 				s.Name = string(v)
@@ -8047,7 +8064,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"name\"")
 			}
 		case "description":
-			requiredBitSet[0] |= 1 << 4
+			requiredBitSet[0] |= 1 << 5
 			if err := func() error {
 				v, err := d.Str()
 				s.Description = string(v)
@@ -8059,7 +8076,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"description\"")
 			}
 		case "trigger_type":
-			requiredBitSet[0] |= 1 << 5
+			requiredBitSet[0] |= 1 << 6
 			if err := func() error {
 				if err := s.TriggerType.Decode(d); err != nil {
 					return err
@@ -8069,7 +8086,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"trigger_type\"")
 			}
 		case "workflow_name":
-			requiredBitSet[0] |= 1 << 6
+			requiredBitSet[0] |= 1 << 7
 			if err := func() error {
 				v, err := d.Str()
 				s.WorkflowName = string(v)
@@ -8121,7 +8138,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"source_integration_id\"")
 			}
 		case "enabled":
-			requiredBitSet[1] |= 1 << 3
+			requiredBitSet[1] |= 1 << 4
 			if err := func() error {
 				v, err := d.Bool()
 				s.Enabled = bool(v)
@@ -8133,7 +8150,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"enabled\"")
 			}
 		case "created_at":
-			requiredBitSet[1] |= 1 << 4
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -8175,7 +8192,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"misfire_policy\"")
 			}
 		case "max_retries":
-			requiredBitSet[2] |= 1 << 0
+			requiredBitSet[2] |= 1 << 1
 			if err := func() error {
 				v, err := d.Int()
 				s.MaxRetries = int(v)
@@ -8187,7 +8204,7 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"max_retries\"")
 			}
 		case "retry_backoff_seconds":
-			requiredBitSet[2] |= 1 << 1
+			requiredBitSet[2] |= 1 << 2
 			if err := func() error {
 				v, err := d.Int()
 				s.RetryBackoffSeconds = int(v)
@@ -8238,9 +8255,9 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [3]uint8{
-		0b01111011,
-		0b00011000,
-		0b00000011,
+		0b11110110,
+		0b00110000,
+		0b00000110,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -40656,15 +40673,22 @@ func (s *IntegrationDef) encodeFields(e *jx.Encoder) {
 		e.FieldStart("config")
 		s.Config.Encode(e)
 	}
+	{
+		if s.MayRun.Set {
+			e.FieldStart("may_run")
+			s.MayRun.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfIntegrationDef = [6]string{
+var jsonFieldsNameOfIntegrationDef = [7]string{
 	0: "id",
 	1: "name",
 	2: "type",
 	3: "target_type",
 	4: "target_id",
 	5: "config",
+	6: "may_run",
 }
 
 // Decode decodes IntegrationDef from json.
@@ -40745,6 +40769,16 @@ func (s *IntegrationDef) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"config\"")
+			}
+		case "may_run":
+			if err := func() error {
+				s.MayRun.Reset()
+				if err := s.MayRun.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"may_run\"")
 			}
 		default:
 			return d.Skip()
@@ -45102,6 +45136,12 @@ func (s *ListWorkflowDefinitionsOKItem) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.MayStart.Set {
+			e.FieldStart("may_start")
+			s.MayStart.Encode(e)
+		}
+	}
+	{
 		if s.ContextSchema != nil {
 			e.FieldStart("context_schema")
 			e.ArrStart()
@@ -45113,12 +45153,13 @@ func (s *ListWorkflowDefinitionsOKItem) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfListWorkflowDefinitionsOKItem = [5]string{
+var jsonFieldsNameOfListWorkflowDefinitionsOKItem = [6]string{
 	0: "id",
 	1: "name",
 	2: "description",
 	3: "trigger_event",
-	4: "context_schema",
+	4: "may_start",
+	5: "context_schema",
 }
 
 // Decode decodes ListWorkflowDefinitionsOKItem from json.
@@ -45168,6 +45209,16 @@ func (s *ListWorkflowDefinitionsOKItem) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"trigger_event\"")
+			}
+		case "may_start":
+			if err := func() error {
+				s.MayStart.Reset()
+				if err := s.MayStart.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"may_start\"")
 			}
 		case "context_schema":
 			if err := func() error {
@@ -67816,13 +67867,20 @@ func (s *TaskContextEntry) encodeFields(e *jx.Encoder) {
 			s.DimensionName.Encode(e)
 		}
 	}
+	{
+		if s.Kind.Set {
+			e.FieldStart("kind")
+			s.Kind.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfTaskContextEntry = [4]string{
+var jsonFieldsNameOfTaskContextEntry = [5]string{
 	0: "key",
 	1: "value",
 	2: "display",
 	3: "dimension_name",
+	4: "kind",
 }
 
 // Decode decodes TaskContextEntry from json.
@@ -67879,6 +67937,16 @@ func (s *TaskContextEntry) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"dimension_name\"")
+			}
+		case "kind":
+			if err := func() error {
+				s.Kind.Reset()
+				if err := s.Kind.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"kind\"")
 			}
 		default:
 			return d.Skip()
@@ -75120,9 +75188,19 @@ func (s *UpdateWorkflowRequest) encodeFields(e *jx.Encoder) {
 			s.ApproverMayStart.Encode(e)
 		}
 	}
+	{
+		if s.StartRoles != nil {
+			e.FieldStart("start_roles")
+			e.ArrStart()
+			for _, elem := range s.StartRoles {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateWorkflowRequest = [9]string{
+var jsonFieldsNameOfUpdateWorkflowRequest = [10]string{
 	0: "name",
 	1: "description",
 	2: "trigger_event",
@@ -75132,6 +75210,7 @@ var jsonFieldsNameOfUpdateWorkflowRequest = [9]string{
 	6: "context_schema",
 	7: "single_active_instance",
 	8: "approver_may_start",
+	9: "start_roles",
 }
 
 // Decode decodes UpdateWorkflowRequest from json.
@@ -75238,6 +75317,25 @@ func (s *UpdateWorkflowRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"approver_may_start\"")
+			}
+		case "start_roles":
+			if err := func() error {
+				s.StartRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.StartRoles = append(s.StartRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"start_roles\"")
 			}
 		default:
 			return d.Skip()
@@ -76808,6 +76906,16 @@ func (s *WorkflowDefFull) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.StartRoles != nil {
+			e.FieldStart("start_roles")
+			e.ArrStart()
+			for _, elem := range s.StartRoles {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		e.FieldStart("created_at")
 		json.EncodeDateTime(e, s.CreatedAt)
 	}
@@ -76829,7 +76937,7 @@ func (s *WorkflowDefFull) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfWorkflowDefFull = [16]string{
+var jsonFieldsNameOfWorkflowDefFull = [17]string{
 	0:  "id",
 	1:  "application_id",
 	2:  "name",
@@ -76842,10 +76950,11 @@ var jsonFieldsNameOfWorkflowDefFull = [16]string{
 	9:  "context_schema",
 	10: "single_active_instance",
 	11: "approver_may_start",
-	12: "created_at",
-	13: "updated_at",
-	14: "published_at",
-	15: "archived_at",
+	12: "start_roles",
+	13: "created_at",
+	14: "updated_at",
+	15: "published_at",
+	16: "archived_at",
 }
 
 // Decode decodes WorkflowDefFull from json.
@@ -76853,7 +76962,7 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode WorkflowDefFull to nil")
 	}
-	var requiredBitSet [2]uint8
+	var requiredBitSet [3]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -76997,8 +77106,27 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"approver_may_start\"")
 			}
+		case "start_roles":
+			if err := func() error {
+				s.StartRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.StartRoles = append(s.StartRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"start_roles\"")
+			}
 		case "created_at":
-			requiredBitSet[1] |= 1 << 4
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -77010,7 +77138,7 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[1] |= 1 << 5
+			requiredBitSet[1] |= 1 << 6
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -77050,9 +77178,10 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [2]uint8{
+	for i, mask := range [3]uint8{
 		0b11111111,
-		0b00110011,
+		0b01100011,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

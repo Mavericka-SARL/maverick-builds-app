@@ -43,6 +43,23 @@ export function formatIsoDate(iso: string, format: string): string {
   }
 }
 
+/** A moment's local date in format, else as the browser writes dates (opts). */
+export function momentDate(ts: string, format = "", opts?: Intl.DateTimeFormatOptions): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  if (!format) return d.toLocaleDateString(undefined, opts);
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return formatIsoDate(iso, format);
+}
+
+/** A moment's local date in format and its time, else as the browser writes both. */
+export function momentDateTime(ts: string, format = ""): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  if (!format) return d.toLocaleString();
+  return `${momentDate(ts, format)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 /** A typed date in format (yyyy-mm-dd is always read too) as yyyy-mm-dd; null when it is no date. */
 export function parseDateText(text: string, format: string): string | null {
   const s = text.trim();

@@ -27,6 +27,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
+	"github.com/mavericks-engine/mavericks/internal/workflow"
 )
 
 const (
@@ -291,6 +292,9 @@ type Workflow struct {
 	// start it).
 	SingleActiveInstance *bool `json:"single_active_instance,omitempty"`
 	ApproverMayStart     *bool `json:"approver_may_start,omitempty"`
+	// StartRoles: who may start it by hand, role names as its steps'
+	// assignee_roles; absent or empty, anyone.
+	StartRoles []string `json:"start_roles,omitempty"`
 }
 
 type AutomationRule struct {
@@ -792,7 +796,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT wd.id::text, wd.name, COALESCE(wd.description,''), wd.trigger_event,
 		       COALESCE(wd.subject_type,''), COALESCE(wd.subject_config,'{}'::jsonb),
-		       wd.steps, wd.context_schema, wd.status, wd.single_active_instance, wd.approver_may_start
+		       wd.steps, wd.context_schema, wd.status, wd.single_active_instance, wd.approver_may_start, wd.start_roles
 		FROM workflow.workflow_def wd
 		WHERE wd.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (wd.revision_id=$2::uuid OR wd.revision_id IS NULL)
@@ -804,7 +808,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var wf Workflow
 		if err := rows.Scan(&wf.ID, &wf.Name, &wf.Description, &wf.TriggerEvent,
-			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status, &wf.SingleActiveInstance, &wf.ApproverMayStart); err != nil {
+			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status, &wf.SingleActiveInstance, &wf.ApproverMayStart, &wf.StartRoles); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -2263,13 +2267,14 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO workflow.workflow_def
 			  (application_id, revision_id, name, description, trigger_event, subject_type, subject_config,
-			   steps, context_schema, status, created_by, updated_by, single_active_instance, approver_may_start)
+			   steps, context_schema, status, created_by, updated_by, single_active_instance, approver_may_start, start_roles)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, COALESCE($7::jsonb,'{}'::jsonb),
 			        COALESCE($8::jsonb,'[]'::jsonb), COALESCE($9::jsonb,'[]'::jsonb), $10, $11::uuid, $11::uuid,
-			        COALESCE($12::boolean, true), COALESCE($13::boolean, false))
+			        COALESCE($12::boolean, true), COALESCE($13::boolean, false), $14::jsonb)
 			RETURNING id::text`,
 			appID, revisionID, wf.Name, wf.Description, wf.TriggerEvent, wf.SubjectType, jsonArg(subject),
-			jsonArg(wf.Steps), jsonArg(schema), status, importerID, wf.SingleActiveInstance, wf.ApproverMayStart).Scan(&newID); err != nil {
+			jsonArg(wf.Steps), jsonArg(schema), status, importerID, wf.SingleActiveInstance, wf.ApproverMayStart,
+			startRolesArg(wf.StartRoles)).Scan(&newID); err != nil {
 			return "", fmt.Errorf("workflow %q: %w", wf.Name, err)
 		}
 		wfMap[wf.ID] = newID
@@ -2476,6 +2481,13 @@ func uniqueName(used map[string]bool, name string) string {
 	}
 	used[out] = true
 	return out
+}
+
+// startRolesArg is a package's start roles as the jsonb array the column
+// holds, cleaned as the workflow store cleans them.
+func startRolesArg(roles []string) string {
+	b, _ := json.Marshal(workflow.CleanStartRoles(roles))
+	return string(b)
 }
 
 // importedDateFormat keeps a package's date format when it is one a model

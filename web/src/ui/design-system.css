@@ -2219,6 +2219,10 @@ tr:hover .mvx-member-label__actions,
 
 /* A date typed in the model's date format (DateInput.tsx): the text field,
    a calendar button, and the browser's date field it opens, unseen. */
+/* A button the reader may not use draws nothing (DashboardWidgets.tsx:
+   may_run): its cell takes no room, so a row of them leaves no gap. */
+.mvx-dash-cell--button:has(> .mvx-dash-cell__frame > .mvx-dash-cell__body:empty) { display: none; }
+
 .mvx-date-input {
   position: relative;
   display: inline-flex;

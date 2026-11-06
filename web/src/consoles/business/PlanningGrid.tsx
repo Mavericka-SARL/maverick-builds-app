@@ -866,12 +866,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // name one metric once instead of over every column). Unlisted, they
       // could not be moved at all (2026-11-05).
       const metricsPlaced = [...rows, ...cols, ...context].includes(METRICS_ID);
-      setPivotCols([...cols.filter(validId), ...(metricsPlaced ? [] : [METRICS_ID])]);
+      // One metric placed nowhere is named once, above the grid, as a
+      // context: under every column it repeated its name (and INPUT/CALC)
+      // month after month (2026-11-06). Dragged to Columns, it goes back.
+      const oneMetric = !metricsPlaced && pickMetrics(grid?.metrics ?? [], metricIds).length === 1;
+      setPivotCols([...cols.filter(validId), ...(metricsPlaced || oneMetric ? [] : [METRICS_ID])]);
       // A dimension the saved layout puts in no zone (a layout naming only
       // its pins in filter_sel) is a context selector at its pinned member,
       // never dropped: dropped, every cell key missed it and read nothing.
       const placed = new Set([...rows, ...cols, ...context]);
-      setPivotContext([...context.filter(validId), ...dims.filter(d => !placed.has(d.id)).map(d => d.id)]);
+      setPivotContext([...context.filter(validId), ...(oneMetric ? [METRICS_ID] : []), ...dims.filter(d => !placed.has(d.id)).map(d => d.id)]);
       const baseSel = Object.fromEntries(dims.map(d => [d.id, defaultLeafCode(d) ?? ""]));
       setFilterSel({ ...baseSel, ...(defaultView.filter_sel ?? {}) });
     } else {
@@ -1808,7 +1812,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 />
               </div>
             ))}
-            {metricsInContext && !metricChoice && gridMetrics[0] && (
+            {/* The one metric, named once — unless the title already names it. */}
+            {metricsInContext && !metricChoice && gridMetrics[0] && !(title ?? "").toLowerCase().includes((gridMetrics[0].label || gridMetrics[0].name).toLowerCase()) && (
               <span style={{ fontSize: 12, color: "var(--color-brand-600)", fontWeight: 500 }}>{gridMetrics[0].label}</span>
             )}
             {metricChoice && (

@@ -604,6 +604,8 @@ export interface TaskContextEntry {
   value: string;
   display: string;
   dimension_name?: string;
+  /** "date": value and display are yyyy-mm-dd. */
+  kind?: string;
 }
 
 export interface WorkflowContextVar {
@@ -619,6 +621,8 @@ export interface WorkflowDefPublic {
   description: string;
   trigger_event: string;
   context_schema: WorkflowContextVar[];
+  /** Whether the caller may start it by hand (its start roles; an approver's separation of duties). */
+  may_start?: boolean;
 }
 
 export interface HistoryStep {
@@ -1557,6 +1561,8 @@ export interface IntegrationRun {
 }
 
 export interface IntegrationDef {
+  /** On the business list: whether the caller could load anything with it (an export always may). */
+  may_run?: boolean;
   id: string;
   name: string;
   type: string;
@@ -1700,6 +1706,8 @@ export interface FormRecordPosting {
 }
 
 export interface AutomationRule {
+  /** On the list: whether the caller may run it by hand (the start roles of the workflow it starts). */
+  may_run?: boolean;
   id: string;
   application_id: string;
   name: string;
@@ -1814,6 +1822,9 @@ export interface WorkflowDef {
   /** A business admin who decides its approval may also start it (a planning
       round). Default false: approvers do not submit what they approve. */
   approver_may_start?: boolean;
+  /** Who may start it by hand (Start button, inbox, automation button): role
+      names as a step's assignee_roles; empty, anyone. */
+  start_roles?: string[];
   created_at: string;
   updated_at: string;
   published_at?: string;
@@ -3118,7 +3129,7 @@ export const api = {
     apiFetch<WorkflowDef>(`/api/developer/workflows?application_id=${encodeURIComponent(applicationId)}${revisionId ? `&revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
       method: "POST", body: JSON.stringify(body),
     }),
-  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean; approver_may_start?: boolean }) =>
+  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean; approver_may_start?: boolean; start_roles?: string[] }) =>
     apiFetch<WorkflowDef>(`/api/developer/workflows/${id}`, {
       method: "PATCH", body: JSON.stringify(body),
     }),

@@ -3218,7 +3218,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				INSERT INTO workflow.workflow_def
 				  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
 				   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
-			   single_active_instance, approver_may_start)
+			   single_active_instance, approver_may_start, start_roles)
 				SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 					-- subject_config binds the workflow to a form ({"form_id"}) or a
 					-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -3243,7 +3243,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 						FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 					), '[]'::jsonb),
 					$2::uuid,
-					wd.single_active_instance, wd.approver_may_start
+					wd.single_active_instance, wd.approver_may_start, wd.start_roles
 				FROM workflow.workflow_def wd
 				WHERE wd.application_id = (SELECT application_id FROM app)
 				  AND wd.revision_id = $3::uuid
@@ -3518,6 +3518,9 @@ type updateWorkflowDefParams struct {
 	// ApproverMayStart: its business-admin approver may also start it (a
 	// planning round); nil leaves it unchanged.
 	ApproverMayStart *bool `json:"approver_may_start"`
+	// StartRoles: who may start it by hand (role names, as steps'
+	// assignee_roles); nil leaves it unchanged, [] lets anyone.
+	StartRoles *[]string `json:"start_roles"`
 }
 
 // updateWorkflowDef fetches the current row first for two reasons: (1) to
@@ -3589,6 +3592,12 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 			return "", "", fmt.Errorf("set approver_may_start: %w", err)
 		}
 		def.ApproverMayStart = *p.ApproverMayStart
+	}
+	if p.StartRoles != nil {
+		if err := ws.SetWorkflowDefStartRoles(ctx, p.WorkflowDefID, *p.StartRoles); err != nil {
+			return "", "", fmt.Errorf("set start_roles: %w", err)
+		}
+		def.StartRoles = workflow.CleanStartRoles(*p.StartRoles)
 	}
 	var stepCount int
 	if arr, uErr := unmarshalArrayLen(def.Steps); uErr == nil {

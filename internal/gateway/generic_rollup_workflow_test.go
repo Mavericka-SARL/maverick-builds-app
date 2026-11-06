@@ -2064,7 +2064,7 @@ func TestContextDisplayResolvesNames(t *testing.T) {
 	if e := byKey["note"]; e.Display != "reminder" || e.DimensionName != "" {
 		t.Errorf("note = %+v, want raw text with no dimension", e)
 	}
-	if e := byKey["extra"]; e.Display != "unschemad" {
+	if e := byKey["Extra"]; e.Display != "unschemad" {
 		t.Errorf("extra = %+v, want unschema'd keys kept with raw value", e)
 	}
 	if _, has := byKey["_hidden"]; has {
@@ -2083,19 +2083,19 @@ func TestContextDisplayResolvesNames(t *testing.T) {
 	var modelName, revName string
 	_ = f.pool.QueryRow(ctx, `SELECT name FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&modelName)
 	_ = f.pool.QueryRow(ctx, `SELECT name FROM model.revision WHERE id=$1::uuid`, f.workingRevID).Scan(&revName)
-	if e := techByKey["model"]; e.Display != modelName || e.Value != modelName {
+	if e := techByKey["Model"]; e.Display != modelName || e.Value != modelName {
 		t.Errorf("model = %+v, want the model's name %q", e, modelName)
 	}
-	if e := techByKey["revision"]; e.Display != revName {
+	if e := techByKey["Revision"]; e.Display != revName {
 		t.Errorf("revision = %+v, want the revision's name %q", e, revName)
 	}
-	if e := techByKey["grid"]; e.Display == "" || e.Display == f.gridStaffID {
+	if e := techByKey["Grid"]; e.Display == "" || e.Display == f.gridStaffID {
 		t.Errorf("grid = %+v, want the grid's name", e)
 	}
-	if e := techByKey["metric"]; e.Display == "" || e.Display == f.amountMetricID {
+	if e := techByKey["Metric"]; e.Display == "" || e.Display == f.amountMetricID {
 		t.Errorf("metric = %+v, want the metric's name", e)
 	}
-	if _, has := techByKey["form"]; has || len(tech) != 4 {
+	if _, has := techByKey["Table"]; has || len(tech) != 4 {
 		t.Errorf("a dangling form_id must be left off; got %+v", tech)
 	}
 	for _, e := range tech {
@@ -2104,8 +2104,31 @@ func TestContextDisplayResolvesNames(t *testing.T) {
 		}
 	}
 
+	// A record-started workflow: its table's fields by their labels, in the
+	// table's order, a member by its label, a date marked; the record names
+	// its table, so no Table line.
+	var formID string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
+		VALUES ($1::uuid, $2::uuid, 'openings', 'Openings', $3::jsonb) RETURNING id::text`,
+		f.modelID, f.workingRevID, `[{"name":"location_name","label":"Location name","type":"text"},
+		  {"name":"dept","label":"Department","type":"dimension","dimension_id":"`+f.deptsDimID+`"},
+		  {"name":"open_on","label":"Opens on","type":"date"}]`).Scan(&formID); err != nil {
+		t.Fatalf("insert form: %v", err)
+	}
+	rec := h.contextDisplay(ctx, nil, map[string]any{
+		"form_id": formID, "record_id": "00000000-0000-0000-0000-000000000000",
+		"open_on": "2027-06-01", "dept": "DEPT_A", "location_name": "Harbour",
+	})
+	if len(rec) != 3 || rec[0].Key != "Location name" || rec[1].Key != "Department" || rec[2].Key != "Opens on" {
+		t.Fatalf("record card = %+v, want Location name, Department, Opens on in the table's order and no Table line", rec)
+	}
+	if rec[1].Display != "Dept A" || rec[1].Value != "DEPT_A" || rec[2].Kind != "date" {
+		t.Errorf("record card = %+v, want the member's label and the date marked", rec)
+	}
+
 	// Schema order first: scope, ghost, note (extra follows).
-	if len(out) != 4 || out[0].Key != "scope" || out[1].Key != "ghost" || out[2].Key != "note" || out[3].Key != "extra" {
+	if len(out) != 4 || out[0].Key != "scope" || out[1].Key != "ghost" || out[2].Key != "note" || out[3].Key != "Extra" {
 		keys := make([]string, len(out))
 		for i, e := range out {
 			keys[i] = e.Key

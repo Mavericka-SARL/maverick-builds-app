@@ -13,6 +13,8 @@ import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
 import { enabledSections, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
 import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
+import { useDemo } from "../api/useDemo";
+import { DateFormatContext } from "../consoles/dateFormat";
 
 /**
  * The one console. Every role the signed-in user holds contributes its
@@ -43,6 +45,9 @@ export default function UnifiedConsole() {
     useAdminSection({ ...input("platform-admin"), scope: "platform" }),
   ];
   const sections = candidates.filter((s): s is ConsoleSection => s !== null);
+  // The open model's date format, for every page — the inbox and history
+  // too, not only dashboards (which provide their own model's).
+  const { data: demo } = useDemo(undefined, { enabled: ids.some((id) => id === "business" || id === "business-admin" || id === "developer") });
   const owner = sections.find((s) => s.id === sectionOf(tab));
   const navGroups = sections.flatMap((s) => s.navGroups);
 
@@ -82,7 +87,9 @@ export default function UnifiedConsole() {
       <PlanBanner />
       {/* A model switch opens the page again in the new model; the sidebar
           and header stay (consoles/business/modelSelection). */}
-      <PageErrorBoundary key={`${tab}#${switches}`}>{owner?.render(tab)}</PageErrorBoundary>
+      <DateFormatContext.Provider value={demo?.date_format ?? ""}>
+        <PageErrorBoundary key={`${tab}#${switches}`}>{owner?.render(tab)}</PageErrorBoundary>
+      </DateFormatContext.Provider>
     </AppShell>
     </ConsolePageContext.Provider>
   );

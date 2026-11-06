@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type WorkflowStatusStep } from "../../api/client";
 import { LoadingState } from "../../ui";
+import { useDateFormat } from "../dateFormat";
+import { momentDate } from "../dateSerial";
 
 // The tenant roles a step names, as people read them; a business role
 // keeps its own name.
@@ -25,7 +27,6 @@ function due(iso?: string): { text: string; late: boolean } | null {
   if (d < 0) return { text: `overdue by ${days(-d)}`, late: true };
   return { text: d === 0 ? "due today" : `due in ${days(d)}`, late: false };
 }
-const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 const MARK: Record<WorkflowStatusStep["state"], string> = { done: "✓", current: "●", sent_back: "↺", skipped: "–", pending: "○" };
 
@@ -33,6 +34,9 @@ const MARK: Record<WorkflowStatusStep["state"], string> = { done: "✓", current
 // every step a person acts on, in order, the current one with its roles,
 // how long it has waited and when it is due. Names no person.
 export function WorkflowStatusWidget({ name }: { name: string }) {
+  // A date as the model writes dates, else "31 Oct 2026"-like in the browser's words.
+  const dateFormat = useDateFormat();
+  const date = (iso: string) => momentDate(iso, dateFormat, { day: "numeric", month: "short", year: "numeric" });
   const { data, isLoading, error } = useQuery({
     queryKey: ["workflow-status", name],
     queryFn: () => api.workflowStatus(name),

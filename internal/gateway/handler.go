@@ -2267,8 +2267,19 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 // only the fields redactHiddenContext needs.
 type contextVarSchema struct {
 	Key         string `json:"key"`
+	Label       string `json:"label"`
 	DataType    string `json:"data_type"`
 	DimensionID string `json:"dimension_id"`
+}
+
+// humanContextKey is how a card names a context key nothing labels:
+// "location_name" reads "Location name".
+func humanContextKey(k string) string {
+	k = strings.TrimSpace(strings.ReplaceAll(k, "_", " "))
+	if k == "" {
+		return k
+	}
+	return strings.ToUpper(k[:1]) + k[1:]
 }
 
 // redactHiddenContext returns a copy of taskCtx with any "Dimension member"
@@ -2336,6 +2347,58 @@ type taskContextEntry struct {
 	// DimensionName names the dimension a member value belongs to, so the
 	// card can say "geography · Canada (CA)". Empty for non-member vars.
 	DimensionName string `json:"dimension_name,omitempty"`
+	// Kind "date": the value is yyyy-mm-dd, for the card to write in the
+	// model's date format.
+	Kind string `json:"kind,omitempty"`
+}
+
+// technicalContextLabels are what the card calls the things a start path
+// names by id.
+var technicalContextLabels = map[string]string{
+	"model_id": "Model", "revision_id": "Revision", "form_id": "Table",
+	"grid_id": "Grid", "metric_id": "Metric", "record_id": "Record",
+}
+
+// recordContextEntries are the card lines of a record-started workflow's
+// context: the fields of its table (formID) present in taskCtx and not yet
+// shown, in the table's field order, each by its label — a member field by
+// its member's label, a date marked as one. Shown by their field names, a
+// new restaurant's card read location_name, restaurant_id, seats.
+func (h *handler) recordContextEntries(ctx context.Context, formID string, taskCtx map[string]any, seen map[string]bool, asString func(any) string) []taskContextEntry {
+	var fieldsJSON []byte
+	if err := h.db.QueryRow(ctx, `SELECT fields FROM model.form_def WHERE id::text = $1`, formID).Scan(&fieldsJSON); err != nil {
+		return nil
+	}
+	var fields []struct {
+		Name        string `json:"name"`
+		Label       string `json:"label"`
+		Type        string `json:"type"`
+		DimensionID string `json:"dimension_id"`
+	}
+	_ = json.Unmarshal(fieldsJSON, &fields)
+	var out []taskContextEntry
+	for _, f := range fields {
+		raw, ok := taskCtx[f.Name]
+		if !ok || seen[f.Name] || strings.HasPrefix(f.Name, "_") {
+			continue
+		}
+		seen[f.Name] = true
+		e := taskContextEntry{Key: cmp.Or(f.Label, f.Name), Value: asString(raw)}
+		e.Display = e.Value
+		switch f.Type {
+		case "dimension":
+			var label string
+			if f.DimensionID != "" && h.db.QueryRow(ctx, `
+				SELECT COALESCE(NULLIF(label, ''), code) FROM model.dimension_member
+				WHERE dimension_id::text = $1 AND code = $2`, f.DimensionID, e.Value).Scan(&label) == nil {
+				e.Display = label
+			}
+		case "date":
+			e.Kind = "date"
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // technicalContextQueries name the ids a workflow's start path puts in its
@@ -2396,7 +2459,7 @@ func (h *handler) contextDisplay(ctx context.Context, schemaJSON []byte, taskCtx
 			continue
 		}
 		seen[v.Key] = true
-		e := taskContextEntry{Key: v.Key, Value: asString(raw)}
+		e := taskContextEntry{Key: cmp.Or(v.Label, v.Key), Value: asString(raw)}
 		e.Display = e.Value
 		switch v.DataType {
 		case "Dimension member":
@@ -2430,11 +2493,19 @@ func (h *handler) contextDisplay(ctx context.Context, schemaJSON []byte, taskCtx
 		}
 		out = append(out, e)
 	}
+	// A record's fields follow, in its table's order.
+	if formID, ok := taskCtx["form_id"].(string); ok && formID != "" {
+		out = append(out, h.recordContextEntries(ctx, formID, taskCtx, seen, asString)...)
+	}
 	// Unschema'd keys iterate in map order — sort them for a stable card;
 	// schema entries keep their schema position at the front.
 	schemaCount := len(out)
 	for k, v := range taskCtx {
 		if seen[k] || strings.HasPrefix(k, "_") {
+			continue
+		}
+		// The record names its table already ("Restaurants R-011").
+		if k == "form_id" && taskCtx["record_id"] != nil {
 			continue
 		}
 		s := asString(v)
@@ -2444,11 +2515,15 @@ func (h *handler) contextDisplay(ctx context.Context, schemaJSON []byte, taskCtx
 			// card names the thing, and leaves out an id that no longer
 			// resolves — a bare UUID tells the person doing the task nothing.
 			if name != "" {
-				out = append(out, taskContextEntry{Key: strings.TrimSuffix(k, "_id"), Value: name, Display: name})
+				out = append(out, taskContextEntry{Key: cmp.Or(technicalContextLabels[k], strings.TrimSuffix(k, "_id")), Value: name, Display: name})
 			}
 			continue
 		}
-		out = append(out, taskContextEntry{Key: k, Value: s, Display: s})
+		// An empty value says nothing; a key nothing labels reads as words.
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+		out = append(out, taskContextEntry{Key: humanContextKey(k), Value: s, Display: s})
 	}
 	tail := out[schemaCount:]
 	sort.Slice(tail, func(i, j int) bool { return tail[i].Key < tail[j].Key })
@@ -4362,6 +4437,9 @@ func (h *handler) workflowSubmit(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("no published workflow def found: %w", err), http.StatusNotFound)
 		return
 	}
+	if h.refuseNonStarter(ctx, w, a, wfDefID) {
+		return
+	}
 
 	ws := h.workflowStore(ctx)
 	resolvedContext, err := ws.ResolveStartContext(ctx, wfDefID, a.UserID, map[string]string{
@@ -5151,7 +5229,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			INSERT INTO workflow.workflow_def
 			  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
 			   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
-			   single_active_instance, approver_may_start)
+			   single_active_instance, approver_may_start, start_roles)
 			SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 				-- subject_config binds the workflow to a form ({"form_id"}) or a
 				-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -5176,7 +5254,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 					FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 				), '[]'::jsonb),
 				$2::uuid,
-				wd.single_active_instance, wd.approver_may_start
+				wd.single_active_instance, wd.approver_may_start, wd.start_roles
 			FROM workflow.workflow_def wd
 			WHERE wd.application_id = (SELECT application_id FROM app)
 			  AND wd.revision_id = $3::uuid
@@ -6156,7 +6234,8 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 // ResolveStartContext re-validates whatever context arrives.
 func (h *handler) workflowDefinitions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if _, err := h.resolveActor(ctx, r); err != nil {
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
@@ -6173,13 +6252,18 @@ func (h *handler) workflowDefinitions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	// may_start: whether the caller may start it by hand — the start
+	// endpoint's two refusals, its start roles (workflow.Store.StartRefusal)
+	// and an approver's (onlyApprover), so the inbox offers only what starts.
 	rows, err := h.db.Query(ctx, `
-		SELECT id::text, name, COALESCE(description,''), trigger_event, COALESCE(context_schema, '[]'::jsonb)
+		SELECT id::text, name, COALESCE(description,''), trigger_event, COALESCE(context_schema, '[]'::jsonb),
+		       (jsonb_array_length(start_roles) = 0 OR `+assignee.SQL("application_id", "start_roles", "$3::uuid")+`)
+		       AND (NOT $4 OR approver_may_start)
 		FROM workflow.workflow_def
 		WHERE application_id=$1::uuid AND status='published'
 		  AND (revision_id IS NULL OR revision_id::text=$2)
 		ORDER BY name
-	`, appID, activeRev)
+	`, appID, activeRev, a.UserID, onlyApprover(a))
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -6191,11 +6275,12 @@ func (h *handler) workflowDefinitions(w http.ResponseWriter, r *http.Request) {
 		Description   string          `json:"description"`
 		TriggerEvent  string          `json:"trigger_event"`
 		ContextSchema json.RawMessage `json:"context_schema"`
+		MayStart      bool            `json:"may_start"`
 	}
 	out := []defRow{}
 	for rows.Next() {
 		var d defRow
-		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.TriggerEvent, &d.ContextSchema); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.TriggerEvent, &d.ContextSchema, &d.MayStart); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6352,6 +6437,9 @@ func (h *handler) workflowStartInstance(w http.ResponseWriter, r *http.Request) 
 	// legitimately wears that other hat.
 	if onlyApprover(a) && !h.workflowStore(ctx).ApproverMayStart(ctx, body.WorkflowDefID) {
 		jsonErr(w, errApproverStarts, http.StatusForbidden)
+		return
+	}
+	if h.refuseNonStarter(ctx, w, a, body.WorkflowDefID) {
 		return
 	}
 
@@ -8511,6 +8599,44 @@ type integrationDef struct {
 	Status string          `json:"status"`
 	Tags   []string        `json:"tags"`
 	Config json.RawMessage `json:"config"`
+	// MayRun: whether the caller could load anything with it (see
+	// integrationMayRun); set on the business list only.
+	MayRun *bool `json:"may_run,omitempty"`
+}
+
+// integrationMayRun reports whether act could load anything with an import
+// integration, so its dashboard button shows only to someone it works for:
+// a table's when they may create its records, a grid's when an input metric
+// of the grid is neither hidden nor read-only for them (the import refuses
+// those, internal/importpkg). An export, or any other target, always may.
+func (h *handler) integrationMayRun(ctx context.Context, act *actor, d integrationDef) bool {
+	if act == nil || d.Type == "file_export" {
+		return true
+	}
+	switch d.TargetType {
+	case "form":
+		scope, err := h.resolveFormRecordScope(ctx, act, d.TargetID)
+		return err == nil && scope.formPermissions().Create
+	case "grid":
+		rows, err := h.db.Query(ctx, `
+			SELECT md.id::text FROM model.grid_metric gm
+			JOIN model.metric_def md ON md.id = gm.metric_id
+			WHERE gm.grid_id::text = $1 AND md.is_input`, d.TargetID)
+		if err != nil {
+			return true
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return true
+		}
+		for _, id := range ids {
+			if access, aErr := writeguard.MetricAccess(ctx, h.db.For(ctx), act.UserID, id); aErr == nil && access != "hidden" && access != "read" {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // importDimensionMembersCSV upserts dimension members from CSV records.
@@ -9387,7 +9513,6 @@ func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 	var list []integrationDef
 	for rows.Next() {
 		var d integrationDef
@@ -9396,6 +9521,12 @@ func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 			d.Config = json.RawMessage("{}")
 		}
 		list = append(list, d)
+	}
+	rows.Close()
+	act, _ := h.resolveActor(ctx, r)
+	for i := range list {
+		may := h.integrationMayRun(ctx, act, list[i])
+		list[i].MayRun = &may
 	}
 	if list == nil {
 		list = []integrationDef{}
@@ -11314,11 +11445,30 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	if rules == nil {
-		jsonOK(w, []any{})
-		return
+	// may_run: whether the caller may run it by hand — a rule that starts a
+	// workflow is the trigger endpoint's two refusals (an approver's, and
+	// the workflow's start roles) — so a dashboard button shows only to
+	// someone it works for.
+	type servedRule struct {
+		*workflow.AutomationRule
+		MayRun bool `json:"may_run"`
 	}
-	jsonOK(w, rules)
+	act, _ := h.resolveActor(ctx, r)
+	out := make([]servedRule, 0, len(rules))
+	for _, rule := range rules {
+		may := true
+		if act != nil {
+			if onlyApprover(act) && !h.ruleApproverMayStart(ctx, rule.ID) {
+				may = false
+			} else if defID := h.ruleWorkflowDefID(ctx, rule.ID); defID != "" {
+				if reason, rErr := store.StartRefusal(ctx, defID, act.UserID); rErr != nil || reason != "" {
+					may = false
+				}
+			}
+		}
+		out = append(out, servedRule{rule, may})
+	}
+	jsonOK(w, out)
 }
 
 func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
@@ -11356,6 +11506,9 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 	// admin role alongside lifts it, as it does there.
 	if onlyApprover(act) && !h.ruleApproverMayStart(ctx, ruleID) {
 		jsonErr(w, errApproverStarts, http.StatusForbidden)
+		return
+	}
+	if defID := h.ruleWorkflowDefID(ctx, ruleID); defID != "" && h.refuseNonStarter(ctx, w, act, defID) {
 		return
 	}
 	var ruleAppID string
@@ -18213,9 +18366,11 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 			// Per-definition dedup choice; absent = unchanged.
 			SingleActiveInstance *bool `json:"single_active_instance"`
 			// Whether its approver may start it; absent = unchanged.
-			ApproverMayStart *bool           `json:"approver_may_start"`
-			Steps            json.RawMessage `json:"steps"`
-			ContextSchema    json.RawMessage `json:"context_schema"`
+			ApproverMayStart *bool `json:"approver_may_start"`
+			// Who may start it (role names); absent = unchanged, [] = anyone.
+			StartRoles    *[]string       `json:"start_roles"`
+			Steps         json.RawMessage `json:"steps"`
+			ContextSchema json.RawMessage `json:"context_schema"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
@@ -18257,6 +18412,13 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 				return
 			}
 			updated.ApproverMayStart = *body.ApproverMayStart
+		}
+		if body.StartRoles != nil {
+			if err := ws.SetWorkflowDefStartRoles(ctx, defID, *body.StartRoles); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			updated.StartRoles = workflow.CleanStartRoles(*body.StartRoles)
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryModelChange, EventType: auditlog.EventWorkflowDefUpdated,
@@ -18859,6 +19021,37 @@ func (h *handler) ruleApproverMayStart(ctx context.Context, ruleID string) bool 
 		ORDER BY (wd.id = r.workflow_def_id) DESC NULLS LAST
 		LIMIT 1`, ruleID).Scan(&v)
 	return v
+}
+
+// ruleWorkflowDefID is the workflow a rule starts — by id, else by name in
+// the rule's application, as ruleApproverMayStart finds it — or "".
+func (h *handler) ruleWorkflowDefID(ctx context.Context, ruleID string) string {
+	var id string
+	_ = h.db.QueryRow(ctx, `
+		SELECT wd.id::text
+		FROM workflow.automation_rule r
+		JOIN workflow.workflow_def wd ON wd.id = r.workflow_def_id
+		     OR (r.workflow_def_id IS NULL AND wd.application_id = r.application_id AND wd.name = r.workflow_name AND wd.status <> 'archived')
+		WHERE r.id = $1::uuid
+		ORDER BY (wd.id = r.workflow_def_id) DESC NULLS LAST
+		LIMIT 1`, ruleID).Scan(&id)
+	return id
+}
+
+// refuseNonStarter answers 403 when the workflow names who may start it by
+// hand and act is none of them (workflow.Store.StartRefusal), reporting
+// whether it did.
+func (h *handler) refuseNonStarter(ctx context.Context, w http.ResponseWriter, act *actor, defID string) bool {
+	reason, err := h.workflowStore(ctx).StartRefusal(ctx, defID, act.UserID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return true
+	}
+	if reason != "" {
+		jsonErr(w, errors.New(reason), http.StatusForbidden)
+		return true
+	}
+	return false
 }
 
 // isUniqueViolation reports a unique constraint refusal (SQLSTATE 23505).

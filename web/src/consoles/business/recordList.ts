@@ -235,9 +235,18 @@ export function singular(label: string): string {
   return label.endsWith("ies") ? label.slice(0, -3) + "y" : label.endsWith("s") ? label.slice(0, -1) : label;
 }
 
-/** What the button adding a record of form says: "New account", "New document link". */
+/**
+ * A label inside a sentence: each capitalised word in lower case, an
+ * acronym or a name with more capitals kept ("GL postings", "POS sales",
+ * "P&L lines" read "New gl posting" before).
+ */
+export function inSentence(label: string): string {
+  return label.split(" ").map(w => (/^[A-Z][^A-Z]*$/.test(w) ? w.toLowerCase() : w)).join(" ");
+}
+
+/** What the button adding a record of form says: "New account", "New GL posting". */
 export function newRecordLabel(form: Pick<FormDef, "label">): string {
-  return `New ${singular(form.label).toLowerCase()}`;
+  return `New ${inSentence(singular(form.label))}`;
 }
 
 /**

@@ -1724,6 +1724,10 @@ type WorkflowDefFull struct {
 	// start it (a planning round); off, an approver does not submit what
 	// they approve (migration 114).
 	ApproverMayStart bool `json:"approver_may_start"`
+	// StartRoles names who may start it, as a step's assignee_roles name
+	// who decides it (internal/workflow/assignee); empty, anyone who reaches
+	// the application (migration 154).
+	StartRoles []string `json:"start_roles"`
 }
 
 // ListWorkflowDefs lists a revision's workflow defs plus revision-global
@@ -1761,12 +1765,12 @@ func (s *Store) GetWorkflowDefFull(ctx context.Context, defID string) (*Workflow
 	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, COALESCE(description,''),
 		       trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		       created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		       created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 		FROM workflow.workflow_def WHERE id = $1::uuid
 	`, defID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found", defID)
@@ -1794,11 +1798,11 @@ func (s *Store) CreateWorkflowDefFull(ctx context.Context, appID, revisionID, na
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6::uuid, $6::uuid)
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, appID, revisionID, name, description, triggerEvent, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if err != nil {
 		return nil, nameTaken(err)
@@ -1822,11 +1826,11 @@ func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, descript
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, defID, name, description, triggerEvent, subjectType, nullableJSON(subjectConfig), nullableJSON(steps), nullableJSON(contextSchema), userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
@@ -1850,6 +1854,61 @@ func (s *Store) SetWorkflowDefApproverMayStart(ctx context.Context, defID string
 		return fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
 	}
 	return nil
+}
+
+// SetWorkflowDefStartRoles sets who may start the definition
+// (WorkflowDefFull.StartRoles), cleaned by CleanStartRoles; none leaves it
+// to anyone. Archived definitions refuse.
+func (s *Store) SetWorkflowDefStartRoles(ctx context.Context, defID string, roles []string) error {
+	b, _ := json.Marshal(CleanStartRoles(roles))
+	tag, err := s.db.Exec(ctx, `
+		UPDATE workflow.workflow_def SET start_roles = $2::jsonb, updated_at = now()
+		WHERE id = $1::uuid AND status <> 'archived'`, defID, string(b))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
+	}
+	return nil
+}
+
+// CleanStartRoles trims role names and drops empty ones and repeats.
+func CleanStartRoles(roles []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, r := range roles {
+		r = strings.TrimSpace(r)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// StartRefusal says why userID may not start defID by hand — from the
+// Start button, the inbox or an automation button — or "" when they may:
+// anyone may when it names no start role, otherwise whoever a step naming
+// those roles would be assigned to (assignee.SQL), so "who starts it" and
+// "who decides a step" read roles alike. A record or event that starts a
+// workflow is not starting it by hand and is not asked.
+func (s *Store) StartRefusal(ctx context.Context, defID, userID string) (string, error) {
+	var name string
+	var roles []string
+	var ok bool
+	err := s.db.QueryRow(ctx, `
+		SELECT wd.name, wd.start_roles,
+		       jsonb_array_length(wd.start_roles) = 0 OR `+assignee.SQL("wd.application_id", "wd.start_roles", "$2::uuid")+`
+		FROM workflow.workflow_def wd WHERE wd.id = $1::uuid`, defID, userID).Scan(&name, &roles, &ok)
+	if errors.Is(err, pgx.ErrNoRows) || ok {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("who may start: %w", err)
+	}
+	return fmt.Sprintf("%q is started by %s", name, strings.Join(roles, " or ")), nil
 }
 
 // ApproverMayStart reports whether defID's approver may start it.
@@ -1883,11 +1942,11 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status IN ('draft', 'invalid')
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not in publishable state", defID)
@@ -1910,11 +1969,11 @@ func (s *Store) ArchiveWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or already archived", defID)
@@ -1933,11 +1992,11 @@ func (s *Store) RestoreWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status = 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not archived", defID)
@@ -1971,17 +2030,17 @@ func (s *Store) DuplicateWorkflowDef(ctx context.Context, defID, newName, userID
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def
 		    (application_id, revision_id, name, description, trigger_event, subject_type, subject_config, steps, context_schema, created_by, updated_by,
-		     single_active_instance, approver_may_start)
+		     single_active_instance, approver_may_start, start_roles)
 		SELECT application_id, revision_id, $2, description, trigger_event, subject_type, subject_config, steps, context_schema, $3::uuid, $3::uuid,
-		       single_active_instance, approver_may_start
+		       single_active_instance, approver_may_start, start_roles
 		FROM workflow.workflow_def WHERE id = $1::uuid
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
 	`, defID, newName, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
 	)
 	if err != nil {
 		return nil, nameTaken(err)

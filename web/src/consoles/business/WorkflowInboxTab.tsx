@@ -6,6 +6,8 @@ import { LoadingState, EmptyState, StatusBadge, Textarea, TextInput, Button, Dia
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { WorkflowStepActions } from "../WorkflowStepActions";
+import { useDateFormat } from "../dateFormat";
+import { momentDate } from "../dateSerial";
 
 // ── Start a workflow (dialog generated from context_schema) ──────────────────
 //
@@ -262,7 +264,7 @@ export function StartWorkflowSection() {
   const { data: dims = [] } = useQuery({ queryKey: ["public-dims"], queryFn: api.getDimensions });
   const [active, setActive] = useState<WorkflowDefPublic | null>(null);
 
-  const manual = defs.filter(d => d.trigger_event === "manual");
+  const manual = defs.filter(d => d.trigger_event === "manual" && d.may_start !== false);
   if (manual.length === 0) return null;
 
   return (
@@ -296,6 +298,7 @@ export function StepTypeIcon({ type, size = 16 }: { type: string; size?: number 
 
 export function WorkflowInbox() {
   const qc = useQueryClient();
+  const dateFormat = useDateFormat();
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["tasks"],
     queryFn: api.getTasks,
@@ -357,10 +360,10 @@ export function WorkflowInbox() {
                 {t.due_at && (
                   <StatusBadge tone={overdue ? "danger" : isDueSoon(t.due_at) ? "warning" : "neutral"}>
                     {overdue && <AlertTriangle size={11} aria-hidden="true" style={{ marginRight: 3, verticalAlign: -1 }} />}
-                    <Txt>{overdue ? "Overdue" : "Due"}</Txt> {new Date(t.due_at).toLocaleDateString()}
+                    <Txt>{overdue ? "Overdue" : "Due"}</Txt> {momentDate(t.due_at, dateFormat)}
                   </StatusBadge>
                 )}
-                <span className="mvx-admin-muted">{new Date(t.created_at).toLocaleDateString()}</span>
+                <span className="mvx-admin-muted">{momentDate(t.created_at, dateFormat)}</span>
               </div>
               {isOpen
                 ? <ChevronUp size={14} aria-hidden="true" style={{ color: "var(--color-text-subtle)" }} />

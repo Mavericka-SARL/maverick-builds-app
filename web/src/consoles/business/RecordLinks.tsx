@@ -13,7 +13,7 @@ import { FormFieldInput, RecordStatusBadge } from "./RecordFieldInput";
 import { canCreateRecords, createStatusesOf, createStatusFor } from "./formPermissions";
 import {
   defaultsOf, displayValue, editableFields, isDueToday, isOverdue, keeperOf, memberLabels, pairedField, postsMember,
-  localDateTime, recordTitle, singular, statusLabel,
+  inSentence, localDateTime, recordTitle, singular, statusLabel,
 } from "./recordList";
 
 /** How one field of a record reads: a link opens in a new tab; a deadline that has passed says overdue. */
@@ -136,7 +136,7 @@ function LinkedCreatePanel({ keeper, origin, originDraft, revisionId, dims, metr
   return (
     <div className="mvx-panel" role="group" aria-label={`New ${singular(keeper.label)}`}
       style={{ padding: 14, borderStyle: "dashed", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 600 }}>New {singular(keeper.label).toLowerCase()}</div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>New {inSentence(singular(keeper.label))}</div>
       {editableFields(keeper).filter(f => f.type !== "autocode").map(f => (
         <Field key={f.name} label={f.label || f.name} required={f.required}>
           <FormFieldInput f={f} value={draft[f.name]} onChange={v => setDraft(d => ({ ...d, [f.name]: v }))} dims={dims} metrics={metrics} />

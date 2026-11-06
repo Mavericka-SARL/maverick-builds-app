@@ -4,6 +4,8 @@ import { api, type HistoryInstance, type HistoryStep } from "../../api/client";
 import { LoadingState, EmptyState, StatusBadge, type DesignTone } from "../../ui";
 import { StepTypeIcon } from "./WorkflowInboxTab";
 import { TaskContextSummary } from "../TaskContextSummary";
+import { useDateFormat } from "../dateFormat";
+import { momentDate } from "../dateSerial";
 
 const WF_STATUS_TONE: Record<string, DesignTone> = {
   running: "info",
@@ -19,6 +21,7 @@ const WF_STEP_STATUS_TONE: Record<string, DesignTone> = {
 };
 
 export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: string }) {
+  const dateFormat = useDateFormat();
   const { data: instances = [], isLoading } = useQuery({
     queryKey: ["my-wf-history"],
     queryFn: api.getMyWorkflowHistory,
@@ -52,7 +55,7 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
                 </span>
               )}
             </div>
-            <span className="mvx-admin-muted">{new Date(inst.started_at).toLocaleDateString()}</span>
+            <span className="mvx-admin-muted">{momentDate(inst.started_at, dateFormat)}</span>
             <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
           </div>
           <div className="mvx-admin-object__body" style={{ gap: 6 }}>

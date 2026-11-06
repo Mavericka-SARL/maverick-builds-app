@@ -847,6 +847,7 @@ components:
         value:          { type: string, description: "Raw context value (stable code / id)" }
         display:        { type: string, description: "Resolved human name; equals value when nothing resolves" }
         dimension_name: { type: string, description: "Dimension a member value belongs to" }
+        kind:           { type: string, description: "\"date\" when the value is a date (yyyy-mm-dd), for the card to write in the model's date format" }
 
     TaskActionRequest:
       type: object
@@ -1372,6 +1373,7 @@ components:
         target_type: { type: string }
         target_id:   { type: string }
         config:      { type: object, additionalProperties: {} }
+        may_run:     { type: boolean, description: "On the business list: whether the caller could load anything with it — a table's when they may create its records, a grid's when an input metric of it is writable for them; an export always" }
 
     CreateIntegrationRequest:
       type: object
@@ -1469,6 +1471,7 @@ components:
         context_schema: { type: object, additionalProperties: {} }
         single_active_instance: { type: boolean, description: One running instance per dimension-member scope; a second start with the same members is refused as a duplicate. Default true. }
         approver_may_start: { type: boolean, description: An approver of the workflow may start it (otherwise refused 403, separation of duties). Default false. }
+        start_roles:    { type: array, items: { type: string }, description: "Who may start it by hand (Start button, inbox, automation button): role names, matched as a step's assignee_roles; empty, anyone who reaches the application. A record or event that starts it is not asked." }
         created_at:     { type: string, format: date-time }
         updated_at:     { type: string, format: date-time }
         published_at:   { type: string, format: date-time, nullable: true }
@@ -1494,6 +1497,7 @@ components:
         context_schema: { type: object, additionalProperties: {} }
         single_active_instance: { type: boolean }
         approver_may_start: { type: boolean }
+        start_roles:    { type: array, items: { type: string }, description: "Who may start it by hand (role names); [] lets anyone, absent leaves it unchanged" }
 
     DuplicateWorkflowRequest:
       type: object
@@ -2584,6 +2588,7 @@ components:
       type: object
       required: [id, application_id, name, description, trigger_type, workflow_name, enabled, created_at, max_retries, retry_backoff_seconds]
       properties:
+        may_run:                { type: boolean, description: "On the list: whether the caller may run it by hand (the workflow it starts names them among its start_roles, and an approver's separation of duties)" }
         id:                     { type: string, format: uuid }
         application_id:         { type: string, format: uuid }
         revision_id:            { type: string, format: uuid, description: "Empty means revision-global" }
@@ -4385,6 +4390,7 @@ paths:
                     name:          { type: string }
                     description:   { type: string }
                     trigger_event: { type: string }
+                    may_start:     { type: boolean, description: "Whether the caller may start it by hand (its start_roles, and an approver's separation of duties)" }
                     context_schema:
                       type: array
                       items:

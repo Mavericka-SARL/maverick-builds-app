@@ -5,6 +5,8 @@ import { api, type Task, type HistoryInstance, type BARole, type BAUser, type BA
 import { TaskContextSummary } from "../TaskContextSummary";
 import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
+import { useDateFormat } from "../dateFormat";
+import { momentDate, momentDateTime } from "../dateSerial";
 import {
   Button,
   Field,
@@ -31,6 +33,7 @@ import {
 
 export function WorkflowInbox() {
   const qc = useQueryClient();
+  const dateFormat = useDateFormat();
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["tasks"],
     queryFn: api.getTasks,
@@ -82,7 +85,7 @@ export function WorkflowInbox() {
             <TaskContextSummary contextDisplay={t.context_display} context={t.context} />
             <div className="mvx-admin-muted">
               {t.requested_by && <span>Requested by <strong>{t.requested_by}</strong> · </span>}
-              <Txt>Instance: </Txt>{t.instance_id.slice(0, 8)} · {new Date(t.created_at).toLocaleString()}
+              <Txt>Instance: </Txt>{t.instance_id.slice(0, 8)} · {momentDateTime(t.created_at, dateFormat)}
             </div>
 
             <TextInput
@@ -126,6 +129,7 @@ const DECISION_TONE: Record<string, DesignTone> = {
 
 export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string } = {}) {
   const qc = useQueryClient();
+  const dateFormat = useDateFormat();
   const { data: instances = [], isLoading } = useQuery({
     queryKey: ["wf-history"],
     queryFn: api.getWorkflowHistory,
@@ -213,7 +217,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
                   </span>
                 )}
               </div>
-              <span className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{new Date(inst.started_at).toLocaleDateString()}</span>
+              <span className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{momentDate(inst.started_at, dateFormat)}</span>
               <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
               <Select
                 value={instanceStatus[inst.id] ?? inst.status}

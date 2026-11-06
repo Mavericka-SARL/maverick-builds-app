@@ -133,7 +133,10 @@ calculations by name, and no number formula reads it). A pick-list
 holds leaf members unless `picklist_allow_parents` is true. A grid widget's
 `widget_props.show_members` (`{"<dimension>": ["<code>", …]}`) shows only
 those members on a row or column axis, in that order; `update_workflow`'s
-`approver_may_start` lets the workflow's approver start it.
+`approver_may_start` lets the workflow's approver start it, and its
+`start_roles` (role names, as a step's `assignee_roles`) says who may start
+it by hand: others are not offered its Start button or inbox entry, and the
+start is refused (`workflow.Store.StartRefusal`); `[]` lets anyone.
 
 `add_dimension_property` declares a typed member property (`dimension_id`,
 `name`, `data_type`: text, number or date) under the same rules as the

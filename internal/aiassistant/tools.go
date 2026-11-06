@@ -60,7 +60,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "get_workflow",
-			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, approver_may_start, the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
+			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, approver_may_start, start_roles (who may start it by hand), the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"workflow_def_id":{"type":"string","description":"The workflow's id from list_workflows, or its exact name"}},"required":["workflow_def_id"]}`),
 		},
 		{

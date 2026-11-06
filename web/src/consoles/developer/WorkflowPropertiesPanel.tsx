@@ -7,6 +7,7 @@ import { StatusBadge as Badge, Button } from "../../ui";
 import { inputStyle, btnPrimary, btnSecondary, TRIGGER_FALLBACK, useTriggerEvents } from "./workflowConstants";
 import { CreateAutomationModal } from "./CreateAutomationModal";
 import { useCancelRun } from "./useCancelRun";
+import { RolePicker } from "./RolePicker";
 
 // "Form record" is the stored name of a record variable; it reads as "Record".
 const contextTypeLabel = (t: string) => (t === "Form record" ? "Record" : t);
@@ -304,6 +305,10 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
             </Field>
             <Field label="Who starts it">
               <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                By hand, from its Start button or the inbox. None ticked: anyone using the model. A record or an event that starts it is not asked.
+              </p>
+              <RolePicker applicationId={applicationId} value={workflow.start_roles ?? []} onChange={roles => onChange({ start_roles: roles })} />
+              <p className="mvx-admin-muted" style={{ margin: "10px 0 6px", fontSize: 12 }}>
                 A business admin decides approvals and does not submit them. Tick this for a planning round the admin opens and signs off.
               </p>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>

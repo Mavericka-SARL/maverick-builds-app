@@ -1,4 +1,6 @@
 import type { TaskContextEntry } from "../api/client";
+import { useDateFormat } from "./dateFormat";
+import { isoToLocal } from "./dateSerial";
 
 // The context block of an approval/task/history card. Prefers the server's
 // context_display (member codes resolved to labels, metric ids to names —
@@ -18,6 +20,7 @@ export function TaskContextSummary({
         // card; the server names them in context_display.
         .filter(([k]) => !k.startsWith("_") && !k.endsWith("_id"))
         .map(([k, v]) => ({ key: k, value: String(v), display: String(v) }));
+  const dateFormat = useDateFormat();
   if (entries.length === 0) return null;
   return (
     <div style={{ background: "var(--color-surface-subtle)", borderRadius: "var(--radius-button)", padding: "8px 12px", fontSize: 12 }}>
@@ -30,7 +33,7 @@ export function TaskContextSummary({
             )}
           </span>
           <span style={{ fontWeight: 500 }}>
-            {e.display}
+            {e.kind === "date" ? isoToLocal(e.display, dateFormat) : e.display}
             {/* The code stays visible when a name resolved — it is the stable
                 identifier people paste into filters and imports. */}
             {e.display !== e.value && <span className="mvx-admin-muted"> ({e.value})</span>}

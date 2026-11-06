@@ -3184,6 +3184,9 @@ func (s *AutomationExecutionTriggerPayload) init() AutomationExecutionTriggerPay
 
 // Ref: #/components/schemas/AutomationRule
 type AutomationRule struct {
+	// On the list: whether the caller may run it by hand (the workflow it starts names them among its
+	// start_roles, and an approver's separation of duties).
+	MayRun        OptBool   `json:"may_run"`
 	ID            uuid.UUID `json:"id"`
 	ApplicationID uuid.UUID `json:"application_id"`
 	// Empty means revision-global.
@@ -3212,6 +3215,11 @@ type AutomationRule struct {
 	LastFireAt          OptNilDateTime                 `json:"last_fire_at"`
 	// A form_submit or form_approval rule also fires for the records a file import creates.
 	FiresOnImport OptBool `json:"fires_on_import"`
+}
+
+// GetMayRun returns the value of MayRun.
+func (s *AutomationRule) GetMayRun() OptBool {
+	return s.MayRun
 }
 
 // GetID returns the value of ID.
@@ -3317,6 +3325,11 @@ func (s *AutomationRule) GetLastFireAt() OptNilDateTime {
 // GetFiresOnImport returns the value of FiresOnImport.
 func (s *AutomationRule) GetFiresOnImport() OptBool {
 	return s.FiresOnImport
+}
+
+// SetMayRun sets the value of MayRun.
+func (s *AutomationRule) SetMayRun(val OptBool) {
+	s.MayRun = val
 }
 
 // SetID sets the value of ID.
@@ -16437,6 +16450,9 @@ type IntegrationDef struct {
 	TargetType string               `json:"target_type"`
 	TargetID   string               `json:"target_id"`
 	Config     IntegrationDefConfig `json:"config"`
+	// On the business list: whether the caller could load anything with it — a table's when they may
+	// create its records, a grid's when an input metric of it is writable for them; an export always.
+	MayRun OptBool `json:"may_run"`
 }
 
 // GetID returns the value of ID.
@@ -16469,6 +16485,11 @@ func (s *IntegrationDef) GetConfig() IntegrationDefConfig {
 	return s.Config
 }
 
+// GetMayRun returns the value of MayRun.
+func (s *IntegrationDef) GetMayRun() OptBool {
+	return s.MayRun
+}
+
 // SetID sets the value of ID.
 func (s *IntegrationDef) SetID(val uuid.UUID) {
 	s.ID = val
@@ -16497,6 +16518,11 @@ func (s *IntegrationDef) SetTargetID(val string) {
 // SetConfig sets the value of Config.
 func (s *IntegrationDef) SetConfig(val IntegrationDefConfig) {
 	s.Config = val
+}
+
+// SetMayRun sets the value of MayRun.
+func (s *IntegrationDef) SetMayRun(val OptBool) {
+	s.MayRun = val
 }
 
 type IntegrationDefConfig map[string]jx.Raw
@@ -17871,10 +17897,12 @@ type ListWorkflowDefinitionsOKApplicationJSON []ListWorkflowDefinitionsOKItem
 func (*ListWorkflowDefinitionsOKApplicationJSON) listWorkflowDefinitionsRes() {}
 
 type ListWorkflowDefinitionsOKItem struct {
-	ID            OptUUID                                          `json:"id"`
-	Name          OptString                                        `json:"name"`
-	Description   OptString                                        `json:"description"`
-	TriggerEvent  OptString                                        `json:"trigger_event"`
+	ID           OptUUID   `json:"id"`
+	Name         OptString `json:"name"`
+	Description  OptString `json:"description"`
+	TriggerEvent OptString `json:"trigger_event"`
+	// Whether the caller may start it by hand (its start_roles, and an approver's separation of duties).
+	MayStart      OptBool                                          `json:"may_start"`
 	ContextSchema []ListWorkflowDefinitionsOKItemContextSchemaItem `json:"context_schema"`
 }
 
@@ -17896,6 +17924,11 @@ func (s *ListWorkflowDefinitionsOKItem) GetDescription() OptString {
 // GetTriggerEvent returns the value of TriggerEvent.
 func (s *ListWorkflowDefinitionsOKItem) GetTriggerEvent() OptString {
 	return s.TriggerEvent
+}
+
+// GetMayStart returns the value of MayStart.
+func (s *ListWorkflowDefinitionsOKItem) GetMayStart() OptBool {
+	return s.MayStart
 }
 
 // GetContextSchema returns the value of ContextSchema.
@@ -17921,6 +17954,11 @@ func (s *ListWorkflowDefinitionsOKItem) SetDescription(val OptString) {
 // SetTriggerEvent sets the value of TriggerEvent.
 func (s *ListWorkflowDefinitionsOKItem) SetTriggerEvent(val OptString) {
 	s.TriggerEvent = val
+}
+
+// SetMayStart sets the value of MayStart.
+func (s *ListWorkflowDefinitionsOKItem) SetMayStart(val OptBool) {
+	s.MayStart = val
 }
 
 // SetContextSchema sets the value of ContextSchema.
@@ -31312,6 +31350,8 @@ type TaskContextEntry struct {
 	Display string `json:"display"`
 	// Dimension a member value belongs to.
 	DimensionName OptString `json:"dimension_name"`
+	// "date" when the value is a date (yyyy-mm-dd), for the card to write in the model's date format.
+	Kind OptString `json:"kind"`
 }
 
 // GetKey returns the value of Key.
@@ -31334,6 +31374,11 @@ func (s *TaskContextEntry) GetDimensionName() OptString {
 	return s.DimensionName
 }
 
+// GetKind returns the value of Kind.
+func (s *TaskContextEntry) GetKind() OptString {
+	return s.Kind
+}
+
 // SetKey sets the value of Key.
 func (s *TaskContextEntry) SetKey(val string) {
 	s.Key = val
@@ -31352,6 +31397,11 @@ func (s *TaskContextEntry) SetDisplay(val string) {
 // SetDimensionName sets the value of DimensionName.
 func (s *TaskContextEntry) SetDimensionName(val OptString) {
 	s.DimensionName = val
+}
+
+// SetKind sets the value of Kind.
+func (s *TaskContextEntry) SetKind(val OptString) {
+	s.Kind = val
 }
 
 // The tenant-level AI provider key (enterprise feature `tenant_ai_keys`). api_key is write-only: it
@@ -33939,6 +33989,8 @@ type UpdateWorkflowRequest struct {
 	ContextSchema        OptUpdateWorkflowRequestContextSchema `json:"context_schema"`
 	SingleActiveInstance OptBool                               `json:"single_active_instance"`
 	ApproverMayStart     OptBool                               `json:"approver_may_start"`
+	// Who may start it by hand (role names); [] lets anyone, absent leaves it unchanged.
+	StartRoles []string `json:"start_roles"`
 }
 
 // GetName returns the value of Name.
@@ -33986,6 +34038,11 @@ func (s *UpdateWorkflowRequest) GetApproverMayStart() OptBool {
 	return s.ApproverMayStart
 }
 
+// GetStartRoles returns the value of StartRoles.
+func (s *UpdateWorkflowRequest) GetStartRoles() []string {
+	return s.StartRoles
+}
+
 // SetName sets the value of Name.
 func (s *UpdateWorkflowRequest) SetName(val OptString) {
 	s.Name = val
@@ -34029,6 +34086,11 @@ func (s *UpdateWorkflowRequest) SetSingleActiveInstance(val OptBool) {
 // SetApproverMayStart sets the value of ApproverMayStart.
 func (s *UpdateWorkflowRequest) SetApproverMayStart(val OptBool) {
 	s.ApproverMayStart = val
+}
+
+// SetStartRoles sets the value of StartRoles.
+func (s *UpdateWorkflowRequest) SetStartRoles(val []string) {
+	s.StartRoles = val
 }
 
 type UpdateWorkflowRequestContextSchema map[string]jx.Raw
@@ -34558,11 +34620,15 @@ type WorkflowDefFull struct {
 	// as a duplicate. Default true.
 	SingleActiveInstance OptBool `json:"single_active_instance"`
 	// An approver of the workflow may start it (otherwise refused 403.
-	ApproverMayStart OptBool        `json:"approver_may_start"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-	PublishedAt      OptNilDateTime `json:"published_at"`
-	ArchivedAt       OptNilDateTime `json:"archived_at"`
+	ApproverMayStart OptBool `json:"approver_may_start"`
+	// Who may start it by hand (Start button, inbox, automation button): role names, matched as a step's
+	// assignee_roles; empty, anyone who reaches the application. A record or event that starts it is not
+	// asked.
+	StartRoles  []string       `json:"start_roles"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	PublishedAt OptNilDateTime `json:"published_at"`
+	ArchivedAt  OptNilDateTime `json:"archived_at"`
 }
 
 // GetID returns the value of ID.
@@ -34623,6 +34689,11 @@ func (s *WorkflowDefFull) GetSingleActiveInstance() OptBool {
 // GetApproverMayStart returns the value of ApproverMayStart.
 func (s *WorkflowDefFull) GetApproverMayStart() OptBool {
 	return s.ApproverMayStart
+}
+
+// GetStartRoles returns the value of StartRoles.
+func (s *WorkflowDefFull) GetStartRoles() []string {
+	return s.StartRoles
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -34703,6 +34774,11 @@ func (s *WorkflowDefFull) SetSingleActiveInstance(val OptBool) {
 // SetApproverMayStart sets the value of ApproverMayStart.
 func (s *WorkflowDefFull) SetApproverMayStart(val OptBool) {
 	s.ApproverMayStart = val
+}
+
+// SetStartRoles sets the value of StartRoles.
+func (s *WorkflowDefFull) SetStartRoles(val []string) {
+	s.StartRoles = val
 }
 
 // SetCreatedAt sets the value of CreatedAt.

@@ -560,7 +560,10 @@ update_workflow_def only overwrites the fields you supply — omit "steps"/"cont
 leave them as-is. It also takes "single_active_instance" (true by default): only one running instance per
 dimension-member scope; set false for per-request records where many submissions run at once — and
 "approver_may_start" (false by default): a business admin who decides its approval may also start it, for a
-planning round the admin opens and signs off (a request/approval workflow keeps it off). To edit a
+planning round the admin opens and signs off (a request/approval workflow keeps it off) — and "start_roles"
+(role names, as a step's assignee_roles): who may start it by hand from its Start button or the inbox; set it
+for a round one team runs (["FP&A"]), so the people it asks to act do not start it themselves; [] lets anyone,
+and a record or event that starts it is not asked. To edit a
 workflow that already existed before this chat, use the "(id:...)" from list_workflows or its exact name —
 never invent a workflow_def_id. delete_workflow_def removes a DRAFT with no instances; anything that has run
 is archived (archive_workflow_def), not deleted.
