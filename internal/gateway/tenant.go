@@ -487,11 +487,18 @@ func (h *handler) activeHomes(ctx context.Context, sub string, member []string) 
 		h.presenceMu.Unlock()
 		if !ok || time.Since(e.at) >= activeHomeTTL {
 			e = activeEntry{at: time.Now()}
-			if pool, err := router.Pool(ctx, id); err == nil {
-				if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity."user"
-					WHERE keycloak_sub = $1 AND disabled_at IS NULL AND NOT stand_in)`, sub).Scan(&e.active); err != nil {
-					h.log.Warn().Err(err).Str("tenant", id).Msg("account state not read; tenant left out of routing")
-				}
+			pool, err := router.Pool(ctx, id)
+			if err == nil {
+				err = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity."user"
+					WHERE keycloak_sub = $1 AND disabled_at IS NULL AND NOT stand_in)`, sub).Scan(&e.active)
+			}
+			if err != nil {
+				// Left out of this request only. Not read is not "inactive":
+				// remembered, a browser reload cancelling the read sent the
+				// person's every request to the control plane until the
+				// entry ran out, 401 for an account that is fine.
+				h.log.Warn().Err(err).Str("tenant", id).Msg("account state not read; tenant left out of routing")
+				continue
 			}
 			h.presenceMu.Lock()
 			if h.active == nil || len(h.active) > 50000 {

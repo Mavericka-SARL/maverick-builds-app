@@ -458,3 +458,30 @@ func TestRoutingDecidesByMembershipAndReach(t *testing.T) {
 		t.Errorf("Ann, deactivated in Acme, was routed to %q; want Globex", got)
 	}
 }
+
+// TestACancelledRequestLeavesAPersonTheirHome: a request cancelled while its
+// account state is read (a browser reload) says nothing about the account.
+// Remembered as "not active", it sent every request of that person to the
+// control plane for activeHomeTTL, where they do not exist: 401 until it ran
+// out. A home read for real is still remembered.
+func TestACancelledRequestLeavesAPersonTheirHome(t *testing.T) {
+	f := newDedicatedFixture(t, Deps{})
+	acme, acmeWS, actx := f.tenant(t, "Acme")
+	f.seed(t, actx, "kc-ann", "ann@acme.test", "Ann", "tenant_admin", acmeWS)
+	h := f.reader
+
+	cancelled, cancel := context.WithCancel(f.ctx)
+	cancel()
+	if got := h.activeHomes(cancelled, "kc-ann", []string{acme}); len(got) != 0 {
+		t.Errorf("the cancelled request itself: homes %v, want none (nothing was read)", got)
+	}
+	if got := h.activeHomes(f.ctx, "kc-ann", []string{acme}); len(got) != 1 {
+		t.Fatalf("the next request: homes %v, want Acme: a cancelled read was remembered as an inactive account", got)
+	}
+	h.presenceMu.Lock()
+	e, ok := h.active[acme+"/kc-ann"]
+	h.presenceMu.Unlock()
+	if !ok || !e.active {
+		t.Errorf("a read home is not remembered: %+v (%v)", e, ok)
+	}
+}

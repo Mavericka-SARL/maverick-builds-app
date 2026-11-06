@@ -910,7 +910,12 @@ func (h *handler) resolveDevActor(ctx context.Context, r *http.Request) (*actor,
 		}
 		sub = "demo-dept-head-001"
 	}
-	return h.actorByKeycloakSub(ctx, sub)
+	a, err := h.actorByKeycloakSub(ctx, sub)
+	if err != nil && sub != devPersonas[persona] {
+		// The person asked for, not the fallback, is who could not be found.
+		return nil, fmt.Errorf("persona %q not found in this request's database: %w", persona, err)
+	}
+	return a, err
 }
 
 // devPersonaList serves GET /api/dev/personas — every user in the database
