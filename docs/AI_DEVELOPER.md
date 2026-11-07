@@ -327,7 +327,10 @@ layout, formulas, lists and highlights; when the whole workbook does not fit,
 each large sheet shows fewer rows and clipped formulas (a sheet of 30 rows or
 fewer is always whole) and says which `read_attached_sheet` call shows the
 rest. Cut off at the end instead, a workbook whose data sheets came first lost
-every later sheet — its calculation sheets. `preview_file_import` and `import_file_data`
+every later sheet — its calculation sheets. A table pasted into the chat (two rows and two columns or more, tab-separated as
+spreadsheets copy it) is attached the same way, as `pasted-data-1.csv`
+(`web/src/consoles/developer/pastedTable.ts`), so a block of values imports instead
+of being retyped through `write_input_values`. `preview_file_import` and `import_file_data`
 take the file's name, an optional sheet, a target (a grid — the metric values
 its columns name — or a dimension — members) and a `column_map` in the Import
 Wizard's vocabulary (a metric or dimension name; `metric` + `value` for a long

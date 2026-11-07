@@ -2153,7 +2153,7 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		  AND NOT (fd.member_root_label IS NOT NULL AND m.code = 'ALL')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runtime.form_record r, jsonb_array_elements(fd.fields) f
-		      WHERE r.form_id = fd.id AND f->>'type' = 'autocode' AND r.data->>(f->>'name') = m.code)`,
+		      WHERE r.form_id = fd.id AND (f->>'type' = 'autocode' OR f->>'code' = 'true') AND r.data->>(f->>'name') = m.code)`,
 		modelID, revisionID); err != nil {
 		return "", fmt.Errorf("kept dimension members: %w", err)
 	}

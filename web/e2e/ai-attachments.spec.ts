@@ -88,3 +88,40 @@ test("several files at once, dropped files, and sent files leave the composer", 
   await expect.poll(() => created.length).toBe(2);
   expect(created[1]).not.toContain("new_draft");
 });
+
+// A block copied from a spreadsheet arrives as tab-separated text. Sent as chat
+// text the assistant would retype it; attached it imports like any file.
+test("a pasted table is attached, can come back as text, and prose stays prose", async ({ page }) => {
+  await mockApi(page);
+  const { uploaded } = await mockAi(page);
+  await page.route(`**/api/ai/sessions/${SESSION_ID}/documents/*`, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"deleted"}' }));
+  await loadAs(page, "developer");
+  await page.getByRole("button", { name: "AI Developer" }).click();
+  await page.getByRole("button", { name: /Session/ }).first().click();
+  await expect(page.getByText("Working in your AI draft")).toBeVisible({ timeout: 10_000 });
+
+  const box = page.getByLabel("Message");
+  const paste = (text: string) => box.evaluate((el, t) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", t);
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, text);
+
+  const table = 'Driver\tBase\tDownside\nDemand "t"\t295\t265\n';
+  await paste(table);
+  await expect(page.getByText("Pasted table attached as pasted-data-1.csv: 2 rows, 3 columns.")).toBeVisible();
+  expect(uploaded).toEqual(["pasted-data-1.csv"]);
+  await expect(box).toHaveValue("");
+
+  await page.getByRole("button", { name: "Use as text" }).click();
+  await expect(box).toHaveValue(table);
+  await expect(page.getByText("Pasted table attached")).toHaveCount(0);
+
+  // One row, or text without tabs, is a message, not a table.
+  await box.fill("");
+  await paste("one\ttwo");
+  await paste("a sentence\nand another");
+  await expect(page.getByText("Pasted table attached")).toHaveCount(0);
+  expect(uploaded).toEqual(["pasted-data-1.csv"]);
+});

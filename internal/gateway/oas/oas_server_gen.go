@@ -421,6 +421,12 @@ type Handler interface {
 	//
 	// DELETE /api/ai/sessions/{id}
 	DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error)
+	// DeleteAllNotifications implements deleteAllNotifications operation.
+	//
+	// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+	//
+	// DELETE /api/notifications
+	DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error)
 	// DeleteAutomationRule implements deleteAutomationRule operation.
 	//
 	// Delete an automation rule.
@@ -533,6 +539,12 @@ type Handler interface {
 	//
 	// DELETE /api/developer/metrics/{id}
 	DeleteMetric(ctx context.Context, params DeleteMetricParams) (*DeleteMetricOK, error)
+	// DeleteNotification implements deleteNotification operation.
+	//
+	// Delete one of the caller's own notifications from their bell.
+	//
+	// DELETE /api/notifications/{id}
+	DeleteNotification(ctx context.Context, params DeleteNotificationParams) (DeleteNotificationRes, error)
 	// DeleteRevision implements deleteRevision operation.
 	//
 	// Delete a revision (rejected if it is the model's active revision).

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
@@ -114,7 +115,8 @@ func (h *handler) recordsQuery(w http.ResponseWriter, r *http.Request, formID st
 // the scope's table (nil for a record being created) that leaves it as
 // `to`: its values, as the caller may see them (field problems, 400), then
 // what it will post, which must be within its creator's access
-// (postingRefusal: a status code and message). required checks every
+// (postingRefusal: a status code and message) and, for a change of its
+// values, within the caller's. required checks every
 // required field has a value.
 func (h *handler) checkRecordSave(ctx context.Context, scope formRecordScope, rec *crudapp.FormRecord, to *recordState, required bool) (int, string, []fieldProblem, error) {
 	view, err := h.accessViewFor(ctx, scope.userID, scope.form)
@@ -141,6 +143,17 @@ func (h *handler) checkRecordSave(ctx context.Context, scope formRecordScope, re
 		return http.StatusForbidden, fmt.Sprintf("forbidden: the %s of this record is read-only for you", field), nil, nil
 	}
 	code, msg, err := h.postingRefusal(ctx, creator, creator == scope.userID, scope.form, recordID, to)
+	if err != nil || code != 0 {
+		return code, msg, nil, err
+	}
+	// A record posts as its creator's, but changing it is the caller's act:
+	// in a table everyone edits, a metric read-only for the caller stayed
+	// changeable through the record. Only a change of its values asks: an
+	// approver moves a record's status without needing the metric, and
+	// postingRefusal passes a change that posts the same.
+	if rec != nil && creator != scope.userID && !reflect.DeepEqual(rec.Data, to.Data) {
+		code, msg, err = h.postingRefusal(ctx, scope.userID, true, scope.form, recordID, to)
+	}
 	return code, msg, nil, err
 }
 

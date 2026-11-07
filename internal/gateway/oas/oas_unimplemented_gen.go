@@ -595,6 +595,15 @@ func (UnimplementedHandler) DeleteAiSession(ctx context.Context, params DeleteAi
 	return r, ht.ErrNotImplemented
 }
 
+// DeleteAllNotifications implements deleteAllNotifications operation.
+//
+// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+//
+// DELETE /api/notifications
+func (UnimplementedHandler) DeleteAllNotifications(ctx context.Context) (r *DeleteAllNotificationsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DeleteAutomationRule implements deleteAutomationRule operation.
 //
 // Delete an automation rule.
@@ -758,6 +767,15 @@ func (UnimplementedHandler) DeleteIntegrationConnection(ctx context.Context, par
 //
 // DELETE /api/developer/metrics/{id}
 func (UnimplementedHandler) DeleteMetric(ctx context.Context, params DeleteMetricParams) (r *DeleteMetricOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// DeleteNotification implements deleteNotification operation.
+//
+// Delete one of the caller's own notifications from their bell.
+//
+// DELETE /api/notifications/{id}
+func (UnimplementedHandler) DeleteNotification(ctx context.Context, params DeleteNotificationParams) (r DeleteNotificationRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

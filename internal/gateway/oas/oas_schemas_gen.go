@@ -8545,6 +8545,20 @@ func (s *DeleteAiSessionOK) SetStatus(val OptString) {
 
 func (*DeleteAiSessionOK) deleteAiSessionRes() {}
 
+type DeleteAllNotificationsOK struct {
+	Deleted OptInt `json:"deleted"`
+}
+
+// GetDeleted returns the value of Deleted.
+func (s *DeleteAllNotificationsOK) GetDeleted() OptInt {
+	return s.Deleted
+}
+
+// SetDeleted sets the value of Deleted.
+func (s *DeleteAllNotificationsOK) SetDeleted(val OptInt) {
+	s.Deleted = val
+}
+
 type DeleteAutomationRuleOK struct {
 	Status OptString `json:"status"`
 }
@@ -8869,6 +8883,22 @@ func (s *DeleteMetricOK) GetStatus() OptString {
 func (s *DeleteMetricOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+type DeleteNotificationOK struct {
+	Deleted OptInt `json:"deleted"`
+}
+
+// GetDeleted returns the value of Deleted.
+func (s *DeleteNotificationOK) GetDeleted() OptInt {
+	return s.Deleted
+}
+
+// SetDeleted sets the value of Deleted.
+func (s *DeleteNotificationOK) SetDeleted(val OptInt) {
+	s.Deleted = val
+}
+
+func (*DeleteNotificationOK) deleteNotificationRes() {}
 
 type DeleteRevisionOK struct {
 	Status OptString `json:"status"`
@@ -9945,6 +9975,7 @@ func (*Error) deleteAiDocumentRes()            {}
 func (*Error) deleteAiSessionRes()             {}
 func (*Error) deleteDimensionRes()             {}
 func (*Error) deleteImportJobRes()             {}
+func (*Error) deleteNotificationRes()          {}
 func (*Error) deleteRevisionRes()              {}
 func (*Error) deleteTenantRes()                {}
 func (*Error) deleteWorkflowRes()              {}

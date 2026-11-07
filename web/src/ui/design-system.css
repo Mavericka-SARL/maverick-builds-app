@@ -2314,6 +2314,8 @@ td[data-sel] .mvx-cell-input { background: transparent; }
 .mvx-wfstatus__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mvx-wfstatus__step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; color: var(--color-text-muted); }
 .mvx-wfstatus__mark { width: 14px; text-align: center; flex-shrink: 0; }
+/* A long step name wraps beside its mark, never onto a line of its own (mark 14px + gap 8px). */
+.mvx-wfstatus__name { max-width: calc(100% - 22px); }
 .mvx-wfstatus__step--done { color: var(--color-text); }
 .mvx-wfstatus__step--done .mvx-wfstatus__mark { color: var(--color-success, #16a34a); }
 .mvx-wfstatus__step--current { color: var(--color-text-strong); font-weight: 600; }

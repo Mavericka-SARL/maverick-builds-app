@@ -135,3 +135,19 @@ test("a wrapped, two-line selector row still leaves the number centred", async (
   expect(Math.max(...labelTops) - Math.min(...labelTops)).toBeLessThanOrEqual(1);
   expect(Math.max(...valueTops) - Math.min(...valueTops)).toBeLessThanOrEqual(1);
 });
+
+// A number metric set to 0 decimals reads whole on its tile, as in its grid:
+// 0 used to fall through to the browser's default, up to three decimals.
+test("a whole-number tile shows no decimals", async ({ page }) => {
+  const dash = { ...dashboard, id: "kpi-whole-dash", name: "KPI Whole Dashboard",
+    widgets: [kpi("w-whole", "m-head", 0, { kpi_context_mode: "total" })] };
+  const data = { ...gridData, totals: { ...gridData.totals, "m-head": 14650.251 } };
+  await mockApi(page);
+  await page.route("**/api/dashboards", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([dash]) }));
+  await page.route("**/api/dashboards/kpi-whole-dash", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(dash) }));
+  await page.route("**/api/grid*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) }));
+  await loadAs(page, "dept_head");
+
+  await expect(page.getByText("KPI Whole Dashboard")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".mvx-kpi__value").filter({ hasText: /^14,650$/ })).toHaveCount(1);
+});

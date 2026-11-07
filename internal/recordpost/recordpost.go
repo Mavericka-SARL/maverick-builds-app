@@ -17,6 +17,8 @@
 //     where it posts — so a save that would give the record a posting in a
 //     cell its creator may not write, in any status it could post in, is
 //     refused with a message saying which.
+//     A change of its values is also the caller's act, so it must be
+//     within the caller's access too (the gateway's checkRecordSave).
 package recordpost
 
 import (
@@ -1006,12 +1008,30 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 		if p == nil {
 			continue
 		}
+		if recordID == "" && to != nil {
+			p = tp.withoutOwnMember(p, to.Data)
+		}
 		code, msg, err := ps.postingCellRefusal(ctx, tp, i, creatorID, forYou, p)
 		if err != nil || code != 0 {
 			return code, msg, err
 		}
 	}
 	return 0, "", nil
+}
+
+// withoutOwnMember is p without the member of a new record of a table that
+// keeps a dimension: saving the record makes that member, so it cannot be
+// looked up yet. A record with a typed code knows its member before the save
+// and was refused for a member it was about to create; an auto-code record
+// has no code here and plans no posting.
+func (tp *tablePosting) withoutOwnMember(p *plannedPosting, data map[string]any) *plannedPosting {
+	code := tp.form.MemberCode(data)
+	if code == "" || p.members[tp.form.KeepsDimensionID] != code {
+		return p
+	}
+	members := maps.Clone(p.members)
+	delete(members, tp.form.KeepsDimensionID)
+	return &plannedPosting{value: p.value, members: members}
 }
 
 // postingCellRefusal says why userID — the record's creator — may not

@@ -229,6 +229,10 @@ type DeleteIntegrationConnectionRes interface {
 	deleteIntegrationConnectionRes()
 }
 
+type DeleteNotificationRes interface {
+	deleteNotificationRes()
+}
+
 type DeleteRevisionRes interface {
 	deleteRevisionRes()
 }

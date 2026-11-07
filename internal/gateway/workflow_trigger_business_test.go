@@ -1069,3 +1069,61 @@ func TestWorkflowWiringAuditLiveDB(t *testing.T) {
 		}
 	}
 }
+
+// A saved file loader starts its integration rules: a good file the completed
+// rule, a refused file the failed one. Only the runner dispatched these
+// events, so a file run started nothing, though the catalog offers both
+// (2026-10-26, again in the production model 2026-11-06: 0 of 9 runs).
+func TestFileRunFiresIntegrationRules(t *testing.T) {
+	f := setupWTFixture(t)
+	ctx := context.Background()
+	var formID, intID string
+	if err := f.pool.QueryRow(ctx,
+		`INSERT INTO model.form_def (model_id, name, label, fields, revision_id) VALUES ($1::uuid, 'Ledger', 'Ledger',
+		 '[{"name":"col","label":"col","type":"text"},{"name":"n","label":"n","type":"number","required":true}]'::jsonb, $2::uuid) RETURNING id::text`,
+		f.modelID, f.revID).Scan(&formID); err != nil {
+		t.Fatalf("insert form: %v", err)
+	}
+	if err := f.pool.QueryRow(ctx,
+		`INSERT INTO model.integration_def (model_id, name, type, target_type, target_id, config, revision_id)
+		 VALUES ($1::uuid, 'Ledger file', 'csv_import', 'form', $2::uuid, '{}'::jsonb, $3::uuid) RETURNING id::text`,
+		f.modelID, formID, f.revID).Scan(&intID); err != nil {
+		t.Fatalf("insert integration: %v", err)
+	}
+	rule := func(name, triggerType string) string {
+		t.Helper()
+		var id string
+		if err := f.pool.QueryRow(ctx, `
+			INSERT INTO workflow.automation_rule
+			  (application_id, name, trigger_type, workflow_name, workflow_def_id, enabled, revision_id, source_integration_id)
+			VALUES ($1::uuid, $2, $3::workflow.trigger_type, 'Budget Approval', $4::uuid, true, $5::uuid, $6::uuid)
+			RETURNING id::text`, f.appID, name, triggerType, f.wfDefID, f.revID, intID).Scan(&id); err != nil {
+			t.Fatalf("insert rule %s: %v", name, err)
+		}
+		return id
+	}
+	done, failed := rule("Loaded", "integration_completed"), rule("Refused", "integration_failed")
+	runs := func(ruleID string) int {
+		return wtCount(t, f.pool, `SELECT count(*) FROM workflow.execution WHERE rule_id=$1::uuid`, ruleID)
+	}
+	wait := func(ruleID, label string) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); runs(ruleID) < 1; time.Sleep(50 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: the rule never fired", label)
+			}
+		}
+	}
+
+	if status, body := f.do(t, "POST", "/api/integrations/"+intID+"/run", f.ownerSub, map[string]any{"csv": "col,n\nval,1\n"}); status != http.StatusOK {
+		t.Fatalf("good file: %d %s", status, body)
+	}
+	wait(done, "a good file")
+	if n := runs(failed); n != 0 {
+		t.Errorf("a good file fired the failed rule %d time(s)", n)
+	}
+	if status, body := f.do(t, "POST", "/api/integrations/"+intID+"/run", f.ownerSub, map[string]any{"csv": "col,n\nval,abc\n"}); status < 400 {
+		t.Fatalf("bad file: %d %s, want it refused", status, body)
+	}
+	wait(failed, "a refused file")
+}

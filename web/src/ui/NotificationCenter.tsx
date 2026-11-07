@@ -1,21 +1,26 @@
 import { useState } from "react";
-import { Bell } from "lucide-react";
+import { Bell, Trash2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Notification } from "../api/client";
+import { Button } from "./Button";
 import { IconButton } from "./IconButton";
 import { Drawer } from "./Drawer";
 import { Badge } from "./Badge";
 import { LoadingState } from "./LoadingState";
 import { EmptyState } from "./EmptyState";
+import { useConfirm } from "./useConfirm";
 
 interface NotificationCenterProps {
   /** Called when the caller clicks a notification that has a resource_type/resource_id — decides what "navigate" means for the current console. */
   onNavigate?: (resourceType: string, resourceId: string) => void;
+  /** How a notification's time reads; the browser's own format without it. */
+  formatTime?: (ts: string) => string;
 }
 
-export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
+export function NotificationCenter({ onNavigate, formatTime }: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
+  const { confirm, confirmElement } = useConfirm();
 
   const { data: notifications = [], isLoading } = useQuery({
     queryKey: ["notifications"],
@@ -27,6 +32,15 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
 
   const markRead = useMutation({
     mutationFn: (ids: string[]) => api.markRead(ids),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+  // Deleting clears the person's own bell; workflow history keeps its runs.
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteNotification(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+  const removeAll = useMutation({
+    mutationFn: () => api.deleteAllNotifications(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
@@ -62,7 +76,33 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
           </Badge>
         )}
       </div>
-      <Drawer open={open} onClose={() => setOpen(false)} title="Notifications">
+      <Drawer
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Notifications"
+        footer={notifications.length > 0 ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            leadingIcon={<Trash2 size={13} />}
+            disabled={removeAll.isPending}
+            onClick={() => confirm({
+              title: "Delete all notifications?",
+              body: "All your notifications leave the bell, also any older than the ones listed here. Workflow history keeps its runs.",
+              confirmLabel: "Delete all",
+              destructive: true,
+              onConfirm: () => removeAll.mutate(),
+            })}
+          >
+            Delete all
+          </Button>
+        ) : undefined}
+      >
+        {(remove.isError || removeAll.isError) && (
+          <div role="alert" style={{ fontSize: 12, color: "var(--color-danger)", padding: "8px 0" }}>
+            {((remove.error ?? removeAll.error) as Error).message}
+          </div>
+        )}
         {isLoading ? (
           <LoadingState label="Loading notifications…" />
         ) : notifications.length === 0 ? (
@@ -73,35 +113,49 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
             const navigable = Boolean(n.resource_type && n.resource_id);
             const vars = n.template_vars ?? {};
             return (
-              <div
-                key={n.id}
-                onClick={() => handleClick(n)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === "Enter") handleClick(n); }}
-                style={{
-                  cursor: navigable || unread ? "pointer" : "default",
-                  padding: "10px 0",
-                  borderBottom: "1px solid var(--color-border)",
-                  opacity: unread ? 1 : 0.6,
-                }}
-              >
-                <div style={{ fontWeight: unread ? 600 : 400, fontSize: 13 }}>
-                  {vars.subject || n.template_id}
-                </div>
-                {vars.message && (
-                  <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {vars.message}
+              <div key={n.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, borderBottom: "1px solid var(--color-border)" }}>
+                <div
+                  onClick={() => handleClick(n)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleClick(n); }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    cursor: navigable || unread ? "pointer" : "default",
+                    padding: "10px 0",
+                    opacity: unread ? 1 : 0.6,
+                  }}
+                >
+                  <div style={{ fontWeight: unread ? 600 : 400, fontSize: 13 }}>
+                    {vars.subject || n.template_id}
                   </div>
-                )}
-                <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  {new Date(n.created_at).toLocaleString()}
+                  {vars.message && (
+                    <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                      {vars.message}
+                    </div>
+                  )}
+                  <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    {formatTime ? formatTime(n.created_at) : new Date(n.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <div style={{ paddingTop: 8 }}>
+                  <IconButton
+                    aria-label={`Delete notification: ${vars.subject || n.template_id}`}
+                    title="Delete"
+                    size={24}
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate(n.id)}
+                  >
+                    <Trash2 size={13} />
+                  </IconButton>
                 </div>
               </div>
             );
           })
         )}
       </Drawer>
+      {confirmElement}
     </>
   );
 }

@@ -651,6 +651,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/workflow/instances/{id}/cancel", "developer_or_business_admin", baOrDev(h.workflowInstanceCancel))
 	register("GET", "/api/notifications", "any", cors(h.notifications))
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
+	register("DELETE", "/api/notifications", "any", cors(h.deleteNotifications))
+	register("DELETE", "/api/notifications/{id}", "any", cors(h.deleteNotifications))
 	// Whether a tenant's people may change grid data from a chat connection.
 	register("GET", "/api/admin/connector-settings", "admin", adm(h.connectorSettings))
 	register("PUT", "/api/admin/connector-settings", "admin", adm(h.connectorSettings))
@@ -2897,7 +2899,7 @@ func (h *handler) notificationsIn(ctx context.Context, a *actor) ([]notifRow, er
 		       CASE WHEN delivered_at IS NOT NULL THEN delivered_at::text END,
 		       resource_type, resource_id
 		FROM notification.notification
-		WHERE recipient_user_id = $1::uuid
+		WHERE recipient_user_id = $1::uuid AND deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT 50
 	`, a.UserID)
@@ -2972,6 +2974,45 @@ func (h *handler) markNotifRead(w http.ResponseWriter, r *http.Request) {
 		updated += tag.RowsAffected()
 	}
 	jsonOK(w, map[string]int64{"updated": updated})
+}
+
+// deleteNotifications clears the caller's bell: DELETE
+// /api/notifications/{id} one notification, DELETE /api/notifications all of
+// them, not only the 50 the list shows, in every home (the list spans them),
+// each by the person's account there. Another person's notification reads as
+// not found. The rows stay, marked (migration 155): history and the
+// access-granted notice read them, and queued mail still goes out.
+func (h *handler) deleteNotifications(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	id := r.PathValue("id")
+	if id != "" {
+		if _, err := uuid.Parse(id); err != nil {
+			jsonErr(w, fmt.Errorf("notification not found"), http.StatusNotFound)
+			return
+		}
+	}
+	var deleted int64
+	for _, hm := range h.homesOf(ctx, r, a) {
+		tag, err := h.db.Exec(tenantdb.WithScope(ctx, hm.Scope), `
+			UPDATE notification.notification SET deleted_at = now()
+			WHERE recipient_user_id = $1::uuid AND deleted_at IS NULL AND ($2 = '' OR id::text = $2)`,
+			hm.Actor.UserID, id)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		deleted += tag.RowsAffected()
+	}
+	if id != "" && deleted == 0 {
+		jsonErr(w, fmt.Errorf("notification not found"), http.StatusNotFound)
+		return
+	}
+	jsonOK(w, map[string]int64{"deleted": deleted})
 }
 
 // ── /api/grid ─────────────────────────────────────────────────────────────────
@@ -9801,6 +9842,31 @@ func (h *handler) recordIntegrationRun(ctx context.Context, intID, userID string
 	`, intID, userID, imported, errRows, status, message); err != nil {
 		h.log.Warn().Err(err).Str("integration_id", intID).Msg("record integration run")
 	}
+	h.dispatchFileRunEvent(ctx, intID, userID, imported, status, message)
+}
+
+// dispatchFileRunEvent fires the integration_completed or integration_failed
+// rules of a finished file run. The runner does this for REST and model-link
+// runs (integration.DispatchRunEvents); a file run ends here and started no
+// rule, though the trigger catalog offers both events for it.
+func (h *handler) dispatchFileRunEvent(ctx context.Context, intID, userID string, imported int, status, message string) {
+	triggerType, outcome := "integration_completed", "success"
+	if status != "success" {
+		triggerType, outcome = "integration_failed", "failed"
+	}
+	var appID, revisionID string
+	if err := h.db.QueryRow(ctx, `
+		SELECT m.application_id::text, COALESCE(d.revision_id::text, '')
+		FROM model.integration_def d JOIN core.model m ON m.id = d.model_id
+		WHERE d.id = $1::uuid`, intID).Scan(&appID, &revisionID); err != nil {
+		h.log.Warn().Err(err).Str("integration_id", intID).Msg("resolve application for integration event")
+		return
+	}
+	payload := map[string]string{"integration_id": intID, "record_count": strconv.Itoa(imported), "status": outcome}
+	if message != "" {
+		payload["error_message"] = message
+	}
+	go h.workflowStore(ctx).DispatchEventRules(context.WithoutCancel(ctx), appID, revisionID, triggerType, intID, userID, payload)
 }
 
 // ── Form-to-Metric Integrations (Phase 3B) ────────────────────────────────────

@@ -111,6 +111,33 @@ func TestFormSyncByWhoChangesEveryRecord(t *testing.T) {
 	}
 }
 
+// In a table everyone edits, a metric read-only for the caller stays so: a
+// record posts as its creator's, but changing its amount is the caller's act.
+// A save that posts the same, and someone free to write the metric, pass
+// (production model, 2026-11-06).
+func TestEveryoneTableKeepsAMetricReadOnly(t *testing.T) {
+	f := setupRecordFixture(t)
+	mappingID, metricID := f.mapRecordsToMetric("submitted")
+	if _, err := f.pool.Exec(context.Background(), `UPDATE model.form_def SET edit_access = 'everyone' WHERE id = $1::uuid`, f.formID); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.create(prBA, "submitted", 10)
+	f.waitPosted("the submitted record", mappingID, metricID, 1, 10)
+	f.expect(http.StatusOK, http.MethodPut, "/api/business-admin/users/"+f.userID[prPeer]+"/access-rules", prBA,
+		map[string]any{"rules": []map[string]string{{"rule_type": "metric", "ref_id": metricID, "access": "read"}}})
+
+	raw := f.expect(http.StatusForbidden, http.MethodPut, "/api/records/"+rec, prPeer, map[string]any{"data": map[string]any{"amount": 15}})
+	if !strings.Contains(string(raw), "read-only for you") {
+		t.Errorf("the refusal does not say the metric is read-only: %s", raw)
+	}
+	f.expect(http.StatusOK, http.MethodPut, "/api/records/"+rec, prPeer, map[string]any{"data": map[string]any{"amount": 10}})
+	if n, total := f.posted(mappingID, metricID); n != 1 || total != 10 {
+		t.Errorf("after the refused edit: %d posting(s) totalling %v, want 1 totalling 10", n, total)
+	}
+	f.expect(http.StatusOK, http.MethodPut, "/api/records/"+rec, prOwner, map[string]any{"data": map[string]any{"amount": 15}})
+	f.waitPosted("the edit by someone free to write the metric", mappingID, metricID, 1, 15)
+}
+
 // TestFormSyncIsAnAdministrators — a sync re-posts every record of the
 // form, other people's included, so a business user who may only read them
 // is refused; the business admin and the developer sync.

@@ -4532,6 +4532,42 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Notification" }
+    delete:
+      operationId: deleteAllNotifications
+      tags: [Workflow]
+      summary: Clear the caller's bell — all their notifications, in every home
+      description: >-
+        They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+      responses:
+        "200":
+          description: Number of notifications deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+
+  /api/notifications/{id}:
+    delete:
+      operationId: deleteNotification
+      tags: [Workflow]
+      summary: Delete one of the caller's own notifications from their bell
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The notification left the caller's list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/notifications/mark-read:
     post:

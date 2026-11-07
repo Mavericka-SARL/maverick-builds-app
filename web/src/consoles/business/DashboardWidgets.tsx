@@ -468,7 +468,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
       ? `${n < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(n).toLocaleString("en-US", digits)}${sc.suffix}`
       : fmt === "percentage"
       ? `${n.toLocaleString("en-US", digits)}%`
-      : `${n.toLocaleString("en-US", dec ? digits : undefined)}${sc.suffix}`;
+      : `${n.toLocaleString("en-US", digits)}${sc.suffix}`;
   };
   const formatted = value === undefined ? "—" : fmtValue(value);
   // The difference, in the comparison's unit; a percentage's difference is

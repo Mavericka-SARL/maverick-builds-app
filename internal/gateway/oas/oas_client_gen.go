@@ -441,6 +441,12 @@ type Invoker interface {
 	//
 	// DELETE /api/ai/sessions/{id}
 	DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error)
+	// DeleteAllNotifications invokes deleteAllNotifications operation.
+	//
+	// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+	//
+	// DELETE /api/notifications
+	DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error)
 	// DeleteAutomationRule invokes deleteAutomationRule operation.
 	//
 	// Delete an automation rule.
@@ -553,6 +559,12 @@ type Invoker interface {
 	//
 	// DELETE /api/developer/metrics/{id}
 	DeleteMetric(ctx context.Context, params DeleteMetricParams) (*DeleteMetricOK, error)
+	// DeleteNotification invokes deleteNotification operation.
+	//
+	// Delete one of the caller's own notifications from their bell.
+	//
+	// DELETE /api/notifications/{id}
+	DeleteNotification(ctx context.Context, params DeleteNotificationParams) (DeleteNotificationRes, error)
 	// DeleteRevision invokes deleteRevision operation.
 	//
 	// Delete a revision (rejected if it is the model's active revision).
@@ -9164,6 +9176,113 @@ func (c *Client) sendDeleteAiSession(ctx context.Context, params DeleteAiSession
 	return result, nil
 }
 
+// DeleteAllNotifications invokes deleteAllNotifications operation.
+//
+// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+//
+// DELETE /api/notifications
+func (c *Client) DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error) {
+	res, err := c.sendDeleteAllNotifications(ctx)
+	return res, err
+}
+
+func (c *Client) sendDeleteAllNotifications(ctx context.Context) (res *DeleteAllNotificationsOK, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteAllNotifications"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/notifications"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteAllNotificationsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/notifications"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DeleteAllNotificationsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteAllNotificationsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DeleteAutomationRule invokes deleteAutomationRule operation.
 //
 // Delete an automation rule.
@@ -11469,6 +11588,131 @@ func (c *Client) sendDeleteMetric(ctx context.Context, params DeleteMetricParams
 
 	stage = "DecodeResponse"
 	result, err := decodeDeleteMetricResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// DeleteNotification invokes deleteNotification operation.
+//
+// Delete one of the caller's own notifications from their bell.
+//
+// DELETE /api/notifications/{id}
+func (c *Client) DeleteNotification(ctx context.Context, params DeleteNotificationParams) (DeleteNotificationRes, error) {
+	res, err := c.sendDeleteNotification(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDeleteNotification(ctx context.Context, params DeleteNotificationParams) (res DeleteNotificationRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteNotification"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/notifications/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteNotificationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/notifications/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DeleteNotificationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteNotificationResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

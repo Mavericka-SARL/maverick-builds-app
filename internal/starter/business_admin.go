@@ -349,7 +349,7 @@ Records — requests, expenses, deals — have no screen of their own: a develop
 
 		baText(`## Notifications and cell history
 
-The bell at the top of the page collects what workflows send you: notification steps, and reminders when a task you can act on falls due — if a tenant admin has turned on **Task reminders** under **Tenant admin › Notification delivery**. A notification about a request opens it in **Workflow History**.
+The bell at the top of the page collects what workflows send you: notification steps, and reminders when a task you can act on falls due — if a tenant admin has turned on **Task reminders** under **Tenant admin › Notification delivery**. A notification about a request opens it in **Workflow History**. Delete one with the bin beside it, or all of them with **Delete all** at the bottom: they leave your bell only, and **Workflow History** keeps its runs.
 
 To see who changed a number, right-click an input cell in a grid: its history lists every value it has held, when, by whom and how. Cell history is part of the Enterprise Edition; on other editions the panel says so. See [cell history](`+publicDocs+`CELL_HISTORY.md) and [editions](`+publicDocs+`LICENSING.md).
 

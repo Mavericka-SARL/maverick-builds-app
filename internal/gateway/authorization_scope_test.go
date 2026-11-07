@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -248,6 +249,77 @@ func TestMarkNotifReadDoesNotTouchAnotherUsersNotification(t *testing.T) {
 	}
 	if bStatus == "read" {
 		t.Error("user A's mark-read call marked user B's notification as read")
+	}
+}
+
+// TestDeletingNotificationsClearsOnlyTheCallersBell: one by id, or all;
+// another person's reads as not found and stays, and a deleted row stays in
+// the table, which history and the access-granted notice read.
+func TestDeletingNotificationsClearsOnlyTheCallersBell(t *testing.T) {
+	f := setupAuthzScopeFixture(t)
+	ctx := context.Background()
+	id := func(user string) string {
+		var s string
+		if err := f.pool.QueryRow(ctx, `INSERT INTO notification.notification (recipient_user_id, template_id, status)
+			VALUES ($1::uuid, 'test', 'delivered') RETURNING id::text`, user).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	listed := func(user string) int {
+		var n int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM notification.notification
+			WHERE recipient_user_id = $1::uuid AND deleted_at IS NULL`, user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	one, bOwn := id(f.userAID), id(f.userBID)
+	before, beforeB := listed(f.userAID), listed(f.userBID)
+
+	if status, body := f.do(t, "DELETE", "/api/notifications/"+bOwn, "authz-dev-a", nil); status != http.StatusNotFound {
+		t.Errorf("deleting another person's notification: %d %v, want 404", status, body)
+	}
+	if status, body := f.do(t, "DELETE", "/api/notifications/not-an-id", "authz-dev-a", nil); status != http.StatusNotFound {
+		t.Errorf("deleting a malformed id: %d %v, want 404", status, body)
+	}
+	if got := listed(f.userBID); got != beforeB {
+		t.Errorf("B's list after A's refused delete: %d, want %d", got, beforeB)
+	}
+	if status, body := f.do(t, "DELETE", "/api/notifications/"+one, "authz-dev-a", nil); status != http.StatusOK {
+		t.Fatalf("deleting one's own: %d %v", status, body)
+	}
+	if got := listed(f.userAID); got != before-1 {
+		t.Errorf("A's list after deleting one: %d, want %d", got, before-1)
+	}
+	if status, body := f.do(t, "DELETE", "/api/notifications/"+one, "authz-dev-a", nil); status != http.StatusNotFound {
+		t.Errorf("deleting it again: %d %v, want 404", status, body)
+	}
+	status, listBody := f.do(t, "GET", "/api/notifications", "authz-dev-a", nil)
+	if status != http.StatusOK || strings.Contains(fmt.Sprint(listBody), one) {
+		t.Errorf("the list after deleting: %d, still holds %s: %v", status, one, listBody)
+	}
+
+	// More than the list's 50: all means all.
+	for range 55 {
+		id(f.userAID)
+	}
+	status, body := f.do(t, "DELETE", "/api/notifications", "authz-dev-a", nil)
+	if deleted, _ := body["deleted"].(float64); status != http.StatusOK || int(deleted) != before-1+55 {
+		t.Errorf("deleting all: %d %v, want %d deleted", status, body, before-1+55)
+	}
+	if got := listed(f.userAID); got != 0 {
+		t.Errorf("A's list after deleting all: %d, want 0", got)
+	}
+	if got := listed(f.userBID); got != beforeB {
+		t.Errorf("B's list after A deleted all: %d, want %d", got, beforeB)
+	}
+	var kept int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM notification.notification WHERE recipient_user_id = $1::uuid`, f.userAID).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != before+55 {
+		t.Errorf("rows kept: %d, want %d (deleting marks, it does not remove)", kept, before+55)
 	}
 }
 

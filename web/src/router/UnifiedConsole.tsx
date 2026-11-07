@@ -15,6 +15,7 @@ import { enabledSections, resolveTab, sectionOf, type ConsoleSection, type Secti
 import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
 import { useDemo } from "../api/useDemo";
 import { DateFormatContext } from "../consoles/dateFormat";
+import { momentDateTime } from "../consoles/dateSerial";
 
 /**
  * The one console. Every role the signed-in user holds contributes its
@@ -72,6 +73,7 @@ export default function UnifiedConsole() {
       utility={
         <>
           <NotificationCenter
+            formatTime={(ts) => momentDateTime(ts, demo?.date_format ?? "")}
             onNavigate={(resourceType, resourceId) => {
               for (const s of sections) {
                 if (s.onNotificationNavigate?.(resourceType, resourceId)) return;

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, type ClipboardEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, Download, FileSpreadsheet, FileText, History, LayoutDashboard, LayoutGrid, Link2, ListTree, Paperclip,
@@ -14,6 +14,7 @@ import {
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
   Txt,
 } from "../../ui";
+import { parsePastedTable } from "./pastedTable";
 
 // ── Settings panel ────────────────────────────────────────────────────────────
 // The model is free text, with no suggestion list: providers ship new models
@@ -664,6 +665,9 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [messages, setMessages]     = useState<AIMessage[]>([]);
   const [pendingProposal, setPendingProposal] = useState<AIProposal | null>(null);
   const [input, setInput]           = useState("");
+  // The table just pasted and attached, until the next message: its note
+  // offers it back as plain text.
+  const [pasted, setPasted]         = useState<{ name: string; text: string; rows: number; columns: number } | null>(null);
   const [thinking, setThinking]     = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [toolStatus, setToolStatus] = useState<string | null>(null);
@@ -882,6 +886,29 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     }
   };
 
+  // A table pasted from a spreadsheet is attached as a CSV, so it imports like
+  // any file instead of the assistant retyping it value by value.
+  const onPasteMessage = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData("text/plain");
+    const table = parsePastedTable(text);
+    if (!table || promoted || thinking || uploading) return;
+    e.preventDefault();
+    const taken = new Set(documents.map(d => d.filename));
+    let n = 1;
+    while (taken.has(`pasted-data-${n}.csv`)) n++;
+    const name = `pasted-data-${n}.csv`;
+    void uploadDocuments([new File([table.csv], name, { type: "text/csv" })]);
+    setPasted({ name, text, rows: table.rows, columns: table.columns });
+  };
+
+  const pastedBackToText = async () => {
+    if (!pasted) return;
+    const doc = documents.find(d => d.filename === pasted.name);
+    if (doc) await removeDocument(doc.id);
+    setInput(prev => prev + pasted.text);
+    setPasted(null);
+  };
+
   const removeDocument = async (docId: string) => {
     if (!sessionId) return;
     try {
@@ -931,6 +958,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     }
 
     setInput("");
+    setPasted(null);
     setSentDocIds(new Set(documents.map(d => d.id)));
     await sendContent(sid, content);
   };
@@ -1360,6 +1388,14 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               )}
             </div>
           )}
+          {pasted && (
+            <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+              <span className="mvx-admin-muted" style={{ flex: 1 }}>
+                Pasted table attached as {pasted.name}: {pasted.rows} rows, {pasted.columns} columns. Say where it goes.
+              </span>
+              <Button size="sm" variant="secondary" onClick={() => { void pastedBackToText(); }}>Use as text</Button>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <input
               ref={fileRef}
@@ -1383,6 +1419,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKeyDown}
+              onPaste={onPasteMessage}
               placeholder={promoted ? "This session is finished — start a new session" : sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
               disabled={thinking || promoted}
               rows={2}

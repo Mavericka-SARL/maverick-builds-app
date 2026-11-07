@@ -2567,6 +2567,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
+  deleteNotification: (id: string) =>
+    apiFetch<{ deleted: number }>(`/api/notifications/${id}`, { method: "DELETE" }),
+  deleteAllNotifications: () =>
+    apiFetch<{ deleted: number }>("/api/notifications", { method: "DELETE" }),
 
   getAdminMe: () => apiFetch<{ user_id: string; email: string; display_name: string; roles: string[] }>("/api/admin/me"),
   getMe: () => apiFetch<Me>("/api/me"),

@@ -746,7 +746,9 @@ A value the developer would type into a grid — a setting (Actual Through Month
 {"<dimension name>": "<leaf member code>", ...}, "value": 9}]}: one member of every dimension of the metric's
 grid, none for a grid without dimensions. Values replace what those cells hold, and "value": null empties a
 cell (what the grid's clear does — never write 0 for "no value"); at most 500 per step. A block
-of values that sits in an attached file is imported instead (import_file_data), never retyped here.
+of values that sits in an attached file is imported instead (import_file_data), never retyped here. A table the
+developer pastes into the chat arrives as an attached file named pasted-data-1.csv (2, 3 …): preview and import it
+like any other, and ask where it goes if the message does not say.
 A Percentage metric takes percent units (3 for 3%): a value under 1 there is refused as a likely fraction
 unless "values_are_percent_units": true says it really is under 1%.
 
