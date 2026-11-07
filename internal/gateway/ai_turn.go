@@ -142,6 +142,13 @@ func claimsUnproposedChange(reply string) bool {
 // explaining why no plan can be made ("FR is not a country in the model"),
 // which is a fine end of a turn and is not nudged.
 func asksToPropose(reply string) bool {
+	// A reply laying out options is a real question about the model (which
+	// reading, which source wins), not a request for permission: the
+	// developer answers it (owner, 2026-11-07: "if the AI Developer is not
+	// sure, it must ask").
+	if presentsChoices(reply) {
+		return false
+	}
 	r := strings.ToLower(reply)
 	for _, p := range []string{"confirm and i", "confirm you", "confirm if you", "shall i", "should i propose", "do you want me",
 		"would you like me", "if you want me to", "want me to proceed", "may i ", "ready to propose", "i will post", "i'll post"} {
@@ -150,6 +157,15 @@ func asksToPropose(reply string) bool {
 		}
 	}
 	return false
+}
+
+// choiceLine is a line starting an option: "1)", "2.", "A)", "Option B".
+var choiceLine = regexp.MustCompile(`(?mi)^\s*(?:[-*]\s*)?(?:\*\*)?(?:\d[.)]|[a-c]\)|option [a-c1-3]\b)`)
+
+// presentsChoices reports whether reply offers the developer two or more
+// options to choose between.
+func presentsChoices(reply string) bool {
+	return len(choiceLine.FindAllStringIndex(reply, -1)) >= 2
 }
 
 // maxFallingRejections caps the corrections while the failures keep falling.

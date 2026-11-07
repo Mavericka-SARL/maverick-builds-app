@@ -146,6 +146,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespons
 			Role:    "assistant",
 			Content: choice.Message.Content,
 		},
+		Usage: usageOf(resp.Usage),
 	}
 	for _, tc := range choice.Message.ToolCalls {
 		out.Message.ToolCalls = append(out.Message.ToolCalls, ToolCall{
@@ -163,13 +164,21 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespons
 // per OpenAI's streaming tool-call format, reported to req.OnToolArgs as
 // they grow, and returned whole in the final ChatResponse.
 func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelta func(string)) (ChatResponse, error) {
-	stream, err := p.client.CreateChatCompletionStream(ctx, p.buildRequest(req))
+	creq := p.buildRequest(req)
+	// OpenAI sends a streamed call's usage only when asked, in a last chunk
+	// with no choices: without it a session's tokens went unrecorded
+	// (2026-11-07). Other compatible vendors keep their defaults.
+	if p.label == "openai" {
+		creq.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
+	}
+	stream, err := p.client.CreateChatCompletionStream(ctx, creq)
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("%s: %w", p.label, err)
 	}
 	defer func() { _ = stream.Close() }()
 
 	var content []byte
+	var usage Usage
 	finishReason := ""
 	type toolCallAccum struct {
 		id, name string
@@ -185,6 +194,9 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 		}
 		if err != nil {
 			return ChatResponse{}, fmt.Errorf("%s: %w", p.label, err)
+		}
+		if chunk.Usage != nil {
+			usage = usageOf(*chunk.Usage)
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -224,6 +236,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 	out := ChatResponse{
 		FinishReason: finishReason,
 		Message:      Message{Role: "assistant", Content: string(content)},
+		Usage:        usage,
 	}
 	for _, idx := range order {
 		acc := byIndex[idx]
@@ -234,6 +247,16 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 		})
 	}
 	return out, nil
+}
+
+// usageOf is a response's usage as Usage: the cached part of the prompt
+// apart from the rest.
+func usageOf(u openai.Usage) Usage {
+	cached := 0
+	if u.PromptTokensDetails != nil {
+		cached = u.PromptTokensDetails.CachedTokens
+	}
+	return Usage{InputTokens: int64(u.PromptTokens - cached), CacheReadTokens: int64(cached), OutputTokens: int64(u.CompletionTokens)}
 }
 
 // openAIReasoningModel reports the o-series (o1, o3, o4-mini, …), which

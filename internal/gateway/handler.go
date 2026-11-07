@@ -15672,10 +15672,19 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 		case r.Method == http.MethodDelete && subID != "":
 			// The grid's metrics lose the dimension: refuse the removal when
 			// a LOOKUP or criteria range elsewhere still reads them along it
-			// (DIMENSION_NOT_ON_SOURCE), as adding it is checked.
+			// (DIMENSION_NOT_ON_SOURCE), as adding it is checked, or while a
+			// posting into one of them still maps it.
+			if msg, err := crudapp.GridDimensionPostedRefusal(ctx, h.db.For(ctx), gridID, subID); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			} else if msg != "" {
+				jsonErr(w, errors.New(msg), http.StatusConflict)
+				return
+			}
+			// The values the grid's metrics kept along it go with it
+			// (crudapp.RemoveGridDimensionSQL); what reads them recalculates.
 			if err := h.gridChangeTx(ctx, gridID, metricformula.ValidateGridDimensional,
-				`DELETE FROM model.grid_dimension WHERE grid_id=$1::uuid AND dimension_id=$2::uuid`,
-				gridID, subID); err != nil {
+				crudapp.RemoveGridDimensionSQL, gridID, subID); err != nil {
 				if metricformula.IsValidationError(err) {
 					jsonErr(w, err, http.StatusBadRequest)
 					return
@@ -15684,6 +15693,7 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.auditGridUpdated(ctx, r, gridID, "dimension_detached", map[string]string{"dimension_id": subID})
+			h.recalcGridMetrics(ctx, gridID)
 			jsonOK(w, map[string]string{"status": "deleted"})
 		default:
 			jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)

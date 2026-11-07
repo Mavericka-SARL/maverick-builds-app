@@ -42,3 +42,6 @@ data:
   # Every model call counts, read-tool round trips included.
   AI_MAX_CALLS_PER_SESSION: "200"
   AI_MAX_CALLS_PER_DAY: "1000"
+  # Optional token budget per AI chat session (input + cache + output);
+  # unset or 0 = no budget. The tokens used show in the AI Developer.
+  # AI_SESSION_TOKEN_LIMIT: "5000000"

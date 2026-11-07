@@ -535,19 +535,35 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 		p.Name, id, p.SourceField, metricName, p.Aggregation, strings.Join(p.PostingStatuses, "/"), len(p.DimensionMappings)), id, nil
 }
 
-func (e *WriteExecutor) loadIntegration(ctx context.Context, id string) (formID, name string, err error) {
+// loadIntegration checks *id names a form integration of this model's
+// working revision. An id of another revision of the model is taken as its
+// copy here, by table and name, and *id is set to that copy: a session's
+// first plan is checked against the working revision and runs in the draft
+// copied from it at confirm time, so a posting named by the id it read was
+// refused there (2026-11-07, "not in the current working revision").
+func (e *WriteExecutor) loadIntegration(ctx context.Context, id *string) (formID, name string, err error) {
 	var modelID, revID string
 	if err := e.pool.QueryRow(ctx, `
 		SELECT model_id::text, COALESCE(revision_id::text,''), form_id::text, name
 		FROM model.form_metric_mapping WHERE id=$1::uuid
-	`, id).Scan(&modelID, &revID, &formID, &name); err != nil {
-		return "", "", fmt.Errorf("form integration %s not found — call list_form_integrations for the id", id)
+	`, *id).Scan(&modelID, &revID, &formID, &name); err != nil {
+		return "", "", fmt.Errorf("form integration %s not found — call list_form_integrations for the id", *id)
 	}
 	if modelID != e.modelID {
-		return "", "", fmt.Errorf("form integration %s belongs to another model", id)
+		return "", "", fmt.Errorf("form integration %s belongs to another model", *id)
 	}
 	if e.revID != "" && revID != "" && revID != e.revID {
-		return "", "", fmt.Errorf("form integration %s is not in the current working revision — call list_form_integrations for the copy in scope", id)
+		var copyID, copyForm string
+		if err := e.pool.QueryRow(ctx, `
+			SELECT m2.id::text, m2.form_id::text
+			FROM model.form_metric_mapping m2
+			JOIN model.form_def f2 ON f2.id = m2.form_id
+			JOIN model.form_def f1 ON f1.id = $1::uuid AND f1.name = f2.name
+			WHERE m2.model_id = $2::uuid AND m2.revision_id = $3::uuid AND m2.name = $4`,
+			formID, e.modelID, e.revID, name).Scan(&copyID, &copyForm); err != nil {
+			return "", "", fmt.Errorf("form integration %s is not in the current working revision — call list_form_integrations for the copy in scope", *id)
+		}
+		*id, formID = copyID, copyForm
 	}
 	return formID, name, nil
 }
@@ -560,7 +576,7 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	if p.FormIntegrationID == "" {
 		return "", "", fmt.Errorf("form_integration_id is required")
 	}
-	formID, curName, err := e.loadIntegration(ctx, p.FormIntegrationID)
+	formID, curName, err := e.loadIntegration(ctx, &p.FormIntegrationID)
 	if err != nil {
 		return "", "", err
 	}
@@ -651,7 +667,7 @@ func (e *WriteExecutor) deleteFormIntegration(ctx context.Context, raw json.RawM
 	if perr != nil || p.FormIntegrationID == "" {
 		return "", "", fmt.Errorf("form_integration_id is required")
 	}
-	_, name, err := e.loadIntegration(ctx, p.FormIntegrationID)
+	_, name, err := e.loadIntegration(ctx, &p.FormIntegrationID)
 	if err != nil {
 		return "", "", err
 	}

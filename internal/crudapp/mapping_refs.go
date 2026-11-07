@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -121,5 +122,182 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 			return refErr("dimension_mappings maps a dimension to %q, which is no field of the table", field)
 		}
 	}
+	return checkMappedDimensionsPlaced(ctx, db, m, dims)
+}
+
+// checkMappedDimensionsPlaced holds a mapping to its target metric's grid
+// (2026-11-07). A mapped dimension of no family of the grid's (the posting
+// kept its values per member of it: the grid showed their sum, every formula
+// read 0 — an AI build took Sites off its balance-sheet grid and four
+// postings kept mapping it, so closing stock read 0 in each closed month),
+// and a grid dimension no mapped dimension supplies (the values landed in no
+// cell: counts into a grid with Scenario mapped by month only), are refused.
+// A family is dimensions linked by parent_dimension_id or
+// source_dimension_id: staff posts into a departments grid. An unplaced
+// metric has no dimensions to check yet.
+func checkMappedDimensionsPlaced(ctx context.Context, db dbx.DB, m MappingRefs, dims []string) error {
+	var metricName string
+	var placed []string
+	if err := db.QueryRow(ctx, `
+		SELECT md.name, COALESCE((SELECT array_agg(DISTINCT gd.dimension_id::text)
+		         FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+		         WHERE gm.metric_id = md.id), '{}')
+		FROM model.metric_def md WHERE md.id = $1::uuid`, m.TargetMetricID).Scan(&metricName, &placed); err != nil {
+		return err
+	}
+	if len(placed) == 0 {
+		return nil
+	}
+	family, names, err := dimensionFamilies(ctx, db, m.TargetMetricID)
+	if err != nil {
+		return err
+	}
+	same := func(a, b string) bool { return a == b || (family[a] != "" && family[a] == family[b]) }
+	for _, dimID := range dims {
+		if !slices.ContainsFunc(placed, func(g string) bool { return same(dimID, g) }) {
+			return refErr("dimension_mappings maps %s, which %s's grid does not have: its values would be kept per %s and formulas, reading %s by its grid's dimensions, would find none — map only the grid's dimensions, or add %s to the grid first",
+				names[dimID], metricName, names[dimID], metricName, names[dimID])
+		}
+	}
+	for _, g := range placed {
+		if !slices.ContainsFunc(dims, func(d string) bool { return same(d, g) }) {
+			return refErr("dimension_mappings leaves %s unmapped, which %s's grid has: the records name no %s, so their values would land in no cell — map a field to %s, or post into a metric on a grid without it",
+				names[g], metricName, names[g], names[g])
+		}
+	}
 	return nil
 }
+
+// dimensionFamilies groups the dimensions of metricID's model revision that
+// parent_dimension_id or source_dimension_id link (id → family root), with
+// every dimension's name.
+func dimensionFamilies(ctx context.Context, db dbx.DB, metricID string) (map[string]string, map[string]string, error) {
+	rows, err := db.Query(ctx, `
+		SELECT d.id::text, d.name, COALESCE(d.parent_dimension_id::text,''), COALESCE(d.source_dimension_id::text,'')
+		FROM model.dimension_def d JOIN model.metric_def md ON md.id = $1::uuid
+		WHERE d.model_id = md.model_id AND (md.revision_id IS NULL OR d.revision_id IS NULL OR d.revision_id = md.revision_id)`, metricID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	root := map[string]string{}
+	names := map[string]string{}
+	var find func(string) string
+	find = func(x string) string {
+		if r, ok := root[x]; ok && r != x {
+			root[x] = find(r)
+			return root[x]
+		}
+		root[x] = x
+		return x
+	}
+	var links [][2]string
+	for rows.Next() {
+		var id, name, parent, source string
+		if err := rows.Scan(&id, &name, &parent, &source); err != nil {
+			return nil, nil, err
+		}
+		names[id] = name
+		find(id)
+		for _, o := range []string{parent, source} {
+			if o != "" {
+				links = append(links, [2]string{id, o})
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	for _, l := range links {
+		root[find(l[0])] = find(l[1])
+	}
+	family := map[string]string{}
+	for id := range names {
+		family[id] = find(id)
+	}
+	return family, names, nil
+}
+
+// GridDimensionPostedRefusal says why dimID may not leave grid gridID ("" when
+// it may): a posting into one of the grid's metrics still maps it — or a
+// dimension of its family no other grid dimension stands for (staff, once
+// departments goes) — and would keep storing values per member of it that no
+// formula reads. The posting is changed (or deleted) first; then the
+// dimension goes.
+func GridDimensionPostedRefusal(ctx context.Context, db dbx.DB, gridID, dimID string) (string, error) {
+	rows, err := db.Query(ctx, `
+		SELECT COALESCE(NULLIF(fm.name,''), fm.id::text), md.id::text, md.name,
+		       ARRAY(SELECT jsonb_object_keys(fm.dimension_mappings))
+		FROM model.form_metric_mapping fm
+		JOIN model.grid_metric gm ON gm.metric_id = fm.target_metric_id AND gm.grid_id = $1::uuid
+		JOIN model.metric_def md ON md.id = fm.target_metric_id
+		ORDER BY 1`, gridID)
+	if err != nil {
+		return "", err
+	}
+	type posting struct {
+		name, metricID, metric string
+		dims                   []string
+	}
+	var postings []posting
+	for rows.Next() {
+		var p posting
+		if err := rows.Scan(&p.name, &p.metricID, &p.metric, &p.dims); err != nil {
+			rows.Close()
+			return "", err
+		}
+		postings = append(postings, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(postings) == 0 {
+		return "", err
+	}
+	var gridDims []string
+	if err := db.QueryRow(ctx, `SELECT COALESCE(array_agg(dimension_id::text), '{}') FROM model.grid_dimension WHERE grid_id = $1::uuid`,
+		gridID).Scan(&gridDims); err != nil {
+		return "", err
+	}
+	family, dimNames, err := dimensionFamilies(ctx, db, postings[0].metricID)
+	if err != nil {
+		return "", err
+	}
+	same := func(a, b string) bool { return a == b || (family[a] != "" && family[a] == family[b]) }
+	// A mapped dimension still stands for one of the grid's other dimensions.
+	kept := func(d string) bool {
+		return slices.ContainsFunc(gridDims, func(g string) bool { return g != dimID && same(d, g) })
+	}
+	var names []string
+	for _, p := range postings {
+		if slices.ContainsFunc(p.dims, func(d string) bool { return same(d, dimID) && !kept(d) }) {
+			names = append(names, fmt.Sprintf("%q (into %s)", p.name, p.metric))
+		}
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	dimName := dimNames[dimID]
+	return fmt.Sprintf("the grid keeps %s: %s still map it — update those postings' dimension_mappings (and backfill them) or delete them first, else their values stay per %s where no formula reads them",
+		dimName, strings.Join(names, ", "), dimName), nil
+}
+
+// RemoveGridDimensionSQL takes dimension $2 off grid $1 and, in the same
+// statement, deletes the values the grid's metrics keep along it — typed
+// cells and calculated results alike (owner decision, 2026-11-07: "values on
+// this dimension must be removed"). Left, the grid summed them into its cells
+// while every formula, reading the metrics by the grid's dimensions, found
+// none. Nothing is deleted when the dimension is not on the grid; a posting
+// that maps it refuses the removal first (GridDimensionPostedRefusal), and the
+// cell history keeps what the cells held.
+const RemoveGridDimensionSQL = `
+	WITH on_grid AS (
+		SELECT 1 FROM model.grid_dimension WHERE grid_id = $1::uuid AND dimension_id = $2::uuid
+	), typed AS (
+		DELETE FROM runtime.fact_input fi USING model.grid_metric gm
+		WHERE gm.grid_id = $1::uuid AND fi.metric_id = gm.metric_id AND fi.dim_members ? $2::text
+		  AND EXISTS (SELECT 1 FROM on_grid)
+	), calculated AS (
+		DELETE FROM runtime.calc_result cr USING model.grid_metric gm
+		WHERE gm.grid_id = $1::uuid AND cr.metric_id = gm.metric_id AND cr.dim_members ? $2::text
+		  AND EXISTS (SELECT 1 FROM on_grid)
+	)
+	DELETE FROM model.grid_dimension WHERE grid_id = $1::uuid AND dimension_id = $2::uuid`

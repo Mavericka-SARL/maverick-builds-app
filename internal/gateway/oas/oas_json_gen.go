@@ -31712,12 +31712,19 @@ func (s *GetAiSessionOK) encodeFields(e *jx.Encoder) {
 			e.ArrEnd()
 		}
 	}
+	{
+		if s.Usage.Set {
+			e.FieldStart("usage")
+			s.Usage.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfGetAiSessionOK = [3]string{
+var jsonFieldsNameOfGetAiSessionOK = [4]string{
 	0: "session",
 	1: "messages",
 	2: "documents",
+	3: "usage",
 }
 
 // Decode decodes GetAiSessionOK from json.
@@ -31772,6 +31779,16 @@ func (s *GetAiSessionOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"documents\"")
 			}
+		case "usage":
+			if err := func() error {
+				s.Usage.Reset()
+				if err := s.Usage.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"usage\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -31792,6 +31809,137 @@ func (s *GetAiSessionOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *GetAiSessionOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GetAiSessionOKUsage) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetAiSessionOKUsage) encodeFields(e *jx.Encoder) {
+	{
+		if s.LlmCalls.Set {
+			e.FieldStart("llm_calls")
+			s.LlmCalls.Encode(e)
+		}
+	}
+	{
+		if s.InputTokens.Set {
+			e.FieldStart("input_tokens")
+			s.InputTokens.Encode(e)
+		}
+	}
+	{
+		if s.OutputTokens.Set {
+			e.FieldStart("output_tokens")
+			s.OutputTokens.Encode(e)
+		}
+	}
+	{
+		if s.CacheReadTokens.Set {
+			e.FieldStart("cache_read_tokens")
+			s.CacheReadTokens.Encode(e)
+		}
+	}
+	{
+		if s.CacheWriteTokens.Set {
+			e.FieldStart("cache_write_tokens")
+			s.CacheWriteTokens.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfGetAiSessionOKUsage = [5]string{
+	0: "llm_calls",
+	1: "input_tokens",
+	2: "output_tokens",
+	3: "cache_read_tokens",
+	4: "cache_write_tokens",
+}
+
+// Decode decodes GetAiSessionOKUsage from json.
+func (s *GetAiSessionOKUsage) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiSessionOKUsage to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "llm_calls":
+			if err := func() error {
+				s.LlmCalls.Reset()
+				if err := s.LlmCalls.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"llm_calls\"")
+			}
+		case "input_tokens":
+			if err := func() error {
+				s.InputTokens.Reset()
+				if err := s.InputTokens.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"input_tokens\"")
+			}
+		case "output_tokens":
+			if err := func() error {
+				s.OutputTokens.Reset()
+				if err := s.OutputTokens.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"output_tokens\"")
+			}
+		case "cache_read_tokens":
+			if err := func() error {
+				s.CacheReadTokens.Reset()
+				if err := s.CacheReadTokens.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"cache_read_tokens\"")
+			}
+		case "cache_write_tokens":
+			if err := func() error {
+				s.CacheWriteTokens.Reset()
+				if err := s.CacheWriteTokens.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"cache_write_tokens\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiSessionOKUsage")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetAiSessionOKUsage) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiSessionOKUsage) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -53602,6 +53750,39 @@ func (s OptFormRecord) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptFormRecord) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes GetAiSessionOKUsage as json.
+func (o OptGetAiSessionOKUsage) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes GetAiSessionOKUsage from json.
+func (o *OptGetAiSessionOKUsage) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGetAiSessionOKUsage to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGetAiSessionOKUsage) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGetAiSessionOKUsage) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

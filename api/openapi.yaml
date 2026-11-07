@@ -8870,6 +8870,15 @@ paths:
                   session:   { $ref: "#/components/schemas/AiSession" }
                   messages:  { type: array, items: { $ref: "#/components/schemas/AiChatMessage" } }
                   documents: { type: array, items: { $ref: "#/components/schemas/AiDocument" } }
+                  usage:
+                    type: object
+                    description: What the session's calls to the AI provider were billed for, as the provider reported them
+                    properties:
+                      llm_calls:          { type: integer }
+                      input_tokens:       { type: integer, format: int64 }
+                      output_tokens:      { type: integer, format: int64 }
+                      cache_read_tokens:  { type: integer, format: int64 }
+                      cache_write_tokens: { type: integer, format: int64 }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       operationId: renameAiSession

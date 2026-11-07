@@ -2059,6 +2059,15 @@ export interface AIConversion {
   created_at: string;
 }
 
+/** What an AI session's calls to the provider were billed for (migration 160). */
+export interface AISessionUsage {
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
 export interface AISession {
   id: string;
   app_id: string;
@@ -2250,6 +2259,7 @@ export interface AISendMessageEvent {
   chars?: number; // progress: how much of the tool call is written
   steps?: number; // progress: steps of a proposal written so far
   warnings?: string[]; // proposal: formulas the plan check thinks look wrong
+  usage?: AISessionUsage; // proposal | done: what the session was billed for so far
   error?: string; // error
   proposal?: AIProposal; // proposal
   reply?: AIMessage; // done
@@ -3295,7 +3305,7 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   aiGetSession: (id: string) =>
-    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[] }>(`/api/ai/sessions/${id}`),
+    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[]; usage?: AISessionUsage }>(`/api/ai/sessions/${id}`),
   aiUploadDocument: async (sessionId: string, file: File): Promise<AIDocument> => {
     // multipart — bypass apiFetch so the browser sets the Content-Type boundary
     const appId = localStorage.getItem("selected_app_id") ?? "";

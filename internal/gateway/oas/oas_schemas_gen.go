@@ -12559,6 +12559,8 @@ type GetAiSessionOK struct {
 	Session   OptAiSession    `json:"session"`
 	Messages  []AiChatMessage `json:"messages"`
 	Documents []AiDocument    `json:"documents"`
+	// What the session's calls to the AI provider were billed for, as the provider reported them.
+	Usage OptGetAiSessionOKUsage `json:"usage"`
 }
 
 // GetSession returns the value of Session.
@@ -12576,6 +12578,11 @@ func (s *GetAiSessionOK) GetDocuments() []AiDocument {
 	return s.Documents
 }
 
+// GetUsage returns the value of Usage.
+func (s *GetAiSessionOK) GetUsage() OptGetAiSessionOKUsage {
+	return s.Usage
+}
+
 // SetSession sets the value of Session.
 func (s *GetAiSessionOK) SetSession(val OptAiSession) {
 	s.Session = val
@@ -12591,7 +12598,71 @@ func (s *GetAiSessionOK) SetDocuments(val []AiDocument) {
 	s.Documents = val
 }
 
+// SetUsage sets the value of Usage.
+func (s *GetAiSessionOK) SetUsage(val OptGetAiSessionOKUsage) {
+	s.Usage = val
+}
+
 func (*GetAiSessionOK) getAiSessionRes() {}
+
+// What the session's calls to the AI provider were billed for, as the provider reported them.
+type GetAiSessionOKUsage struct {
+	LlmCalls         OptInt   `json:"llm_calls"`
+	InputTokens      OptInt64 `json:"input_tokens"`
+	OutputTokens     OptInt64 `json:"output_tokens"`
+	CacheReadTokens  OptInt64 `json:"cache_read_tokens"`
+	CacheWriteTokens OptInt64 `json:"cache_write_tokens"`
+}
+
+// GetLlmCalls returns the value of LlmCalls.
+func (s *GetAiSessionOKUsage) GetLlmCalls() OptInt {
+	return s.LlmCalls
+}
+
+// GetInputTokens returns the value of InputTokens.
+func (s *GetAiSessionOKUsage) GetInputTokens() OptInt64 {
+	return s.InputTokens
+}
+
+// GetOutputTokens returns the value of OutputTokens.
+func (s *GetAiSessionOKUsage) GetOutputTokens() OptInt64 {
+	return s.OutputTokens
+}
+
+// GetCacheReadTokens returns the value of CacheReadTokens.
+func (s *GetAiSessionOKUsage) GetCacheReadTokens() OptInt64 {
+	return s.CacheReadTokens
+}
+
+// GetCacheWriteTokens returns the value of CacheWriteTokens.
+func (s *GetAiSessionOKUsage) GetCacheWriteTokens() OptInt64 {
+	return s.CacheWriteTokens
+}
+
+// SetLlmCalls sets the value of LlmCalls.
+func (s *GetAiSessionOKUsage) SetLlmCalls(val OptInt) {
+	s.LlmCalls = val
+}
+
+// SetInputTokens sets the value of InputTokens.
+func (s *GetAiSessionOKUsage) SetInputTokens(val OptInt64) {
+	s.InputTokens = val
+}
+
+// SetOutputTokens sets the value of OutputTokens.
+func (s *GetAiSessionOKUsage) SetOutputTokens(val OptInt64) {
+	s.OutputTokens = val
+}
+
+// SetCacheReadTokens sets the value of CacheReadTokens.
+func (s *GetAiSessionOKUsage) SetCacheReadTokens(val OptInt64) {
+	s.CacheReadTokens = val
+}
+
+// SetCacheWriteTokens sets the value of CacheWriteTokens.
+func (s *GetAiSessionOKUsage) SetCacheWriteTokens(val OptInt64) {
+	s.CacheWriteTokens = val
+}
 
 // GetAuditSettingsForbidden is response for GetAuditSettings operation.
 type GetAuditSettingsForbidden struct{}
@@ -23208,6 +23279,52 @@ func (o OptFormRecord) Get() (v FormRecord, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptFormRecord) Or(d FormRecord) FormRecord {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetAiSessionOKUsage returns new OptGetAiSessionOKUsage with value set to v.
+func NewOptGetAiSessionOKUsage(v GetAiSessionOKUsage) OptGetAiSessionOKUsage {
+	return OptGetAiSessionOKUsage{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiSessionOKUsage is optional GetAiSessionOKUsage.
+type OptGetAiSessionOKUsage struct {
+	Value GetAiSessionOKUsage
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiSessionOKUsage was set.
+func (o OptGetAiSessionOKUsage) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiSessionOKUsage) Reset() {
+	var v GetAiSessionOKUsage
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiSessionOKUsage) SetTo(v GetAiSessionOKUsage) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiSessionOKUsage) Get() (v GetAiSessionOKUsage, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiSessionOKUsage) Or(d GetAiSessionOKUsage) GetAiSessionOKUsage {
 	if v, ok := o.Get(); ok {
 		return v
 	}

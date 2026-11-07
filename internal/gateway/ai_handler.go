@@ -100,6 +100,12 @@ func sessionCapMessage(limit int, draftRevisionID string) string {
 }
 
 // llmCallCaps returns the per-session and per-user-per-day caps.
+// sessionTokenLimit is AI_SESSION_TOKEN_LIMIT: the tokens a session may be
+// billed for before its next message is refused; 0 (unset) is no budget.
+func sessionTokenLimit() int64 {
+	return int64(envPositiveInt("AI_SESSION_TOKEN_LIMIT", 0))
+}
+
 func llmCallCaps() (perSession, perDay int) {
 	return envPositiveInt("AI_MAX_CALLS_PER_SESSION", defaultLLMCallsPerSession),
 		envPositiveInt("AI_MAX_CALLS_PER_DAY", defaultLLMCallsPerUserPerDay)
@@ -313,7 +319,9 @@ func (h *handler) aiGetSession(w http.ResponseWriter, r *http.Request) {
 	if docs == nil {
 		docs = []aiassistant.Document{}
 	}
-	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs})
+	// What the session's calls were billed for (migration 160).
+	usage, _ := store.Usage(ctx, sessionID)
+	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": usage})
 }
 
 // ── POST /api/ai/sessions/{id}/messages ─────────────────────────────────────
@@ -399,6 +407,14 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	if dailyCalls >= maxLLMCallsPerUserPerDay {
 		jsonErr(w, fmt.Errorf("you've reached today's limit of %d LLM calls — try again tomorrow", maxLLMCallsPerUserPerDay), http.StatusTooManyRequests)
 		return
+	}
+	// A session's token budget (AI_SESSION_TOKEN_LIMIT; none by default):
+	// what its calls were billed for, input, cached and output together.
+	if limit := sessionTokenLimit(); limit > 0 {
+		if u, uErr := store.Usage(ctx, sessionID); uErr == nil && u.Total() >= limit {
+			jsonErr(w, fmt.Errorf("this session has used %d tokens, its budget of %d: start a new session to go on", u.Total(), limit), http.StatusTooManyRequests)
+			return
+		}
 	}
 	// The tenant's plan may cap AI messages per day as well (plan.go).
 	if cid := h.requestCustomerID(ctx, r, a); cid != "" && h.plans != nil {
@@ -628,6 +644,10 @@ turn:
 		if u := llmResp.Usage; u.InputTokens+u.CacheReadTokens+u.CacheWriteTokens > 0 {
 			log.Printf("AI call: session=%s input=%d cache_read=%d cache_write=%d output=%d",
 				sessionID, u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens)
+			// Kept with the session, so a build's cost is known afterwards.
+			if uErr := store.AddUsage(context.WithoutCancel(ctx), sessionID, u); uErr != nil {
+				log.Printf("AI call: session=%s record usage: %v", sessionID, uErr)
+			}
 		}
 
 		if llmResp.FinishReason != "tool_calls" || len(llmResp.Message.ToolCalls) == 0 {
@@ -642,6 +662,16 @@ turn:
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
 				continue
+			}
+			// A sheet called done is checked against the session's value
+			// comparisons first (ai_sheet_check.go).
+			if !nudged {
+				if nudge := h.sheetDoneNudge(ctx, store, sessionID, llmResp.Message.Content); nudge != "" {
+					nudged = true
+					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: nudge})
+					continue
+				}
 			}
 			finalReply = llmResp.Message.Content
 			break
@@ -854,7 +884,8 @@ turn:
 			if allMsgs == nil {
 				allMsgs = []aiassistant.ChatMessage{}
 			}
-			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings})
+			usage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
+			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings, "usage": usage})
 			return
 		}
 	}
@@ -874,10 +905,12 @@ turn:
 	if allMsgs == nil {
 		allMsgs = []aiassistant.ChatMessage{}
 	}
+	doneUsage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
 	sendSSE("done", map[string]any{
 		"reply":    saved,
 		"messages": allMsgs,
 		"session":  sess,
+		"usage":    doneUsage,
 	})
 }
 

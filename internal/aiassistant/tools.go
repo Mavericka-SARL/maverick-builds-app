@@ -25,8 +25,8 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_metrics",
-			Description: "Returns every metric definition in the current revision: name, formula (if calculated), format, and dependencies.",
-			Parameters:  noParams,
+			Description: "Returns metric definitions of the current revision: name, formula (if calculated), format, aggregation, tags. Narrow it: \"grid\" (the metrics of one grid), \"names\" (just these), or \"search\" (a part of a name, label or formula) — a model of hundreds of metrics is long to read whole, and re-reading it after each refused plan costs the most of a build.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"grid":{"type":"string","description":"A grid's name or id: only its metrics"},"names":{"type":"array","items":{"type":"string"},"description":"Only the metrics of these names"},"search":{"type":"string","description":"Only metrics whose name, label or formula contains this (case ignored)"}},"required":[]}`),
 		},
 		{
 			Name:        "list_dimensions",
@@ -251,7 +251,11 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 	case "get_model_summary":
 		return e.modelSummary(ctx)
 	case "list_metrics":
-		return e.listMetrics(ctx)
+		var p metricFilter
+		if len(args) > 0 {
+			_ = json.Unmarshal(args, &p)
+		}
+		return e.listMetrics(ctx, p)
 	case "list_dimensions":
 		return e.listDimensions(ctx)
 	case "list_grids":
@@ -389,7 +393,34 @@ func tagSuffix(tagList []string) string {
 	return ", tags: " + strings.Join(tagList, ", ")
 }
 
-func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
+// metricFilter narrows list_metrics: one grid's metrics, the named ones, or
+// those whose name, label or formula holds a text. An AI build re-read all of
+// a 250-metric model 38 times, 530 KB, after refused plans (2026-11-07).
+type metricFilter struct {
+	Grid   string   `json:"grid"`
+	Names  []string `json:"names"`
+	Search string   `json:"search"`
+}
+
+// listMetricsHint is how many metrics an unfiltered list_metrics returns
+// before it says how to read fewer.
+const listMetricsHint = 80
+
+func (e *ToolExecutor) listMetrics(ctx context.Context, f metricFilter) (string, error) {
+	gridID := ""
+	if g := strings.TrimSpace(f.Grid); g != "" {
+		id, err := e.resolveRef(ctx, "grid", g)
+		if err != nil {
+			return "", err
+		}
+		gridID = id
+	}
+	lower := make([]string, 0, len(f.Names))
+	for _, n := range f.Names {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			lower = append(lower, n)
+		}
+	}
 	rows, err := e.pool.Query(ctx, `
 		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
 		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),''),
@@ -397,15 +428,21 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END, m.row_style
 		FROM model.metric_def m
 		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
-		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID)
+		  AND ($3 = '' OR EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = m.id AND gm.grid_id::text = $3))
+		  AND (cardinality($4::text[]) = 0 OR lower(m.name) = ANY($4::text[]))
+		  AND ($5 = '' OR strpos(lower(m.name || ' ' || COALESCE(m.label,'') || ' ' || COALESCE(m.formula,'')), lower($5)) > 0)
+		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID, gridID, lower, strings.TrimSpace(f.Search))
 	if err != nil {
 		return "", err
 	}
 	defer rows.Close()
 
+	filtered := gridID != "" || len(lower) > 0 || strings.TrimSpace(f.Search) != ""
+	count := 0
 	var sb strings.Builder
 	sb.WriteString("Metrics:\n")
 	for rows.Next() {
+		count++
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
@@ -432,7 +469,16 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 			fmt.Fprintf(&sb, "  [CALC]   %s = %s  (format:%s, agg:%s%s)\n", name, formula, format, agg, tagSuffix(tagList))
 		}
 	}
-	return sb.String(), rows.Err()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	switch {
+	case filtered && count == 0:
+		sb.WriteString("  (none match)\n")
+	case !filtered && count > listMetricsHint:
+		fmt.Fprintf(&sb, "(%d metrics. Next time read only what you need: list_metrics with \"grid\", \"names\" or \"search\".)\n", count)
+	}
+	return sb.String(), nil
 }
 
 func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {

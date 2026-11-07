@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xuri/excelize/v2"
+
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
@@ -26,6 +28,7 @@ import (
 
 type aiTurnEnv struct {
 	chat      *aiassistant.ChatStore
+	docs      *aiassistant.DocumentStore
 	proposals *aiassistant.ProposalStore
 	session   string
 	send      func(content string) (int, string)
@@ -68,7 +71,7 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 		t.Fatal(err)
 	}
 	_ = chat.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
-	return aiTurnEnv{chat: chat, proposals: aiassistant.NewProposalStore(pool), session: sess.ID, send: func(content string) (int, string) {
+	return aiTurnEnv{chat: chat, docs: aiassistant.NewDocumentStore(pool), proposals: aiassistant.NewProposalStore(pool), session: sess.ID, send: func(content string) (int, string) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]string{"content": content})
 		req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+"/api/ai/sessions/"+sess.ID+"/messages", bytes.NewReader(body))
@@ -326,6 +329,8 @@ func TestAsksToPropose(t *testing.T) {
 		"Confirm you still want me to proceed and I'll post the full proposal.":                true,
 		"FR is not a country in the model.":                                                    false,
 		"Those properties do not exist.":                                                       false,
+		// A real question about the model, with options, is left for the developer.
+		"Net revenue does not reconcile with the sales import. Which source wins?\n1) The GL categories\n2) The sales ledger\nWould you like me to use one of them?": false,
 	} {
 		if got := asksToPropose(reply); got != want {
 			t.Errorf("asksToPropose(%q) = %v, want %v", reply, got, want)
@@ -480,5 +485,90 @@ func TestSendMessage_WarnsOfHiddenDecimals(t *testing.T) {
 	}
 	if strings.Contains(results[0], "rate shows no decimal places") {
 		t.Errorf("rate keeps the default two decimals, yet was warned of:\n%s", results[0])
+	}
+}
+
+// A session keeps what its calls were billed for, as the provider reports
+// it, and AI_SESSION_TOKEN_LIMIT stops it at a budget (2026-11-07: a build's
+// cost was only in the gateway log).
+func TestSendMessage_RecordsTokenUsageAndStopsAtTheBudget(t *testing.T) {
+	reply := func(text string) providers.ChatResponse {
+		return providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: text},
+			Usage: providers.Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 500}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{reply("The grid holds 3 metrics."), reply("It has no time dimension.")}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("what does the grid hold"); status != http.StatusOK || !strings.Contains(sse, `"usage":{"llm_calls":1,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":500`) {
+		t.Fatalf("first turn: %d\n%s", status, sse)
+	}
+	u, err := env.chat.Usage(context.Background(), env.session)
+	if err != nil || u.Calls != 1 || u.Total() != 1700 {
+		t.Fatalf("usage after one call = %+v (%v), want 1 call and 1700 tokens", u, err)
+	}
+	t.Setenv("AI_SESSION_TOKEN_LIMIT", "1500")
+	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "its budget of 1500") {
+		t.Errorf("a turn past the budget: %d %s, want 429 naming the budget", status, body)
+	}
+}
+
+// A step failing only over what a failed step was to make is told so in
+// one line, naming that step: one wrong formula used to bring a dozen long
+// errors, and the model chased those (2026-11-07).
+func TestSendMessage_RefusalFoldsWhatFailsOnlyBecauseOfAnother(t *testing.T) {
+	root := turnMetricStep("gross", map[string]any{"formula": "no_such_metric * 2"})
+	follower := turnMetricStep("margin", map[string]any{"formula": "gross / 2"})
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		proposeResp("c1", root, follower),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "gross fails: no_such_metric does not exist."}},
+	}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("build the margin"); status != http.StatusOK {
+		t.Fatalf("send: %d\n%s", status, sse)
+	}
+	results := toolResults(t, env)
+	if len(results) == 0 {
+		t.Fatal("no tool result")
+	}
+	got := results[0]
+	if !strings.Contains(got, "step 1 (create_metric") || !strings.Contains(got, "no_such_metric") {
+		t.Errorf("the root failure is not reported in full:\n%s", got)
+	}
+	if !strings.Contains(got, `step 2 (create_metric — Create margin): uses "gross", which step 1 was to make and fails — fix step 1`) {
+		t.Errorf("the follower is not folded into one line naming step 1:\n%s", got)
+	}
+}
+
+// A reply calling an attached sheet done goes back once while the session's
+// comparisons do not show it matching (2026-11-07: "the five grids are now
+// populated" with Actual_PnL at 10 of 36 rows).
+func TestSendMessage_SheetCalledDoneIsCheckedFirst(t *testing.T) {
+	wb := excelize.NewFile()
+	_ = wb.SetSheetName("Sheet1", "Actual_PnL")
+	var buf bytes.Buffer
+	if err := wb.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	stop := func(text string) providers.ChatResponse {
+		return providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: text}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		stop("Actual_PnL is complete: every row reproduces the workbook."),
+		stop("Actual_PnL is not done: I have not compared its rows yet."),
+	}}
+	env := newAITurnEnv(t, fake)
+	if _, err := env.docs.CreateDocument(context.Background(), env.session, "model.xlsx",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "## Sheet: Actual_PnL", false, buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	status, sse := env.send("finish Actual_PnL")
+	if status != http.StatusOK || !strings.Contains(sse, "I have not compared its rows yet") {
+		t.Fatalf("the claim was not sent back: %d\n%s", status, sse)
+	}
+	if fake.calls != 2 {
+		t.Errorf("provider calls = %d, want 2 (the claim, then the answer to the check)", fake.calls)
+	}
+	msgs, _ := env.chat.ListMessages(context.Background(), env.session)
+	if len(msgs) < 2 || !strings.Contains(msgs[len(msgs)-1].Content, "not done") {
+		t.Errorf("the turn does not end on the checked answer: %+v", msgs[len(msgs)-1])
 	}
 }

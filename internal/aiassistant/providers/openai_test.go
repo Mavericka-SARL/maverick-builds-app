@@ -419,3 +419,39 @@ func TestOpenAIProvider_Chat_OneToolCallPerMessageOnOpenAIOnly(t *testing.T) {
 		}
 	}
 }
+
+// A call's usage comes back, the cached part of the prompt apart, from a
+// whole response and from a stream (which asks for it): a session's tokens
+// went unrecorded (2026-11-07).
+func TestOpenAIProvider_ReportsUsage(t *testing.T) {
+	var streamed map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		usage := `{"prompt_tokens": 1200, "completion_tokens": 80, "total_tokens": 1280, "prompt_tokens_details": {"cached_tokens": 1000}}`
+		if body["stream"] == true {
+			streamed = body
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, `data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"gpt-5","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}`+"\n\n")
+			_, _ = fmt.Fprint(w, `data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"gpt-5","choices":[],"usage":`+usage+`}`+"\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"c","object":"chat.completion","created":1,"model":"gpt-5","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Hi"}}],"usage":`+usage+`}`)
+	}))
+	defer server.Close()
+	p := NewOpenAICompatible("test-key", server.URL, "openai")
+	want := Usage{InputTokens: 200, CacheReadTokens: 1000, OutputTokens: 80}
+	resp, err := p.Chat(t.Context(), ChatRequest{Model: "gpt-5", Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil || resp.Usage != want {
+		t.Errorf("Chat usage = %+v (%v), want %+v", resp.Usage, err, want)
+	}
+	resp, err = p.ChatStream(t.Context(), ChatRequest{Model: "gpt-5", Messages: []Message{{Role: "user", Content: "hi"}}}, func(string) {})
+	if err != nil || resp.Usage != want {
+		t.Errorf("ChatStream usage = %+v (%v), want %+v", resp.Usage, err, want)
+	}
+	if opts, _ := streamed["stream_options"].(map[string]any); opts["include_usage"] != true {
+		t.Errorf("the stream did not ask for usage: %v", streamed["stream_options"])
+	}
+}

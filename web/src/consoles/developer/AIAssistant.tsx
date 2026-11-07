@@ -7,7 +7,7 @@ import {
 import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
 import { credentialSteps, credentialsComplete } from "./proposalCredentials";
-import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
+import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
@@ -646,6 +646,13 @@ function formatElapsed(ms: number): string {
 
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
+
+// fmtTokens writes a token count briefly: 950, 12.4k, 1.25M.
+function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
 export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   revisionId?: string; revisionName?: string;
   /** Makes a revision the console's working revision (the draft, once promoted). */
@@ -662,6 +669,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   };
   const [sessionId, setSessionId]   = useState<string | null>(null);
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
+  // What this session's calls were billed for, from the provider's reports.
+  const [usage, setUsage] = useState<AISessionUsage | null>(null);
   const [messages, setMessages]     = useState<AIMessage[]>([]);
   const [pendingProposal, setPendingProposal] = useState<AIProposal | null>(null);
   const [input, setInput]           = useState("");
@@ -760,6 +769,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     setToolStatus(null);
     const data = await api.aiGetSession(id);
     setCurrentSession(data.session);
+    setUsage(data.usage ?? null);
     setMessages(data.messages ?? []);
     setDocuments(data.documents ?? []);
     const lastSent = (data.messages ?? []).filter(m => m.role === "user").at(-1)?.created_at;
@@ -1008,6 +1018,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setPendingProposal(event.proposal ?? null);
             setProposalWarnings(event.warnings ?? []);
             if (event.session) setCurrentSession(event.session);
+            if (event.usage) setUsage(event.usage);
             qc.invalidateQueries({ queryKey: ["ai-proposals", sid] });
             break;
           case "done":
@@ -1016,6 +1027,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setMessages(event.messages ?? []);
             setPendingProposal(null);
             if (event.session) setCurrentSession(event.session);
+            if (event.usage) setUsage(event.usage);
             break;
           case "error":
             setError(event.error ?? "Something went wrong");
@@ -1216,6 +1228,11 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <span>· revision:</span>
             <strong style={{ color: "var(--color-text)" }}>{revisionName || demo?.revision || "active"}</strong>
             {currentSession?.draft_revision_id && <span>· writes go to your AI draft revision</span>}
+            {usage && usage.llm_calls > 0 && (
+              <span title={`Input ${usage.input_tokens.toLocaleString()}, read from cache ${usage.cache_read_tokens.toLocaleString()}, written to cache ${usage.cache_write_tokens.toLocaleString()}, output ${usage.output_tokens.toLocaleString()}`}>
+                <Txt>{`· ${usage.llm_calls} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in, ${fmtTokens(usage.output_tokens)} out`}</Txt>
+              </span>
+            )}
           </div>
         )}
 

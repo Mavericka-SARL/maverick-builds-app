@@ -262,7 +262,20 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
               {expandedGrid === g.id && draft?.gridId === g.id && (isDirty || saveError) && (
                 <div style={{ padding: "12px 16px 0" }}>
                   <UnsavedChangesBar
-                    onSave={() => save.mutate({ g, d: draft })}
+                    onSave={() => {
+                      // A dimension taken off the grid takes the values its
+                      // metrics keep along it (they would show in the grid
+                      // but no formula could read them).
+                      const removed = g.dimension_ids.filter(id => !draft.dimension_ids.includes(id))
+                        .map(id => dims.find(x => x.id === id)?.name ?? id);
+                      if (removed.length === 0) { save.mutate({ g, d: draft }); return; }
+                      confirm({
+                        title: `Remove ${removed.join(", ")} from the grid?`,
+                        body: `The values this grid's metrics hold for each member of ${removed.join(", ")} are deleted with it; the cell history keeps them.`,
+                        confirmLabel: "Remove and save",
+                        onConfirm: () => save.mutate({ g, d: draft }),
+                      });
+                    }}
                     onCancel={() => { setDraft(draftOf(g)); setSaveError(null); }}
                     saving={save.isPending}
                     error={saveError ?? undefined}

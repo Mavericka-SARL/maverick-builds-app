@@ -43,13 +43,40 @@ func (e *WriteExecutor) clearInputValues(ctx context.Context, raw json.RawMessag
 	if id == "" {
 		return "", "", fmt.Errorf("grid_id (list_grids) or metric_id is required")
 	}
-	if err := e.inModel(ctx, kind, id); err != nil {
+	// By name or id, into the working revision, as every other tool: a
+	// metric named here was refused "not in this model" (2026-11-07).
+	id, err := e.requireInModel(ctx, kind, id)
+	if err != nil {
 		return "", "", err
 	}
 	if e.hooks.ClearValues == nil {
 		return "", "", fmt.Errorf("values are cleared through the gateway, which is not available here")
 	}
-	body, _ := json.Marshal(map[string]any{"metric_ids": p.MetricIDs, "members": p.Members})
+	// The members' dimensions and the metrics into the working revision as
+	// well: ids read from the revision a plan was checked against name the
+	// draft's copies.
+	members := p.Members
+	var byDim map[string]json.RawMessage
+	if len(members) > 0 && json.Unmarshal(members, &byDim) == nil && len(byDim) > 0 {
+		mapped := make(map[string]json.RawMessage, len(byDim))
+		for dim, codes := range byDim {
+			did, err := e.requireInModel(ctx, "dimension", dim)
+			if err != nil {
+				return "", "", err
+			}
+			mapped[did] = codes
+		}
+		members, _ = json.Marshal(mapped)
+	}
+	metricIDs := make([]string, 0, len(p.MetricIDs))
+	for _, m := range p.MetricIDs {
+		mid, err := e.requireInModel(ctx, "metric", m)
+		if err != nil {
+			return "", "", err
+		}
+		metricIDs = append(metricIDs, mid)
+	}
+	body, _ := json.Marshal(map[string]any{"metric_ids": metricIDs, "members": members})
 	out, err := e.hooks.ClearValues(ctx, kind, id, body)
 	if err != nil {
 		return "", "", err
@@ -74,7 +101,8 @@ func (e *WriteExecutor) fillSampleValues(ctx context.Context, raw json.RawMessag
 	if id == "" {
 		return "", "", fmt.Errorf("grid_id is required (list_grids)")
 	}
-	if err := e.inModel(ctx, "grid", id); err != nil {
+	id, err := e.requireInModel(ctx, "grid", id)
+	if err != nil {
 		return "", "", err
 	}
 	if e.hooks.FillSample == nil {
@@ -86,19 +114,6 @@ func (e *WriteExecutor) fillSampleValues(ctx context.Context, raw json.RawMessag
 		return "", "", err
 	}
 	return out, id, nil
-}
-
-// inModel refuses a grid or metric that is not this model's.
-func (e *WriteExecutor) inModel(ctx context.Context, kind, id string) error {
-	table := map[string]string{"grid": "model.grid_def", "metric": "model.metric_def"}[kind]
-	var ok bool
-	if err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE id::text = $1 AND model_id = $2::uuid)`, id, e.modelID).Scan(&ok); err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("%s %s is not in this model (list_grids / list_metrics)", kind, id)
-	}
-	return nil
 }
 
 // createCSVFile is create_csv_file: a CSV the assistant writes, attached to

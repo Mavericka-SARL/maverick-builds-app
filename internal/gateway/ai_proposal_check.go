@@ -127,6 +127,27 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 	created := make([]string, len(steps))
 	blocked := map[int]bool{} // 0-based steps whose result later steps cannot use
 	filled := aiassistant.FilledLater(steps)
+	// failedNames: a metric or grid a failed step was to create or place,
+	// lower-cased, with that step's number. A later step failing over one
+	// of them is told in one line, not with its own long error: one wrong
+	// formula used to bring a dozen "not found" and "not on a grid with a
+	// time dimension" errors, each listing names, and the model chased those
+	// (2026-11-07).
+	failedNames := map[string]int{}
+	fail := func(i int, step aiassistant.ProposalStep, err error) {
+		blocked[i] = true
+		msg := err.Error()
+		low := strings.ToLower(msg)
+		for name, root := range failedNames {
+			if strings.Contains(low, `"`+name+`"`) || strings.Contains(low, `'`+name+`'`) {
+				out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): uses %q, which step %d was to make and fails — fix step %d", i+1, step.Tool, step.Description, name, root, root))
+				recordFailedNames(failedNames, step, i+1)
+				return
+			}
+		}
+		out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): %s", i+1, step.Tool, step.Description, msg))
+		recordFailedNames(failedNames, step, i+1)
+	}
 	for i, step := range steps {
 		if _, ok := usesBlockedStep(step.Params, blocked); ok {
 			blocked[i] = true
@@ -141,8 +162,7 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 			lintErr = percentUnitsLint(ctx, tx, modelID, revID, step)
 		}
 		if lintErr != nil {
-			blocked[i] = true
-			out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): %v", i+1, step.Tool, step.Description, lintErr))
+			fail(i, step, lintErr)
 			continue
 		}
 		sp, err := tx.Begin(ctx) // a savepoint: one failure must not poison the rest
@@ -157,8 +177,7 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 			out.unchecked = append(out.unchecked, i+1)
 		case stepErr != nil:
 			_ = sp.Rollback(ctx)
-			blocked[i] = true
-			out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): %v", i+1, step.Tool, step.Description, stepErr))
+			fail(i, step, stepErr)
 		default:
 			if err := sp.Commit(ctx); err != nil {
 				return out, created, err
@@ -167,6 +186,28 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 		}
 	}
 	return out, created, nil
+}
+
+// recordFailedNames notes the metric or grid a failed step (number n) was to
+// create, place or change, by name.
+func recordFailedNames(failed map[string]int, step aiassistant.ProposalStep, n int) {
+	var p struct {
+		Name     string `json:"name"`
+		Metric   string `json:"metric"`
+		MetricID string `json:"metric_id"`
+	}
+	if json.Unmarshal(storedParams(step.Params), &p) != nil {
+		return
+	}
+	for _, v := range []string{p.Name, p.Metric, p.MetricID} {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v == "" || len(v) == 36 && strings.Count(v, "-") == 4 { // an id names nothing a message quotes
+			continue
+		}
+		if _, seen := failed[v]; !seen {
+			failed[v] = n
+		}
+	}
 }
 
 // storedParams is a step's params as confirming reads them back from the
@@ -319,7 +360,7 @@ func (c proposalCheck) rejection(mode retryMode) string {
 	case retryStop:
 		sb.WriteString("Do not propose again in this turn. Tell the developer, in a short list, which steps fail and why, and what you would change; do not ask whether to propose — their next message says how to go on.")
 	default:
-		sb.WriteString("Fix every failing step — read the current names with list_metrics / list_dimensions if needed — and call propose_actions again with the WHOLE corrected plan.")
+		sb.WriteString("Fix every failing step, the ones that fail on their own first — read names you are unsure of with list_metrics {\"names\": [...]} or {\"search\": \"...\"}, not the whole list — and call propose_actions again with the WHOLE corrected plan.")
 	}
 	return sb.String()
 }

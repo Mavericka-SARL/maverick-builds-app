@@ -46,10 +46,15 @@ func TestAIDeveloperClearsFillsAndWritesFiles(t *testing.T) {
 		p, _ := proposals.GetProposal(ctx, id)
 		return p
 	}
+	// A metric's values in the session's draft — where the AI writes, not
+	// the revision it started from (the draft's copy of metric).
 	values := func(metric string) map[string]float64 {
 		t.Helper()
 		rows, err := f.pool.Query(ctx, `SELECT DISTINCT ON (dim_members) (SELECT value FROM jsonb_each_text(dim_members) LIMIT 1), value::float8
-			FROM runtime.fact_input WHERE metric_id = $1::uuid ORDER BY dim_members, entered_at DESC, id DESC`, metric)
+			FROM runtime.fact_input WHERE metric_id = (
+				SELECT d.id FROM model.metric_def d JOIN model.metric_def o ON o.id = $1::uuid AND o.name = d.name
+				WHERE d.revision_id = (SELECT draft_revision_id FROM ai_assistant.session WHERE id = $2::uuid))
+			ORDER BY dim_members, entered_at DESC, id DESC`, metric, sess.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

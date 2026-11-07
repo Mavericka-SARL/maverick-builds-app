@@ -21,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/imagedata"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
@@ -569,7 +570,9 @@ func (e *WriteExecutor) removeGridMetric(ctx context.Context, raw json.RawMessag
 
 // removeGridDimension is DELETE /api/developer/grids/{id}/dimensions/{dimId}:
 // refused while a metric on the grid reads that dimension in a formula
-// (metricformula.ValidateGridDimensional).
+// (metricformula.ValidateGridDimensional) or a posting into one of its
+// metrics still maps it (crudapp.GridDimensionPostedRefusal); the values its
+// metrics kept along the dimension go with it (crudapp.RemoveGridDimensionSQL).
 func (e *WriteExecutor) removeGridDimension(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
 		GridID      string `json:"grid_id"`
@@ -590,15 +593,20 @@ func (e *WriteExecutor) removeGridDimension(ctx context.Context, raw json.RawMes
 	if err != nil {
 		return "", "", err
 	}
+	if msg, err := crudapp.GridDimensionPostedRefusal(ctx, e.pool, gridID, dimID); err != nil {
+		return "", "", err
+	} else if msg != "" {
+		return "", "", errors.New(msg)
+	}
 	n, err := e.gridChangeTx(ctx, gridID, metricformula.ValidateGridDimensional,
-		`DELETE FROM model.grid_dimension WHERE grid_id=$1::uuid AND dimension_id=$2::uuid`, gridID, dimID)
+		crudapp.RemoveGridDimensionSQL, gridID, dimID)
 	if err != nil {
 		return "", "", err
 	}
 	if n == 0 {
 		return "", "", fmt.Errorf("that dimension is not on this grid (call list_grids)")
 	}
-	return "Dimension removed from the grid", "", nil
+	return "Dimension removed from the grid, with the values its metrics kept along it", "", nil
 }
 
 // updateGridDimension is PATCH /api/developer/grids/{id}/dimensions/{dimId}:
@@ -1383,7 +1391,7 @@ func (e *WriteExecutor) backfillFormIntegration(ctx context.Context, raw json.Ra
 	if perr != nil || p.FormIntegrationID == "" {
 		return "", "", fmt.Errorf("form_integration_id is required")
 	}
-	if _, _, err := e.loadIntegration(ctx, p.FormIntegrationID); err != nil {
+	if _, _, err := e.loadIntegration(ctx, &p.FormIntegrationID); err != nil {
 		return "", "", err
 	}
 	if e.hooks.PostFormIntegration == nil {

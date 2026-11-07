@@ -418,7 +418,7 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 		if err := e.pool.QueryRow(ctx, q.counterpart, e.modelID, e.revID, id).Scan(&mapped); err == nil {
 			return mapped, nil
 		}
-		return "", fmt.Errorf("%s %q not found in the working revision — pass its exact name or id%s", kind, id, e.availableNames(ctx, kind))
+		return "", fmt.Errorf("%s %q not found in the working revision — pass its exact name or id%s", kind, id, e.availableNames(ctx, kind, id))
 	}
 	var owner, revision, identity string
 	// Only a UUID-shaped id reaches the ::uuid lookup: a malformed one fails
@@ -439,11 +439,11 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 		// remap below then finds the draft's own.
 		near := e.nearID(ctx, kind, id)
 		if near == "" {
-			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind))
+			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind, id))
 		}
 		id = near
 		if err := e.pool.QueryRow(ctx, q.lookup, id).Scan(&owner, &revision, &identity); err != nil {
-			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind))
+			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind, id))
 		}
 	}
 	if owner != e.modelID {
@@ -4113,28 +4113,83 @@ func validationName(requested, stored string) string {
 
 // availableNames lists what the working revision has of a kind, for a
 // not-found message: the assistant invented a grid id live and was told only
-// that it did not exist.
-func (e *WriteExecutor) availableNames(ctx context.Context, kind string) string {
+// that it did not exist. A short list is given whole; a long one, the names
+// nearest ref — the first 40 by name, ids included, made every "not found"
+// of a 250-metric model 3 KB the model then re-read (2026-11-07).
+func (e *WriteExecutor) availableNames(ctx context.Context, kind, ref string) string {
 	table := map[string]string{"grid": "model.grid_def", "metric": "model.metric_def", "dimension": "model.dimension_def", "dashboard": "model.dashboard_def"}[kind]
 	if table == "" || e.revID == "" {
 		return ""
 	}
-	rows, err := e.pool.Query(ctx, `SELECT name, id::text FROM `+table+` WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name LIMIT 40`, e.modelID, e.revID)
+	rows, err := e.pool.Query(ctx, `SELECT name, id::text FROM `+table+` WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`, e.modelID, e.revID)
 	if err != nil {
 		return ""
 	}
 	defer rows.Close()
-	var items []string
+	type named struct{ name, id string }
+	var all []named
 	for rows.Next() {
-		var name, id string
-		if rows.Scan(&name, &id) == nil {
-			items = append(items, fmt.Sprintf("%s (%s)", name, id))
+		var n named
+		if rows.Scan(&n.name, &n.id) == nil {
+			all = append(all, n)
 		}
 	}
-	if len(items) == 0 {
+	if len(all) == 0 {
 		return fmt.Sprintf(" (the working revision has no %s yet)", kind)
 	}
-	return fmt.Sprintf(" — the working revision's %ss: %s", kind, strings.Join(items, "; "))
+	const whole, nearest = 12, 6
+	if len(all) <= whole {
+		items := make([]string, len(all))
+		for i, n := range all {
+			items[i] = fmt.Sprintf("%s (%s)", n.name, n.id)
+		}
+		return fmt.Sprintf(" — the working revision's %ss: %s", kind, strings.Join(items, "; "))
+	}
+	want := strings.ToLower(strings.TrimSpace(ref))
+	sort.SliceStable(all, func(i, j int) bool { return nameDistance(want, all[i].name) < nameDistance(want, all[j].name) })
+	items := make([]string, 0, nearest)
+	for _, n := range all[:nearest] {
+		items = append(items, n.name)
+	}
+	return fmt.Sprintf(" — the nearest of the working revision's %d %ss: %s", len(all), kind, strings.Join(items, ", "))
+}
+
+// nameDistance ranks name against a wanted one (lower-cased): one holding it
+// or held by it first, then by edit distance.
+func nameDistance(want, name string) int {
+	name = strings.ToLower(name)
+	if want != "" && (strings.Contains(name, want) || strings.Contains(want, name)) {
+		return abs(len(name) - len(want))
+	}
+	return 100 + levenshtein(want, name)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
 }
 
 // nearID returns the one id of the model's resources of a kind (any

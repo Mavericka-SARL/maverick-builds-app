@@ -205,6 +205,11 @@ which seals connector credentials and has no plaintext fallback at all
 read-tool round trips included. A whole 13-sheet FP&A workbook took 74 to 78
 calls with the gpt-5 models; at the session cap, the developer is told to
 make the session's draft their working revision and continue in a new session.
+Each session keeps the tokens its calls were billed for, as the provider
+reports them (input, read from and written to the cache, output); the AI
+Developer shows them above the chat, and `GET /api/ai/sessions/{id}` returns
+them as `usage`. `AI_SESSION_TOKEN_LIMIT` (unset: no budget) refuses a
+session's next message once it has used that many tokens.
 
 The model is each developer's own choice (AI Developer → Settings, free text),
 or the tenant's when a tenant administrator sets the tenant key. When neither
