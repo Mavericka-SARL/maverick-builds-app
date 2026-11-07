@@ -163,9 +163,12 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		RowLines []int `json:"row_lines"`
 		// FileName names the person's file in Recent Imports.
 		FileName string `json:"file_name"`
+		// ReplaceBy names a field: the table's records holding a value of
+		// it the file holds are replaced (recordpost.ImportRequest).
+		ReplaceBy string `json:"replace_by"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
-		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
+		jsonErr(w, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)"), http.StatusBadRequest)
 		return
 	}
 
@@ -191,18 +194,22 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
-	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun)
+	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun, body.ReplaceBy)
+	created, errs := res.Created, res.Errors
 	if body.DryRun && err == nil {
-		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "error_rows": len(errs), "errors": errs})
+		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "rows_replaced": res.Replaced, "error_rows": len(errs), "errors": errs})
 		return
 	}
 	job := importpkg.FinishedJob{}
 	if !body.DryRun && (err != nil || len(errs) > 0 || created > 0) {
 		job = h.tableImportJob(ctx, formID, "upload", act.UserID, body.FileName, started, created, errs, err)
+		if body.ReplaceBy != "" {
+			job.Details.Mode = string(importpkg.ModeReplace)
+		}
 		h.recordImportJob(ctx, job)
 	}
 	if err != nil {
-		h.jsonLimitErr(w, err)
+		h.jsonImportErr(w, err)
 		return
 	}
 	if len(errs) > 0 {
@@ -218,17 +225,30 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID, RevisionID: job.RevisionID,
-		Metadata: map[string]string{"records_created": strconv.Itoa(created)},
+		Metadata: map[string]string{"records_created": strconv.Itoa(created), "records_replaced": strconv.Itoa(res.Replaced)},
 	})
-	jsonOK(w, map[string]any{"status": "ok", "records_created": created})
+	jsonOK(w, map[string]any{"status": "ok", "records_created": created, "records_replaced": res.Replaced})
 }
 
-// jsonFormRowErrs answers a refused form import: 422, nothing created.
+// jsonFormRowErrs answers a refused form import: 422, nothing created. When
+// every row is refused for one reason — a period locked while its approval
+// waits — the answer says it once (2026-11-07: a reload repeated the lock
+// on each of 15 rows under "15 row(s) failed validation").
 func jsonFormRowErrs(w http.ResponseWriter, errs []formRowError) {
+	msg := fmt.Sprintf("import rejected: %d row(s) failed validation, nothing was imported", len(errs))
+	if len(errs) > 1 {
+		same := true
+		for _, e := range errs[1:] {
+			same = same && e.Message == errs[0].Message && e.Column == errs[0].Column
+		}
+		if same {
+			msg = fmt.Sprintf("nothing was imported: %s (all %d rows)", errs[0].Message, len(errs))
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error":      fmt.Sprintf("import rejected: %d row(s) failed validation, nothing was imported", len(errs)),
+		"error":      msg,
 		"error_rows": len(errs),
 		"errors":     errs,
 	})

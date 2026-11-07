@@ -4049,6 +4049,71 @@ func decodeDeleteIntegrationConnectionParams(args [1]string, argsEscaped bool, r
 	return params, nil
 }
 
+// DeleteIntegrationTemplateParams is parameters of deleteIntegrationTemplate operation.
+type DeleteIntegrationTemplateParams struct {
+	ID uuid.UUID
+}
+
+func unpackDeleteIntegrationTemplateParams(packed middleware.Parameters) (params DeleteIntegrationTemplateParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeDeleteIntegrationTemplateParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteIntegrationTemplateParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DeleteMetricParams is parameters of deleteMetric operation.
 type DeleteMetricParams struct {
 	ID uuid.UUID
@@ -5947,6 +6012,71 @@ func decodeExportModelParams(args [1]string, argsEscaped bool, r *http.Request) 
 		return params, &ogenerrors.DecodeParamError{
 			Name: "include_data",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ExtendBACalendarParams is parameters of extendBACalendar operation.
+type ExtendBACalendarParams struct {
+	DimId uuid.UUID
+}
+
+func unpackExtendBACalendarParams(packed middleware.Parameters) (params ExtendBACalendarParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeExtendBACalendarParams(args [1]string, argsEscaped bool, r *http.Request) (params ExtendBACalendarParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
+			In:   "path",
 			Err:  err,
 		}
 	}
@@ -10884,6 +11014,71 @@ func decodeListRevisionsParams(args [0]string, argsEscaped bool, r *http.Request
 	return params, nil
 }
 
+// ListRoleAccessRulesParams is parameters of listRoleAccessRules operation.
+type ListRoleAccessRulesParams struct {
+	ID uuid.UUID
+}
+
+func unpackListRoleAccessRulesParams(packed middleware.Parameters) (params ListRoleAccessRulesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeListRoleAccessRulesParams(args [1]string, argsEscaped bool, r *http.Request) (params ListRoleAccessRulesParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ListUserAccessRulesParams is parameters of listUserAccessRules operation.
 type ListUserAccessRulesParams struct {
 	ID uuid.UUID
@@ -10901,6 +11096,71 @@ func unpackListUserAccessRulesParams(packed middleware.Parameters) (params ListU
 }
 
 func decodeListUserAccessRulesParams(args [1]string, argsEscaped bool, r *http.Request) (params ListUserAccessRulesParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ListUserRoleAccessRulesParams is parameters of listUserRoleAccessRules operation.
+type ListUserRoleAccessRulesParams struct {
+	ID uuid.UUID
+}
+
+func unpackListUserRoleAccessRulesParams(packed middleware.Parameters) (params ListUserRoleAccessRulesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeListUserRoleAccessRulesParams(args [1]string, argsEscaped bool, r *http.Request) (params ListUserRoleAccessRulesParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -12286,6 +12546,71 @@ func unpackRenameAiSessionParams(packed middleware.Parameters) (params RenameAiS
 }
 
 func decodeRenameAiSessionParams(args [1]string, argsEscaped bool, r *http.Request) (params RenameAiSessionParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ReopenWorkflowInstanceParams is parameters of reopenWorkflowInstance operation.
+type ReopenWorkflowInstanceParams struct {
+	ID uuid.UUID
+}
+
+func unpackReopenWorkflowInstanceParams(packed middleware.Parameters) (params ReopenWorkflowInstanceParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeReopenWorkflowInstanceParams(args [1]string, argsEscaped bool, r *http.Request) (params ReopenWorkflowInstanceParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -14317,6 +14642,71 @@ func unpackSetModelDateFormatParams(packed middleware.Parameters) (params SetMod
 }
 
 func decodeSetModelDateFormatParams(args [1]string, argsEscaped bool, r *http.Request) (params SetModelDateFormatParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// SetRoleAccessRulesParams is parameters of setRoleAccessRules operation.
+type SetRoleAccessRulesParams struct {
+	ID uuid.UUID
+}
+
+func unpackSetRoleAccessRulesParams(packed middleware.Parameters) (params SetRoleAccessRulesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeSetRoleAccessRulesParams(args [1]string, argsEscaped bool, r *http.Request) (params SetRoleAccessRulesParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -17096,6 +17486,123 @@ func decodeUpsertPlanParams(args [1]string, argsEscaped bool, r *http.Request) (
 		return params, &ogenerrors.DecodeParamError{
 			Name: "key",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// UseIntegrationTemplateParams is parameters of useIntegrationTemplate operation.
+type UseIntegrationTemplateParams struct {
+	ID         uuid.UUID
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackUseIntegrationTemplateParams(packed middleware.Parameters) (params UseIntegrationTemplateParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeUseIntegrationTemplateParams(args [1]string, argsEscaped bool, r *http.Request) (params UseIntegrationTemplateParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
 			Err:  err,
 		}
 	}

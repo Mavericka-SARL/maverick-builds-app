@@ -33,6 +33,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
         workflow_name: workflow.name,
         workflow_def_id: workflow.id,
         ...(trigger.source_form_id ? { source_form_id: trigger.source_form_id } : {}),
+        ...(trigger.source_grid_id ? { source_grid_id: trigger.source_grid_id } : {}),
         ...(trigger.source_integration_id ? { source_integration_id: trigger.source_integration_id } : {}),
       }, revisionId),
     onSuccess: () => {
@@ -54,7 +55,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
         </div>
         {trigger.unresolved && !catalogLoading && (
           <div role="alert" style={{ color: "var(--color-danger)", fontSize: 13 }}>
-            This workflow starts on “{workflow.trigger_event}”, which names no table or integration of this revision.
+            This workflow starts on “{workflow.trigger_event}”, which names no table, grid or integration of this revision.
             Choose its trigger event again in the workflow's properties, or create the trigger in Developer › Triggers.
           </div>
         )}

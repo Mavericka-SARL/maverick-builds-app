@@ -158,6 +158,20 @@ func encodeCompleteTaskRequest(
 	return nil
 }
 
+func encodeCopyBAValuesRequest(
+	req *CopyBAValuesReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeCreateAPITokenRequest(
 	req *APITokenCreate,
 	r *http.Request,
@@ -542,6 +556,20 @@ func encodeDuplicateWorkflowRequest(
 	return nil
 }
 
+func encodeExtendBACalendarRequest(
+	req *ExtendBACalendarReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeExtractFormulaRefsRequest(
 	req *FormulaRefsRequest,
 	r *http.Request,
@@ -792,6 +820,20 @@ func encodeRenameAiSessionRequest(
 	return nil
 }
 
+func encodeReopenWorkflowInstanceRequest(
+	req *ReopenWorkflowInstanceReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeReorderDashboardsRequest(
 	req *ReorderDashboardsReq,
 	r *http.Request,
@@ -850,6 +892,20 @@ func encodeRunIntegrationRequest(
 
 func encodeSaveAiSettingsRequest(
 	req *AiSaveSettingsRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeSaveIntegrationTemplateRequest(
+	req *SaveIntegrationTemplateReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"
@@ -990,6 +1046,20 @@ func encodeSetBARoleDashboardsRequest(
 
 func encodeSetModelDateFormatRequest(
 	req *SetModelDateFormatReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeSetRoleAccessRulesRequest(
+	req *SetUserAccessRulesRequest,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"
@@ -1663,6 +1733,26 @@ func encodeUpsertPlanRequest(
 	e := new(jx.Encoder)
 	{
 		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeUseIntegrationTemplateRequest(
+	req OptUseIntegrationTemplateReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	if !req.Set {
+		// Keep request with empty body if value is not set.
+		return nil
+	}
+	e := new(jx.Encoder)
+	{
+		if req.Set {
+			req.Encode(e)
+		}
 	}
 	encoded := e.Bytes()
 	ht.SetBody(r, bytes.NewReader(encoded), contentType)

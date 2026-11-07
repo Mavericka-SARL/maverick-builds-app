@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 )
 
 // FileImportRequest is one import of an attached spreadsheet, its
@@ -52,6 +54,9 @@ type FileImportRequest struct {
 	// IntegrationID, when set, records the run in that integration's
 	// history.
 	IntegrationID string
+	// ReplaceBy (a table) names the field whose values the file replaces:
+	// the table's records holding one are deleted as the file's are added.
+	ReplaceBy string
 }
 
 // ReadHooks are the gateway operations behind the read tools that look at a
@@ -65,6 +70,9 @@ type ReadHooks struct {
 	// ReadAttachedSheet renders rows from..to of one sheet of an attached
 	// workbook, with those rows' whole formulas.
 	ReadAttachedSheet func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error)
+	// AttachedFile is an attached file's name and bytes, kept whole
+	// (compare_with_sheet reads one row of it).
+	AttachedFile func(ctx context.Context, file string) (string, []byte, error)
 	// TestIntegration tests a saved REST API connector through the
 	// developer's own Test route, as the developer, and reports the result
 	// with its first records. Tests with side effects are refused there.
@@ -118,6 +126,11 @@ func integrationToolDefs() []toolDef {
 				"from_row":{"type":"integer","description":"First row (1-based); omit for row 1"},
 				"to_row":{"type":"integer","description":"Last row; omit for the sheet's last"}
 			},"required":["file"]}`,
+		},
+		{
+			Name:        "compare_with_sheet",
+			Description: "Compares one row of an attached sheet with the metric it became, period by period along the metric's time dimension, at the members you name for its other dimensions: how many periods match and every one that differs (sheet value, model value). Use it before saying a row or a sheet is done — a model can look complete and still differ — and after each fix. A percentage metric matches the sheet's fraction.",
+			Parameters:  compareWithSheetSchema,
 		},
 		{
 			Name:        "prepare_converted_file",
@@ -225,10 +238,14 @@ func (e *ToolExecutor) listIntegrations(ctx context.Context) (string, error) {
 				ColumnMap  map[string]string  `json:"column_map"`
 				ImportMode string             `json:"import_mode"`
 				SheetURL   string             `json:"sheet_url"`
+				ReplaceBy  string             `json:"replace_by"`
 			}
 			_ = json.Unmarshal([]byte(cfg), &c)
 			b, _ := json.Marshal(c.ColumnMap)
 			fmt.Fprintf(&sb, "    column_map: %s · import_mode: %s", b, orDefault(c.ImportMode, "default"))
+			if c.ReplaceBy != "" {
+				fmt.Fprintf(&sb, " · replace_by: %s", c.ReplaceBy)
+			}
 			if c.SheetURL != "" {
 				fmt.Fprintf(&sb, " · sheet: %s", c.SheetURL)
 			}
@@ -500,6 +517,22 @@ type fileIntegrationConfig struct {
 	Reshape    *importpkg.Reshape `json:"reshape,omitempty"`
 	ColumnMap  map[string]string  `json:"column_map,omitempty"`
 	ImportMode string             `json:"import_mode,omitempty"`
+	// ReplaceBy (a table) names the field whose values each file replaces.
+	ReplaceBy string `json:"replace_by,omitempty"`
+}
+
+// tableReplaceBy is the name of the field of table tableID a loader may
+// replace by, as name names it.
+func (e *WriteExecutor) tableReplaceBy(ctx context.Context, tableID, name string) (string, error) {
+	form, err := crudapp.NewStoreOn(e.pool).GetForm(ctx, tableID)
+	if err != nil {
+		return "", fmt.Errorf("replace_by: read the table: %w", err)
+	}
+	f, err := recordpost.ReplaceField(form, name)
+	if err != nil {
+		return "", err
+	}
+	return f.Name, nil
 }
 
 // create_file_integration saves a re-runnable Excel/CSV import: the Import
@@ -515,6 +548,7 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		Tags       []string           `json:"tags"`
 		SheetURL   string             `json:"sheet_url"`
 		Sheet      string             `json:"sheet"`
+		ReplaceBy  string             `json:"replace_by"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -555,6 +589,14 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	}
 	cfg.SheetURL = p.SheetURL
 	cfg.Sheet = p.Sheet
+	if p.ReplaceBy = strings.TrimSpace(p.ReplaceBy); p.ReplaceBy != "" {
+		if p.TargetType != "form" {
+			return "", "", fmt.Errorf("replace_by applies to a table's loader; a grid's import_mode says what a file replaces")
+		}
+		if cfg.ReplaceBy, err = e.tableReplaceBy(ctx, targetID, p.ReplaceBy); err != nil {
+			return "", "", err
+		}
+	}
 	if err := e.integrationNameFree(ctx, p.Name, ""); err != nil {
 		return "", "", err
 	}
@@ -661,6 +703,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		Status        *string           `json:"status"`
 		SheetURL      *string           `json:"sheet_url"`
 		Sheet         *string           `json:"sheet"`
+		ReplaceBy     *string           `json:"replace_by"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -785,6 +828,27 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 			c["import_mode"] = *p.ImportMode
 			changed = append(changed, "import_mode")
 		}
+		// replace_by: the field a table's loader replaces by; "" removes it
+		// (each run adds its rows again).
+		if p.ReplaceBy != nil {
+			if row.TargetType != "form" {
+				return "", "", fmt.Errorf("replace_by applies to a table's loader only")
+			}
+			if s := strings.TrimSpace(*p.ReplaceBy); s == "" {
+				delete(c, "replace_by")
+			} else {
+				name, err := e.tableReplaceBy(ctx, targetID, s)
+				if err != nil {
+					return "", "", err
+				}
+				c["replace_by"] = name
+			}
+			changed = append(changed, "replace_by")
+		} else if rb, _ := c["replace_by"].(string); rb != "" && targetID != row.TargetID {
+			if _, err := e.tableReplaceBy(ctx, targetID, rb); err != nil {
+				return "", "", err
+			}
+		}
 		cfg, _ = json.Marshal(c)
 	}
 	if p.Name != nil {
@@ -847,6 +911,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		Reshape       *importpkg.Reshape `json:"reshape"`
 		ColumnMap     map[string]string  `json:"column_map"`
 		ImportMode    string             `json:"import_mode"`
+		ReplaceBy     string             `json:"replace_by"`
 		// See FileImportRequest.ValuesArePercentUnits.
 		ValuesArePercentUnits bool `json:"values_are_percent_units"`
 	}
@@ -874,7 +939,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		var c fileIntegrationConfig
 		_ = json.Unmarshal(row.Config, &c)
 		req.IntegrationID, req.TargetType, req.TargetID = row.ID, row.TargetType, row.TargetID
-		req.Reshape, req.ColumnMap, req.ImportMode = c.Reshape, c.ColumnMap, c.ImportMode
+		req.Reshape, req.ColumnMap, req.ImportMode, req.ReplaceBy = c.Reshape, c.ColumnMap, c.ImportMode, c.ReplaceBy
 		if req.Sheet == "" {
 			req.Sheet = c.Sheet
 		}
@@ -940,6 +1005,17 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		return "", "", err
 	}
 	req.ImportMode = cfg.ImportMode
+	if p.ReplaceBy = strings.TrimSpace(p.ReplaceBy); p.ReplaceBy != "" {
+		req.ReplaceBy = p.ReplaceBy
+	}
+	if req.ReplaceBy != "" {
+		if req.TargetType != "form" {
+			return "", "", fmt.Errorf("replace_by applies to a table import; a grid's import_mode says what a file replaces")
+		}
+		if req.ReplaceBy, err = e.tableReplaceBy(ctx, req.TargetID, req.ReplaceBy); err != nil {
+			return "", "", err
+		}
+	}
 	result, err := e.hooks.ImportFile(ctx, req)
 	if err != nil {
 		return "", "", err

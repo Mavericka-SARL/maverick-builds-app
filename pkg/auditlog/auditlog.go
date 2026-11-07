@@ -54,6 +54,7 @@ const (
 	EventRoleUpdated            EventType = "role.updated"
 	EventRoleDeleted            EventType = "role.deleted"
 	EventUserAccessRulesUpdated EventType = "user.access_rules_updated"
+	EventRoleAccessRulesUpdated EventType = "business_role.access_rules_updated"
 
 	EventAutomationRuleScheduledMisfireSkipped EventType = "automation_rule.scheduled_misfire_skipped"
 	EventAutomationRuleScheduledFireFailed     EventType = "automation_rule.scheduled_fire_failed"
@@ -236,6 +237,7 @@ const (
 	// A running instance stopped by a developer or business admin
 	// (workflow.Store.CancelInstance), with its reason.
 	EventWorkflowInstanceCancelled EventType = "workflow_instance.cancelled"
+	EventWorkflowInstanceReopened  EventType = "workflow_instance.reopened"
 
 	// Batch 7 — Forms / CRUD app (/api/forms/..., /api/records/...).
 	EventFormCreated       EventType = "form.created"

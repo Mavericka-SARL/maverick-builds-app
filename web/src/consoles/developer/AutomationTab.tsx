@@ -291,7 +291,7 @@ function RuleForm({
       workflow_name: wf?.name ?? "",
       trigger_type: derived ? derived.trigger_type : rule.trigger_type,
       source_form_id: derived?.source_form_id ?? "",
-      source_grid_id: "",
+      source_grid_id: derived?.source_grid_id ?? "",
       source_integration_id: derived?.source_integration_id ?? "",
     });
   };

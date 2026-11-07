@@ -20,7 +20,7 @@ import {
   type ChartContextDim,
   dimLabel,
 } from "../../api/client";
-import { CHART_COLORS, formatValue, CHART_TYPE_LABELS, isChartConfigComplete } from "./chartTypes";
+import { CHART_COLORS, formatValue, CHART_TYPE_LABELS, isChartConfigComplete, niceTicks, axisTickFormatter } from "./chartTypes";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { defaultLeafCode } from "../dashboardLayout";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync, DashboardContextSyncContext } from "../dashboardContextSync";
@@ -123,6 +123,60 @@ function tooltipIndex(state: unknown): number | null {
 
 type CategoryClick = ((index: number) => void) | undefined;
 
+// SeriesLegend is a bar or line chart's legend: one entry per series, in the
+// chart's order — Recharts' own sorted them by name and gave each series of a
+// chart with forecast periods a second "(forecast)" entry — and, when some
+// periods are forecast, one key saying how they are drawn.
+function SeriesLegend({ series, forecast }: { series: Array<{ metric_id: string; label: string }>; forecast?: "line" | "bar" }) {
+  return (
+    <div className="mvx-chart-legend">
+      {series.map((s, i) => (
+        <span key={s.metric_id} className="mvx-chart-legend__item">
+          <span className="mvx-chart-legend__swatch" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+          <Txt>{s.label}</Txt>
+        </span>
+      ))}
+      {forecast === "line" && (
+        <span className="mvx-chart-legend__item mvx-chart-legend__key">
+          <svg width={22} height={8} aria-hidden><line x1={0} y1={4} x2={22} y2={4} stroke="currentColor" strokeWidth={2} /></svg>actual
+          <svg width={22} height={8} aria-hidden><line x1={0} y1={4} x2={22} y2={4} stroke="currentColor" strokeWidth={2} strokeDasharray="5 4" /></svg>forecast
+        </span>
+      )}
+      {forecast === "bar" && (
+        <span className="mvx-chart-legend__item mvx-chart-legend__key">
+          <span className="mvx-chart-legend__swatch" style={{ background: "currentColor" }} />actual
+          <span className="mvx-chart-legend__swatch mvx-chart-legend__swatch--hatched" />forecast
+        </span>
+      )}
+    </div>
+  );
+}
+
+// valueTicks are a chart's round value-axis ticks over its values (each
+// category's stacked sum when stacked), from zero unless the chart says not.
+function valueTicks(data: CategoryChartData, stacked: boolean, fromZero: boolean): number[] {
+  let lo = Infinity, hi = -Infinity;
+  data.categories.forEach((_, i) => {
+    if (stacked) {
+      let pos = 0, neg = 0;
+      data.series.forEach(s => { const v = s.values[i]; if (v != null) { if (v >= 0) pos += v; else neg += v; } });
+      lo = Math.min(lo, neg); hi = Math.max(hi, pos);
+    } else {
+      data.series.forEach(s => { const v = s.values[i]; if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    }
+  });
+  if (!Number.isFinite(lo)) return [];
+  if (fromZero) { lo = Math.min(0, lo); hi = Math.max(0, hi); }
+  return niceTicks(lo, hi);
+}
+
+// categoryStep labels every n-th category so the labels keep even steps and
+// do not overlap: the axis's own interval skipped unevenly (Apr 2027, then
+// Aug 2027).
+function categoryStep(count: number, plotWidth: number, labelWidth = 56): number {
+  return plotWidth > 0 ? Math.max(1, Math.ceil((count * labelWidth) / Math.max(1, plotWidth - 80))) : 1;
+}
+
 // A forecast period's bar (the chart's actual_metric_id is 0 there): the
 // series' colour hatched on the background, outlined — IBCS draws actual
 // solid and forecast hatched.
@@ -143,7 +197,9 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
   // Every category labelled while each has room for its two-line label;
   // a narrow chart labels every n-th (24 months in 275px overlapped).
   const [plotWidth, setPlotWidth] = useState(0);
-  const every = plotWidth > 0 ? Math.max(1, Math.ceil((data.categories.length * 40) / Math.max(1, plotWidth - 80))) : 1;
+  const every = categoryStep(data.categories.length, plotWidth, data.categories.length <= 24 ? 40 : 56);
+  const ticks = valueTicks(data, !!config.stacked, true);
+  const tickFmt = ticks.length > 1 ? axisTickFormatter(ticks, config.value_format, currencySymbol) : fmt;
   return (
     <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
       <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
@@ -153,10 +209,12 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
         {/* Every category labelled while there are few enough to read; a long run keeps the axis's own spacing. */}
         {data.categories.length <= 24
           ? <XAxis dataKey="name" interval={every - 1} height={36} tick={<CategoryTick />} />
-          : <XAxis dataKey="name" tick={{ fontSize: 11 }} />}
-        <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />
+          : <XAxis dataKey="name" interval={every - 1} tick={{ fontSize: 11 }} />}
+        {ticks.length > 1
+          ? <YAxis tickFormatter={tickFmt} tick={{ fontSize: 11 }} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
+          : <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />}
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
-        {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
+        {(showLegend || actual) && <Legend content={() => <SeriesLegend series={showLegend ? data.series : []} forecast={actual ? "bar" : undefined} />} />}
         {actual && (
           <defs>
             {data.series.map((s, i) => (
@@ -195,6 +253,10 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
   const actual = data.actual && data.actual.length === data.categories.length && data.actual.some(a => !a) && data.actual.some(a => a)
     ? data.actual : undefined;
   const fcKey = (label: string) => `${label} (forecast)`;
+  const [plotWidth, setPlotWidth] = useState(0);
+  const every = categoryStep(data.categories.length, plotWidth);
+  const ticks = valueTicks(data, false, config.y_axis_from_zero !== false);
+  const tickFmt = ticks.length > 1 ? axisTickFormatter(ticks, config.value_format, currencySymbol) : fmt;
   const chartData = data.categories.map((cat, i) => {
     const row: Record<string, unknown> = { name: cat.label };
     data.series.forEach(s => {
@@ -210,16 +272,18 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
     return row;
   });
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
       <LineChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-        <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }}
-          domain={config.y_axis_from_zero === false ? ["auto", "auto"] : [0, "auto"]} />
+        <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={every - 1} />
+        {ticks.length > 1
+          ? <YAxis tickFormatter={tickFmt} tick={{ fontSize: 11 }} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
+          : <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }}
+              domain={config.y_axis_from_zero === false ? ["auto", "auto"] : [0, "auto"]} />}
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
-        {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
+        {(showLegend || actual) && <Legend content={() => <SeriesLegend series={showLegend ? data.series : []} forecast={actual ? "line" : undefined} />} />}
         {data.series.map((s, i) => (
           <Line
             key={s.metric_id}
@@ -237,7 +301,9 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
             dataKey={fcKey(s.label)}
             stroke={CHART_COLORS[i % CHART_COLORS.length]}
             strokeDasharray="5 4"
-            dot={showDots ? { r: 3, fill: "var(--color-surface)", strokeWidth: 1.5 } : false}
+            // A marker's outline drawn whole: the line's dash pattern broke it.
+            dot={showDots ? { r: 3, fill: "var(--color-surface)", strokeWidth: 1.5, strokeDasharray: "0" } : false}
+            activeDot={{ r: 4, strokeDasharray: "0" }}
             connectNulls={false}
           />
         ))}
@@ -375,6 +441,13 @@ function HistogramRenderer({ data, config, currencySymbol }: { data: HistogramCh
 }
 
 function ChartBody({ data, config, currencySymbol, onCategoryClick }: { data: ChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
+  // A series named in the chart's settings carries that name in the legend
+  // and tooltip; the metric's label otherwise.
+  const names = config.series_names;
+  if (names && (data.chart_type === "bar" || data.chart_type === "line")) {
+    const cat = data as CategoryChartData;
+    data = { ...cat, series: cat.series.map(s => ({ ...s, label: names[s.metric_id]?.trim() || s.label })) };
+  }
   switch (data.chart_type) {
     case "bar":
       return <BarChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} onCategoryClick={onCategoryClick} />;

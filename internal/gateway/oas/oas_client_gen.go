@@ -173,6 +173,15 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
+	// CopyBAValues invokes copyBAValues operation.
+	//
+	// In the live revision of the model the admin has open, every value typed into a cell of `from` is
+	// written to the same cell of `to` (values a table of records posts stay with their records). Each
+	// is checked as a typed value is (access rules, workflow locks, closed and posted cells), all or
+	// nothing. At most 20,000 values; `metric_ids` narrows the copy.
+	//
+	// POST /api/business-admin/copy-values
+	CopyBAValues(ctx context.Context, request *CopyBAValuesReq) (CopyBAValuesRes, error)
 	// CreateAPIToken invokes createAPIToken operation.
 	//
 	// Make a personal API token for a script; the answer carries the token, once.
@@ -553,6 +562,12 @@ type Invoker interface {
 	//
 	// DELETE /api/developer/integration-connections/{id}
 	DeleteIntegrationConnection(ctx context.Context, params DeleteIntegrationConnectionParams) (DeleteIntegrationConnectionRes, error)
+	// DeleteIntegrationTemplate invokes deleteIntegrationTemplate operation.
+	//
+	// Delete an integration template.
+	//
+	// DELETE /api/developer/integration-templates/{id}
+	DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (DeleteIntegrationTemplateRes, error)
 	// DeleteMetric invokes deleteMetric operation.
 	//
 	// Delete a metric definition.
@@ -665,6 +680,15 @@ type Invoker interface {
 	//
 	// GET /api/admin/models/{id}/export
 	ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error)
+	// ExtendBACalendar invokes extendBACalendar operation.
+	//
+	// Adds the periods after the last one through the period containing `through`, placed as the last
+	// one is: under quarters and fiscal years of the same kind, reused or created and named after their
+	// peers. Nothing is renamed, moved or deleted. Only a time dimension of the active revision of the
+	// model the admin has open.
+	//
+	// POST /api/business-admin/calendars/{dimId}/extend
+	ExtendBACalendar(ctx context.Context, request *ExtendBACalendarReq, params ExtendBACalendarParams) (ExtendBACalendarRes, error)
 	// ExtractFormulaRefs invokes extractFormulaRefs operation.
 	//
 	// Parse a formula string and return the metric/dimension names it references.
@@ -1133,6 +1157,12 @@ type Invoker interface {
 	//
 	// GET /api/business-admin/available
 	ListBAAvailable(ctx context.Context, params ListBAAvailableParams) (ListBAAvailableRes, error)
+	// ListBACalendars invokes listBACalendars operation.
+	//
+	// The time dimensions of the open model's active revision, with their first and last period.
+	//
+	// GET /api/business-admin/calendars
+	ListBACalendars(ctx context.Context) (ListBACalendarsRes, error)
 	// ListBARoleDashboards invokes listBARoleDashboards operation.
 	//
 	// List the dashboard IDs assigned to a business role.
@@ -1270,6 +1300,12 @@ type Invoker interface {
 	//
 	// GET /api/developer/integrations/{id}/runs
 	ListIntegrationRuns(ctx context.Context, params ListIntegrationRunsParams) (ListIntegrationRunsRes, error)
+	// ListIntegrationTemplates invokes listIntegrationTemplates operation.
+	//
+	// The integration templates of the open model's tenant.
+	//
+	// GET /api/developer/integration-templates
+	ListIntegrationTemplates(ctx context.Context) (ListIntegrationTemplatesRes, error)
 	// ListMetrics invokes listMetrics operation.
 	//
 	// List all metrics for the demo model.
@@ -1325,6 +1361,12 @@ type Invoker interface {
 	//
 	// GET /api/developer/revisions
 	ListRevisions(ctx context.Context, params ListRevisionsParams) ([]DevRevision, error)
+	// ListRoleAccessRules invokes listRoleAccessRules operation.
+	//
+	// List a business role's access rules, which every member of the role holds.
+	//
+	// GET /api/business-admin/roles/{id}/access-rules
+	ListRoleAccessRules(ctx context.Context, params ListRoleAccessRulesParams) (ListRoleAccessRulesRes, error)
 	// ListScimTokens invokes listScimTokens operation.
 	//
 	// This tenant's SCIM tokens, revoked ones included, never the secret (administrators; enterprise
@@ -1351,6 +1393,12 @@ type Invoker interface {
 	//
 	// GET /api/apps
 	ListUserApps(ctx context.Context) ([]UserApp, error)
+	// ListUserRoleAccessRules invokes listUserRoleAccessRules operation.
+	//
+	// The access rules a user holds through this workspace's business roles.
+	//
+	// GET /api/business-admin/users/{id}/role-access-rules
+	ListUserRoleAccessRules(ctx context.Context, params ListUserRoleAccessRulesParams) (ListUserRoleAccessRulesRes, error)
 	// ListWorkflowDefinitions invokes listWorkflowDefinitions operation.
 	//
 	// Published workflow definitions of the caller's application, with context schemas — what the
@@ -1511,6 +1559,14 @@ type Invoker interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, request *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// ReopenWorkflowInstance invokes reopenWorkflowInstance operation.
+	//
+	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
+	// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
+	// required: it goes into the audit log and the message the people involved receive.
+	//
+	// POST /api/workflow/instances/{id}/reopen
+	ReopenWorkflowInstance(ctx context.Context, request *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error)
 	// ReorderDashboards invokes reorderDashboards operation.
 	//
 	// Dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the
@@ -1601,6 +1657,13 @@ type Invoker interface {
 	//
 	// PUT /api/ai/settings
 	SaveAiSettings(ctx context.Context, request *AiSaveSettingsRequest) (*SaveAiSettingsOK, error)
+	// SaveIntegrationTemplate invokes saveIntegrationTemplate operation.
+	//
+	// Its target is kept by name and its config as it is (it names metrics, dimensions and fields). A
+	// REST connector or a model link holds a connection or another model and cannot be a template.
+	//
+	// POST /api/developer/integration-templates
+	SaveIntegrationTemplate(ctx context.Context, request *SaveIntegrationTemplateReq) (SaveIntegrationTemplateRes, error)
 	// ScimCreateGroup invokes scimCreateGroup operation.
 	//
 	// Create a business role with members (SCIM bearer token).
@@ -1751,6 +1814,13 @@ type Invoker interface {
 	//
 	// PUT /api/developer/models/{id}/date-format
 	SetModelDateFormat(ctx context.Context, request *SetModelDateFormatReq, params SetModelDateFormatParams) (SetModelDateFormatRes, error)
+	// SetRoleAccessRules invokes setRoleAccessRules operation.
+	//
+	// Every member of the role holds these rules as their own; where one of them and a person's own rule
+	// land on the same member or metric, the stricter wins.
+	//
+	// PUT /api/business-admin/roles/{id}/access-rules
+	SetRoleAccessRules(ctx context.Context, request *SetUserAccessRulesRequest, params SetRoleAccessRulesParams) (SetRoleAccessRulesRes, error)
 	// SetUserAccessRules invokes setUserAccessRules operation.
 	//
 	// Replace the full set of a user's dimension/metric access rules.
@@ -2090,6 +2160,12 @@ type Invoker interface {
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)
+	// UseIntegrationTemplate invokes useIntegrationTemplate operation.
+	//
+	// Make a template in the open model's working revision, its target found by name.
+	//
+	// POST /api/developer/integration-templates/{id}/use
+	UseIntegrationTemplate(ctx context.Context, request OptUseIntegrationTemplateReq, params UseIntegrationTemplateParams) (UseIntegrationTemplateRes, error)
 	// ValidateIntegration invokes validateIntegration operation.
 	//
 	// Validate a rest_api integration's configuration and target/connection ownership without saving.
@@ -4826,6 +4902,119 @@ func (c *Client) sendConfirmAiProposal(ctx context.Context, params ConfirmAiProp
 
 	stage = "DecodeResponse"
 	result, err := decodeConfirmAiProposalResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CopyBAValues invokes copyBAValues operation.
+//
+// In the live revision of the model the admin has open, every value typed into a cell of `from` is
+// written to the same cell of `to` (values a table of records posts stay with their records). Each
+// is checked as a typed value is (access rules, workflow locks, closed and posted cells), all or
+// nothing. At most 20,000 values; `metric_ids` narrows the copy.
+//
+// POST /api/business-admin/copy-values
+func (c *Client) CopyBAValues(ctx context.Context, request *CopyBAValuesReq) (CopyBAValuesRes, error) {
+	res, err := c.sendCopyBAValues(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendCopyBAValues(ctx context.Context, request *CopyBAValuesReq) (res CopyBAValuesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("copyBAValues"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/business-admin/copy-values"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CopyBAValuesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/business-admin/copy-values"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCopyBAValuesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, CopyBAValuesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCopyBAValuesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -11470,6 +11659,131 @@ func (c *Client) sendDeleteIntegrationConnection(ctx context.Context, params Del
 	return result, nil
 }
 
+// DeleteIntegrationTemplate invokes deleteIntegrationTemplate operation.
+//
+// Delete an integration template.
+//
+// DELETE /api/developer/integration-templates/{id}
+func (c *Client) DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (DeleteIntegrationTemplateRes, error) {
+	res, err := c.sendDeleteIntegrationTemplate(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (res DeleteIntegrationTemplateRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteIntegrationTemplate"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/developer/integration-templates/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteIntegrationTemplateOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/developer/integration-templates/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DeleteIntegrationTemplateOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteIntegrationTemplateResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DeleteMetric invokes deleteMetric operation.
 //
 // Delete a metric definition.
@@ -13865,6 +14179,138 @@ func (c *Client) sendExportModel(ctx context.Context, params ExportModelParams) 
 
 	stage = "DecodeResponse"
 	result, err := decodeExportModelResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ExtendBACalendar invokes extendBACalendar operation.
+//
+// Adds the periods after the last one through the period containing `through`, placed as the last
+// one is: under quarters and fiscal years of the same kind, reused or created and named after their
+// peers. Nothing is renamed, moved or deleted. Only a time dimension of the active revision of the
+// model the admin has open.
+//
+// POST /api/business-admin/calendars/{dimId}/extend
+func (c *Client) ExtendBACalendar(ctx context.Context, request *ExtendBACalendarReq, params ExtendBACalendarParams) (ExtendBACalendarRes, error) {
+	res, err := c.sendExtendBACalendar(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendExtendBACalendar(ctx context.Context, request *ExtendBACalendarReq, params ExtendBACalendarParams) (res ExtendBACalendarRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("extendBACalendar"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/business-admin/calendars/{dimId}/extend"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ExtendBACalendarOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/business-admin/calendars/"
+	{
+		// Encode "dimId" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "dimId",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.DimId))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/extend"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeExtendBACalendarRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ExtendBACalendarOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeExtendBACalendarResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -21911,6 +22357,113 @@ func (c *Client) sendListBAAvailable(ctx context.Context, params ListBAAvailable
 	return result, nil
 }
 
+// ListBACalendars invokes listBACalendars operation.
+//
+// The time dimensions of the open model's active revision, with their first and last period.
+//
+// GET /api/business-admin/calendars
+func (c *Client) ListBACalendars(ctx context.Context) (ListBACalendarsRes, error) {
+	res, err := c.sendListBACalendars(ctx)
+	return res, err
+}
+
+func (c *Client) sendListBACalendars(ctx context.Context) (res ListBACalendarsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listBACalendars"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/business-admin/calendars"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListBACalendarsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/business-admin/calendars"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListBACalendarsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListBACalendarsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListBARoleDashboards invokes listBARoleDashboards operation.
 //
 // List the dashboard IDs assigned to a business role.
@@ -24512,6 +25065,113 @@ func (c *Client) sendListIntegrationRuns(ctx context.Context, params ListIntegra
 	return result, nil
 }
 
+// ListIntegrationTemplates invokes listIntegrationTemplates operation.
+//
+// The integration templates of the open model's tenant.
+//
+// GET /api/developer/integration-templates
+func (c *Client) ListIntegrationTemplates(ctx context.Context) (ListIntegrationTemplatesRes, error) {
+	res, err := c.sendListIntegrationTemplates(ctx)
+	return res, err
+}
+
+func (c *Client) sendListIntegrationTemplates(ctx context.Context) (res ListIntegrationTemplatesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listIntegrationTemplates"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/integration-templates"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListIntegrationTemplatesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integration-templates"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListIntegrationTemplatesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListIntegrationTemplatesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListMetrics invokes listMetrics operation.
 //
 // List all metrics for the demo model.
@@ -25497,6 +26157,132 @@ func (c *Client) sendListRevisions(ctx context.Context, params ListRevisionsPara
 	return result, nil
 }
 
+// ListRoleAccessRules invokes listRoleAccessRules operation.
+//
+// List a business role's access rules, which every member of the role holds.
+//
+// GET /api/business-admin/roles/{id}/access-rules
+func (c *Client) ListRoleAccessRules(ctx context.Context, params ListRoleAccessRulesParams) (ListRoleAccessRulesRes, error) {
+	res, err := c.sendListRoleAccessRules(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListRoleAccessRules(ctx context.Context, params ListRoleAccessRulesParams) (res ListRoleAccessRulesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listRoleAccessRules"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/business-admin/roles/{id}/access-rules"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListRoleAccessRulesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/business-admin/roles/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/access-rules"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListRoleAccessRulesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListRoleAccessRulesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListScimTokens invokes listScimTokens operation.
 //
 // This tenant's SCIM tokens, revoked ones included, never the secret (administrators; enterprise
@@ -25939,6 +26725,132 @@ func (c *Client) sendListUserApps(ctx context.Context) (res []UserApp, err error
 
 	stage = "DecodeResponse"
 	result, err := decodeListUserAppsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListUserRoleAccessRules invokes listUserRoleAccessRules operation.
+//
+// The access rules a user holds through this workspace's business roles.
+//
+// GET /api/business-admin/users/{id}/role-access-rules
+func (c *Client) ListUserRoleAccessRules(ctx context.Context, params ListUserRoleAccessRulesParams) (ListUserRoleAccessRulesRes, error) {
+	res, err := c.sendListUserRoleAccessRules(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListUserRoleAccessRules(ctx context.Context, params ListUserRoleAccessRulesParams) (res ListUserRoleAccessRulesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listUserRoleAccessRules"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/business-admin/users/{id}/role-access-rules"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListUserRoleAccessRulesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/business-admin/users/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/role-access-rules"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListUserRoleAccessRulesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListUserRoleAccessRulesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -28776,6 +29688,137 @@ func (c *Client) sendRenameAiSession(ctx context.Context, request *RenameAiSessi
 	return result, nil
 }
 
+// ReopenWorkflowInstance invokes reopenWorkflowInstance operation.
+//
+// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
+// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
+// required: it goes into the audit log and the message the people involved receive.
+//
+// POST /api/workflow/instances/{id}/reopen
+func (c *Client) ReopenWorkflowInstance(ctx context.Context, request *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error) {
+	res, err := c.sendReopenWorkflowInstance(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendReopenWorkflowInstance(ctx context.Context, request *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (res ReopenWorkflowInstanceRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("reopenWorkflowInstance"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/workflow/instances/{id}/reopen"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ReopenWorkflowInstanceOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/workflow/instances/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/reopen"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeReopenWorkflowInstanceRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ReopenWorkflowInstanceOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeReopenWorkflowInstanceResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ReorderDashboards invokes reorderDashboards operation.
 //
 // Dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the
@@ -30211,6 +31254,117 @@ func (c *Client) sendSaveAiSettings(ctx context.Context, request *AiSaveSettings
 
 	stage = "DecodeResponse"
 	result, err := decodeSaveAiSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// SaveIntegrationTemplate invokes saveIntegrationTemplate operation.
+//
+// Its target is kept by name and its config as it is (it names metrics, dimensions and fields). A
+// REST connector or a model link holds a connection or another model and cannot be a template.
+//
+// POST /api/developer/integration-templates
+func (c *Client) SaveIntegrationTemplate(ctx context.Context, request *SaveIntegrationTemplateReq) (SaveIntegrationTemplateRes, error) {
+	res, err := c.sendSaveIntegrationTemplate(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendSaveIntegrationTemplate(ctx context.Context, request *SaveIntegrationTemplateReq) (res SaveIntegrationTemplateRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("saveIntegrationTemplate"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integration-templates"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, SaveIntegrationTemplateOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integration-templates"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeSaveIntegrationTemplateRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, SaveIntegrationTemplateOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeSaveIntegrationTemplateResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -32905,6 +34059,136 @@ func (c *Client) sendSetModelDateFormat(ctx context.Context, request *SetModelDa
 
 	stage = "DecodeResponse"
 	result, err := decodeSetModelDateFormatResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// SetRoleAccessRules invokes setRoleAccessRules operation.
+//
+// Every member of the role holds these rules as their own; where one of them and a person's own rule
+// land on the same member or metric, the stricter wins.
+//
+// PUT /api/business-admin/roles/{id}/access-rules
+func (c *Client) SetRoleAccessRules(ctx context.Context, request *SetUserAccessRulesRequest, params SetRoleAccessRulesParams) (SetRoleAccessRulesRes, error) {
+	res, err := c.sendSetRoleAccessRules(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendSetRoleAccessRules(ctx context.Context, request *SetUserAccessRulesRequest, params SetRoleAccessRulesParams) (res SetRoleAccessRulesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("setRoleAccessRules"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/business-admin/roles/{id}/access-rules"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, SetRoleAccessRulesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/business-admin/roles/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/access-rules"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeSetRoleAccessRulesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, SetRoleAccessRulesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeSetRoleAccessRulesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -39156,6 +40440,156 @@ func (c *Client) sendUpsertPlan(ctx context.Context, request *PlanInput, params 
 
 	stage = "DecodeResponse"
 	result, err := decodeUpsertPlanResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// UseIntegrationTemplate invokes useIntegrationTemplate operation.
+//
+// Make a template in the open model's working revision, its target found by name.
+//
+// POST /api/developer/integration-templates/{id}/use
+func (c *Client) UseIntegrationTemplate(ctx context.Context, request OptUseIntegrationTemplateReq, params UseIntegrationTemplateParams) (UseIntegrationTemplateRes, error) {
+	res, err := c.sendUseIntegrationTemplate(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendUseIntegrationTemplate(ctx context.Context, request OptUseIntegrationTemplateReq, params UseIntegrationTemplateParams) (res UseIntegrationTemplateRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("useIntegrationTemplate"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integration-templates/{id}/use"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, UseIntegrationTemplateOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/integration-templates/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/use"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeUseIntegrationTemplateRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, UseIntegrationTemplateOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeUseIntegrationTemplateResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

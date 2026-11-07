@@ -2087,10 +2087,13 @@ func (s *Store) GetWorkflowDefUsage(ctx context.Context, defID string) ([]*Workf
 
 func (s *Store) ListWorkflowInstancesByDef(ctx context.Context, defID string, limit int) ([]*Execution, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, status::text, started_at, completed_at, COALESCE(context, '{}'::jsonb), test_run
-		FROM workflow.workflow_instance
-		WHERE workflow_def_id = $1::uuid
-		ORDER BY started_at DESC LIMIT $2
+		SELECT wi.id::text, wi.status::text, wi.started_at, wi.completed_at, COALESCE(wi.context, '{}'::jsonb), wi.test_run,
+		       `+writeguard.ReopenableSQL+`
+		FROM workflow.workflow_instance wi
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		`+writeguard.LastApprovalJoinSQL+`
+		WHERE wi.workflow_def_id = $1::uuid
+		ORDER BY wi.started_at DESC LIMIT $2
 	`, defID, limit)
 	if err != nil {
 		return nil, err
@@ -2104,7 +2107,7 @@ func (s *Store) ListWorkflowInstancesByDef(ctx context.Context, defID string, li
 	for rows.Next() {
 		var e Execution
 		var ctxJSON []byte
-		if err := rows.Scan(&e.ID, &e.Status, &e.StartedAt, &e.CompletedAt, &ctxJSON, &e.TestRun); err != nil {
+		if err := rows.Scan(&e.ID, &e.Status, &e.StartedAt, &e.CompletedAt, &ctxJSON, &e.TestRun, &e.Reopenable); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(ctxJSON, &e.Context)
@@ -2199,6 +2202,8 @@ type Execution struct {
 	// Instance-level fields, filled by ListWorkflowInstancesByDef.
 	Context map[string]string `json:"context,omitempty"`
 	TestRun bool              `json:"test_run,omitempty"`
+	// Reopenable: finished and approved, so ReopenInstance can take it back.
+	Reopenable bool `json:"reopenable,omitempty"`
 }
 
 // CreateAutomationRule creates (or upserts by name) a rule scoped to
@@ -2506,7 +2511,7 @@ func (s *Store) checkScopeWritable(ctx context.Context, userID, memberID string)
 		FROM sub
 		JOIN model.dimension_member m ON m.id = sub.id
 		JOIN model.dimension_def d ON d.id = m.dimension_id
-		JOIN identity.user_access_rule r
+		JOIN identity.effective_access_rule r
 		  ON r.user_id = $1::uuid AND r.rule_type = 'dimension_member'
 		 AND (r.access = 'hidden' OR r.access = 'read')
 		 AND (r.ref_id = sub.id::text

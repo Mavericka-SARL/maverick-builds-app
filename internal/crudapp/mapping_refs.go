@@ -73,6 +73,13 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 	err := db.QueryRow(ctx, `SELECT t.fields FROM model.form_def t WHERE t.id = $3::uuid AND `+inRevision,
 		modelID, revisionID, m.FormID).Scan(&fieldsJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// A table of another revision of the model: say so, so the caller
+		// names that revision (a draft's table was reported as missing).
+		var elsewhere bool
+		if db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM model.form_def WHERE id = $2::uuid AND model_id = $1::uuid)`,
+			modelID, m.FormID).Scan(&elsewhere) == nil && elsewhere {
+			return refErr("form_id names a table of another revision of this model: pass that revision's revision_id")
+		}
 		return refErr("form_id names no table of this model's revision")
 	}
 	if err != nil {

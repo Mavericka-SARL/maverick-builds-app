@@ -64,6 +64,37 @@ func (l workflowLock) coversMetric(name string) bool {
 	return len(l.metricNames) == 0 || name == "" || l.metricNames[name]
 }
 
+// LastApprovalJoinSQL joins ws.decision onto workflow_instance wi and
+// workflow_def wd: the decision that says whether a run stands approved.
+const LastApprovalJoinSQL = `
+		-- The decision of the last APPROVAL step decided. A notification,
+		-- task or condition step after it records a decision of its own
+		-- (sent, done, a branch), and reading that one released the agreed
+		-- numbers as soon as "approve, then tell the requester" sent its
+		-- mail (decided 2026-10-06: an approved instance stays locked
+		-- whatever follows). A step its definition no longer names (edited
+		-- since, with no snapshot) counts when it recorded an approval's
+		-- decision.
+		LEFT JOIN LATERAL (
+			SELECT s.decision FROM workflow.workflow_step s
+			LEFT JOIN LATERAL (
+				SELECT lower(d->>'type') AS type
+				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
+				                               THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
+				WHERE d->>'id' = s.step_def_id LIMIT 1
+			) sd ON true
+			WHERE s.instance_id = wi.id AND s.decision IS NOT NULL AND s.completed_at IS NOT NULL
+			  AND (sd.type IN ('approval', 'step_type_approval', '2')
+			       OR (sd.type IS NULL AND s.decision IN ('approve', 'approved', 'reject', 'rejected')))
+			ORDER BY s.completed_at DESC LIMIT 1
+		) ws ON true
+`
+
+// ReopenableSQL is true for a run an administrator may reopen, given
+// LastApprovalJoinSQL: finished, with its last approval approved. It is the
+// run that locks its scope for good (see the terminalApproved rule below).
+const ReopenableSQL = `COALESCE(wi.status::text = 'completed' AND ws.decision = 'approve', false)`
+
 // loadWorkflowLocks reads the workflow instances of modelID's application,
 // newest first, as locks.
 func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) ([]workflowLock, error) {
@@ -87,27 +118,7 @@ func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) 
 		       ) AS awaiting_approval
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-		-- The decision of the last APPROVAL step decided. A notification,
-		-- task or condition step after it records a decision of its own
-		-- (sent, done, a branch), and reading that one released the agreed
-		-- numbers as soon as "approve, then tell the requester" sent its
-		-- mail (decided 2026-10-06: an approved instance stays locked
-		-- whatever follows). A step its definition no longer names (edited
-		-- since, with no snapshot) counts when it recorded an approval's
-		-- decision.
-		LEFT JOIN LATERAL (
-			SELECT s.decision FROM workflow.workflow_step s
-			LEFT JOIN LATERAL (
-				SELECT lower(d->>'type') AS type
-				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
-				                               THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
-				WHERE d->>'id' = s.step_def_id LIMIT 1
-			) sd ON true
-			WHERE s.instance_id = wi.id AND s.decision IS NOT NULL AND s.completed_at IS NOT NULL
-			  AND (sd.type IN ('approval', 'step_type_approval', '2')
-			       OR (sd.type IS NULL AND s.decision IN ('approve', 'approved', 'reject', 'rejected')))
-			ORDER BY s.completed_at DESC LIMIT 1
-		) ws ON true
+	`+LastApprovalJoinSQL+`
 		WHERE wd.application_id = $1::uuid
 		ORDER BY wi.started_at DESC
 	`, appID)

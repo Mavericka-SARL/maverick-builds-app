@@ -36,6 +36,7 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 	var out []string
 	out = append(out, recurringMistakeWarnings(ctx, tx, modelID, revID, steps)...)
 	out = append(out, hiddenDecimalWarnings(ctx, tx, modelID, revID, steps)...)
+	out = append(out, emptyInputWarnings(ctx, tx, modelID, revID, steps)...)
 	for i, step := range steps {
 		if step.Tool != "create_metric" && step.Tool != "update_metric" {
 			continue
@@ -935,4 +936,60 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+// emptyInputWarnings names the revision's input metrics that hold no value
+// and that nothing fills — no table posts into them, no saved loader maps a
+// column to them — when a plan builds pages (2026-11-06: a build of 251
+// metrics had every input grid at 0 values while the assistant called the
+// sheets done, and every calculation read zeros). Only at that stage: a plan
+// creating inputs before their values load is the staging the instructions
+// ask for, and a warning sends the plan back to the model once.
+func emptyInputWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep) []string {
+	pages := false
+	for _, step := range steps {
+		switch step.Tool {
+		case "create_dashboard", "add_dashboard_widget", "update_dashboard_widget", "arrange_dashboard":
+			pages = true
+		}
+	}
+	if !pages {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT md.name FROM model.metric_def md
+		WHERE md.model_id = $1::uuid AND md.revision_id = $2::uuid AND md.is_input
+		  AND COALESCE(md.format, '') <> 'text'
+		  AND EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = md.id)
+		  AND NOT EXISTS (SELECT 1 FROM runtime.fact_input f WHERE f.metric_id = md.id)
+		  AND NOT EXISTS (SELECT 1 FROM model.form_metric_mapping fm WHERE fm.target_metric_id = md.id)
+		  AND NOT EXISTS (SELECT 1 FROM model.integration_def i, jsonb_each_text(COALESCE(i.config->'column_map', '{}'::jsonb)) c
+		                  WHERE i.model_id = md.model_id AND (i.revision_id = md.revision_id OR i.revision_id IS NULL)
+		                    AND lower(c.value) = lower(md.name))
+		ORDER BY md.name`, modelID, revID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var empty []string
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil {
+			empty = append(empty, n)
+		}
+	}
+	if len(empty) == 0 {
+		return nil
+	}
+	shown := empty
+	if len(shown) > 12 {
+		shown = shown[:12]
+	}
+	more := ""
+	if len(empty) > len(shown) {
+		more = fmt.Sprintf(" and %d more", len(empty)-len(shown))
+	}
+	return []string{fmt.Sprintf("this plan builds pages, but %d input metric(s) hold no value and nothing loads them (%s%s): every calculation reading them reads 0. "+
+		"Load them from the attached sheet (import_file_data) or a saved loader, and check a row with compare_with_sheet",
+		len(empty), strings.Join(shown, ", "), more)}
 }

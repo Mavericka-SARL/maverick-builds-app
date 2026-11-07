@@ -297,7 +297,7 @@ func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessio
 	sb.WriteString(f.layout(req))
 
 	if req.TargetType == "form" {
-		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, true)
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), true)
 		switch {
 		case err != nil:
 			sb.WriteString("Cannot import: " + err.Error() + "\n")
@@ -414,7 +414,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	}
 
 	if req.TargetType == "form" {
-		n, problems, table, err := h.aiTableImport(ctx, act.UserID, f, req.TargetID, false)
+		n, problems, table, err := h.aiTableImport(ctx, act.UserID, f, req.TargetID, h.aiReplaceBy(ctx, req), false)
 		if err == nil && problems != "" {
 			err = fmt.Errorf("%s", strings.TrimSpace(problems))
 		}
@@ -541,6 +541,13 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		},
 		ReadAttachedSheet: func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error) {
 			return h.aiReadAttachedSheet(ctx, sessionID, file, sheet, fromRow, toRow)
+		},
+		AttachedFile: func(ctx context.Context, file string) (string, []byte, error) {
+			doc, raw, err := aiassistant.NewDocumentStore(h.db.For(ctx)).GetRaw(ctx, sessionID, strings.TrimSpace(file))
+			if err != nil || raw == nil {
+				return "", nil, fmt.Errorf("no file named %q is attached to this chat, kept whole", file)
+			}
+			return doc.Filename, raw, nil
 		},
 		TestIntegration: func(ctx context.Context, integrationID string) (string, error) {
 			return h.aiTestIntegration(ctx, r, modelID, integrationID)
@@ -797,7 +804,7 @@ var afterStepRef = regexp.MustCompile(`^\s*<created in step (\d+)>\s*$`)
 // create, each record posted through the table's mappings, nothing created
 // when any row fails. problems lists the failing rows; the table's name
 // comes back for the message.
-func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedFile, tableID string, dryRun bool) (n int, problems, table string, err error) {
+func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedFile, tableID, replaceBy string, dryRun bool) (n int, problems, table string, err error) {
 	act, err := h.actorByUserID(ctx, userID)
 	if err != nil {
 		return 0, "", "", err
@@ -813,7 +820,8 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 	if !scope.reach {
 		return 0, "", table, fmt.Errorf("you cannot add records to table '%s'", table)
 	}
-	n, rowErrs, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun)
+	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun, replaceBy)
+	n, rowErrs := res.Created, res.Errors
 	if err != nil {
 		return 0, "", table, err
 	}
@@ -828,5 +836,23 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 	if n == 0 {
 		return 0, "", table, fmt.Errorf("%s holds no rows for table '%s'", f.describe(), table)
 	}
+	if res.Replaced > 0 {
+		note := replacedNote(res.Replaced)
+		if dryRun {
+			note = "would replace" + strings.TrimPrefix(note, "replaced")
+		}
+		table += " (" + note + ")"
+	}
 	return n, "", table, nil
+}
+
+// aiReplaceBy is the field an AI import into a table replaces by: the one
+// it names, or the one its integration's loader names.
+func (h *handler) aiReplaceBy(ctx context.Context, req aiassistant.FileImportRequest) string {
+	if req.ReplaceBy != "" || req.IntegrationID == "" {
+		return req.ReplaceBy
+	}
+	var v string
+	_ = h.db.For(ctx).QueryRow(ctx, `SELECT COALESCE(config->>'replace_by', '') FROM model.integration_def WHERE id = $1::uuid`, req.IntegrationID).Scan(&v)
+	return v
 }

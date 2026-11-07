@@ -538,7 +538,7 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, labelWidth, hideLegend, hideBadges, footer }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Amounts in thousands or millions (widget_props.number_scale "k"/"m"); "auto" is a tile's, a grid keeps every digit. */
   numberScale?: NumberScale;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
@@ -546,7 +546,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   /** Context selectors take several members (widget_props.multi_select): the grid shows their aggregate. */
   multiSelect?: boolean;
   /** No "Find a row or column…" box (widget_props.hide_search): a grid of a few rows needs none. */
-  hideSearch?: boolean }) {
+  hideSearch?: boolean;
+  /** No Total row under flat rows (widget_props.hide_total_row): prices, rates and dates have nothing to add up. */
+  hideTotalRow?: boolean;
+  /** The row-label column's width in pixels (widget_props.label_width), instead of a narrow default that wraps labels. */
+  labelWidth?: number;
+  /** No legend and hints under the grid (widget_props.hide_legend): a read-only statement needs neither. */
+  hideLegend?: boolean;
+  /** No INPUT / CALC tags beside the metric labels (widget_props.hide_badges). */
+  hideBadges?: boolean;
+  /** A line of text under the grid (widget_props.footer): a source, a unit, a note. */
+  footer?: string }) {
   const qc = useQueryClient();
   // A grid divides by one unit throughout ("k", "m"); "auto" sizes a tile's
   // single number, and a table keeps its every digit then.
@@ -914,6 +924,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   const pushSync = useSyncSetter(true);
   const selPos: SelectorsPosition = selectorsPosition ?? "top";
   const selVertical = selPos === "left" || selPos === "right";
+  // The row-label column: widget_props.label_width when set, else a minimum
+  // the labels may grow past.
+  const labelCol = (dflt: number): React.CSSProperties =>
+    labelWidth ? { minWidth: labelWidth, width: labelWidth, maxWidth: labelWidth } : { minWidth: dflt };
   const pickProps = (dimId: string | undefined, dimName: string | undefined, code: string, label: string) =>
     pushSync && dimId
       ? { className: "mvx-header-cell--pickable", title: `Set ${dimName ?? "context"} to ${label} for synced widgets`, onClick: () => pushSync(dimId, code) }
@@ -1623,9 +1637,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
           style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
-          title={isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : postedFrom ? `From the records of ${postedFrom}: change them there. Right-click for history` : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
+          title={val === null ? WITHHELD_TITLE : isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : postedFrom ? `From the records of ${postedFrom}: change them there. Right-click for history` : m.readonly || fc.some(member => member.readonly) ? `Read-only for you (an access rule).${note ? `\n\n${note}` : ""} Right-click for history` : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
-          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val, gridScale, dateFormat)}
+          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtCell(m, fc, val, gridScale, dateFormat)}
         </td>
       );
     }
@@ -1774,7 +1788,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         title={recalcPending ? "Recalculating — this value is about to change" : undefined}
         style={{ ...td, textAlign: "right", borderLeft }}
       >
-        {fmtMetric(m, v, gridScale, dateFormat)}
+        {fmtCell(m, fc, v, gridScale, dateFormat)}
       </td>
     );
   }
@@ -1858,7 +1872,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   colHeaderLevels.map((level, li) => (
                     <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
                       {li === 0 && (
-                        <th style={{ ...th, minWidth: 180 }} rowSpan={colHeaderLevels.length}>
+                        <th style={{ ...th, ...labelCol(180) }} rowSpan={colHeaderLevels.length}>
                           {rowDims.length > 0 ? rowDims.map(d => d.name).join(" / ") + " / Metric" : "Metric"}
                         </th>
                       )}
@@ -1880,7 +1894,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   ))
                 ) : (
                   <tr style={{ background: colDims.length > 0 ? "var(--color-grid-col-header-bg)" : "var(--color-surface-faint)", borderBottom: "2px solid var(--color-border)" }}>
-                    <th style={{ ...th, minWidth: 180 }}>
+                    <th style={{ ...th, ...labelCol(180) }}>
                       {rowDims.length > 0 ? rowDims.map(d => d.name).join(" / ") + " / Metric" : "Metric"}
                     </th>
                     {colDims.length > 0
@@ -1912,14 +1926,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   const cols = hasColHierarchy ? effectiveColCombos : (colDims.length > 0 ? colCombos : [[]]);
                   return (
                     <tr key={`${comboKey(rc)}-${m.id}`}
+                      // A metric styled as a total (row_style): its label in
+                      // the text colour, bold, and a rule above the row.
+                      className={m.row_style === "total" ? "mvx-grid-row--total" : undefined}
                       style={{ borderBottom: "1px solid var(--color-surface-muted)", background: !m.is_input ? "var(--color-grid-row-alt-bg)" : undefined }}>
                       <td style={{
                         ...td, paddingLeft: rowDims.length > 0 ? 22 : 12,
                         fontWeight: m.is_input ? 400 : 700,
-                        color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)",
+                        color: m.is_input || m.row_style === "total" ? "var(--color-text-strong)" : "var(--color-grid-calc-text)",
                       }}>
                         {m.label}
-                        {!m.is_input && <span style={{ fontSize: 10, color: "var(--color-disabled)", marginLeft: 6 }}>CALC</span>}
+                        {!m.is_input && !hideBadges && <span style={{ fontSize: 10, color: "var(--color-disabled)", marginLeft: 6 }}>CALC</span>}
                       </td>
                       {cols.map(cc => {
                         const fc = fullCombo(rc, cc);
@@ -1940,7 +1957,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
               <thead>
                 {metricsOuter ? (<>
                   <tr style={{ background: "var(--color-surface-faint)", borderBottom: "1px solid var(--color-grid-col-header-border)" }}>
-                    <th style={{ ...th, minWidth: 160 }} rowSpan={1 + (hasColHierarchy && colHeaderLevels ? colHeaderLevels.length : 1)}>
+                    <th style={{ ...th, ...labelCol(160) }} rowSpan={1 + (hasColHierarchy && colHeaderLevels ? colHeaderLevels.length : 1)}>
                       {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                     </th>
                     {gridMetrics.map((m, mi) => (
@@ -1948,7 +1965,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                         style={{ ...th, textAlign: "center", borderLeft: mi > 0 ? "1px solid var(--color-border)" : undefined,
                           color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
                         {m.label}
-                        <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>
+                        {!hideBadges && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
                       </th>
                     ))}
                   </tr>
@@ -1984,7 +2001,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   colHeaderLevels.map((level, li) => (
                     <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
                       {li === 0 && (
-                        <th style={{ ...th, minWidth: 160 }} rowSpan={colHeaderLevels.length + (metricHeaderRow ? 1 : 0)}>
+                        <th style={{ ...th, ...labelCol(160) }} rowSpan={colHeaderLevels.length + (metricHeaderRow ? 1 : 0)}>
                           {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                         </th>
                       )}
@@ -2007,7 +2024,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   ))
                 ) : hasColDims ? (
                   <tr style={{ background: "var(--color-grid-col-header-bg)", borderBottom: "1px solid var(--color-grid-col-header-border)" }}>
-                    <th style={{ ...th, minWidth: 160 }} rowSpan={metricHeaderRow ? 2 : 1}>
+                    <th style={{ ...th, ...labelCol(160) }} rowSpan={metricHeaderRow ? 2 : 1}>
                       {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                     </th>
                     {colCombos.map((cc, ci) => (
@@ -2020,7 +2037,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 ) : null}
                 {metricHeaderRow && <tr style={{ background: "var(--color-surface-faint)", borderBottom: "2px solid var(--color-border)" }}>
                   {!hasColDims && !hasColHierarchy && (
-                    <th style={{ ...th, minWidth: 160 }}>
+                    <th style={{ ...th, ...labelCol(160) }}>
                       {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                     </th>
                   )}
@@ -2033,7 +2050,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                           color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)",
                         }}>
                         {m.label}
-                        {!metricsInContext && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
+                        {!metricsInContext && !hideBadges && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
                       </th>
                     ))
                   )}
@@ -2095,7 +2112,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     ))
                 )}
                 {maintainedRowDim && <AddMemberRow dim={maintainedRowDim} colSpan={1 + effectiveColCombos.length * gridMetrics.length} />}
-                {!hasRowHierarchy && rowCombos.length > 1 && (
+                {!hasRowHierarchy && rowCombos.length > 1 && !hideTotalRow && (
                   <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-surface-faint)" }}>
                     <td style={{ ...td, fontWeight: 700 }}>Total</td>
                     {colSlots.map(({ cc, m, edge }) => {
@@ -2105,7 +2122,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                           <td key={`tot-${comboKey(cc)}-${m.id}`}
                             className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
                             style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
-                            {fmtMetric(m, total, gridScale, dateFormat)}
+                            {fmtCell(m, cc, total, gridScale, dateFormat)}
                           </td>
                         );
                       })}
@@ -2116,12 +2133,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           )}
         </div>
 
-        <div className="mvx-grid-legend" aria-label="Cell legend">
+        {footer && <div className="mvx-grid-footer"><Txt>{footer}</Txt></div>}
+        {(!hideLegend || !toolbarRow) && <div className="mvx-grid-legend" aria-label={hideLegend ? undefined : "Cell legend"}>
+          {!hideLegend && <>
           {gridMetrics.some(m => m.is_input) && <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--input" />Editable</span>}
           {gridMetrics.some(m => !m.is_input) && <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--calc" />Calculated</span>}
           <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--readonly" />Read-only / total</span>
-          {pushSync && <span>Click a row or column label to select it in synced widgets</span>}
+          {/* Only where a label can be clicked: a grid of metrics alone has
+              none, and the hint promised a click that did nothing. */}
+          {pushSync && rowDims.length + colDims.length > 0 && <span>Click a row or column label to select it in synced widgets</span>}
           {gridMetrics.some(m => m.is_input) && <span>Shift+click selects cells; ⌘/Ctrl+C and ⌘/Ctrl+V copy and paste them, also from a spreadsheet</span>}
+          </>}
           {!toolbarRow && (
             <span style={{ marginLeft: "auto" }}>
               <GridActionsMenu
@@ -2133,7 +2155,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
               />
             </span>
           )}
-        </div>
+        </div>}
         {writeback.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Saving…</p>}
         {pasteBatch.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Pasting…</p>}
         {!pasteBatch.isPending && pasteNote && (
@@ -2238,6 +2260,21 @@ function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>):
     else out[k] = v;
   }
   return out;
+}
+
+// A withheld cell's dash says why: a bare dash read as "no value" (2026-11-06).
+const WITHHELD_TITLE = "Not shown: this value is worked out from members hidden from you";
+
+// A calculated member that is one member less another ({ACT} - {BUD}): a
+// percentage there is a difference of percentages, in points — -0.9 pp, not
+// -0.9%, which reads as a relative change.
+const DIFFERENCE_MEMBER = /^\s*\{[^{}]+\}\s*-\s*\{[^{}]+\}\s*$/;
+function inPoints(m: Metric, fc: DimMember[]): boolean {
+  return m.format === "percentage" && fc.some(member => !!member.formula && DIFFERENCE_MEMBER.test(member.formula));
+}
+function fmtCell(m: Metric, fc: DimMember[], n: number | null | undefined, scale?: Scale, dateFormat = ""): string {
+  const text = fmtMetric(m, n, scale, dateFormat);
+  return n != null && inPoints(m, fc) ? text.replace(/%$/, " pp") : text;
 }
 
 function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale, dateFormat = ""): string {

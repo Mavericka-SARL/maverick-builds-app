@@ -209,7 +209,7 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, u
 		if !exists {
 			return "", aiassistant.ErrNotDryRunnable
 		}
-		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, true)
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), true)
 		if err == nil && problems != "" {
 			err = fmt.Errorf("import rejected: %s", strings.TrimSpace(problems))
 		}

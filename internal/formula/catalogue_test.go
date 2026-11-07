@@ -368,6 +368,21 @@ func TestBlankInputsReadBlankWhereBlanknessMatters(t *testing.T) {
 	}
 }
 
+// EvalWithContext is what filtered reads and charts evaluate through
+// (calculation.EvaluateMetricWithDimContext). It rebuilds the context to
+// upper-case the variables, and that copy lost Blank: IF(ISBLANK(x), y, x)
+// read 0 on an empty cell, where the scheduler's EvalNode read y.
+func TestEvalWithContextKeepsBlankVariables(t *testing.T) {
+	v, err := EvalWithContext(`IF(ISBLANK(x), y, x)`, &EvalContext{
+		Vars:  map[string]Value{"x": NumberVal(0), "y": NumberVal(6)},
+		Blank: map[string]bool{"X": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	num(6).check(t, "IF(ISBLANK(x), y, x)", v)
+}
+
 func TestCatalogueToday(t *testing.T) {
 	now := time.Now().UTC()
 	v, err := Eval(`TODAY()`, nil)

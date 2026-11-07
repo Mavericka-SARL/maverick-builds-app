@@ -69,6 +69,10 @@ type ConfirmAiProposalRes interface {
 	confirmAiProposalRes()
 }
 
+type CopyBAValuesRes interface {
+	copyBAValuesRes()
+}
+
 type CreateAPITokenRes interface {
 	createAPITokenRes()
 }
@@ -229,6 +233,10 @@ type DeleteIntegrationConnectionRes interface {
 	deleteIntegrationConnectionRes()
 }
 
+type DeleteIntegrationTemplateRes interface {
+	deleteIntegrationTemplateRes()
+}
+
 type DeleteNotificationRes interface {
 	deleteNotificationRes()
 }
@@ -287,6 +295,10 @@ type ExportGridRes interface {
 
 type ExportModelRes interface {
 	exportModelRes()
+}
+
+type ExtendBACalendarRes interface {
+	extendBACalendarRes()
 }
 
 type FillSampleValuesRes interface {
@@ -469,6 +481,10 @@ type ListBAAvailableRes interface {
 	listBAAvailableRes()
 }
 
+type ListBACalendarsRes interface {
+	listBACalendarsRes()
+}
+
 type ListBARoleDashboardsRes interface {
 	listBARoleDashboardsRes()
 }
@@ -529,6 +545,10 @@ type ListIntegrationRunsRes interface {
 	listIntegrationRunsRes()
 }
 
+type ListIntegrationTemplatesRes interface {
+	listIntegrationTemplatesRes()
+}
+
 type ListMetricsRes interface {
 	listMetricsRes()
 }
@@ -545,12 +565,20 @@ type ListReadableGridsRes interface {
 	listReadableGridsRes()
 }
 
+type ListRoleAccessRulesRes interface {
+	listRoleAccessRulesRes()
+}
+
 type ListScimTokensRes interface {
 	listScimTokensRes()
 }
 
 type ListUserAccessRulesRes interface {
 	listUserAccessRulesRes()
+}
+
+type ListUserRoleAccessRulesRes interface {
+	listUserRoleAccessRulesRes()
 }
 
 type ListWorkflowDefinitionsRes interface {
@@ -629,6 +657,10 @@ type RenameAiSessionRes interface {
 	renameAiSessionRes()
 }
 
+type ReopenWorkflowInstanceRes interface {
+	reopenWorkflowInstanceRes()
+}
+
 type ReorderDashboardsRes interface {
 	reorderDashboardsRes()
 }
@@ -667,6 +699,10 @@ type RevokeScimTokenRes interface {
 
 type RunIntegrationRes interface {
 	runIntegrationRes()
+}
+
+type SaveIntegrationTemplateRes interface {
+	saveIntegrationTemplateRes()
 }
 
 type ScimCreateGroupRes interface {
@@ -751,6 +787,10 @@ type SetDefaultModelRes interface {
 
 type SetModelDateFormatRes interface {
 	setModelDateFormatRes()
+}
+
+type SetRoleAccessRulesRes interface {
+	setRoleAccessRulesRes()
 }
 
 type SetUserAccessRulesRes interface {
@@ -931,6 +971,10 @@ type UploadAiDocumentRes interface {
 
 type UpsertPlanRes interface {
 	upsertPlanRes()
+}
+
+type UseIntegrationTemplateRes interface {
+	useIntegrationTemplateRes()
 }
 
 type ValidateIntegrationRes interface {

@@ -153,6 +153,15 @@ type Handler interface {
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
+	// CopyBAValues implements copyBAValues operation.
+	//
+	// In the live revision of the model the admin has open, every value typed into a cell of `from` is
+	// written to the same cell of `to` (values a table of records posts stay with their records). Each
+	// is checked as a typed value is (access rules, workflow locks, closed and posted cells), all or
+	// nothing. At most 20,000 values; `metric_ids` narrows the copy.
+	//
+	// POST /api/business-admin/copy-values
+	CopyBAValues(ctx context.Context, req *CopyBAValuesReq) (CopyBAValuesRes, error)
 	// CreateAPIToken implements createAPIToken operation.
 	//
 	// Make a personal API token for a script; the answer carries the token, once.
@@ -533,6 +542,12 @@ type Handler interface {
 	//
 	// DELETE /api/developer/integration-connections/{id}
 	DeleteIntegrationConnection(ctx context.Context, params DeleteIntegrationConnectionParams) (DeleteIntegrationConnectionRes, error)
+	// DeleteIntegrationTemplate implements deleteIntegrationTemplate operation.
+	//
+	// Delete an integration template.
+	//
+	// DELETE /api/developer/integration-templates/{id}
+	DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (DeleteIntegrationTemplateRes, error)
 	// DeleteMetric implements deleteMetric operation.
 	//
 	// Delete a metric definition.
@@ -645,6 +660,15 @@ type Handler interface {
 	//
 	// GET /api/admin/models/{id}/export
 	ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error)
+	// ExtendBACalendar implements extendBACalendar operation.
+	//
+	// Adds the periods after the last one through the period containing `through`, placed as the last
+	// one is: under quarters and fiscal years of the same kind, reused or created and named after their
+	// peers. Nothing is renamed, moved or deleted. Only a time dimension of the active revision of the
+	// model the admin has open.
+	//
+	// POST /api/business-admin/calendars/{dimId}/extend
+	ExtendBACalendar(ctx context.Context, req *ExtendBACalendarReq, params ExtendBACalendarParams) (ExtendBACalendarRes, error)
 	// ExtractFormulaRefs implements extractFormulaRefs operation.
 	//
 	// Parse a formula string and return the metric/dimension names it references.
@@ -1113,6 +1137,12 @@ type Handler interface {
 	//
 	// GET /api/business-admin/available
 	ListBAAvailable(ctx context.Context, params ListBAAvailableParams) (ListBAAvailableRes, error)
+	// ListBACalendars implements listBACalendars operation.
+	//
+	// The time dimensions of the open model's active revision, with their first and last period.
+	//
+	// GET /api/business-admin/calendars
+	ListBACalendars(ctx context.Context) (ListBACalendarsRes, error)
 	// ListBARoleDashboards implements listBARoleDashboards operation.
 	//
 	// List the dashboard IDs assigned to a business role.
@@ -1250,6 +1280,12 @@ type Handler interface {
 	//
 	// GET /api/developer/integrations/{id}/runs
 	ListIntegrationRuns(ctx context.Context, params ListIntegrationRunsParams) (ListIntegrationRunsRes, error)
+	// ListIntegrationTemplates implements listIntegrationTemplates operation.
+	//
+	// The integration templates of the open model's tenant.
+	//
+	// GET /api/developer/integration-templates
+	ListIntegrationTemplates(ctx context.Context) (ListIntegrationTemplatesRes, error)
 	// ListMetrics implements listMetrics operation.
 	//
 	// List all metrics for the demo model.
@@ -1305,6 +1341,12 @@ type Handler interface {
 	//
 	// GET /api/developer/revisions
 	ListRevisions(ctx context.Context, params ListRevisionsParams) ([]DevRevision, error)
+	// ListRoleAccessRules implements listRoleAccessRules operation.
+	//
+	// List a business role's access rules, which every member of the role holds.
+	//
+	// GET /api/business-admin/roles/{id}/access-rules
+	ListRoleAccessRules(ctx context.Context, params ListRoleAccessRulesParams) (ListRoleAccessRulesRes, error)
 	// ListScimTokens implements listScimTokens operation.
 	//
 	// This tenant's SCIM tokens, revoked ones included, never the secret (administrators; enterprise
@@ -1331,6 +1373,12 @@ type Handler interface {
 	//
 	// GET /api/apps
 	ListUserApps(ctx context.Context) ([]UserApp, error)
+	// ListUserRoleAccessRules implements listUserRoleAccessRules operation.
+	//
+	// The access rules a user holds through this workspace's business roles.
+	//
+	// GET /api/business-admin/users/{id}/role-access-rules
+	ListUserRoleAccessRules(ctx context.Context, params ListUserRoleAccessRulesParams) (ListUserRoleAccessRulesRes, error)
 	// ListWorkflowDefinitions implements listWorkflowDefinitions operation.
 	//
 	// Published workflow definitions of the caller's application, with context schemas — what the
@@ -1491,6 +1539,14 @@ type Handler interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// ReopenWorkflowInstance implements reopenWorkflowInstance operation.
+	//
+	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
+	// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
+	// required: it goes into the audit log and the message the people involved receive.
+	//
+	// POST /api/workflow/instances/{id}/reopen
+	ReopenWorkflowInstance(ctx context.Context, req *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error)
 	// ReorderDashboards implements reorderDashboards operation.
 	//
 	// Dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the
@@ -1581,6 +1637,13 @@ type Handler interface {
 	//
 	// PUT /api/ai/settings
 	SaveAiSettings(ctx context.Context, req *AiSaveSettingsRequest) (*SaveAiSettingsOK, error)
+	// SaveIntegrationTemplate implements saveIntegrationTemplate operation.
+	//
+	// Its target is kept by name and its config as it is (it names metrics, dimensions and fields). A
+	// REST connector or a model link holds a connection or another model and cannot be a template.
+	//
+	// POST /api/developer/integration-templates
+	SaveIntegrationTemplate(ctx context.Context, req *SaveIntegrationTemplateReq) (SaveIntegrationTemplateRes, error)
 	// ScimCreateGroup implements scimCreateGroup operation.
 	//
 	// Create a business role with members (SCIM bearer token).
@@ -1731,6 +1794,13 @@ type Handler interface {
 	//
 	// PUT /api/developer/models/{id}/date-format
 	SetModelDateFormat(ctx context.Context, req *SetModelDateFormatReq, params SetModelDateFormatParams) (SetModelDateFormatRes, error)
+	// SetRoleAccessRules implements setRoleAccessRules operation.
+	//
+	// Every member of the role holds these rules as their own; where one of them and a person's own rule
+	// land on the same member or metric, the stricter wins.
+	//
+	// PUT /api/business-admin/roles/{id}/access-rules
+	SetRoleAccessRules(ctx context.Context, req *SetUserAccessRulesRequest, params SetRoleAccessRulesParams) (SetRoleAccessRulesRes, error)
 	// SetUserAccessRules implements setUserAccessRules operation.
 	//
 	// Replace the full set of a user's dimension/metric access rules.
@@ -2070,6 +2140,12 @@ type Handler interface {
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)
+	// UseIntegrationTemplate implements useIntegrationTemplate operation.
+	//
+	// Make a template in the open model's working revision, its target found by name.
+	//
+	// POST /api/developer/integration-templates/{id}/use
+	UseIntegrationTemplate(ctx context.Context, req OptUseIntegrationTemplateReq, params UseIntegrationTemplateParams) (UseIntegrationTemplateRes, error)
 	// ValidateIntegration implements validateIntegration operation.
 	//
 	// Validate a rest_api integration's configuration and target/connection ownership without saving.

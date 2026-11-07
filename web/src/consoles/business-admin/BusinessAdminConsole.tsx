@@ -5,6 +5,7 @@ import { api, type Task, type HistoryInstance, type BARole, type BAUser, type BA
 import { TaskContextSummary } from "../TaskContextSummary";
 import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
+import { useReopenRun } from "../useReopenRun";
 import { useDateFormat } from "../dateFormat";
 import { momentDate, momentDateTime } from "../dateSerial";
 import {
@@ -164,6 +165,8 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
     },
   });
 
+  const reopenRun = useReopenRun();
+
   const filtered = useMemo(() => {
     return instances.filter((inst: HistoryInstance) => {
       if (statusFilter !== "all" && inst.status !== statusFilter) return false;
@@ -219,6 +222,12 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
               </div>
               <span className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{momentDate(inst.started_at, dateFormat)}</span>
               <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
+              {inst.reopenable ? (
+                <Button size="sm" variant="ghost" disabled={reopenRun.pending}
+                  aria-label={`Reopen ${inst.workflow_name}`} onClick={() => reopenRun.askReopen(inst.id, `"${inst.workflow_name}"`)}>
+                  Reopen
+                </Button>
+              ) : (<>
               <Select
                 value={instanceStatus[inst.id] ?? inst.status}
                 onChange={e => setInstanceStatus(m => ({ ...m, [inst.id]: e.target.value }))}
@@ -239,6 +248,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
               >
                 Apply
               </Button>
+              </>)}
             </div>
 
             {/* Steps */}
@@ -289,6 +299,8 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
           </div>
         );
       })}
+      {reopenRun.error && <p className="mvx-admin-error">{reopenRun.error}</p>}
+      {reopenRun.confirmElement}
     </div>
   );
 }
@@ -645,6 +657,9 @@ export function AccessRulesTab() {
   const qc = useQueryClient();
 
   const { data: users = [] } = useQuery<BAUser[]>({ queryKey: ["ba-users"], queryFn: api.listBAUsers });
+  // A role's rules apply to every member of the role (migration 156): the
+  // picker offers roles beside people, "role:<id>".
+  const { data: roles = [] } = useQuery<BARole[]>({ queryKey: ["ba-roles"], queryFn: api.listBARoles });
   const { data: dimMembers = [] } = useQuery<BAAvailableItem[]>({
     queryKey: ["ba-available-dimension-members"],
     queryFn: () => api.getBAAvailable("dimension_members"),
@@ -688,11 +703,29 @@ export function AccessRulesTab() {
   // Back, since nothing registered a beforeunload handler.
   const { guard, guardElement } = useUnsavedGuard(dirty);
 
+  const selectedRole = selectedUser.startsWith("role:") ? selectedUser.slice(5) : "";
   const { data: existingRules = [] } = useQuery<UserAccessRule[]>({
     queryKey: ["ba-access-rules", selectedUser],
-    queryFn: () => api.getUserAccessRules(selectedUser),
+    queryFn: () => (selectedRole ? api.getRoleAccessRules(selectedRole) : api.getUserAccessRules(selectedUser)),
     enabled: !!selectedUser,
   });
+  // A person's rules from their roles, shown beside their own: the stricter wins.
+  const { data: roleRules = [] } = useQuery({
+    queryKey: ["ba-role-access-rules", selectedUser],
+    queryFn: () => api.getUserRoleAccessRules(selectedUser),
+    enabled: !!selectedUser && !selectedRole,
+  });
+  const fromRoles = useMemo(() => {
+    const m: Record<string, { access: AccessLevel; roles: string[] }> = {};
+    for (const r of selectedRole ? [] : roleRules) {
+      const key = `${r.rule_type}:${r.ref_id}`;
+      const cur = m[key];
+      const access = r.access as AccessLevel;
+      const rank = (a: AccessLevel) => (a === "hidden" ? 0 : a === "read" ? 1 : 2);
+      m[key] = { access: !cur || rank(access) < rank(cur.access) ? access : cur.access, roles: [...(cur?.roles ?? []), r.role_name] };
+    }
+    return m;
+  }, [roleRules, selectedRole]);
 
   // Clear draft immediately when user changes
   useEffect(() => {
@@ -713,9 +746,10 @@ export function AccessRulesTab() {
   }, [existingRules]); // intentionally omit selectedUser — only fire when data changes
 
   const saveRules = useMutation({
-    mutationFn: (rules: UserAccessRule[]) => api.putUserAccessRules(selectedUser, rules),
+    mutationFn: (rules: UserAccessRule[]) => (selectedRole ? api.putRoleAccessRules(selectedRole, rules) : api.putUserAccessRules(selectedUser, rules)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ba-access-rules", selectedUser] });
+      qc.invalidateQueries({ queryKey: ["ba-role-access-rules"] });
       // What a grid, KPI or chart shows depends on the viewer's rules: an
       // admin who changed their own saw the old ones for up to the 30 s
       // refresh. (Other people's consoles keep that refresh.)
@@ -758,17 +792,25 @@ export function AccessRulesTab() {
 
   function accessSelect(type: string, id: string) {
     const val = getAccess(type, id);
+    const role = fromRoles[`${type}:${id}`];
     return (
-      <Select
-        value={val}
-        onChange={e => setAccess(type, id, e.target.value as AccessLevel)}
-        style={{ color: ACCESS_COLOR[val] }}
-        aria-label="Access level"
-      >
-        <option value="write">Write</option>
-        <option value="read">Read</option>
-        <option value="hidden">Hidden</option>
-      </Select>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <Select
+          value={val}
+          onChange={e => setAccess(type, id, e.target.value as AccessLevel)}
+          style={{ color: ACCESS_COLOR[val] }}
+          aria-label="Access level"
+        >
+          <option value="write">Write</option>
+          <option value="read">Read</option>
+          <option value="hidden">Hidden</option>
+        </Select>
+        {role && role.access !== "write" && (
+          <span className="mvx-admin-muted" style={{ fontSize: 12 }} title="A role's rule applies too; the stricter wins">
+            {role.access === "hidden" ? "Hidden" : "Read"} by {role.roles.join(", ")}
+          </span>
+        )}
+      </span>
     );
   }
 
@@ -786,17 +828,24 @@ export function AccessRulesTab() {
 
       <Toolbar>
         <ToolbarGroup>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>User:</span>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>For:</span>
           <Select
             value={selectedUser}
             onChange={e => { const next = e.target.value; guard(() => setSelectedUser(next)); }}
             style={{ minWidth: 220 }}
             aria-label="Select user"
           >
-            <option value="">— select a user —</option>
-            {users.map(u => (
-              <option key={u.id} value={u.id}>{u.display_name}</option>
-            ))}
+            <option value="">— select a person or a role —</option>
+            {roles.length > 0 && (
+              <optgroup label="Roles (every member holds these)">
+                {roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="People">
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.display_name}</option>
+              ))}
+            </optgroup>
           </Select>
           {saveRules.isSuccess && !dirty && (
             <span style={{ fontSize: 13, color: "var(--color-success)", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -815,7 +864,7 @@ export function AccessRulesTab() {
       </Toolbar>
 
       {!selectedUser && (
-        <EmptyState label="Select a user to configure their access rules." />
+        <EmptyState label="Select a person or a role. A role's rules apply to everyone in it; where a role's rule and a person's own meet, the stricter wins." />
       )}
 
       {selectedUser && (

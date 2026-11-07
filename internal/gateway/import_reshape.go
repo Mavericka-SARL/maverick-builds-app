@@ -45,7 +45,7 @@ func (h *handler) importReshapePreview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case body.CSV == "":
-		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
+		jsonErr(w, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)"), http.StatusBadRequest)
 		return
 	}
 	if err := body.Reshape.Validate(); err != nil {

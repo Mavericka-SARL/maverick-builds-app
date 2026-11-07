@@ -40,9 +40,13 @@ type ChartConfig struct {
 	ContextDefaults map[string]string `json:"context_defaults"`
 	BinCount        int               `json:"bin_count,omitempty"`
 	ShowLegend      *bool             `json:"show_legend,omitempty"`
-	ShowValues      *bool             `json:"show_values,omitempty"`
-	ValueFormat     string            `json:"value_format,omitempty"`
-	RefreshSeconds  int               `json:"refresh_seconds,omitempty"`
+	// SeriesNames names a bar or line series in the legend and tooltip,
+	// by metric id, where the metric's label will not do (a workbook's
+	// capitals); the console draws it, the server only keeps the setting.
+	SeriesNames    map[string]string `json:"series_names,omitempty"`
+	ShowValues     *bool             `json:"show_values,omitempty"`
+	ValueFormat    string            `json:"value_format,omitempty"`
+	RefreshSeconds int               `json:"refresh_seconds,omitempty"`
 	// HideRollupMembers drops the plotted dimension's non-leaf members — the
 	// "All Regions" style totals. A total is the sum of everything beside it,
 	// so plotting it next to its own children gives one bar that dwarfs the
@@ -51,6 +55,10 @@ type ChartConfig struct {
 	// Only the plotted axis: the context selectors keep their rollups, where
 	// picking "All Regions" is a meaningful choice rather than a distortion.
 	HideRollupMembers bool `json:"hide_rollup_members,omitempty"`
+	// PlottedMembers are the plotted dimension's member codes the chart
+	// draws, in this order; none draws them all. A scenario chart that must
+	// show only the two "vs Base" bars could not be narrowed (2026-11-06).
+	PlottedMembers []string `json:"plotted_members,omitempty"`
 	// YAxisFromZero false fits a line chart's value axis to the data; the
 	// console draws it (ChartWidget), the server only keeps the setting.
 	YAxisFromZero *bool `json:"y_axis_from_zero,omitempty"`
@@ -298,6 +306,9 @@ func (r *ChartResolver) Resolve(
 	if cfg.HideRollupMembers {
 		plottedMembers = leafMembersOnly(plottedMembers)
 	}
+	if len(cfg.PlottedMembers) > 0 {
+		plottedMembers = chosenMembers(plottedMembers, cfg.PlottedMembers)
+	}
 	if len(plottedMembers) == 0 {
 		return nil, fmt.Errorf("no visible members for plotted dimension")
 	}
@@ -394,6 +405,23 @@ func (r *ChartResolver) Resolve(
 // dimension as a whole: a member whose only children are hidden from this
 // caller has nothing left to total, so it is a leaf here and dropping it would
 // remove real data rather than a duplicate of it.
+// chosenMembers keeps the members named in codes, in codes' order: a code
+// the viewer may not see, or one since deleted, draws nothing.
+func chosenMembers(members []dimMember, codes []string) []dimMember {
+	byCode := make(map[string]dimMember, len(members))
+	for _, m := range members {
+		byCode[m.Code] = m
+	}
+	out := make([]dimMember, 0, len(codes))
+	for _, c := range codes {
+		if m, ok := byCode[c]; ok {
+			out = append(out, m)
+			delete(byCode, c)
+		}
+	}
+	return out
+}
+
 func leafMembersOnly(members []dimMember) []dimMember {
 	hasChild := make(map[string]bool, len(members))
 	for _, m := range members {

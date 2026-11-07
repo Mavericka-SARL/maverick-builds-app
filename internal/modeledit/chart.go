@@ -270,11 +270,12 @@ var (
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
 		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
-		"kpi_compare": true, "kpi_good": true, "number_scale": true}
+		"kpi_compare": true, "kpi_good": true, "number_scale": true,
+		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
 		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
 		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true, "y_axis_from_zero": true,
-		"stacked": true, "actual_metric_id": true}
+		"stacked": true, "actual_metric_id": true, "series_names": true, "plotted_members": true}
 )
 
 // CheckWidgetPropKeys refuses a widget_props key — at the top or under

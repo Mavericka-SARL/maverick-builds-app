@@ -1,6 +1,6 @@
 import { useBrand } from "../../../branding/brand";
 import { useQuery } from "@tanstack/react-query";
-import { api, type ApiIntegrationConfig } from "../../../api/client";
+import { api, type ApiIntegrationConfig, type FormDef } from "../../../api/client";
 import { Field, Select, TextInput, Textarea } from "../../../ui";
 
 export function BasicsStep({
@@ -52,14 +52,14 @@ export function BasicsStep({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Target type">
           <Select value={config.target_type} aria-label="Target type"
-            onChange={e => onConfig({ target_type: e.target.value as ApiIntegrationConfig["target_type"], target_id: "" })}>
+            onChange={e => onConfig({ target_type: e.target.value as ApiIntegrationConfig["target_type"], target_id: "", replace_by: undefined })}>
             <option value="grid">Grid</option>
             <option value="form">Table of records</option>
             <option value="dimension">Dimension</option>
           </Select>
         </Field>
         <Field label={config.direction === "pull" ? "Import into" : "Read from"} required>
-          <Select value={config.target_id} aria-label="Target" onChange={e => onConfig({ target_id: e.target.value })}>
+          <Select value={config.target_id} aria-label="Target" onChange={e => onConfig({ target_id: e.target.value, replace_by: undefined })}>
             <option value="">Select…</option>
             {targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
@@ -74,6 +74,18 @@ export function BasicsStep({
             <option value="incremental" disabled={config.protocol === "model"}>Incremental</option>
             <option value="replace">Replace</option>
             <option value="full_reload">Full reload</option>
+          </Select>
+        </Field>
+      )}
+      {config.direction === "pull" && config.target_type === "form" && config.target_id && (
+        <Field label="When a run brings rows again" description="Rows of a period (or site, ledger…) a run already loaded are otherwise added again.">
+          <Select value={config.replace_by ?? ""} aria-label="Replace by"
+            onChange={e => onConfig({ replace_by: e.target.value || undefined })}>
+            <option value="">Add them to the earlier records</option>
+            {(forms as FormDef[]).find(f => f.id === config.target_id)?.keeps_dimension_id ? null
+              : ((forms as FormDef[]).find(f => f.id === config.target_id)?.fields ?? [])
+                .filter(f => f.type === "dimension" || f.type === "select" || f.type === "text" || f.type === "date")
+                .map(f => <option key={f.name} value={f.name}>{`Replace the records with the same ${f.label || f.name}`}</option>)}
           </Select>
         </Field>
       )}

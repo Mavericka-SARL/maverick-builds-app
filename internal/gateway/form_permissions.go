@@ -78,6 +78,12 @@ func (h *handler) withFormPermissions(ctx context.Context, act *actor, forms []*
 				}
 			}
 			scope.formID, scope.form = f.ID, f
+			// Who may add records, and a table everyone edits' view,
+			// are the table's own.
+			var err error
+			if scope, err = h.tableScope(ctx, scope); err != nil {
+				return nil, err
+			}
 			served.Permissions = scope.formPermissions()
 		}
 		posting, posts, err := h.records().PostingOf(ctx, f)

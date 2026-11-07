@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { IntegrationTemplatesPanel } from "./IntegrationTemplatesPanel";
 import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
@@ -494,6 +495,8 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       {activeSource === "form_records" && <FormRecordsSection />}
 
       {activeSource === "export" && <ExportSection revisionId={revisionId} />}
+
+      <IntegrationTemplatesPanel revisionId={revisionId} />
     </div>
   );
 }

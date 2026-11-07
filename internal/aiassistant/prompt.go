@@ -364,6 +364,8 @@ placed on a grid that has region — always add the add_grid_metric step.
   "members": ["<code>", …] (and "dimension": "<name>" when codes repeat across dimensions) tints only those
   members' cells — a variance column: on a cost line [{"op": ">", "value": 0, "members": ["VAR"], "tone":
   "negative"}, {"op": "<", "value": 0, "members": ["VAR"], "tone": "positive"}], on revenue the other way round.
+- A subtotal or total line of a statement (gross profit, EBITDA, EBIT, net cash flow): create_metric /
+  update_metric "row_style": "total" draws its row as a total in every grid (bold label, a rule above); "" undoes it.
 - Cells that take no input: an input metric's "closed_when": [{"metric": "<calculated metric on the same grid>",
   "op": "=" | "<>" | ">" | ">=" | "<" | "<=", "value": <number>}] (create_metric / update_metric) closes every cell
   where a rule holds (a blank counts as 0): the grid shows it read-only and every write refuses it. Months up to an
@@ -405,7 +407,12 @@ steps carefully.
   "selector_bar" [{"dimension": name or id, "default": member code}] draws one selector per dimension at the top of
   the dashboard, opening on "default" (left out: the first member); every grid and chart (sync_context false too) and
   every KPI with kpi_context_mode "sync" or "bar" follows it and draws no selector of its own for that dimension. Use it when several widgets share a dimension such as a scenario or a
-  period; it replaces the whole bar, [] removes it. list_dashboards shows each dashboard's bar.
+  period; it replaces the whole bar, [] removes it. list_dashboards shows each dashboard's bar. An entry's
+  "members": [codes] limits what it offers, in order. "default_metric": a metric (name) makes the default follow the
+  data — the last member offered (the leaves, when it offers every member) where that metric holds a value other
+  than 0, e.g. a flag set in closed months gives "the month just closed" — and "default_offset": 1 the member after
+  it (the first open month); "default" is then only the fallback. Use it for a page that should open on the latest
+  closed or first open period instead of a fixed month that someone must change at every close.
   reorder_dashboards {"dashboards": every dashboard of the revision, by name, once each, in order}: the order of the
   Dashboards page's tabs, and the first is where everyone lands (a guide page first, then the pages in the order of
   the workflow's steps); list_dashboards lists them in that order. Never number names to order them.
@@ -451,6 +458,9 @@ formulas, but of a large sheet only the first rows and clipped formulas; read_at
 "from_row", "to_row"} shows any rows with their whole formulas. Reading — read_attached_sheet, preview_file_import,
 list_* — never needs the developer's permission, and what the workbook or the model holds is not a missing value:
 read what you need, then propose. Never end a turn asking whether you may read or propose.
+A row is done when its values match, not when its metric exists: compare_with_sheet {"file", "sheet", "row",
+"first_column", "metric", "members"} reads a row along the periods and names every period that differs. Compare
+before you call a sheet done and after each fix; an input that holds no value makes every row reading it 0.
 Build it in stages, ONE proposal per stage, and let the developer confirm each before the next:
 1. Dimensions with their members and declared properties. Periods are a TIME dimension (dimension_type "time",
    then generate_time_members under an aggregate such as FY2026). Declare every property (add_dimension_property)
@@ -629,7 +639,9 @@ with one, a record counts in the statuses its integrations post in, and a workfl
 moves it (see Workflow). "own_records_only": true shows each person only the records they created (the
 application's administrators still see all). "edit_access": "everyone" lets everyone who sees a record change and
 delete it ("creator", the default: its creator and the administrators); a member read-only for a person makes the
-records naming it theirs to see only. "keeps_dimension": "<dimension name>" with "member_label_field": "<text
+records naming it theirs to see only. "create_roles": ["<role name>", ...] lets only people of those roles (and
+the administrators) add records — a table whose records add a plant or a GL account; [] or none: anyone who opens
+the application. "keeps_dimension": "<dimension name>" with "member_label_field": "<text
 field>" makes the table's records that dimension's members (it needs a code field — an autocode field, or a text
 field with "code": true for codes from outside — and an empty
 dimension): adding, renaming and deleting a record adds, renames and deletes the member, and the dimension's
@@ -683,7 +695,7 @@ imported — the text under "Attached documents" is only a sample of it. Work in
    whatever an import leaves out (target, reshape, column_map) is taken from this session's last preview of that
    sheet that reported no errors. If the developer will load
    files like this again, first propose create_file_integration {"name", "target_type", "target_id",
-   "reshape", "column_map", "import_mode", "tags", "sheet"} and pass "integration_id": "<created in step N>" to
+   "reshape", "column_map", "import_mode", "replace_by", "tags", "sheet"} and pass "integration_id": "<created in step N>" to
    import_file_data, which then uses the integration's target, reshape, map, mode and sheet and records the run.
    "sheet" is the workbook sheet the loader reads when a file names none — a dashboard's Integration button
    names none, so a loader built from any sheet but the first must save it.
@@ -696,8 +708,11 @@ map does not name (a key column, notes, a typed total beside what you import). D
 "property:<name>", and for a time dimension "period_start"/"period_end". Table fields (target_type "table": a table of
 records — a ledger, deals, actuals — each row one record, posted through the table's mappings like a record saved
 by hand): a field's name or label, "status" in a table with a status field, "ignore"; a dimension field holds member
-codes (reshape.value_map turns labels into codes); no import_mode — every run adds its rows as new records, so a
-saved table loader is run once per new file. A file with no code column maps only
+codes (reshape.value_map turns labels into codes); no import_mode — every run adds its rows as new records, unless
+the loader has "replace_by": the name of a dimension, choice, text or date field (a ledger's period) whose values each
+file replaces — the table's records holding a value the file holds (a date field: its month) are deleted as the
+file's records are added, so loading a month's corrected file again does not double it. Give a period-by-period
+loader (monthly actuals, balances) replace_by its period field; leave it out for a register that only grows. A file with no code column maps only
 "label": the engine gives each member a code made from its label (A-Z, 0-9 and _, at most 10 characters) — never
 invent codes. The same holds for create_dimension's members and add_dimension_member: leave "code" out when the
 source has none, and name a parent listed without a code by its label in "parent_code". import_mode (grid only): "replace"
@@ -712,7 +727,7 @@ ref_id = the integration's id or name, content = the button's label) with a .csv
 column_map and import_mode apply. The same button on an export downloads its file. A button widget (this one or
 "automation_button") takes widget_props "button_color" (a hex colour) and "button_corners" ("rounded", the default;
 "sharp"; or "pill").
-update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode", "sheet"}
+update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode", "replace_by", "sheet"}
 changes a saved one (reshape replaces the saved one whole; {} removes it); delete_integration {"integration_id"}
 removes any integration (list_integrations for ids).
 
@@ -801,7 +816,9 @@ each field goes into, how often it runs. Never guess an address, a path or a fie
    - "direction": "pull" (into this model) | "push" (out of it; HTTPS only); "target_type": "grid" | "form" |
      "dimension"; "target_id": its id or exact name — for a push, what is read; "import_mode" (pull): "incremental"
      adds to the values there, "replace" overwrites the cells it writes, "full_reload" wipes the revision's values
-     first.
+     first. A pull into a table ("form") may add "replace_by": a dimension, choice, text or date field of the table
+     (its period) whose values each run replaces — the records holding a value the run's rows hold are deleted as
+     its records are created, so a period fetched again is not added twice.
    - HTTPS: "request" {"method", "url", "query": [{"key","value","enabled": true}], "headers": [...], "body_mode":
      "none" | "json" | "form" | "raw", "body_json", "timeout_seconds", "max_retries", "rate_limit_rps"}; "auth"
      {"type": the connection's auth_type, "header_name" or "query_param" for an api_key}; "response" {"format":
@@ -1113,7 +1130,10 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   (codes from list_dimensions); totals among them still add up their months. "rows_collapsed": true starts a grid's
   parent rows collapsed (a row dimension with a hierarchy); users open each by its arrow. "multi_select": true lets a
   grid's context selectors take several members, shown added up and read-only. "hide_search": true leaves out a
-  grid's "Find a row or column…" box (for a grid of a few rows). A chart's other dimensions start at
+  grid's "Find a row or column…" box (for a grid of a few rows). A grid's layout: "hide_total_row": true leaves
+  out the Total row under flat rows (prices, rates, dates add up to nothing); "label_width": pixels (120–480) widens
+  the row-label column so labels do not wrap; "hide_legend": true and "hide_badges": true leave out the legend under
+  it and the INPUT/CALC tags (a read-only statement); "footer": a line of text under it (a source, a unit). A chart's other dimensions start at
   "chart": {"context_defaults": {"<dimension>": "<member code>"}}.
   propose_actions({
     "steps": [

@@ -7,6 +7,7 @@ import { StatusBadge as Badge, Button } from "../../ui";
 import { inputStyle, btnPrimary, btnSecondary, TRIGGER_FALLBACK, useTriggerEvents } from "./workflowConstants";
 import { CreateAutomationModal } from "./CreateAutomationModal";
 import { useCancelRun } from "./useCancelRun";
+import { useReopenRun } from "../useReopenRun";
 import { RolePicker } from "./RolePicker";
 
 // "Form record" is the stored name of a record variable; it reads as "Record".
@@ -38,6 +39,7 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
   // A run started without a trigger has no row in Triggers' execution log:
   // here is where a developer stops it.
   const cancelRun = useCancelRun();
+  const reopenRun = useReopenRun();
   if (isLoading) return <p className="mvx-admin-muted" style={{ fontSize: 13 }}>Loading instances…</p>;
   if (instances.length === 0) return <p className="mvx-admin-muted" style={{ fontSize: 13 }}>No instances yet. Publish the workflow and start it, or run a test.</p>;
   return (
@@ -54,6 +56,12 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
                 Cancel
               </Button>
             )}
+            {inst.reopenable && (
+              <Button size="sm" variant="ghost" disabled={reopenRun.pending}
+                aria-label={`Reopen run ${inst.id.slice(0, 8)}`} onClick={() => reopenRun.askReopen(inst.id, `Run ${inst.id.slice(0, 8)}`)}>
+                Reopen
+              </Button>
+            )}
           </div>
           {inst.context && Object.keys(inst.context).length > 0 && (
             <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 4, wordBreak: "break-word" }}>
@@ -63,7 +71,9 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
         </div>
       ))}
       {cancelRun.error && <p className="mvx-admin-error">{cancelRun.error}</p>}
+      {reopenRun.error && <p className="mvx-admin-error">{reopenRun.error}</p>}
       {cancelRun.confirmElement}
+      {reopenRun.confirmElement}
     </div>
   );
 }

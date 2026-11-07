@@ -12,6 +12,7 @@ package gateway
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 )
 
 // errRecordNotReached answers a record or form the caller does not reach
@@ -47,6 +49,9 @@ type formRecordScope struct {
 	// table everyone edits (a record naming a member read-only for them is
 	// theirs to see only); nil otherwise.
 	view *accessView
+	// noAdd: the table names who may add records and the caller, no
+	// administrator, holds none of those roles.
+	noAdd bool
 }
 
 // resolveFormRecordScope decides reach and admin for act on formID. A form
@@ -89,7 +94,29 @@ func (h *handler) resolveFormRecordScope(ctx context.Context, act *actor, formID
 		return s, err
 	}
 	s.admin = admin
-	if s.form.EveryoneEdits() && !admin {
+	return h.tableScope(ctx, s)
+}
+
+// tableScope sets what of s depends on its table rather than its model:
+// whether the caller may add records (create_roles) and, in a table everyone
+// edits, the access view that marks members read-only. A list of one model's
+// tables resolves the model once and this per table: reusing the first
+// table's gave every New button its create_roles (2026-11-07).
+func (h *handler) tableScope(ctx context.Context, s formRecordScope) (formRecordScope, error) {
+	s.noAdd, s.view = false, nil
+	if !s.reach || s.form == nil {
+		return s, nil
+	}
+	if len(s.form.CreateRoles) > 0 && !s.admin {
+		roles, _ := json.Marshal(s.form.CreateRoles)
+		var holds bool
+		if err := h.db.QueryRow(ctx, `SELECT `+assignee.SQL("$1::uuid", "$2::jsonb", "$3::uuid"), s.appID, string(roles), s.userID).Scan(&holds); err != nil {
+			return s, fmt.Errorf("resolve who may add records: %w", err)
+		}
+		s.noAdd = !holds
+	}
+	if s.form.EveryoneEdits() && !s.admin {
+		var err error
 		if s.view, err = h.accessViewFor(ctx, s.userID, s.form); err != nil {
 			return s, err
 		}
@@ -173,7 +200,7 @@ func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 
 // createAccess is who the scope's caller is to a record they are creating.
 func (s formRecordScope) createAccess() crudapp.RecordAccess {
-	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true, Statuses: s.hasStatus(), Everyone: s.everyoneEdits()}
+	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true, Statuses: s.hasStatus(), Everyone: s.everyoneEdits(), NoAdd: s.noAdd}
 }
 
 // everyoneEdits reports whether the scope's table lets everyone who sees a
@@ -188,6 +215,19 @@ func (s formRecordScope) readOnlyMember(data map[string]any) string {
 		return ""
 	}
 	return s.view.ReadOnlyMember(s.form, data)
+}
+
+// noAddReason says who may add the table's records, for a caller who may not.
+func (s formRecordScope) noAddReason() string {
+	label := "this table"
+	if s.form != nil && s.form.Label != "" {
+		label = s.form.Label
+	}
+	roles := ""
+	if s.form != nil {
+		roles = strings.Join(s.form.CreateRoles, ", ")
+	}
+	return fmt.Sprintf("only %s and the application's administrators add records to %s", roles, label)
 }
 
 // hasStatus reports whether the scope's table has a status field.

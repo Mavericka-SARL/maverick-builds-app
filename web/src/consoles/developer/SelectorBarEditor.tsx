@@ -3,16 +3,19 @@ import { useMutation } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { api, type DevDimension, type SelectorBarEntry } from "../../api/client";
 import { defaultLeafCode } from "../dashboardLayout";
+import { MemberChooser } from "./MemberChooser";
 import { Button, IconButton, Select } from "../../ui";
 
 // The dashboard's selector bar, as the developer sets it: the dimensions
 // whose selector is drawn once at the top of the dashboard, each with the
 // member it opens on. Saved on its own (PATCH selector_bar), not with the
 // layout.
-export function SelectorBarEditor({ dashId, bar, dims, onSaved, onClose }: {
+export function SelectorBarEditor({ dashId, bar, dims, metrics = [], onSaved, onClose }: {
   dashId: string;
   bar: SelectorBarEntry[];
   dims: DevDimension[];
+  /** The revision's metrics a default may follow. */
+  metrics?: Array<{ id: string; name: string; label?: string }>;
   onSaved: () => void;
   onClose: () => void;
 }) {
@@ -44,7 +47,8 @@ export function SelectorBarEditor({ dashId, bar, dims, onSaved, onClose }: {
       {draft.map((e, i) => {
         const dim = dims.find(d => d.id === e.dimension_id);
         return (
-          <div key={e.dimension_id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <div key={e.dimension_id} style={{ marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Select
               aria-label={`Selector ${i + 1} dimension`}
               value={e.dimension_id}
@@ -65,12 +69,48 @@ export function SelectorBarEditor({ dashId, bar, dims, onSaved, onClose }: {
               style={{ minWidth: 180 }}
             >
               <option value="">(first member)</option>
-              {(dim?.members ?? []).map(m => <option key={m.code} value={m.code}>{m.label || m.code}</option>)}
+              {(dim?.members ?? []).filter(m => !e.members?.length || e.members.includes(m.code))
+                .map(m => <option key={m.code} value={m.code}>{m.label || m.code}</option>)}
             </Select>
+            <span className="mvx-admin-muted" style={{ fontSize: 12 }}>offers</span>
+            <MemberChooser label={`Selector ${i + 1} members offered`} members={dim?.members ?? []} value={e.members ?? []}
+              onChange={codes => setDraft(prev => prev.map((p, j) => (j === i
+                ? { ...p, members: codes.length ? codes : undefined, default: !codes.length || codes.includes(p.default ?? "") ? p.default : "" }
+                : p)))} />
             <IconButton aria-label={`Remove selector ${dim?.name ?? i + 1}`} title="Remove" size={26}
               onClick={() => setDraft(prev => prev.filter((_, j) => j !== i))}>
               <X size={14} />
             </IconButton>
+            </div>
+            {/* A default that follows the data: the month just closed, read
+                from a metric set in closed months, without editing the page
+                at every close. */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 4px 188px" }}>
+              <span className="mvx-admin-muted" style={{ fontSize: 12 }}>or follows</span>
+              <Select
+                aria-label={`Selector ${i + 1} default follows`}
+                value={e.default_metric_id ?? ""}
+                onChange={ev => setDraft(prev => prev.map((p, j) => (j === i
+                  ? { ...p, default_metric_id: ev.target.value || undefined, default_offset: ev.target.value ? p.default_offset : undefined }
+                  : p)))}
+                style={{ minWidth: 180 }}
+              >
+                <option value="">(no metric: the member above)</option>
+                {metrics.map(m => <option key={m.id} value={m.id}>{m.label || m.name}</option>)}
+              </Select>
+              {e.default_metric_id && (
+                <Select
+                  aria-label={`Selector ${i + 1} default offset`}
+                  value={String(e.default_offset ?? 0)}
+                  onChange={ev => setDraft(prev => prev.map((p, j) => (j === i ? { ...p, default_offset: Number(ev.target.value) || undefined } : p)))}
+                  style={{ minWidth: 260 }}
+                >
+                  <option value="0">the last member where it holds a value</option>
+                  <option value="1">the member after that one</option>
+                  <option value="-1">the member before that one</option>
+                </Select>
+              )}
+            </div>
           </div>
         );
       })}

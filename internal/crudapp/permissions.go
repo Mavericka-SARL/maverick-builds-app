@@ -50,6 +50,9 @@ type RecordAccess struct {
 	// ReadOnly: in such a table, the record names a member that is
 	// read-only for the caller — it is theirs to see, not to change.
 	ReadOnly bool
+	// NoAdd: the table names who may add records (FormDef.CreateRoles) and
+	// the caller, no administrator, is none of them.
+	NoAdd bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -118,7 +121,7 @@ func (a RecordAccess) CanDelete(status string) bool { return a.Permissions(statu
 // one, anyone who reaches it, with no status. (The caller of a create is
 // its creator.)
 func (a RecordAccess) CanCreate(status string) bool {
-	if !a.Reach {
+	if !a.Reach || a.NoAdd {
 		return false
 	}
 	if !a.Statuses {

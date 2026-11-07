@@ -32,6 +32,9 @@ func (c *Config) Validate(allowInsecure bool) error {
 			return fmt.Errorf("import_mode must be incremental, replace or full_reload for pull")
 		}
 	}
+	if c.ReplaceBy != "" && (c.Direction != DirectionPull || c.TargetType != TargetForm) {
+		return fmt.Errorf("replace_by applies to a pull into a table")
+	}
 
 	switch c.Protocol {
 	case ProtocolHTTPS:

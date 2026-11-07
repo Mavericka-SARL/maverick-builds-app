@@ -58,6 +58,8 @@ export interface DevMetric {
   highlight_rules?: HighlightRule[];
   // Where its cells take no input.
   closed_when?: ClosedRule[];
+  // "total": its row is drawn as a total in every grid (bold, a rule above).
+  row_style?: RowStyle;
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
@@ -552,6 +554,8 @@ export interface Metric {
   highlight_rules?: HighlightRule[];
   // Where its cells take no input: shown read-only, refused by every write.
   closed_when?: ClosedRule[];
+  // "total": the grid draws its row as a total (bold label, a rule above).
+  row_style?: RowStyle;
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -636,6 +640,17 @@ export interface HistoryStep {
   completed_at?: string;
 }
 
+/** A time dimension of the open model's live revision (Business Admin › Calendar). */
+export interface BACalendar {
+  id: string;
+  name: string;
+  granularity: string;
+  first?: string;
+  last?: string;
+  last_label?: string;
+  periods: number;
+}
+
 export interface HistoryInstance {
   id: string;
   workflow_name: string;
@@ -645,6 +660,8 @@ export interface HistoryInstance {
   completed_at?: string;
   steps: HistoryStep[];
   context_display?: TaskContextEntry[];
+  /** Finished and approved: only Reopen, with a reason, takes it out of completed. */
+  reopenable?: boolean;
 }
 
 export interface DevDimensionMember {
@@ -733,6 +750,10 @@ export interface GridChartConfig {
   context_defaults: Record<string, string>;
   bin_count?: number;
   show_legend?: boolean;
+  /** A bar or line series' name in the legend and tooltip, by metric id; the metric's label otherwise. */
+  series_names?: Record<string, string>;
+  /** The plotted dimension's member codes the chart draws, in this order; none = all. */
+  plotted_members?: string[];
   show_values?: boolean;
   value_format?: "number" | "currency" | "percent" | "compact";
   refresh_seconds?: 2 | 5 | 10 | 30;
@@ -841,6 +862,16 @@ export interface WidgetProps {
   multi_select?: boolean;
   /** Grid widgets: no "Find a row or column…" box (a grid of a few rows needs none). Shown by default. */
   hide_search?: boolean;
+  /** Grid widgets: no Total row under flat rows (prices, rates and dates add up to nothing). */
+  hide_total_row?: boolean;
+  /** Grid widgets: the row-label column's width in pixels (120–480). */
+  label_width?: number;
+  /** Grid widgets: no legend and hints under the grid. */
+  hide_legend?: boolean;
+  /** Grid widgets: no INPUT / CALC tags beside metric labels. */
+  hide_badges?: boolean;
+  /** Grid widgets: a line of text under the grid (a source, a unit, a note). */
+  footer?: string;
   /** Records widgets: offer "+ New record" (to people who may create one). Off by default. */
   new_record_button?: boolean;
   /** Records widgets and boards: filters the viewer cannot remove (relative dates count from their day). */
@@ -956,6 +987,9 @@ export interface ApiIntegrationConfig {
   target_type: ApiTargetType;
   target_id: string;
   import_mode?: ApiImportMode;
+  // A pull into a table: the field whose values each run replaces (the
+  // table's records holding one the run's rows hold are deleted first).
+  replace_by?: string;
   request: {
     method: string; url: string;
     query?: ApiKV[]; headers?: ApiKV[];
@@ -1068,6 +1102,13 @@ export interface SelectorBarEntry {
   dimension_id: string;
   /** Member code the selector opens on; empty = the dimension's first member. */
   default?: string;
+  /** Member codes the selector offers, in this order; none = every member. */
+  members?: string[];
+  /** The default follows this metric: the last member offered (its leaves when
+      every member is) where it holds a value other than 0 — served as `default` —
+      moved `default_offset` members on (1: the first open month). */
+  default_metric_id?: string;
+  default_offset?: number;
 }
 
 export interface DashboardDef {
@@ -1330,6 +1371,8 @@ export interface FormDef {
   member_root_label?: string;
   /** Who may change and delete its records: their creator and administrators (default), or everyone who sees them. */
   edit_access?: EditAccess;
+  /** Who may add records, by role name; none: anyone who opens the application. */
+  create_roles?: string[];
   created_at: string;
   /** Served by GET /api/forms; absent from an older server, which the UI then treats as no permission. */
   permissions?: FormPermissions;
@@ -1412,6 +1455,8 @@ export interface TableSettings {
   member_label_field?: string;
   member_root_label?: string;
   edit_access?: EditAccess;
+  /** The roles whose people may add records; [] for anyone who opens the application. */
+  create_roles?: string[];
 }
 
 /** How many records of a table a delete touches through one of its fields. */
@@ -1560,6 +1605,17 @@ export interface IntegrationRun {
   run_by: string;
 }
 
+/** A loader or export saved for every model of the tenant; its target found by name where it is made. */
+export interface IntegrationTemplate {
+  id: string;
+  name: string;
+  type: string;
+  target_type: string;
+  target_name: string;
+  config: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface IntegrationDef {
   /** On the business list: whether the caller could load anything with it (an export always may). */
   may_run?: boolean;
@@ -1585,6 +1641,10 @@ export interface IntegrationDef {
     // csv_import from a workbook: the sheet a run reads when its workbook
     // names none (a dashboard's Integration button, Run with a file).
     sheet?: string;
+    // A table's loader: the field whose values each file replaces — the
+    // table's records holding one the file holds are deleted as its records
+    // are added (a month's file loaded again replaces that month).
+    replace_by?: string;
   } & Partial<ExportSpec>;
 }
 
@@ -1876,6 +1936,7 @@ export interface Execution {
       the instance's resolved context and whether it was a developer test run. */
   context?: Record<string, string>;
   test_run?: boolean;
+  reopenable?: boolean;
 }
 
 export interface ImportJob {
@@ -1930,6 +1991,8 @@ export interface ImportUploadResult {
 export interface ImportCheck {
   dry_run: true;
   rows: number;
+  // A table load replacing by a field: the earlier records it would replace.
+  rows_replaced?: number;
   values?: number;
   error_rows: number;
   errors: Array<{ row: number; column: string; message: string; code?: string; raw_value?: string }>;
@@ -2150,6 +2213,9 @@ export interface WorkflowRunStatus {
   instance: { status: string; started_at: string; completed_at?: string | null } | null;
   steps: WorkflowStatusStep[];
 }
+
+/** A metric's row style (metric.row_style): "total" draws its row as a total; "" as any row. */
+export type RowStyle = "" | "total";
 
 /** A cell of an input metric where this holds takes no input (metric.closed_when):
  *  a calculated metric of the same grid compared with a number (a blank is 0). */
@@ -2736,6 +2802,15 @@ export const api = {
     apiFetchBlob(`/api/ai/sessions/${sessionId}/conversions/${encodeURIComponent(id)}?format=${format}`),
   updateIntegrationConfig: (id: string, config: Record<string, unknown>) =>
     apiFetch<{ status: string }>(`/api/developer/integrations/${id}/config`, { method: "PATCH", body: JSON.stringify({ config }) }),
+  listIntegrationTemplates: () => apiFetch<IntegrationTemplate[]>("/api/developer/integration-templates"),
+  saveIntegrationTemplate: (integrationId: string, name?: string) =>
+    apiFetch<{ id: string }>("/api/developer/integration-templates", { method: "POST", body: JSON.stringify({ integration_id: integrationId, name }) }),
+  useIntegrationTemplate: (templateId: string, name: string, revisionId?: string) =>
+    apiFetch<{ id: string }>(`/api/developer/integration-templates/${templateId}/use${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
+      method: "POST", body: JSON.stringify({ name }),
+    }),
+  deleteIntegrationTemplate: (templateId: string) =>
+    apiFetch<{ status: string }>(`/api/developer/integration-templates/${templateId}`, { method: "DELETE" }),
   listIntegrations: (revisionId?: string) =>
     apiFetch<IntegrationDef[]>(`/api/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
   // A csv_import run carries its file — CSV text, or a workbook as
@@ -2744,7 +2819,7 @@ export const api = {
   // column map is applied server-side, so a file of metric and member names
   // runs as it is.
   runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout) =>
-    apiFetch<{ rows_imported: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
+    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
       method: "POST",
       body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}) }),
     }),
@@ -2792,13 +2867,15 @@ export const api = {
   // Given a query (without totals), the export holds what it matches, in its order.
   exportFormRecords: (formId: string, format: "csv" | "xlsx" = "xlsx", query?: RecordsQuery) =>
     apiFetchBlob(`/api/forms/${formId}/export?format=${format}${query ? `&query=${encodeURIComponent(JSON.stringify(query))}` : ""}`),
-  importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout) =>
-    apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
+  // replaceBy: the field whose values the file replaces (IntegrationDef
+  // config.replace_by); omitted, the file's records are added.
+  importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout, replaceBy?: string) =>
+    apiFetch<{ status: string; records_created: number; records_replaced?: number }>(`/api/forms/${formId}/import`, {
       method: "POST",
-      body: JSON.stringify({ csv, row_lines: rowLines, file_name: about?.fileName }),
+      body: JSON.stringify({ csv, row_lines: rowLines, file_name: about?.fileName, ...(replaceBy ? { replace_by: replaceBy } : {}) }),
     }),
-  checkFormRecords: (formId: string, csv: string, rowLines?: number[]) =>
-    apiFetch<ImportCheck>(`/api/forms/${formId}/import`, { method: "POST", body: JSON.stringify({ csv, dry_run: true, row_lines: rowLines }) }),
+  checkFormRecords: (formId: string, csv: string, rowLines?: number[], replaceBy?: string) =>
+    apiFetch<ImportCheck>(`/api/forms/${formId}/import`, { method: "POST", body: JSON.stringify({ csv, dry_run: true, row_lines: rowLines, ...(replaceBy ? { replace_by: replaceBy } : {}) }) }),
   importFormRecordsXlsx: (formId: string, xlsxBase64: string) =>
     apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
       method: "POST",
@@ -2808,7 +2885,7 @@ export const api = {
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
-    closed_when?: ClosedRule[]; is_input?: boolean; drop_values?: boolean }) =>
+    closed_when?: ClosedRule[]; row_style?: RowStyle; is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -2945,6 +3022,19 @@ export const api = {
   listExecutions: () => apiFetch<Execution[]>("/api/automation/executions"),
   // Stops a running instance: its open steps are withdrawn, it and its
   // execution read "cancelled", and its assignees and starter are told.
+  copyBAValues: (body: { dimension_id: string; from: string; to: string; metric_ids?: string[]; dry_run?: boolean }) =>
+    apiFetch<{ cells: number; dry_run: boolean }>("/api/business-admin/copy-values", { method: "POST", body: JSON.stringify(body) }),
+  listBACalendars: () => apiFetch<BACalendar[]>("/api/business-admin/calendars"),
+  extendBACalendar: (dimId: string, through: string) =>
+    apiFetch<{ periods: number; aggregates: number }>(`/api/business-admin/calendars/${dimId}/extend`, {
+      method: "POST",
+      body: JSON.stringify({ through }),
+    }),
+  reopenWorkflowInstance: (instanceId: string, reason: string) =>
+    apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
   cancelWorkflowInstance: (instanceId: string, reason?: string) =>
     apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/cancel`, {
       method: "POST", body: JSON.stringify({ reason: reason ?? "" }),
@@ -3115,6 +3205,13 @@ export const api = {
 
   // ── Business-Admin: users + access rules ────────────────────────────────────
   listBAUsers: () => apiFetch<BAUser[]>("/api/business-admin/users"),
+  getRoleAccessRules: (roleId: string) =>
+    apiFetch<UserAccessRule[]>(`/api/business-admin/roles/${roleId}/access-rules`),
+  putRoleAccessRules: (roleId: string, rules: UserAccessRule[]) =>
+    apiFetch<{ status: string }>(`/api/business-admin/roles/${roleId}/access-rules`, { method: "PUT", body: JSON.stringify({ rules }) }),
+  /** The rules a person holds through this workspace's roles, each with its role. */
+  getUserRoleAccessRules: (userId: string) =>
+    apiFetch<Array<UserAccessRule & { role_id: string; role_name: string }>>(`/api/business-admin/users/${userId}/role-access-rules`),
   getUserAccessRules: (userId: string) =>
     apiFetch<UserAccessRule[]>(`/api/business-admin/users/${userId}/access-rules`),
   putUserAccessRules: (userId: string, rules: UserAccessRule[]) =>

@@ -947,6 +947,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
+        row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
         tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
@@ -1068,6 +1069,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
+        row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1105,6 +1107,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
+        row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -2583,6 +2586,7 @@ components:
         dry_run:     { type: boolean, description: "Check every row as the import would and create nothing: 200 with dry_run, rows and errors" }
         row_lines:   { type: array, items: { type: integer }, description: "With csv written out of another file (the Import Wizard's): the line in that file of each data row, in order; every answer names a row by it" }
         file_name:   { type: string, description: "The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing about the import" }
+        replace_by:  { type: string, description: "A dimension, choice, text or date field (name or label): the table's records holding a value of it the file holds (a date field, its month) are deleted as the file's records are created, in one transaction, and their postings withdrawn. Refused whole (409) when a record it replaces is not the caller's to delete or posted into a cell they may not write" }
 
     AutomationRule:
       type: object
@@ -4472,6 +4476,51 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/workflow/instances/{id}/reopen:
+    post:
+      operationId: reopenWorkflowInstance
+      tags: [Workflow]
+      summary: Take back a finished run's approval (developer or business_admin)
+      description: >-
+        Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
+        values and approved records stay. The same people who may cancel a run may reopen it. A
+        reason is required: it goes into the audit log and the message the people involved receive.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: Run reopened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:   { type: string, enum: [cancelled] }
+                  notified: { type: integer, description: How many people were notified }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not a run the caller may reopen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The run is not finished and approved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/workflow/instances/{id}/cancel:
     post:
       operationId: cancelWorkflowInstance
@@ -8426,6 +8475,88 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/business-admin/users/{id}/role-access-rules:
+    get:
+      operationId: listUserRoleAccessRules
+      tags: [Business Admin]
+      summary: The access rules a user holds through this workspace's business roles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Rules, each with the role it comes from
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    role_id:   { type: string, format: uuid }
+                    role_name: { type: string }
+                    rule_type: { type: string }
+                    ref_id:    { type: string }
+                    access:    { type: string, enum: [write, read, hidden] }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/business-admin/roles/{id}/access-rules:
+    get:
+      operationId: listRoleAccessRules
+      tags: [Business Admin]
+      summary: List a business role's access rules, which every member of the role holds
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Access rule list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UserAccessRule" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not a role of the caller's workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      operationId: setRoleAccessRules
+      tags: [Business Admin]
+      summary: Replace a business role's access rules on the open model
+      description: >-
+        Every member of the role holds these rules as their own; where one of them and a
+        person's own rule land on the same member or metric, the stricter wins.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetUserAccessRulesRequest" }
+      responses:
+        "200":
+          description: Access rules updated
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not a role of the caller's workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/business-admin/available:
     get:
       operationId: listBAAvailable
@@ -8446,6 +8577,237 @@ paths:
                 items: { $ref: "#/components/schemas/BAAvailableItem" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+
+  /api/developer/integration-templates:
+    get:
+      operationId: listIntegrationTemplates
+      tags: [Integrations]
+      summary: The integration templates of the open model's tenant
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:          { type: string, format: uuid }
+                    name:        { type: string }
+                    type:        { type: string }
+                    target_type: { type: string }
+                    target_name: { type: string }
+                    config:      { type: object, additionalProperties: true }
+                    created_at:  { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: saveIntegrationTemplate
+      tags: [Integrations]
+      summary: Save an integration of the open model as a template for every model of its tenant
+      description: >-
+        Its target is kept by name and its config as it is (it names metrics, dimensions and
+        fields). A REST connector or a model link holds a connection or another model and cannot
+        be a template.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [integration_id]
+              properties:
+                integration_id: { type: string, format: uuid }
+                name:           { type: string }
+      responses:
+        "200":
+          description: Template saved
+          content:
+            application/json:
+              schema: { type: object, properties: { id: { type: string, format: uuid } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such integration in the open model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: A template of that name exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/developer/integration-templates/{id}/use:
+    post:
+      operationId: useIntegrationTemplate
+      tags: [Integrations]
+      summary: Make a template in the open model's working revision, its target found by name
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string } } }
+      responses:
+        "200":
+          description: Integration created
+          content:
+            application/json:
+              schema: { type: object, properties: { id: { type: string }, status: { type: string } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such template in the tenant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/developer/integration-templates/{id}:
+    delete:
+      operationId: deleteIntegrationTemplate
+      tags: [Integrations]
+      summary: Delete an integration template
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such template in the tenant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/business-admin/copy-values:
+    post:
+      operationId: copyBAValues
+      tags: [Business Admin]
+      summary: Copy the values typed into one member to another (the plan into the budget)
+      description: >-
+        In the live revision of the model the admin has open, every value typed into a cell of
+        `from` is written to the same cell of `to` (values a table of records posts stay with their
+        records). Each is checked as a typed value is (access rules, workflow locks, closed and
+        posted cells), all or nothing. At most 20,000 values; `metric_ids` narrows the copy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dimension_id, from, to]
+              properties:
+                dimension_id: { type: string, format: uuid }
+                from:         { type: string, description: A member code holding values }
+                to:           { type: string, description: A member code holding values }
+                metric_ids:   { type: array, items: { type: string, format: uuid } }
+                dry_run:      { type: boolean }
+      responses:
+        "200":
+          description: Values copied (or, on a dry run, that would be)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cells:   { type: integer }
+                  dry_run: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not a dimension of the model the admin has open
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Some values cannot be written; nothing was copied
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/business-admin/calendars:
+    get:
+      operationId: listBACalendars
+      tags: [Business Admin]
+      summary: The time dimensions of the open model's active revision, with their first and last period
+      responses:
+        "200":
+          description: Calendars
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:          { type: string, format: uuid }
+                    name:        { type: string }
+                    granularity: { type: string }
+                    first:       { type: string, format: date }
+                    last:        { type: string, format: date }
+                    last_label:  { type: string }
+                    periods:     { type: integer }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/business-admin/calendars/{dimId}/extend:
+    post:
+      operationId: extendBACalendar
+      tags: [Business Admin]
+      summary: Add periods after a calendar's last one (business_admin)
+      description: >-
+        Adds the periods after the last one through the period containing `through`, placed as the
+        last one is: under quarters and fiscal years of the same kind, reused or created and named
+        after their peers. Nothing is renamed, moved or deleted. Only a time dimension of the active
+        revision of the model the admin has open.
+      parameters:
+        - name: dimId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [through]
+              properties:
+                through: { type: string, format: date }
+      responses:
+        "200":
+          description: Periods and aggregate periods created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periods:    { type: integer }
+                  aggregates: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not a calendar of the model the admin has open
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /api/ai/sessions:
@@ -9272,6 +9634,7 @@ paths:
                 type: object
                 properties:
                   rows_imported:   { type: integer }
+                  rows_replaced:   { type: integer, description: "Table runs of a loader whose config names replace_by — the earlier records the run replaced (with dry_run, would replace)" }
                   values_imported: { type: integer, description: Grid runs — one row can carry several metrics' values }
                   error_rows:      { type: integer }
                   dry_run:         { type: boolean }
@@ -9653,9 +10016,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  status:          { type: string }
-                  records_created: { type: integer }
-                  dry_run:         { type: boolean }
+                  status:           { type: string }
+                  records_created:  { type: integer }
+                  records_replaced: { type: integer, description: With replace_by — the earlier records deleted }
+                  dry_run:          { type: boolean }
+                  rows_replaced:    { type: integer, description: With dry_run and replace_by — the earlier records the file would replace }
                   rows:            { type: integer, description: With dry_run — the records that would be created }
                   error_rows:      { type: integer }
                   errors:

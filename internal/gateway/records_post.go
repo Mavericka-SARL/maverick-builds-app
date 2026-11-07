@@ -8,6 +8,8 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
@@ -78,26 +80,70 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 // /api/forms/{id}/import, a saved csv_import or google_sheets integration
 // whose target is a table, and the AI Developer's import of an attached
 // file. dryRun checks every row and creates nothing.
-func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool) (int, []formRowError, error) {
+// replaceBy names the field a load replaces by (recordpost.ImportRequest):
+// the records it deletes are ones act may delete, as by hand.
+func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool, replaceBy string) (recordpost.ImportResult, error) {
 	// Each record of a table keeping a dimension is a new member: within the
 	// edition's members per dimension, as a record saved by hand is.
 	if form.KeepsDimension() && h.plans != nil {
 		if cid, _ := h.customerOfDimension(ctx, form.KeepsDimensionID); cid != "" {
 			if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, form.KeepsDimensionID, len(rawRows)); err != nil {
-				return 0, nil, err
+				return recordpost.ImportResult{}, err
 			}
 		}
 	}
-	return h.records().ImportRows(ctx, recordpost.ImportRequest{
+	return h.records().Import(ctx, recordpost.ImportRequest{
 		Form: form, CreatorID: act.UserID, Header: header, Rows: rawRows,
 		NewStatus: scope.newRecordStatus(),
 		StatusRefusal: func(status string) string {
+			if scope.noAdd {
+				return scope.noAddReason()
+			}
 			if !scope.createAccess().CanCreate(status) {
 				return fmt.Sprintf("only an administrator of this application imports a record as %s", status)
 			}
 			return ""
 		},
 		AppID: scope.appID, RevisionID: scope.revisionID,
-		DryRun: dryRun,
+		DryRun: dryRun, ReplaceBy: replaceBy, ByPerson: true,
+		DeleteRefusal: func(rec *crudapp.FormRecord) string {
+			if !scope.access(rec).CanDelete(rec.Status) {
+				return "you may not delete it"
+			}
+			return ""
+		},
 	})
+}
+
+// jsonImportErr answers an import that failed as a whole: a load whose
+// replace is refused (409) or whose replace_by is not a field it may replace
+// by (400), a plan limit, or a server error.
+func (h *handler) jsonImportErr(w http.ResponseWriter, err error) {
+	switch {
+	case recordpost.IsReplaceRefused(err):
+		jsonErr(w, err, http.StatusConflict)
+	case strings.HasPrefix(err.Error(), "replace_by:"):
+		jsonErr(w, err, http.StatusBadRequest)
+	default:
+		h.jsonLimitErr(w, err)
+	}
+}
+
+// checkReplaceBy says why table tableID's loader may not replace by name
+// (nil when it may).
+func (h *handler) checkReplaceBy(ctx context.Context, tableID, name string) error {
+	form, err := crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, tableID)
+	if err != nil {
+		return fmt.Errorf("replace_by: the loader's table: %w", err)
+	}
+	_, err = recordpost.ReplaceField(form, name)
+	return err
+}
+
+// replacedNote is what a run that replaced records says of them.
+func replacedNote(n int) string {
+	if n == 1 {
+		return "replaced 1 earlier record"
+	}
+	return fmt.Sprintf("replaced %d earlier records", n)
 }

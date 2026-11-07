@@ -388,6 +388,9 @@ func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []
 		StatusRefusal: func(string) string { return "" },
 		AppID:         appID, RevisionID: revisionID,
 		DryRun: dryRun, Inline: true, Partial: true,
+		// A run replacing by a field is whole or nothing: a period whose
+		// rows partly failed would otherwise lose the records they replace.
+		ReplaceBy: def.Config.ReplaceBy,
 	})
 	if err != nil {
 		return written, len(rowErrs), err

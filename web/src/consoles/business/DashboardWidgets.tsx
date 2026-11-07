@@ -202,8 +202,20 @@ function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: Select
   });
   const m = meta as GridData | undefined;
   const all = m?.all_dimensions ?? m?.dimensions ?? [];
+  // A selector naming the members it offers shows those, in its order; a
+  // member it names keeps its parent only when that is offered too.
   const dims = entries
-    .map(e => all.find(d => d.id === e.dimension_id))
+    .map(e => {
+      const d = all.find(x => x.id === e.dimension_id);
+      if (!d || !e.members?.length) return d;
+      const offered = new Set(e.members);
+      const order = new Map(e.members.map((c, i) => [c, i]));
+      const members = d.members
+        .filter(mm => offered.has(mm.code))
+        .map(mm => (mm.parent_code && !offered.has(mm.parent_code) ? { ...mm, parent_code: undefined } : mm))
+        .sort((a, b) => (order.get(a.code) ?? 0) - (order.get(b.code) ?? 0));
+      return { ...d, members };
+    })
     .filter((d): d is NonNullable<typeof d> => !!d && d.members.length > 0);
 
   // Open on the developer's default when this viewer can see it, else on the
@@ -255,7 +267,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -541,7 +553,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
         <span
           className={["mvx-kpi__value", pending ? "mvx-cell--pending" : ""].filter(Boolean).join(" ")}
           style={widgetProps?.color ? { color: widgetProps.color } : undefined}
-          title={pending ? "Recalculating — this value is about to change" : undefined}
+          title={pending ? "Recalculating — this value is about to change" : g?.withheld?.includes(metricId) ? "Not shown: this value is worked out from members hidden from you" : undefined}
           aria-busy={pending || undefined}
         >{valueReady && g ? formatted : "—"}</span>
         {compareLine}
@@ -554,7 +566,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
 export function IntegrationButtonWidget({ integrationId, label, buttonColor, corners }: { integrationId: string; label: string; buttonColor?: string; corners?: ButtonCorners }) {
   const radius = { borderRadius: buttonRadius(corners) };
   const fileRef = React.useRef<HTMLInputElement>(null);
-  const [result, setResult] = useState<{ rows_imported?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
+  const [result, setResult] = useState<{ rows_imported?: number; rows_replaced?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
 
   // A google_sheets integration needs no file — the server re-fetches its
   // configured sheet on every run — so its button syncs on click instead of
@@ -627,7 +639,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
         <div style={{ fontSize: 12, color: result.message ? "var(--color-danger)" : "var(--color-live)" }}>
           {result.message
             ? result.message
-            : `${result.rows_imported ?? 0} rows imported${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
+            : `${result.rows_imported ?? 0} rows imported${result.rows_replaced ? `, replacing ${result.rows_replaced} earlier record${result.rows_replaced === 1 ? "" : "s"}` : ""}${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
           {result.errors && result.errors.length > 0 && (
             <div style={{ color: "var(--color-danger)" }}>
               Row {result.errors[0].row}: {result.errors[0].message}<Txt>{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}</Txt>

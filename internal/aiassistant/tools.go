@@ -280,6 +280,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.prepareConvertedFile(ctx, args)
 	case "read_attached_sheet":
 		return e.readAttachedSheet(ctx, args)
+	case "compare_with_sheet":
+		return e.compareWithSheet(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
 	case "get_integration":
@@ -392,7 +394,7 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
 		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),''),
 		       CASE WHEN m.highlight_rules = '[]'::jsonb THEN '' ELSE m.highlight_rules::text END,
-		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END
+		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END, m.row_style
 		FROM model.metric_def m
 		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
 		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID)
@@ -407,8 +409,11 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		var label, picklist, highlights, closed string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights, &closed)
+		var label, picklist, highlights, closed, rowStyle string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights, &closed, &rowStyle)
+		if rowStyle != "" {
+			agg += ", row_style: " + rowStyle
+		}
 		if picklist != "" {
 			format += " of " + picklist
 		}

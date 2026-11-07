@@ -24,6 +24,14 @@ import (
 //     scheduler's persisted rows. A persisted cell whose read set touches a
 //     member hidden from the caller is WITHHELD: absent from cells and listed
 //     in the response's withheld array, never recomputed over visible data.
+//   - A metric that reads ACROSS the scope (a dependency has a dimension the
+//     scope restricted, the metric neither has it nor relates to it) is
+//     served too. The scope restricts the cells shown, never what a cell is:
+//     total orders on [month] filtered to one channel is still total orders,
+//     and every metric reading it stays what it is. As the chart reads it
+//     (ownPoint). A cell of it that reads a member hidden from the caller is
+//     withheld like any served cell: the slice would pass for the total
+//     (owner decision, 2026-11-07).
 //   - Every other calculated metric is recomputed per combo from the
 //     already-scoped input cells, exactly as the scheduler computes it
 //     (rollup.ResolveTime with time_summary, the member-metadata context for
@@ -378,13 +386,8 @@ func (sr *scopedReads) persistedTotal(m metricRow, sm *servedMetric, ownDims []s
 		}
 	}
 	for d := range sr.Trimmed {
-		if containsString(ownDims, d) {
-			continue
-		}
-		for _, own := range ownDims {
-			if rollup.Relates(sr.Dims, own, d) {
-				return 0, false, withheld
-			}
+		if !containsString(ownDims, d) && sr.relatesToAny(ownDims, d) {
+			return 0, false, withheld
 		}
 	}
 	if sr.withheld(m.ID, combo) {
@@ -434,6 +437,46 @@ func soleRoot(dim *rollup.Dimension) (string, bool) {
 		root = m.Code
 	}
 	return root, root != ""
+}
+
+// relatesToAny reports whether dimID is one of ownDims or related to one (a
+// parent dimension, a property grouping).
+func (sr *scopedReads) relatesToAny(ownDims []string, dimID string) bool {
+	for _, own := range ownDims {
+		if rollup.Relates(sr.Dims, own, dimID) {
+			return true
+		}
+	}
+	return false
+}
+
+// readsAcrossScope reports whether a plain metric reads a dependency across
+// a dimension the scope restricted: the dependency has the dimension, the
+// metric neither has it nor relates to it, so its cells are totals over that
+// dimension. Recomputed from the scoped inputs they would be the slice in
+// view instead, under the same coordinates, and so would everything reading
+// them (2026-11-06: a share of total orders, a capacity waterfall).
+func (sr *scopedReads) readsAcrossScope(m metricRow, byName map[string]metricRow, metricDims map[string][]string) bool {
+	if len(sr.Trimmed) == 0 {
+		return false
+	}
+	refs, err := formula.ExtractRefs(*m.Formula)
+	if err != nil {
+		return false
+	}
+	own := metricDims[m.ID]
+	for _, ref := range refs {
+		dep, ok := byName[strings.ToLower(ref)]
+		if !ok {
+			continue // a function or dimension name, not a metric
+		}
+		for _, d := range metricDims[dep.ID] {
+			if sr.Trimmed[d] && !sr.relatesToAny(own, d) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containsString(list []string, s string) bool {
@@ -870,22 +913,6 @@ func (h *handler) loadScopedReads(
 	for d := range scopeSubtrees {
 		sr.Trimmed[d] = true
 	}
-	textNames := map[string]bool{}
-	for _, m := range allMetrics {
-		if m.Format == metricformula.FormatText {
-			textNames[strings.ToLower(m.Name)] = true
-		}
-	}
-	for _, m := range allMetrics {
-		if m.IsInput || m.Formula == nil || (!readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames)) {
-			continue
-		}
-		rows, err := store.LoadCalcValueMap(ctx, modelID, revisionID, m.ID)
-		if err != nil {
-			return nil, err
-		}
-		sr.Served[m.ID] = &servedMetric{Rows: rows}
-	}
 	if len(hiddenByDim) > 0 {
 		metrics := make([]readset.Metric, 0, len(revisionMetrics))
 		for _, m := range revisionMetrics {
@@ -896,6 +923,29 @@ func (h *handler) loadScopedReads(
 			metrics = append(metrics, rm)
 		}
 		sr.Reads = readset.New(unfiltered, dimIDToName, meta, metrics, hiddenByDim)
+	}
+	textNames := map[string]bool{}
+	for _, m := range allMetrics {
+		if m.Format == metricformula.FormatText {
+			textNames[strings.ToLower(m.Name)] = true
+		}
+	}
+	byName := make(map[string]metricRow, len(revisionMetrics))
+	for _, m := range revisionMetrics {
+		byName[strings.ToLower(m.Name)] = m
+	}
+	for _, m := range allMetrics {
+		if m.IsInput || m.Formula == nil {
+			continue
+		}
+		if !readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames) && !sr.readsAcrossScope(m, byName, metricDims) {
+			continue
+		}
+		rows, err := store.LoadCalcValueMap(ctx, modelID, revisionID, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		sr.Served[m.ID] = &servedMetric{Rows: rows}
 	}
 	return sr, nil
 }

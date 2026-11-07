@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, Check, ArrowUp, ArrowDown, SlidersHorizontal } from "lucide-react";
-import { api, type FormField, type DevDimension, type DevMetric, type FormDef, type EditAccess } from "../../api/client";
+import { api, type FormField, type DevDimension, type DevMetric, type FormDef, type EditAccess, type TableSettings } from "../../api/client";
+import { useDemo } from "../../api/useDemo";
+import { RolePicker } from "./RolePicker";
 import { TextInput, NumberInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, SearchInput, useConfirm, Txt } from "../../ui";
 
 const blankField = (): FormField => ({ name: "", label: "", type: "text", required: false });
@@ -341,6 +343,8 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [editFields, setEditFields] = useState<FormField[]>([]);
   const [editOwnOnly, setEditOwnOnly] = useState(false);
   const [editEditAccess, setEditEditAccess] = useState<EditAccess>("creator");
+  const [editCreateRoles, setEditCreateRoles] = useState<string[]>([]);
+  const { data: demoCtx } = useDemo(revisionId, { staleTime: 60_000 });
   const [editKeeps, setEditKeeps] = useState("");
   const [editLabelField, setEditLabelField] = useState("");
   const [editRootLabel, setEditRootLabel] = useState("");
@@ -395,8 +399,9 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   // they are as the table has them, so the request is what it always was.
   const changedSettings = (id: string) => {
     const t = (forms as FormDef[]).find(f => f.id === id);
-    const out: { edit_access?: EditAccess; keeps_dimension_id?: string; member_label_field?: string; member_root_label?: string } = {};
+    const out: TableSettings = {};
     if (editEditAccess !== (t?.edit_access ?? "creator")) out.edit_access = editEditAccess;
+    if (editCreateRoles.join("\u0000") !== (t?.create_roles ?? []).join("\u0000")) out.create_roles = editCreateRoles;
     if (editKeeps !== (t?.keeps_dimension_id ?? "") || editLabelField !== (t?.member_label_field ?? "") || editRootLabel.trim() !== (t?.member_root_label ?? "")) {
       out.keeps_dimension_id = editKeeps;
       out.member_label_field = editKeeps ? editLabelField : "";
@@ -406,7 +411,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   };
   const startEdit = (f: FormDef) => {
     setEditId(f.id); setEditName(f.name); setEditLabel(f.label); setEditFields([...(f.fields ?? [])]); setEditOwnOnly(!!f.own_records_only);
-    setEditEditAccess(f.edit_access ?? "creator"); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? "");
+    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? "");
   };
   const editing = (forms as FormDef[]).find(f => f.id === editId);
   // Removing the status field makes every record count; adding one makes new records wait for approval.
@@ -502,6 +507,13 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
                     <Checkbox checked={editOwnOnly} onChange={e => setEditOwnOnly(e.target.checked)} label="Each person sees only their own records" />
                     <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0 24px" }}>{ownRecordsHint}</p>
                   </div>
+                  <Field label="Who may add records">
+                    <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                      None ticked: anyone who opens the application. The application's administrators always may.
+                      Tick roles when a new record adds something others plan on, such as a plant or an account.
+                    </p>
+                    {demoCtx?.app_id && <RolePicker applicationId={demoCtx.app_id} value={editCreateRoles} onChange={setEditCreateRoles} />}
+                  </Field>
                   <TableSettingsEditor editAccess={editEditAccess} onEditAccess={setEditEditAccess} keeps={editKeeps} onKeeps={setEditKeeps}
                     labelField={editLabelField} onLabelField={setEditLabelField} rootLabel={editRootLabel} onRootLabel={setEditRootLabel} fields={editFields} dims={dims} forms={forms as FormDef[]} selfId={f.id} />
                   {statusChange && (

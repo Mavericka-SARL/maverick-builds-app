@@ -30,7 +30,12 @@ func EvalWithContext(text string, ctx *EvalContext) (Value, error) {
 		return ErrorVal(ErrValue), err
 	}
 	if ctx != nil && ctx.Vars != nil {
-		ctx = &EvalContext{Vars: upperKeys(ctx.Vars), Funcs: ctx.Funcs, Time: ctx.Time, Dim: ctx.Dim}
+		// A copy of the whole context, so a field is never left behind: naming
+		// the fields here lost Blank, and ISBLANK answered FALSE on an empty
+		// cell in every filtered read and chart.
+		upper := *ctx
+		upper.Vars = upperKeys(ctx.Vars)
+		ctx = &upper
 	}
 	return ctx.safeEval(node), nil
 }

@@ -245,14 +245,18 @@ type SFTPSource struct {
 
 // Config is the full typed document.
 type Config struct {
-	Kind       string           `json:"kind"` // always "rest_api/v1"
-	Protocol   Protocol         `json:"protocol,omitempty"`
-	SFTP       *SFTPSource      `json:"sftp,omitempty"`  // Protocol=="sftp" only
-	Model      *ModelSource     `json:"model,omitempty"` // Protocol=="model" only
-	Direction  Direction        `json:"direction"`
-	TargetType TargetType       `json:"target_type"`
-	TargetID   string           `json:"target_id"`
-	ImportMode ImportMode       `json:"import_mode,omitempty"` // pull only
+	Kind       string       `json:"kind"` // always "rest_api/v1"
+	Protocol   Protocol     `json:"protocol,omitempty"`
+	SFTP       *SFTPSource  `json:"sftp,omitempty"`  // Protocol=="sftp" only
+	Model      *ModelSource `json:"model,omitempty"` // Protocol=="model" only
+	Direction  Direction    `json:"direction"`
+	TargetType TargetType   `json:"target_type"`
+	TargetID   string       `json:"target_id"`
+	ImportMode ImportMode   `json:"import_mode,omitempty"` // pull only
+	// ReplaceBy (a pull into a table) names the field whose values each
+	// run replaces: the table's records holding a value the run's rows hold
+	// are deleted as its records are created (recordpost.ImportRequest).
+	ReplaceBy  string           `json:"replace_by,omitempty"`
 	Request    RequestConfig    `json:"request"`
 	Auth       AuthPlacement    `json:"auth"`
 	Response   ResponseConfig   `json:"response,omitempty"` // pull only

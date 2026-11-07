@@ -149,6 +149,8 @@ type Metric struct {
 	// ClosedWhen closes cells to input, naming metrics by name (migration
 	// 147); absent when none, and in packages made before it existed.
 	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
+	// RowStyle "total" draws its row as a total (migration 159).
+	RowStyle string `json:"row_style,omitempty"`
 }
 
 type Dependency struct {
@@ -234,6 +236,8 @@ type Form struct {
 	MemberLabelField string `json:"member_label_field,omitempty"`
 	MemberRootLabel  string `json:"member_root_label,omitempty"`
 	EditAccess       string `json:"edit_access,omitempty"`
+	// CreateRoles: who may add records, by role name (none: anyone).
+	CreateRoles []string `json:"create_roles,omitempty"`
 }
 
 type FormRecord struct {
@@ -515,7 +519,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
 		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
-		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb)
+		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb), row_style
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -524,7 +528,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen, &m.RowStyle); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -701,7 +705,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only,
 		       COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''),
-		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END
+		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -709,7 +713,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -2026,6 +2030,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 				return "", fmt.Errorf("metric %q closed rules: %w", m.Name, err)
 			}
 		}
+		if m.RowStyle != "" {
+			style, sErr := metricformula.RowStyle(m.RowStyle)
+			if sErr != nil {
+				return "", fmt.Errorf("metric %q: %w", m.Name, sErr)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, metricMap[m.ID], style); err != nil {
+				return "", fmt.Errorf("metric %q row style: %w", m.Name, err)
+			}
+		}
 		if picklistDim != "" {
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid, picklist_allow_parents=$3 WHERE id=$1::uuid`,
 				metricMap[m.ID], picklistDim, m.PicklistAllowParents); err != nil {
@@ -2118,10 +2131,10 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			labelField, rootLabel = "", ""
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''))
+			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb))
 			RETURNING id::text`,
-			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel).Scan(&newID); err != nil {
+			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel, rolesArg(f.CreateRoles)).Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -2499,4 +2512,13 @@ func importedDateFormat(f string) string {
 		}
 	}
 	return ""
+}
+
+// rolesArg is role names as a jsonb argument (nil for none).
+func rolesArg(roles []string) any {
+	if len(roles) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(roles)
+	return string(b)
 }

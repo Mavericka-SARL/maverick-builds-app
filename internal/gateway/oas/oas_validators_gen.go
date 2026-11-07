@@ -2155,6 +2155,24 @@ func (s *CreateMetricRequest) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.RowStyle.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "row_style",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -2176,6 +2194,17 @@ func (s *CreateMetricRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s CreateMetricRequestRowStyle) Validate() error {
+	switch s {
+	case "":
+		return nil
+	case "total":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s CreateMetricRequestTimeSummary) Validate() error {
@@ -5326,6 +5355,14 @@ func (s ListBAAvailableType) Validate() error {
 	}
 }
 
+func (s ListBACalendarsOKApplicationJSON) Validate() error {
+	alias := ([]ListBACalendarsOKItem)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	return nil
+}
+
 func (s ListBARoleDashboardsOKApplicationJSON) Validate() error {
 	alias := ([]uuid.UUID)(s)
 	if alias == nil {
@@ -5648,6 +5685,14 @@ func (s ListIntegrationRunsOKItemStatus) Validate() error {
 	}
 }
 
+func (s ListIntegrationTemplatesOKApplicationJSON) Validate() error {
+	alias := ([]ListIntegrationTemplatesOKItem)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	return nil
+}
+
 func (s ListMetricsOKApplicationJSON) Validate() error {
 	alias := ([]Metric)(s)
 	if alias == nil {
@@ -5731,12 +5776,88 @@ func (s ListReadableGridsOKApplicationJSON) Validate() error {
 	return nil
 }
 
+func (s ListRoleAccessRulesOKApplicationJSON) Validate() error {
+	alias := ([]UserAccessRule)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	return nil
+}
+
 func (s ListUserAccessRulesOKApplicationJSON) Validate() error {
 	alias := ([]UserAccessRule)(s)
 	if alias == nil {
 		return errors.New("nil is invalid value")
 	}
 	return nil
+}
+
+func (s ListUserRoleAccessRulesOKApplicationJSON) Validate() error {
+	alias := ([]ListUserRoleAccessRulesOKItem)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	var failures []validate.FieldError
+	for i, elem := range alias {
+		if err := func() error {
+			if err := elem.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			failures = append(failures, validate.FieldError{
+				Name:  fmt.Sprintf("[%d]", i),
+				Error: err,
+			})
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s *ListUserRoleAccessRulesOKItem) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.Access.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "access",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s ListUserRoleAccessRulesOKItemAccess) Validate() error {
+	switch s {
+	case "write":
+		return nil
+	case "read":
+		return nil
+	case "hidden":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s ListWorkflowDefinitionsOKApplicationJSON) Validate() error {
@@ -6029,6 +6150,24 @@ func (s *MetricDef) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.RowStyle.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "row_style",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if s.DependsOn == nil {
 			return errors.New("nil is invalid value")
 		}
@@ -6054,6 +6193,17 @@ func (s *MetricDef) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s MetricDefRowStyle) Validate() error {
+	switch s {
+	case "":
+		return nil
+	case "total":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s MetricDefTimeSummary) Validate() error {
@@ -7215,6 +7365,80 @@ func (s *RenameAiSessionReq) Validate() error {
 	return nil
 }
 
+func (s *ReopenWorkflowInstanceOK) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.Status.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "status",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s ReopenWorkflowInstanceOKStatus) Validate() error {
+	switch s {
+	case "cancelled":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s *ReopenWorkflowInstanceReq) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if err := (validate.String{
+			MinLength:     1,
+			MinLengthSet:  true,
+			MaxLength:     500,
+			MaxLengthSet:  true,
+			Email:         false,
+			Hostname:      false,
+			Regex:         nil,
+			MinNumeric:    0,
+			MinNumericSet: false,
+			MaxNumeric:    0,
+			MaxNumericSet: false,
+		}).Validate(string(s.Reason)); err != nil {
+			return errors.Wrap(err, "string")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "reason",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s *ReorderDashboardsReq) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -8228,6 +8452,24 @@ func (s *UpdateMetricRequest) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.RowStyle.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "row_style",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -8249,6 +8491,17 @@ func (s *UpdateMetricRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s UpdateMetricRequestRowStyle) Validate() error {
+	switch s {
+	case "":
+		return nil
+	case "total":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s UpdateMetricRequestTimeSummary) Validate() error {

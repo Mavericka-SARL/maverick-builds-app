@@ -5601,6 +5601,118 @@ func (s *ConnectorSettingsScope) SetDeploymentSettingsAvailable(val OptBool) {
 	s.DeploymentSettingsAvailable = val
 }
 
+type CopyBAValuesBadRequest Error
+
+func (*CopyBAValuesBadRequest) copyBAValuesRes() {}
+
+type CopyBAValuesForbidden Error
+
+func (*CopyBAValuesForbidden) copyBAValuesRes() {}
+
+type CopyBAValuesNotFound Error
+
+func (*CopyBAValuesNotFound) copyBAValuesRes() {}
+
+type CopyBAValuesOK struct {
+	Cells  OptInt  `json:"cells"`
+	DryRun OptBool `json:"dry_run"`
+}
+
+// GetCells returns the value of Cells.
+func (s *CopyBAValuesOK) GetCells() OptInt {
+	return s.Cells
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *CopyBAValuesOK) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// SetCells sets the value of Cells.
+func (s *CopyBAValuesOK) SetCells(val OptInt) {
+	s.Cells = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *CopyBAValuesOK) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+func (*CopyBAValuesOK) copyBAValuesRes() {}
+
+type CopyBAValuesReq struct {
+	DimensionID uuid.UUID `json:"dimension_id"`
+	// A member code holding values.
+	From string `json:"from"`
+	// A member code holding values.
+	To        string      `json:"to"`
+	MetricIds []uuid.UUID `json:"metric_ids"`
+	DryRun    OptBool     `json:"dry_run"`
+}
+
+// GetDimensionID returns the value of DimensionID.
+func (s *CopyBAValuesReq) GetDimensionID() uuid.UUID {
+	return s.DimensionID
+}
+
+// GetFrom returns the value of From.
+func (s *CopyBAValuesReq) GetFrom() string {
+	return s.From
+}
+
+// GetTo returns the value of To.
+func (s *CopyBAValuesReq) GetTo() string {
+	return s.To
+}
+
+// GetMetricIds returns the value of MetricIds.
+func (s *CopyBAValuesReq) GetMetricIds() []uuid.UUID {
+	return s.MetricIds
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *CopyBAValuesReq) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// SetDimensionID sets the value of DimensionID.
+func (s *CopyBAValuesReq) SetDimensionID(val uuid.UUID) {
+	s.DimensionID = val
+}
+
+// SetFrom sets the value of From.
+func (s *CopyBAValuesReq) SetFrom(val string) {
+	s.From = val
+}
+
+// SetTo sets the value of To.
+func (s *CopyBAValuesReq) SetTo(val string) {
+	s.To = val
+}
+
+// SetMetricIds sets the value of MetricIds.
+func (s *CopyBAValuesReq) SetMetricIds(val []uuid.UUID) {
+	s.MetricIds = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *CopyBAValuesReq) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+type CopyBAValuesUnprocessableEntity map[string]jx.Raw
+
+func (s *CopyBAValuesUnprocessableEntity) init() CopyBAValuesUnprocessableEntity {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+func (*CopyBAValuesUnprocessableEntity) copyBAValuesRes() {}
+
 // CreateAPITokenBadRequest is response for CreateAPIToken operation.
 type CreateAPITokenBadRequest struct{}
 
@@ -7201,6 +7313,9 @@ type CreateMetricRequest struct {
 	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
 	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
 	ClosedWhen []ClosedRule `json:"closed_when"`
+	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+	// Omitted keeps it on PATCH.
+	RowStyle OptCreateMetricRequestRowStyle `json:"row_style"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -7275,6 +7390,11 @@ func (s *CreateMetricRequest) GetHighlightRules() []HighlightRule {
 // GetClosedWhen returns the value of ClosedWhen.
 func (s *CreateMetricRequest) GetClosedWhen() []ClosedRule {
 	return s.ClosedWhen
+}
+
+// GetRowStyle returns the value of RowStyle.
+func (s *CreateMetricRequest) GetRowStyle() OptCreateMetricRequestRowStyle {
+	return s.RowStyle
 }
 
 // GetTimeSummary returns the value of TimeSummary.
@@ -7352,9 +7472,57 @@ func (s *CreateMetricRequest) SetClosedWhen(val []ClosedRule) {
 	s.ClosedWhen = val
 }
 
+// SetRowStyle sets the value of RowStyle.
+func (s *CreateMetricRequest) SetRowStyle(val OptCreateMetricRequestRowStyle) {
+	s.RowStyle = val
+}
+
 // SetTimeSummary sets the value of TimeSummary.
 func (s *CreateMetricRequest) SetTimeSummary(val OptCreateMetricRequestTimeSummary) {
 	s.TimeSummary = val
+}
+
+// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+// Omitted keeps it on PATCH.
+type CreateMetricRequestRowStyle string
+
+const (
+	CreateMetricRequestRowStyleEmpty CreateMetricRequestRowStyle = ""
+	CreateMetricRequestRowStyleTotal CreateMetricRequestRowStyle = "total"
+)
+
+// AllValues returns all CreateMetricRequestRowStyle values.
+func (CreateMetricRequestRowStyle) AllValues() []CreateMetricRequestRowStyle {
+	return []CreateMetricRequestRowStyle{
+		CreateMetricRequestRowStyleEmpty,
+		CreateMetricRequestRowStyleTotal,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateMetricRequestRowStyle) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateMetricRequestRowStyleEmpty:
+		return []byte(s), nil
+	case CreateMetricRequestRowStyleTotal:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateMetricRequestRowStyle) UnmarshalText(data []byte) error {
+	switch CreateMetricRequestRowStyle(data) {
+	case CreateMetricRequestRowStyleEmpty:
+		*s = CreateMetricRequestRowStyleEmpty
+		return nil
+	case CreateMetricRequestRowStyleTotal:
+		*s = CreateMetricRequestRowStyleTotal
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
@@ -8870,6 +9038,30 @@ func (s *DeleteIntegrationOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type DeleteIntegrationTemplateForbidden Error
+
+func (*DeleteIntegrationTemplateForbidden) deleteIntegrationTemplateRes() {}
+
+type DeleteIntegrationTemplateNotFound Error
+
+func (*DeleteIntegrationTemplateNotFound) deleteIntegrationTemplateRes() {}
+
+type DeleteIntegrationTemplateOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *DeleteIntegrationTemplateOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *DeleteIntegrationTemplateOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*DeleteIntegrationTemplateOK) deleteIntegrationTemplateRes() {}
+
 type DeleteMetricOK struct {
 	Status OptString `json:"status"`
 }
@@ -10013,8 +10205,10 @@ func (*Error) listFormMappingsRes()            {}
 func (*Error) listFormsRes()                   {}
 func (*Error) listGridsRes()                   {}
 func (*Error) listIntegrationRunsRes()         {}
+func (*Error) listIntegrationTemplatesRes()    {}
 func (*Error) listPlansRes()                   {}
 func (*Error) listUserAccessRulesRes()         {}
+func (*Error) listUserRoleAccessRulesRes()     {}
 func (*Error) listWorkflowRolesRes()           {}
 func (*Error) listWorkflowTriggerEventsRes()   {}
 func (*Error) previewExportIntegrationRes()    {}
@@ -10800,6 +10994,63 @@ func (s *ExportSpecMetricDisplay) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
+}
+
+type ExtendBACalendarBadRequest Error
+
+func (*ExtendBACalendarBadRequest) extendBACalendarRes() {}
+
+type ExtendBACalendarForbidden Error
+
+func (*ExtendBACalendarForbidden) extendBACalendarRes() {}
+
+type ExtendBACalendarInternalServerError Error
+
+func (*ExtendBACalendarInternalServerError) extendBACalendarRes() {}
+
+type ExtendBACalendarNotFound Error
+
+func (*ExtendBACalendarNotFound) extendBACalendarRes() {}
+
+type ExtendBACalendarOK struct {
+	Periods    OptInt `json:"periods"`
+	Aggregates OptInt `json:"aggregates"`
+}
+
+// GetPeriods returns the value of Periods.
+func (s *ExtendBACalendarOK) GetPeriods() OptInt {
+	return s.Periods
+}
+
+// GetAggregates returns the value of Aggregates.
+func (s *ExtendBACalendarOK) GetAggregates() OptInt {
+	return s.Aggregates
+}
+
+// SetPeriods sets the value of Periods.
+func (s *ExtendBACalendarOK) SetPeriods(val OptInt) {
+	s.Periods = val
+}
+
+// SetAggregates sets the value of Aggregates.
+func (s *ExtendBACalendarOK) SetAggregates(val OptInt) {
+	s.Aggregates = val
+}
+
+func (*ExtendBACalendarOK) extendBACalendarRes() {}
+
+type ExtendBACalendarReq struct {
+	Through time.Time `json:"through"`
+}
+
+// GetThrough returns the value of Through.
+func (s *ExtendBACalendarReq) GetThrough() time.Time {
+	return s.Through
+}
+
+// SetThrough sets the value of Through.
+func (s *ExtendBACalendarReq) SetThrough(val time.Time) {
+	s.Through = val
 }
 
 type ExtractFormulaRefsOK struct {
@@ -11776,6 +12027,11 @@ type FormImportRequest struct {
 	// The person's file, by name (a path is cut to its last part), for Recent Imports; changes nothing
 	// about the import.
 	FileName OptString `json:"file_name"`
+	// A dimension, choice, text or date field (name or label): the table's records holding a value of it
+	// the file holds (a date field, its month) are deleted as the file's records are created, in one
+	// transaction, and their postings withdrawn. Refused whole (409) when a record it replaces is not
+	// the caller's to delete or posted into a cell they may not write.
+	ReplaceBy OptString `json:"replace_by"`
 }
 
 // GetCsv returns the value of Csv.
@@ -11803,6 +12059,11 @@ func (s *FormImportRequest) GetFileName() OptString {
 	return s.FileName
 }
 
+// GetReplaceBy returns the value of ReplaceBy.
+func (s *FormImportRequest) GetReplaceBy() OptString {
+	return s.ReplaceBy
+}
+
 // SetCsv sets the value of Csv.
 func (s *FormImportRequest) SetCsv(val OptString) {
 	s.Csv = val
@@ -11826,6 +12087,11 @@ func (s *FormImportRequest) SetRowLines(val []int) {
 // SetFileName sets the value of FileName.
 func (s *FormImportRequest) SetFileName(val OptString) {
 	s.FileName = val
+}
+
+// SetReplaceBy sets the value of ReplaceBy.
+func (s *FormImportRequest) SetReplaceBy(val OptString) {
+	s.ReplaceBy = val
 }
 
 // Ref: #/components/schemas/FormMetricMapping
@@ -15214,7 +15480,11 @@ func (*ImportFormRecordsNotFound) importFormRecordsRes() {}
 type ImportFormRecordsOK struct {
 	Status         OptString `json:"status"`
 	RecordsCreated OptInt    `json:"records_created"`
-	DryRun         OptBool   `json:"dry_run"`
+	// With replace_by — the earlier records deleted.
+	RecordsReplaced OptInt  `json:"records_replaced"`
+	DryRun          OptBool `json:"dry_run"`
+	// With dry_run and replace_by — the earlier records the file would replace.
+	RowsReplaced OptInt `json:"rows_replaced"`
 	// With dry_run — the records that would be created.
 	Rows      OptInt `json:"rows"`
 	ErrorRows OptInt `json:"error_rows"`
@@ -15232,9 +15502,19 @@ func (s *ImportFormRecordsOK) GetRecordsCreated() OptInt {
 	return s.RecordsCreated
 }
 
+// GetRecordsReplaced returns the value of RecordsReplaced.
+func (s *ImportFormRecordsOK) GetRecordsReplaced() OptInt {
+	return s.RecordsReplaced
+}
+
 // GetDryRun returns the value of DryRun.
 func (s *ImportFormRecordsOK) GetDryRun() OptBool {
 	return s.DryRun
+}
+
+// GetRowsReplaced returns the value of RowsReplaced.
+func (s *ImportFormRecordsOK) GetRowsReplaced() OptInt {
+	return s.RowsReplaced
 }
 
 // GetRows returns the value of Rows.
@@ -15262,9 +15542,19 @@ func (s *ImportFormRecordsOK) SetRecordsCreated(val OptInt) {
 	s.RecordsCreated = val
 }
 
+// SetRecordsReplaced sets the value of RecordsReplaced.
+func (s *ImportFormRecordsOK) SetRecordsReplaced(val OptInt) {
+	s.RecordsReplaced = val
+}
+
 // SetDryRun sets the value of DryRun.
 func (s *ImportFormRecordsOK) SetDryRun(val OptBool) {
 	s.DryRun = val
+}
+
+// SetRowsReplaced sets the value of RowsReplaced.
+func (s *ImportFormRecordsOK) SetRowsReplaced(val OptInt) {
+	s.RowsReplaced = val
 }
 
 // SetRows sets the value of Rows.
@@ -17376,6 +17666,98 @@ func (s *ListBAAvailableType) UnmarshalText(data []byte) error {
 	}
 }
 
+type ListBACalendarsForbidden Error
+
+func (*ListBACalendarsForbidden) listBACalendarsRes() {}
+
+type ListBACalendarsInternalServerError Error
+
+func (*ListBACalendarsInternalServerError) listBACalendarsRes() {}
+
+type ListBACalendarsOKApplicationJSON []ListBACalendarsOKItem
+
+func (*ListBACalendarsOKApplicationJSON) listBACalendarsRes() {}
+
+type ListBACalendarsOKItem struct {
+	ID          OptUUID   `json:"id"`
+	Name        OptString `json:"name"`
+	Granularity OptString `json:"granularity"`
+	First       OptDate   `json:"first"`
+	Last        OptDate   `json:"last"`
+	LastLabel   OptString `json:"last_label"`
+	Periods     OptInt    `json:"periods"`
+}
+
+// GetID returns the value of ID.
+func (s *ListBACalendarsOKItem) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *ListBACalendarsOKItem) GetName() OptString {
+	return s.Name
+}
+
+// GetGranularity returns the value of Granularity.
+func (s *ListBACalendarsOKItem) GetGranularity() OptString {
+	return s.Granularity
+}
+
+// GetFirst returns the value of First.
+func (s *ListBACalendarsOKItem) GetFirst() OptDate {
+	return s.First
+}
+
+// GetLast returns the value of Last.
+func (s *ListBACalendarsOKItem) GetLast() OptDate {
+	return s.Last
+}
+
+// GetLastLabel returns the value of LastLabel.
+func (s *ListBACalendarsOKItem) GetLastLabel() OptString {
+	return s.LastLabel
+}
+
+// GetPeriods returns the value of Periods.
+func (s *ListBACalendarsOKItem) GetPeriods() OptInt {
+	return s.Periods
+}
+
+// SetID sets the value of ID.
+func (s *ListBACalendarsOKItem) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *ListBACalendarsOKItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetGranularity sets the value of Granularity.
+func (s *ListBACalendarsOKItem) SetGranularity(val OptString) {
+	s.Granularity = val
+}
+
+// SetFirst sets the value of First.
+func (s *ListBACalendarsOKItem) SetFirst(val OptDate) {
+	s.First = val
+}
+
+// SetLast sets the value of Last.
+func (s *ListBACalendarsOKItem) SetLast(val OptDate) {
+	s.Last = val
+}
+
+// SetLastLabel sets the value of LastLabel.
+func (s *ListBACalendarsOKItem) SetLastLabel(val OptString) {
+	s.LastLabel = val
+}
+
+// SetPeriods sets the value of Periods.
+func (s *ListBACalendarsOKItem) SetPeriods(val OptInt) {
+	s.Periods = val
+}
+
 type ListBARoleDashboardsForbidden Error
 
 func (*ListBARoleDashboardsForbidden) listBARoleDashboardsRes() {}
@@ -17673,6 +18055,101 @@ func (s *ListIntegrationRunsOKItemStatus) UnmarshalText(data []byte) error {
 	}
 }
 
+type ListIntegrationTemplatesOKApplicationJSON []ListIntegrationTemplatesOKItem
+
+func (*ListIntegrationTemplatesOKApplicationJSON) listIntegrationTemplatesRes() {}
+
+type ListIntegrationTemplatesOKItem struct {
+	ID         OptUUID                                 `json:"id"`
+	Name       OptString                               `json:"name"`
+	Type       OptString                               `json:"type"`
+	TargetType OptString                               `json:"target_type"`
+	TargetName OptString                               `json:"target_name"`
+	Config     OptListIntegrationTemplatesOKItemConfig `json:"config"`
+	CreatedAt  OptString                               `json:"created_at"`
+}
+
+// GetID returns the value of ID.
+func (s *ListIntegrationTemplatesOKItem) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *ListIntegrationTemplatesOKItem) GetName() OptString {
+	return s.Name
+}
+
+// GetType returns the value of Type.
+func (s *ListIntegrationTemplatesOKItem) GetType() OptString {
+	return s.Type
+}
+
+// GetTargetType returns the value of TargetType.
+func (s *ListIntegrationTemplatesOKItem) GetTargetType() OptString {
+	return s.TargetType
+}
+
+// GetTargetName returns the value of TargetName.
+func (s *ListIntegrationTemplatesOKItem) GetTargetName() OptString {
+	return s.TargetName
+}
+
+// GetConfig returns the value of Config.
+func (s *ListIntegrationTemplatesOKItem) GetConfig() OptListIntegrationTemplatesOKItemConfig {
+	return s.Config
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *ListIntegrationTemplatesOKItem) GetCreatedAt() OptString {
+	return s.CreatedAt
+}
+
+// SetID sets the value of ID.
+func (s *ListIntegrationTemplatesOKItem) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *ListIntegrationTemplatesOKItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetType sets the value of Type.
+func (s *ListIntegrationTemplatesOKItem) SetType(val OptString) {
+	s.Type = val
+}
+
+// SetTargetType sets the value of TargetType.
+func (s *ListIntegrationTemplatesOKItem) SetTargetType(val OptString) {
+	s.TargetType = val
+}
+
+// SetTargetName sets the value of TargetName.
+func (s *ListIntegrationTemplatesOKItem) SetTargetName(val OptString) {
+	s.TargetName = val
+}
+
+// SetConfig sets the value of Config.
+func (s *ListIntegrationTemplatesOKItem) SetConfig(val OptListIntegrationTemplatesOKItemConfig) {
+	s.Config = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *ListIntegrationTemplatesOKItem) SetCreatedAt(val OptString) {
+	s.CreatedAt = val
+}
+
+type ListIntegrationTemplatesOKItemConfig map[string]jx.Raw
+
+func (s *ListIntegrationTemplatesOKItemConfig) init() ListIntegrationTemplatesOKItemConfig {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
 type ListMetricsInternalServerError Error
 
 func (*ListMetricsInternalServerError) listMetricsRes() {}
@@ -17909,6 +18386,18 @@ type ListReadableGridsOKApplicationJSON []GridCatalogItem
 
 func (*ListReadableGridsOKApplicationJSON) listReadableGridsRes() {}
 
+type ListRoleAccessRulesForbidden Error
+
+func (*ListRoleAccessRulesForbidden) listRoleAccessRulesRes() {}
+
+type ListRoleAccessRulesNotFound Error
+
+func (*ListRoleAccessRulesNotFound) listRoleAccessRulesRes() {}
+
+type ListRoleAccessRulesOKApplicationJSON []UserAccessRule
+
+func (*ListRoleAccessRulesOKApplicationJSON) listRoleAccessRulesRes() {}
+
 // ListScimTokensForbidden is response for ListScimTokens operation.
 type ListScimTokensForbidden struct{}
 
@@ -17922,6 +18411,116 @@ func (*ListScimTokensOK) listScimTokensRes() {}
 type ListUserAccessRulesOKApplicationJSON []UserAccessRule
 
 func (*ListUserAccessRulesOKApplicationJSON) listUserAccessRulesRes() {}
+
+type ListUserRoleAccessRulesOKApplicationJSON []ListUserRoleAccessRulesOKItem
+
+func (*ListUserRoleAccessRulesOKApplicationJSON) listUserRoleAccessRulesRes() {}
+
+type ListUserRoleAccessRulesOKItem struct {
+	RoleID   OptUUID                                `json:"role_id"`
+	RoleName OptString                              `json:"role_name"`
+	RuleType OptString                              `json:"rule_type"`
+	RefID    OptString                              `json:"ref_id"`
+	Access   OptListUserRoleAccessRulesOKItemAccess `json:"access"`
+}
+
+// GetRoleID returns the value of RoleID.
+func (s *ListUserRoleAccessRulesOKItem) GetRoleID() OptUUID {
+	return s.RoleID
+}
+
+// GetRoleName returns the value of RoleName.
+func (s *ListUserRoleAccessRulesOKItem) GetRoleName() OptString {
+	return s.RoleName
+}
+
+// GetRuleType returns the value of RuleType.
+func (s *ListUserRoleAccessRulesOKItem) GetRuleType() OptString {
+	return s.RuleType
+}
+
+// GetRefID returns the value of RefID.
+func (s *ListUserRoleAccessRulesOKItem) GetRefID() OptString {
+	return s.RefID
+}
+
+// GetAccess returns the value of Access.
+func (s *ListUserRoleAccessRulesOKItem) GetAccess() OptListUserRoleAccessRulesOKItemAccess {
+	return s.Access
+}
+
+// SetRoleID sets the value of RoleID.
+func (s *ListUserRoleAccessRulesOKItem) SetRoleID(val OptUUID) {
+	s.RoleID = val
+}
+
+// SetRoleName sets the value of RoleName.
+func (s *ListUserRoleAccessRulesOKItem) SetRoleName(val OptString) {
+	s.RoleName = val
+}
+
+// SetRuleType sets the value of RuleType.
+func (s *ListUserRoleAccessRulesOKItem) SetRuleType(val OptString) {
+	s.RuleType = val
+}
+
+// SetRefID sets the value of RefID.
+func (s *ListUserRoleAccessRulesOKItem) SetRefID(val OptString) {
+	s.RefID = val
+}
+
+// SetAccess sets the value of Access.
+func (s *ListUserRoleAccessRulesOKItem) SetAccess(val OptListUserRoleAccessRulesOKItemAccess) {
+	s.Access = val
+}
+
+type ListUserRoleAccessRulesOKItemAccess string
+
+const (
+	ListUserRoleAccessRulesOKItemAccessWrite  ListUserRoleAccessRulesOKItemAccess = "write"
+	ListUserRoleAccessRulesOKItemAccessRead   ListUserRoleAccessRulesOKItemAccess = "read"
+	ListUserRoleAccessRulesOKItemAccessHidden ListUserRoleAccessRulesOKItemAccess = "hidden"
+)
+
+// AllValues returns all ListUserRoleAccessRulesOKItemAccess values.
+func (ListUserRoleAccessRulesOKItemAccess) AllValues() []ListUserRoleAccessRulesOKItemAccess {
+	return []ListUserRoleAccessRulesOKItemAccess{
+		ListUserRoleAccessRulesOKItemAccessWrite,
+		ListUserRoleAccessRulesOKItemAccessRead,
+		ListUserRoleAccessRulesOKItemAccessHidden,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ListUserRoleAccessRulesOKItemAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case ListUserRoleAccessRulesOKItemAccessWrite:
+		return []byte(s), nil
+	case ListUserRoleAccessRulesOKItemAccessRead:
+		return []byte(s), nil
+	case ListUserRoleAccessRulesOKItemAccessHidden:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ListUserRoleAccessRulesOKItemAccess) UnmarshalText(data []byte) error {
+	switch ListUserRoleAccessRulesOKItemAccess(data) {
+	case ListUserRoleAccessRulesOKItemAccessWrite:
+		*s = ListUserRoleAccessRulesOKItemAccessWrite
+		return nil
+	case ListUserRoleAccessRulesOKItemAccessRead:
+		*s = ListUserRoleAccessRulesOKItemAccessRead
+		return nil
+	case ListUserRoleAccessRulesOKItemAccessHidden:
+		*s = ListUserRoleAccessRulesOKItemAccessHidden
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 type ListWorkflowDefinitionsOKApplicationJSON []ListWorkflowDefinitionsOKItem
 
@@ -18505,6 +19104,9 @@ type MetricDef struct {
 	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
 	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
 	ClosedWhen []ClosedRule `json:"closed_when"`
+	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+	// Omitted keeps it on PATCH.
+	RowStyle OptMetricDefRowStyle `json:"row_style"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -18581,6 +19183,11 @@ func (s *MetricDef) GetHighlightRules() []HighlightRule {
 // GetClosedWhen returns the value of ClosedWhen.
 func (s *MetricDef) GetClosedWhen() []ClosedRule {
 	return s.ClosedWhen
+}
+
+// GetRowStyle returns the value of RowStyle.
+func (s *MetricDef) GetRowStyle() OptMetricDefRowStyle {
+	return s.RowStyle
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -18668,6 +19275,11 @@ func (s *MetricDef) SetClosedWhen(val []ClosedRule) {
 	s.ClosedWhen = val
 }
 
+// SetRowStyle sets the value of RowStyle.
+func (s *MetricDef) SetRowStyle(val OptMetricDefRowStyle) {
+	s.RowStyle = val
+}
+
 // SetDependsOn sets the value of DependsOn.
 func (s *MetricDef) SetDependsOn(val []string) {
 	s.DependsOn = val
@@ -18681,6 +19293,49 @@ func (s *MetricDef) SetDependedBy(val []string) {
 // SetTags sets the value of Tags.
 func (s *MetricDef) SetTags(val []string) {
 	s.Tags = val
+}
+
+// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+// Omitted keeps it on PATCH.
+type MetricDefRowStyle string
+
+const (
+	MetricDefRowStyleEmpty MetricDefRowStyle = ""
+	MetricDefRowStyleTotal MetricDefRowStyle = "total"
+)
+
+// AllValues returns all MetricDefRowStyle values.
+func (MetricDefRowStyle) AllValues() []MetricDefRowStyle {
+	return []MetricDefRowStyle{
+		MetricDefRowStyleEmpty,
+		MetricDefRowStyleTotal,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s MetricDefRowStyle) MarshalText() ([]byte, error) {
+	switch s {
+	case MetricDefRowStyleEmpty:
+		return []byte(s), nil
+	case MetricDefRowStyleTotal:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *MetricDefRowStyle) UnmarshalText(data []byte) error {
+	switch MetricDefRowStyle(data) {
+	case MetricDefRowStyleEmpty:
+		*s = MetricDefRowStyleEmpty
+		return nil
+	case MetricDefRowStyleTotal:
+		*s = MetricDefRowStyleTotal
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
@@ -21225,6 +21880,52 @@ func (o OptCreateFormRequestEditAccess) Or(d CreateFormRequestEditAccess) Create
 	return d
 }
 
+// NewOptCreateMetricRequestRowStyle returns new OptCreateMetricRequestRowStyle with value set to v.
+func NewOptCreateMetricRequestRowStyle(v CreateMetricRequestRowStyle) OptCreateMetricRequestRowStyle {
+	return OptCreateMetricRequestRowStyle{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateMetricRequestRowStyle is optional CreateMetricRequestRowStyle.
+type OptCreateMetricRequestRowStyle struct {
+	Value CreateMetricRequestRowStyle
+	Set   bool
+}
+
+// IsSet returns true if OptCreateMetricRequestRowStyle was set.
+func (o OptCreateMetricRequestRowStyle) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateMetricRequestRowStyle) Reset() {
+	var v CreateMetricRequestRowStyle
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateMetricRequestRowStyle) SetTo(v CreateMetricRequestRowStyle) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateMetricRequestRowStyle) Get() (v CreateMetricRequestRowStyle, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateMetricRequestRowStyle) Or(d CreateMetricRequestRowStyle) CreateMetricRequestRowStyle {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateMetricRequestTimeSummary returns new OptCreateMetricRequestTimeSummary with value set to v.
 func NewOptCreateMetricRequestTimeSummary(v CreateMetricRequestTimeSummary) OptCreateMetricRequestTimeSummary {
 	return OptCreateMetricRequestTimeSummary{
@@ -23387,6 +24088,98 @@ func (o OptInt64) Or(d int64) int64 {
 	return d
 }
 
+// NewOptListIntegrationTemplatesOKItemConfig returns new OptListIntegrationTemplatesOKItemConfig with value set to v.
+func NewOptListIntegrationTemplatesOKItemConfig(v ListIntegrationTemplatesOKItemConfig) OptListIntegrationTemplatesOKItemConfig {
+	return OptListIntegrationTemplatesOKItemConfig{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptListIntegrationTemplatesOKItemConfig is optional ListIntegrationTemplatesOKItemConfig.
+type OptListIntegrationTemplatesOKItemConfig struct {
+	Value ListIntegrationTemplatesOKItemConfig
+	Set   bool
+}
+
+// IsSet returns true if OptListIntegrationTemplatesOKItemConfig was set.
+func (o OptListIntegrationTemplatesOKItemConfig) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptListIntegrationTemplatesOKItemConfig) Reset() {
+	var v ListIntegrationTemplatesOKItemConfig
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptListIntegrationTemplatesOKItemConfig) SetTo(v ListIntegrationTemplatesOKItemConfig) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptListIntegrationTemplatesOKItemConfig) Get() (v ListIntegrationTemplatesOKItemConfig, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptListIntegrationTemplatesOKItemConfig) Or(d ListIntegrationTemplatesOKItemConfig) ListIntegrationTemplatesOKItemConfig {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptListUserRoleAccessRulesOKItemAccess returns new OptListUserRoleAccessRulesOKItemAccess with value set to v.
+func NewOptListUserRoleAccessRulesOKItemAccess(v ListUserRoleAccessRulesOKItemAccess) OptListUserRoleAccessRulesOKItemAccess {
+	return OptListUserRoleAccessRulesOKItemAccess{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptListUserRoleAccessRulesOKItemAccess is optional ListUserRoleAccessRulesOKItemAccess.
+type OptListUserRoleAccessRulesOKItemAccess struct {
+	Value ListUserRoleAccessRulesOKItemAccess
+	Set   bool
+}
+
+// IsSet returns true if OptListUserRoleAccessRulesOKItemAccess was set.
+func (o OptListUserRoleAccessRulesOKItemAccess) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptListUserRoleAccessRulesOKItemAccess) Reset() {
+	var v ListUserRoleAccessRulesOKItemAccess
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptListUserRoleAccessRulesOKItemAccess) SetTo(v ListUserRoleAccessRulesOKItemAccess) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptListUserRoleAccessRulesOKItemAccess) Get() (v ListUserRoleAccessRulesOKItemAccess, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptListUserRoleAccessRulesOKItemAccess) Or(d ListUserRoleAccessRulesOKItemAccess) ListUserRoleAccessRulesOKItemAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptListedFormEditAccess returns new OptListedFormEditAccess with value set to v.
 func NewOptListedFormEditAccess(v ListedFormEditAccess) OptListedFormEditAccess {
 	return OptListedFormEditAccess{
@@ -23427,6 +24220,52 @@ func (o OptListedFormEditAccess) Get() (v ListedFormEditAccess, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptListedFormEditAccess) Or(d ListedFormEditAccess) ListedFormEditAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptMetricDefRowStyle returns new OptMetricDefRowStyle with value set to v.
+func NewOptMetricDefRowStyle(v MetricDefRowStyle) OptMetricDefRowStyle {
+	return OptMetricDefRowStyle{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptMetricDefRowStyle is optional MetricDefRowStyle.
+type OptMetricDefRowStyle struct {
+	Value MetricDefRowStyle
+	Set   bool
+}
+
+// IsSet returns true if OptMetricDefRowStyle was set.
+func (o OptMetricDefRowStyle) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptMetricDefRowStyle) Reset() {
+	var v MetricDefRowStyle
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptMetricDefRowStyle) SetTo(v MetricDefRowStyle) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptMetricDefRowStyle) Get() (v MetricDefRowStyle, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptMetricDefRowStyle) Or(d MetricDefRowStyle) MetricDefRowStyle {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -24845,6 +25684,52 @@ func (o OptRemoveAdminUserFromTenantOKStatus) Or(d RemoveAdminUserFromTenantOKSt
 	return d
 }
 
+// NewOptReopenWorkflowInstanceOKStatus returns new OptReopenWorkflowInstanceOKStatus with value set to v.
+func NewOptReopenWorkflowInstanceOKStatus(v ReopenWorkflowInstanceOKStatus) OptReopenWorkflowInstanceOKStatus {
+	return OptReopenWorkflowInstanceOKStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptReopenWorkflowInstanceOKStatus is optional ReopenWorkflowInstanceOKStatus.
+type OptReopenWorkflowInstanceOKStatus struct {
+	Value ReopenWorkflowInstanceOKStatus
+	Set   bool
+}
+
+// IsSet returns true if OptReopenWorkflowInstanceOKStatus was set.
+func (o OptReopenWorkflowInstanceOKStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptReopenWorkflowInstanceOKStatus) Reset() {
+	var v ReopenWorkflowInstanceOKStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptReopenWorkflowInstanceOKStatus) SetTo(v ReopenWorkflowInstanceOKStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptReopenWorkflowInstanceOKStatus) Get() (v ReopenWorkflowInstanceOKStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptReopenWorkflowInstanceOKStatus) Or(d ReopenWorkflowInstanceOKStatus) ReopenWorkflowInstanceOKStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptScatterChartDataContext returns new OptScatterChartDataContext with value set to v.
 func NewOptScatterChartDataContext(v ScatterChartDataContext) OptScatterChartDataContext {
 	return OptScatterChartDataContext{
@@ -25581,6 +26466,52 @@ func (o OptUpdateFormMappingRequestDimensionMappings) Or(d UpdateFormMappingRequ
 	return d
 }
 
+// NewOptUpdateMetricRequestRowStyle returns new OptUpdateMetricRequestRowStyle with value set to v.
+func NewOptUpdateMetricRequestRowStyle(v UpdateMetricRequestRowStyle) OptUpdateMetricRequestRowStyle {
+	return OptUpdateMetricRequestRowStyle{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateMetricRequestRowStyle is optional UpdateMetricRequestRowStyle.
+type OptUpdateMetricRequestRowStyle struct {
+	Value UpdateMetricRequestRowStyle
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateMetricRequestRowStyle was set.
+func (o OptUpdateMetricRequestRowStyle) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateMetricRequestRowStyle) Reset() {
+	var v UpdateMetricRequestRowStyle
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateMetricRequestRowStyle) SetTo(v UpdateMetricRequestRowStyle) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateMetricRequestRowStyle) Get() (v UpdateMetricRequestRowStyle, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateMetricRequestRowStyle) Or(d UpdateMetricRequestRowStyle) UpdateMetricRequestRowStyle {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateMetricRequestTimeSummary returns new OptUpdateMetricRequestTimeSummary with value set to v.
 func NewOptUpdateMetricRequestTimeSummary(v UpdateMetricRequestTimeSummary) OptUpdateMetricRequestTimeSummary {
 	return OptUpdateMetricRequestTimeSummary{
@@ -25851,6 +26782,52 @@ func (o OptUpdateWorkflowRequestSubjectConfig) Get() (v UpdateWorkflowRequestSub
 
 // Or returns value if set, or given parameter if does not.
 func (o OptUpdateWorkflowRequestSubjectConfig) Or(d UpdateWorkflowRequestSubjectConfig) UpdateWorkflowRequestSubjectConfig {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptUseIntegrationTemplateReq returns new OptUseIntegrationTemplateReq with value set to v.
+func NewOptUseIntegrationTemplateReq(v UseIntegrationTemplateReq) OptUseIntegrationTemplateReq {
+	return OptUseIntegrationTemplateReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUseIntegrationTemplateReq is optional UseIntegrationTemplateReq.
+type OptUseIntegrationTemplateReq struct {
+	Value UseIntegrationTemplateReq
+	Set   bool
+}
+
+// IsSet returns true if OptUseIntegrationTemplateReq was set.
+func (o OptUseIntegrationTemplateReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUseIntegrationTemplateReq) Reset() {
+	var v UseIntegrationTemplateReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUseIntegrationTemplateReq) SetTo(v UseIntegrationTemplateReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUseIntegrationTemplateReq) Get() (v UseIntegrationTemplateReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUseIntegrationTemplateReq) Or(d UseIntegrationTemplateReq) UseIntegrationTemplateReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -28753,6 +29730,98 @@ func (s *RenameAiSessionReq) SetTitle(val string) {
 	s.Title = val
 }
 
+type ReopenWorkflowInstanceBadRequest Error
+
+func (*ReopenWorkflowInstanceBadRequest) reopenWorkflowInstanceRes() {}
+
+type ReopenWorkflowInstanceConflict Error
+
+func (*ReopenWorkflowInstanceConflict) reopenWorkflowInstanceRes() {}
+
+type ReopenWorkflowInstanceForbidden Error
+
+func (*ReopenWorkflowInstanceForbidden) reopenWorkflowInstanceRes() {}
+
+type ReopenWorkflowInstanceNotFound Error
+
+func (*ReopenWorkflowInstanceNotFound) reopenWorkflowInstanceRes() {}
+
+type ReopenWorkflowInstanceOK struct {
+	Status OptReopenWorkflowInstanceOKStatus `json:"status"`
+	// How many people were notified.
+	Notified OptInt `json:"notified"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ReopenWorkflowInstanceOK) GetStatus() OptReopenWorkflowInstanceOKStatus {
+	return s.Status
+}
+
+// GetNotified returns the value of Notified.
+func (s *ReopenWorkflowInstanceOK) GetNotified() OptInt {
+	return s.Notified
+}
+
+// SetStatus sets the value of Status.
+func (s *ReopenWorkflowInstanceOK) SetStatus(val OptReopenWorkflowInstanceOKStatus) {
+	s.Status = val
+}
+
+// SetNotified sets the value of Notified.
+func (s *ReopenWorkflowInstanceOK) SetNotified(val OptInt) {
+	s.Notified = val
+}
+
+func (*ReopenWorkflowInstanceOK) reopenWorkflowInstanceRes() {}
+
+type ReopenWorkflowInstanceOKStatus string
+
+const (
+	ReopenWorkflowInstanceOKStatusCancelled ReopenWorkflowInstanceOKStatus = "cancelled"
+)
+
+// AllValues returns all ReopenWorkflowInstanceOKStatus values.
+func (ReopenWorkflowInstanceOKStatus) AllValues() []ReopenWorkflowInstanceOKStatus {
+	return []ReopenWorkflowInstanceOKStatus{
+		ReopenWorkflowInstanceOKStatusCancelled,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ReopenWorkflowInstanceOKStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case ReopenWorkflowInstanceOKStatusCancelled:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ReopenWorkflowInstanceOKStatus) UnmarshalText(data []byte) error {
+	switch ReopenWorkflowInstanceOKStatus(data) {
+	case ReopenWorkflowInstanceOKStatusCancelled:
+		*s = ReopenWorkflowInstanceOKStatusCancelled
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type ReopenWorkflowInstanceReq struct {
+	Reason string `json:"reason"`
+}
+
+// GetReason returns the value of Reason.
+func (s *ReopenWorkflowInstanceReq) GetReason() string {
+	return s.Reason
+}
+
+// SetReason sets the value of Reason.
+func (s *ReopenWorkflowInstanceReq) SetReason(val string) {
+	s.Reason = val
+}
+
 type ReorderDashboardsBadRequest Error
 
 func (*ReorderDashboardsBadRequest) reorderDashboardsRes() {}
@@ -29093,6 +30162,9 @@ func (*RunIntegrationNotFound) runIntegrationRes() {}
 
 type RunIntegrationOK struct {
 	RowsImported OptInt `json:"rows_imported"`
+	// Table runs of a loader whose config names replace_by — the earlier records the run replaced
+	// (with dry_run, would replace).
+	RowsReplaced OptInt `json:"rows_replaced"`
 	// Grid runs — one row can carry several metrics' values.
 	ValuesImported OptInt  `json:"values_imported"`
 	ErrorRows      OptInt  `json:"error_rows"`
@@ -29108,6 +30180,11 @@ type RunIntegrationOK struct {
 // GetRowsImported returns the value of RowsImported.
 func (s *RunIntegrationOK) GetRowsImported() OptInt {
 	return s.RowsImported
+}
+
+// GetRowsReplaced returns the value of RowsReplaced.
+func (s *RunIntegrationOK) GetRowsReplaced() OptInt {
+	return s.RowsReplaced
 }
 
 // GetValuesImported returns the value of ValuesImported.
@@ -29143,6 +30220,11 @@ func (s *RunIntegrationOK) GetErrors() []RunIntegrationOKErrorsItem {
 // SetRowsImported sets the value of RowsImported.
 func (s *RunIntegrationOK) SetRowsImported(val OptInt) {
 	s.RowsImported = val
+}
+
+// SetRowsReplaced sets the value of RowsReplaced.
+func (s *RunIntegrationOK) SetRowsReplaced(val OptInt) {
+	s.RowsReplaced = val
 }
 
 // SetValuesImported sets the value of ValuesImported.
@@ -29350,6 +30432,63 @@ func (s *SaveAiSettingsOK) GetStatus() OptString {
 // SetStatus sets the value of Status.
 func (s *SaveAiSettingsOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+type SaveIntegrationTemplateBadRequest Error
+
+func (*SaveIntegrationTemplateBadRequest) saveIntegrationTemplateRes() {}
+
+type SaveIntegrationTemplateConflict Error
+
+func (*SaveIntegrationTemplateConflict) saveIntegrationTemplateRes() {}
+
+type SaveIntegrationTemplateForbidden Error
+
+func (*SaveIntegrationTemplateForbidden) saveIntegrationTemplateRes() {}
+
+type SaveIntegrationTemplateNotFound Error
+
+func (*SaveIntegrationTemplateNotFound) saveIntegrationTemplateRes() {}
+
+type SaveIntegrationTemplateOK struct {
+	ID OptUUID `json:"id"`
+}
+
+// GetID returns the value of ID.
+func (s *SaveIntegrationTemplateOK) GetID() OptUUID {
+	return s.ID
+}
+
+// SetID sets the value of ID.
+func (s *SaveIntegrationTemplateOK) SetID(val OptUUID) {
+	s.ID = val
+}
+
+func (*SaveIntegrationTemplateOK) saveIntegrationTemplateRes() {}
+
+type SaveIntegrationTemplateReq struct {
+	IntegrationID uuid.UUID `json:"integration_id"`
+	Name          OptString `json:"name"`
+}
+
+// GetIntegrationID returns the value of IntegrationID.
+func (s *SaveIntegrationTemplateReq) GetIntegrationID() uuid.UUID {
+	return s.IntegrationID
+}
+
+// GetName returns the value of Name.
+func (s *SaveIntegrationTemplateReq) GetName() OptString {
+	return s.Name
+}
+
+// SetIntegrationID sets the value of IntegrationID.
+func (s *SaveIntegrationTemplateReq) SetIntegrationID(val uuid.UUID) {
+	s.IntegrationID = val
+}
+
+// SetName sets the value of Name.
+func (s *SaveIntegrationTemplateReq) SetName(val OptString) {
+	s.Name = val
 }
 
 // Returned when the widget's chart_type is scatter.
@@ -30119,6 +31258,34 @@ func (s *SetModelDateFormatReq) GetDateFormat() string {
 func (s *SetModelDateFormatReq) SetDateFormat(val string) {
 	s.DateFormat = val
 }
+
+type SetRoleAccessRulesBadRequest Error
+
+func (*SetRoleAccessRulesBadRequest) setRoleAccessRulesRes() {}
+
+type SetRoleAccessRulesForbidden Error
+
+func (*SetRoleAccessRulesForbidden) setRoleAccessRulesRes() {}
+
+type SetRoleAccessRulesNotFound Error
+
+func (*SetRoleAccessRulesNotFound) setRoleAccessRulesRes() {}
+
+type SetRoleAccessRulesOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *SetRoleAccessRulesOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *SetRoleAccessRulesOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*SetRoleAccessRulesOK) setRoleAccessRulesRes() {}
 
 // Ref: #/components/schemas/SetRoleDashboardsRequest
 type SetRoleDashboardsRequest struct {
@@ -33386,6 +34553,9 @@ type UpdateMetricRequest struct {
 	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
 	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
 	ClosedWhen []ClosedRule `json:"closed_when"`
+	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+	// Omitted keeps it on PATCH.
+	RowStyle OptUpdateMetricRequestRowStyle `json:"row_style"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -33460,6 +34630,11 @@ func (s *UpdateMetricRequest) GetHighlightRules() []HighlightRule {
 // GetClosedWhen returns the value of ClosedWhen.
 func (s *UpdateMetricRequest) GetClosedWhen() []ClosedRule {
 	return s.ClosedWhen
+}
+
+// GetRowStyle returns the value of RowStyle.
+func (s *UpdateMetricRequest) GetRowStyle() OptUpdateMetricRequestRowStyle {
+	return s.RowStyle
 }
 
 // GetTimeSummary returns the value of TimeSummary.
@@ -33537,9 +34712,57 @@ func (s *UpdateMetricRequest) SetClosedWhen(val []ClosedRule) {
 	s.ClosedWhen = val
 }
 
+// SetRowStyle sets the value of RowStyle.
+func (s *UpdateMetricRequest) SetRowStyle(val OptUpdateMetricRequestRowStyle) {
+	s.RowStyle = val
+}
+
 // SetTimeSummary sets the value of TimeSummary.
 func (s *UpdateMetricRequest) SetTimeSummary(val OptUpdateMetricRequestTimeSummary) {
 	s.TimeSummary = val
+}
+
+// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
+// Omitted keeps it on PATCH.
+type UpdateMetricRequestRowStyle string
+
+const (
+	UpdateMetricRequestRowStyleEmpty UpdateMetricRequestRowStyle = ""
+	UpdateMetricRequestRowStyleTotal UpdateMetricRequestRowStyle = "total"
+)
+
+// AllValues returns all UpdateMetricRequestRowStyle values.
+func (UpdateMetricRequestRowStyle) AllValues() []UpdateMetricRequestRowStyle {
+	return []UpdateMetricRequestRowStyle{
+		UpdateMetricRequestRowStyleEmpty,
+		UpdateMetricRequestRowStyleTotal,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateMetricRequestRowStyle) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateMetricRequestRowStyleEmpty:
+		return []byte(s), nil
+	case UpdateMetricRequestRowStyleTotal:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateMetricRequestRowStyle) UnmarshalText(data []byte) error {
+	switch UpdateMetricRequestRowStyle(data) {
+	case UpdateMetricRequestRowStyleEmpty:
+		*s = UpdateMetricRequestRowStyleEmpty
+		return nil
+	case UpdateMetricRequestRowStyleTotal:
+		*s = UpdateMetricRequestRowStyleTotal
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
@@ -34188,6 +35411,59 @@ func (*UpsertPlanBadRequest) upsertPlanRes() {}
 type UpsertPlanNotFound struct{}
 
 func (*UpsertPlanNotFound) upsertPlanRes() {}
+
+type UseIntegrationTemplateBadRequest Error
+
+func (*UseIntegrationTemplateBadRequest) useIntegrationTemplateRes() {}
+
+type UseIntegrationTemplateForbidden Error
+
+func (*UseIntegrationTemplateForbidden) useIntegrationTemplateRes() {}
+
+type UseIntegrationTemplateNotFound Error
+
+func (*UseIntegrationTemplateNotFound) useIntegrationTemplateRes() {}
+
+type UseIntegrationTemplateOK struct {
+	ID     OptString `json:"id"`
+	Status OptString `json:"status"`
+}
+
+// GetID returns the value of ID.
+func (s *UseIntegrationTemplateOK) GetID() OptString {
+	return s.ID
+}
+
+// GetStatus returns the value of Status.
+func (s *UseIntegrationTemplateOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetID sets the value of ID.
+func (s *UseIntegrationTemplateOK) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetStatus sets the value of Status.
+func (s *UseIntegrationTemplateOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*UseIntegrationTemplateOK) useIntegrationTemplateRes() {}
+
+type UseIntegrationTemplateReq struct {
+	Name OptString `json:"name"`
+}
+
+// GetName returns the value of Name.
+func (s *UseIntegrationTemplateReq) GetName() OptString {
+	return s.Name
+}
+
+// SetName sets the value of Name.
+func (s *UseIntegrationTemplateReq) SetName(val OptString) {
+	s.Name = val
+}
 
 // Ref: #/components/schemas/UserAccessRule
 type UserAccessRule struct {

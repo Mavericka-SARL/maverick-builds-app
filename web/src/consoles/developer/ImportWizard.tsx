@@ -94,10 +94,15 @@ interface WizardConfig {
   // A saved integration's workbook sheet, which the upload step opens a
   // workbook on.
   sheet?: string;
+  // A table's load: the field whose values the file replaces (its period) —
+  // the table's records holding one are deleted as the file's are added.
+  replaceBy?: string;
 }
 
 interface CommitResult {
   rowsImported: number;
+  // A table load replacing by a field: the earlier records it replaced.
+  replaced?: number;
   values?: number; // a grid's: a row of a wide file is one value per metric
   errorRows: number;
   status: "success" | "error";
@@ -370,7 +375,7 @@ async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Pr
   try {
     if (cfg.integrationId) res = await api.checkIntegrationRun(cfg.integrationId, csv, lines);
     else if (cfg.targetType === "grid") res = await api.checkImport(csv, cfg.revisionId, lines);
-    else res = await api.checkFormRecords(cfg.targetId, csv, lines);
+    else res = await api.checkFormRecords(cfg.targetId, csv, lines, cfg.replaceBy);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // Refused as a whole (a column naming no metric or dimension) — or not
@@ -379,9 +384,23 @@ async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Pr
       ? { row: 0, index: -1, col: "—", value: "", issue: message, sev: "error" }
       : { row: 0, index: -1, col: "—", value: "", issue: `The rows could not be checked (${message}); the import checks them when you commit`, sev: "warning" }];
   }
-  return (res?.errors ?? []).map(e => (
+  const found: ValError[] = (res?.errors ?? []).map(e => (
     { row: e.row, index: indexOf.get(e.row) ?? -1, col: e.column || "—", value: e.raw_value ?? "", issue: e.message, sev: "error" as const }
   ));
+  if (res?.rows_replaced) {
+    found.push({ row: 0, index: -1, col: "—", value: "", sev: "warning",
+      issue: `Loading this file replaces ${res.rows_replaced} earlier record${res.rows_replaced === 1 ? "" : "s"} holding the same values` });
+  }
+  return found;
+}
+
+// replaceFieldsOf are the fields of a table a load may replace by: values
+// naming a slice of it (a period, a site), not amounts. A table whose
+// records are a dimension's members has none: they are added and updated
+// by their code.
+function replaceFieldsOf(form: FormDef | undefined): FormDef["fields"] {
+  if (!form || form.keeps_dimension_id) return [];
+  return form.fields.filter(f => f.type === "dimension" || f.type === "select" || f.type === "text" || f.type === "date");
 }
 
 // sheetOf is the workbook sheet a saved integration keeps: the one the
@@ -395,7 +414,8 @@ function sheetOf(pf?: ParsedFile | null): { sheet?: string } {
 // savedMode is the import mode a saved integration keeps: a grid's, from
 // a file as well as a sheet. A file integration used to keep none and run
 // as incremental, whatever was chosen (2026-10-21).
-function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"] } {
+function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"]; replace_by?: string } {
+  if (cfg.targetType === "form") return cfg.replaceBy ? { replace_by: cfg.replaceBy } : {};
   return cfg.targetType === "grid" || cfg.source === "google_sheets" ? { import_mode: cfg.importMode } : {};
 }
 
@@ -527,7 +547,7 @@ function UploadStep({
         <Field label="Import target type">
           <Select
             value={config.targetType}
-            onChange={e => onConfigChange({ ...config, targetType: e.target.value as TargetType, targetId: "", targetLabel: "", revisionId: workingRevisionId ?? "", revisionName: "" })}
+            onChange={e => onConfigChange({ ...config, targetType: e.target.value as TargetType, targetId: "", targetLabel: "", revisionId: workingRevisionId ?? "", revisionName: "", replaceBy: undefined })}
           >
             <option value="grid">Grid</option>
             <option value="form">Table of records</option>
@@ -539,7 +559,7 @@ function UploadStep({
             value={config.targetId}
             onChange={e => {
               const opt = targetOpts.find(o => o.id === e.target.value);
-              onConfigChange({ ...config, targetId: e.target.value, targetLabel: opt?.label ?? "" });
+              onConfigChange({ ...config, targetId: e.target.value, targetLabel: opt?.label ?? "", replaceBy: undefined });
             }}
           >
             <option value="">— select —</option>
@@ -547,6 +567,25 @@ function UploadStep({
           </Select>
         </Field>
       </div>
+      {config.targetType === "form" && config.targetId && !config.integrationId && replaceFieldsOf(forms.find(f => f.id === config.targetId)).length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+          <Field
+            label="When a file is loaded again"
+            description="A month's file loaded twice, or its corrected copy, otherwise adds its records again."
+          >
+            <Select
+              data-testid="import-replace-by"
+              value={config.replaceBy ?? ""}
+              onChange={e => onConfigChange({ ...config, replaceBy: e.target.value || undefined })}
+            >
+              <option value="">Add its records to the earlier ones</option>
+              {replaceFieldsOf(forms.find(f => f.id === config.targetId)).map(f => (
+                <option key={f.name} value={f.name}>{`Replace the records with the same ${f.label || f.name}`}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      )}
       {config.targetType === "grid" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
           <Field label="Target revision" required>
@@ -1123,10 +1162,10 @@ function CommitStep({
   const commit = useMutation({
     mutationFn: async () => {
       const csv = resolveAndSerialize(parsedFile.headers, rowsToImport, mappings, resolveCtx);
-      let out: { rows_imported: number; error_rows: number; values?: number };
+      let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number };
       if (config.integrationId) {
         const res = await api.runIntegration(config.integrationId, csv, rowLines, about);
-        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported };
+        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
@@ -1135,8 +1174,8 @@ function CommitStep({
       } else if (config.targetType === "form") {
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.
-        const res = await api.importFormRecords(config.targetId, csv, rowLines, about);
-        out = { rows_imported: res.records_created, error_rows: 0 };
+        const res = await api.importFormRecords(config.targetId, csv, rowLines, about, config.replaceBy);
+        out = { rows_imported: res.records_created, error_rows: 0, replaced: res.records_replaced };
       } else {
         const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines, about);
         out = { rows_imported: res.rows ?? res.valid_rows, error_rows: res.error_rows, values: res.values };
@@ -1178,7 +1217,7 @@ function CommitStep({
         if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
         void invalidateModelData(qc);
       }
-      setResult({ rowsImported: data.rows_imported, values: data.values, errorRows: data.error_rows, status: "success" });
+      setResult({ rowsImported: data.rows_imported, values: data.values, replaced: data.replaced, errorRows: data.error_rows, status: "success" });
     },
     onError: (e) => {
       const rows = (e as ApiError).body?.errors;
@@ -1198,6 +1237,7 @@ function CommitStep({
             <p className="mvx-admin-muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
               {result.rowsImported} rows imported
               <Txt>{result.values && result.values !== result.rowsImported ? ` (${result.values} values)` : ""}</Txt>
+              <Txt>{result.replaced ? `, ${result.replaced} earlier record${result.replaced === 1 ? "" : "s"} replaced` : ""}</Txt>
               <Txt>{result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}</Txt>
             </p>
           </>
@@ -1252,6 +1292,7 @@ function CommitStep({
             ["Target", config.targetLabel || config.targetId],
             config.revisionName ? ["Revision", config.revisionName] : null,
             config.targetType === "grid" ? ["Import mode", IMPORT_MODE_LABEL[config.importMode] ?? config.importMode] : null,
+            config.targetType === "form" && config.replaceBy ? ["When loaded again", `Replaces the records with the same ${config.replaceBy}`] : null,
             config.integrationId ? ["Integration", config.integrationName ?? config.integrationId] : null,
             ["Rows to import", String(rowsToImport.length)],
             ["Columns mapped", String(mappings.filter(m => m.targetField).length)],
@@ -1571,8 +1612,8 @@ function ImportWizard({
   const saveChanges = useMutation({
     mutationFn: async () => {
       const it = config.editIntegration!;
-      const { reshape: _old, column_map: _oldMap, ...rest } = it.config;
-      void _old; void _oldMap;
+      const { reshape: _old, column_map: _oldMap, replace_by: _oldReplace, ...rest } = it.config;
+      void _old; void _oldMap; void _oldReplace;
       await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config), ...sheetOf(sourceFile) });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-integrations"] }); onClose(); },
@@ -1850,6 +1891,11 @@ function SavedIntegrationsList({
                     Mode: <Txt>{MODE_LABEL[d.config?.import_mode ?? (d.type === "google_sheets" ? "replace" : "incremental")] ?? d.config?.import_mode}</Txt>
                   </span>
                 )}
+                {d.target_type === "form" && d.config?.replace_by && (
+                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-replace-${d.id}`} title="Each run deletes the table's records holding a value of this field that its file holds; change it with Edit shape and mapping">
+                    Replaces by <Txt>{d.config.replace_by}</Txt>
+                  </span>
+                )}
                 {d.type === "csv_import" && d.config?.sheet && (
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-sheet-${d.id}`} title="The workbook sheet each run reads when its file names none; change it with Edit shape and mapping">
                     Reads sheet {d.config.sheet}
@@ -1871,6 +1917,7 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     ...(d.config?.import_mode ? { importMode: d.config.import_mode as WizardConfig["importMode"] } : {}),
+                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
@@ -1896,6 +1943,7 @@ function SavedIntegrationsList({
                   leadingIcon={<Play size={13} />}
                   onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id,
                     ...(d.config?.column_map ? { savedColumnMap: d.config.column_map } : {}),
+                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}) })}
                 >
                   Run Import
@@ -1911,6 +1959,7 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     importMode: (d.config?.import_mode as WizardConfig["importMode"] | undefined) ?? (d.type === "google_sheets" ? "replace" : "incremental"),
+                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),

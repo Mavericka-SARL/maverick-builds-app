@@ -11,6 +11,8 @@ import type { StepType, TriggerEventCatalogItem } from "../../api/client";
 // Create Trigger dialog both use this one mapping.
 export function triggerTypeFromWorkflow(triggerEvent: string): string {
   if (triggerEvent === "form.submit" || triggerEvent.endsWith(".submitted")) return "form_submit";
+  if (triggerEvent === "form.approve" || triggerEvent.endsWith(".approved")) return "form_approval";
+  if (triggerEvent === "grid.change" || triggerEvent.endsWith(".changed")) return "grid_change";
   if (triggerEvent === "api.workflow.start") return "api";
   if (triggerEvent.endsWith(".import.completed")) return "integration_completed";
   if (triggerEvent.endsWith(".import.failed")) return "integration_failed";
@@ -19,11 +21,12 @@ export function triggerTypeFromWorkflow(triggerEvent: string): string {
 
 // The events that name no source: a rule made from them fires for any form
 // or any integration run, which is what they say.
-const ANY_SOURCE_EVENTS = new Set(["form.submit", "integration.import.completed", "integration.import.failed"]);
+const ANY_SOURCE_EVENTS = new Set(["form.submit", "form.approve", "grid.change", "integration.import.completed", "integration.import.failed"]);
 
 export interface RuleTriggerFromWorkflow {
   trigger_type: string;
   source_form_id: string;
+  source_grid_id: string;
   source_integration_id: string;
   /** A per-form or per-integration event whose form or integration the
       catalog does not list (still loading, renamed, or not in this
@@ -39,10 +42,11 @@ export interface RuleTriggerFromWorkflow {
     every form submitted or every import in the revision. */
 export function ruleTriggerFromWorkflow(triggerEvent: string, catalog: TriggerEventCatalogItem[] | undefined): RuleTriggerFromWorkflow {
   const trigger_type = triggerTypeFromWorkflow(triggerEvent);
-  const out = { trigger_type, source_form_id: "", source_integration_id: "", unresolved: false };
+  const out = { trigger_type, source_form_id: "", source_grid_id: "", source_integration_id: "", unresolved: false };
   if (trigger_type === "manual" || trigger_type === "api" || ANY_SOURCE_EVENTS.has(triggerEvent)) return out;
   const item = catalog?.find(c => c.key === triggerEvent);
   if (item?.source_type === "form" && item.source_id) return { ...out, source_form_id: item.source_id };
+  if (item?.source_type === "grid" && item.source_id) return { ...out, source_grid_id: item.source_id };
   if (item?.source_type === "integration" && item.source_id) return { ...out, source_integration_id: item.source_id };
   return { ...out, unresolved: true };
 }

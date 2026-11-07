@@ -650,7 +650,9 @@ func TestRestrictedViewerChartData(t *testing.T) {
 func TestGridFailsClosedWhenAccessRulesCannotBeRead(t *testing.T) {
 	f := setupRestrictedFixture(t)
 	f.hide("US")
-	if _, err := f.pool.Exec(context.Background(), `ALTER TABLE identity.user_access_rule RENAME TO user_access_rule_gone`); err != nil {
+	// Every check reads a person's rules through identity.effective_access_rule
+	// (their own and their roles', migration 156).
+	if _, err := f.pool.Exec(context.Background(), `ALTER VIEW identity.effective_access_rule RENAME TO effective_access_rule_gone`); err != nil {
 		t.Fatal(err)
 	}
 	status, raw := f.req("GET", "/api/grid?grid_def_id="+f.plan, f.viewer, nil)

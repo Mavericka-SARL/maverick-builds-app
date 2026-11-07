@@ -1,6 +1,6 @@
 // Package writeguard holds the generic, model-agnostic checks that decide
 // whether a write to runtime.fact_input is allowed: is the target revision
-// system-managed (read-only), does the caller's identity.user_access_rule
+// system-managed (read-only), does the caller's identity.effective_access_rule (own or role rule)
 // hide or read-restrict the dimension member being written, and is that
 // member (or an ancestor of it) currently locked by an in-progress or
 // approved workflow instance.
@@ -114,7 +114,7 @@ func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID
 	case (ruleType == "dimension_member" || ruleType == "metric") && uuidRE.MatchString(refID):
 		err = pool.QueryRow(ctx, `
 			SELECT r.access
-			FROM identity.user_access_rule r
+			FROM identity.effective_access_rule r
 			WHERE r.user_id = $1::uuid AND r.rule_type = $2::text
 			  AND (r.ref_id = $3::text
 			       OR COALESCE(r.ref_lineage_id, CASE $2::text
@@ -132,7 +132,8 @@ func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID
 		).Scan(&access)
 	default:
 		err = pool.QueryRow(ctx,
-			`SELECT access FROM identity.user_access_rule WHERE user_id=$1::uuid AND rule_type=$2 AND ref_id=$3`,
+			`SELECT access FROM identity.effective_access_rule WHERE user_id=$1::uuid AND rule_type=$2 AND ref_id=$3
+			 ORDER BY CASE access WHEN 'hidden' THEN 0 WHEN 'read' THEN 1 ELSE 2 END LIMIT 1`,
 			userID, ruleType, refID,
 		).Scan(&access)
 	}

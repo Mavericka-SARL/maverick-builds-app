@@ -60,6 +60,8 @@
   --color-neutral-solid: var(--color-text);
   --color-info: #0284c7;
   --color-info-bg: #f0f9ff;
+  /* Text on --color-info-bg: #0369a1 is 5.9:1 there (--color-info, 3.8:1). */
+  --color-info-text: #0369a1;
   --color-info-border: #bae6fd;
   --color-live: #15803d;
   --color-draft: #b45309;
@@ -246,6 +248,7 @@
   --color-neutral-solid: #374151;
   --color-info: #38bdf8;
   --color-info-bg: #0c2536;
+  --color-info-text: #7dd3fc;
   --color-info-border: #164e6e;
   --color-live: #4ade80;
   --color-draft: #fbbf24;
@@ -2033,9 +2036,9 @@
 .mvx-kpi__label {
   font-size: var(--font-size-body-sm);
   font-weight: 600;
-  color: var(--color-text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  /* The title carries the tile's unit ("Dispatched, t"): readable (4.8:1)
+     and as written — capitals turned the unit t into T. */
+  color: var(--color-text-quiet);
   /* One line: "Attainment Pct" wrapped into three lines in a narrow tile. */
   max-width: 100%;
   white-space: nowrap;
@@ -2071,12 +2074,12 @@
   font-size: 12px;
   color: var(--color-text-muted);
   margin-top: 4px;
-  white-space: nowrap;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.mvx-kpi__delta { font-weight: 600; }
+/* The difference moves to a line of its own rather than being cut: the
+   comparison needs up to 267px and a tile four abreast has 208px, so the
+   percentage was clipped at every width (2026-11-06). */
+.mvx-kpi__delta { font-weight: 600; white-space: nowrap; }
 .mvx-kpi__delta--good { color: var(--color-success); }
 .mvx-kpi__delta--bad { color: var(--color-danger); }
 
@@ -2196,7 +2199,7 @@
 .mvx-cell--tone-negative { background: var(--color-danger-bg) !important; color: var(--color-danger) !important; font-weight: 600; }
 .mvx-cell--tone-warning  { background: var(--color-warning-bg) !important; color: var(--color-warning-text) !important; font-weight: 600; }
 .mvx-cell--tone-positive { background: var(--color-success-bg) !important; color: var(--color-success) !important; font-weight: 600; }
-.mvx-cell--tone-info     { background: var(--color-info-bg) !important; color: var(--color-info) !important; font-weight: 600; }
+.mvx-cell--tone-info     { background: var(--color-info-bg) !important; color: var(--color-info-text) !important; font-weight: 600; }
 [class*="mvx-cell--tone-"] .mvx-cell-input { background: transparent; color: inherit; font-weight: inherit; }
 
 /* A business-maintained row's rename / remove, shown on hover or focus. */
@@ -2354,6 +2357,45 @@ td[data-sel] .mvx-cell-input { background: transparent; }
   left: 0;
   z-index: 3;
   box-shadow: inset -1px -2px 0 var(--color-border);
+}
+
+/* A bar or line chart's legend: one entry per series in the chart's order,
+   and how forecast periods are drawn. */
+.mvx-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  padding-top: 6px;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.mvx-chart-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.mvx-chart-legend__key { color: var(--color-text-quiet); }
+.mvx-chart-legend__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.mvx-chart-legend__swatch--hatched {
+  border: 1px solid currentColor;
+  background: repeating-linear-gradient(45deg, currentColor 0 1.5px, transparent 1.5px 4px);
+}
+
+/* A metric drawn as a total (metric.row_style "total"): a rule above its row
+   and its figures bold, so EBITDA stands apart from the lines it sums. */
+.mvx-grid-row--total > td {
+  border-top: 2px solid var(--color-border);
+  font-weight: 700;
+}
+.mvx-grid-row--total > td:first-child { font-weight: 800; }
+
+/* A grid widget's footer line (widget_props.footer): a source, a unit, a note. */
+.mvx-grid-footer {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-quiet);
 }
 
 .mvx-grid-legend {

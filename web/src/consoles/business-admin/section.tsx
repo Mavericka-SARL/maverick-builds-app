@@ -1,19 +1,23 @@
 import { useState } from "react";
-import { Inbox, History, Shield, KeyRound, Boxes } from "lucide-react";
+import { Inbox, History, Shield, KeyRound, Boxes, CalendarRange, Copy } from "lucide-react";
 import { useDemo } from "../../api/useDemo";
 import { AppsTab } from "../business/AppsTab";
 import { useModelLabel } from "../business/modelLabel";
 import { PageLayout } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 import { WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./BusinessAdminConsole";
+import { CalendarTab } from "./CalendarTab";
+import { CopyValuesTab } from "./CopyValuesTab";
 
-type Tab = "inbox" | "history" | "roles" | "access" | "models";
+type Tab = "inbox" | "history" | "roles" | "access" | "calendar" | "copy" | "models";
 
 const TAB_LABELS: Record<Tab, string> = {
   inbox: "Workflow Inbox",
   history: "Workflow History",
   roles: "Roles",
   access: "Access Rules",
+  calendar: "Calendar",
+  copy: "Copy values",
   models: "Models",
 };
 
@@ -21,7 +25,7 @@ const SECTION: SectionId = "business-admin";
 
 /**
  * The business_admin section of the console: Business Admin › Workflow Inbox
- * (the approvals it decides), Workflow History, Roles, Access Rules, Models — the
+ * (the approvals it decides), Workflow History, Roles, Access Rules, Calendar, Copy values, Models — the
  * inbox and Models only for someone without the user role, whose User group
  * already has them. Dashboards come from the user role alone. A tenant
  * admin's own group (Applications with model export/import, Users, Audit
@@ -48,6 +52,8 @@ export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput
           { id: t("history"), label: "Workflow History", icon: <History size={16} /> },
           { id: t("roles"), label: "Roles", icon: <Shield size={16} /> },
           { id: t("access"), label: "Access Rules", icon: <KeyRound size={16} /> },
+          { id: t("calendar"), label: "Calendar", icon: <CalendarRange size={16} /> },
+          { id: t("copy"), label: "Copy values", icon: <Copy size={16} /> },
           ...(isUser ? [] : [{ id: t("models"), label: "Models", icon: <Boxes size={16} /> }]),
         ],
       },
@@ -70,6 +76,8 @@ export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput
           {cur === "history" && <WorkflowHistory focusInstanceId={focusInstanceId} />}
           {cur === "roles" && <RolesTab builds={roles.includes("developer")} />}
           {cur === "access" && <AccessRulesTab />}
+          {cur === "calendar" && <CalendarTab />}
+          {cur === "copy" && <CopyValuesTab />}
           {cur === "models" && <AppsTab />}
         </PageLayout>
       );

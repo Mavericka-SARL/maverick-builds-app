@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
-import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, TIME_SUMMARIES } from "../../api/client";
+import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, type RowStyle, TIME_SUMMARIES } from "../../api/client";
 import { HighlightRulesEditor } from "./HighlightRulesEditor";
 import { ClosedRulesEditor } from "./ClosedRulesEditor";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter, Txt } from "../../ui";
@@ -242,6 +242,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(m.highlight_rules ?? []);
   const [closedRules, setClosedRules] = useState<ClosedRule[]>(m.closed_when ?? []);
+  const [rowStyle, setRowStyle] = useState<RowStyle>(m.row_style ?? "");
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
   // while a banner is showing, for this metric's own model.
@@ -274,6 +275,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       picklist_dimension_id: isPicklist ? picklistDim : "",
       picklist_allow_parents: isPicklist ? allowParents : false,
       highlight_rules: highlightRules,
+      row_style: rowStyle,
       ...(isInput ? { closed_when: closedRules } : {}),
     }),
     onSuccess: (data) => {
@@ -411,6 +413,13 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
               <span className="mvx-admin-muted">Tags:</span>
               <TagInput value={tags} onChange={setTags} inputWidth={110} />
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+              <span className="mvx-admin-muted">Row:</span>
+              <Select value={rowStyle} onChange={e => setRowStyle(e.target.value as RowStyle)} aria-label="Row style" style={{ width: 260 }}>
+                <option value="">As any row</option>
+                <option value="total">A total (bold, a rule above)</option>
+              </Select>
             </div>
             <div style={{ marginTop: 8 }}>
               <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>Highlight cells (the first rule that holds tints the cell):</div>

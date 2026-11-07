@@ -74,6 +74,64 @@ func (h *handler) workflowInstanceCancel(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]any{"status": "cancelled", "notified": res.Notified})
 }
 
+// workflowInstanceReopen handles POST /api/workflow/instances/{id}/reopen,
+// body {"reason"} (required): the same people who may cancel a run take back
+// a finished run's approval, which releases what it locks.
+func (h *handler) workflowInstanceReopen(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	ctx := r.Context()
+	instanceID := r.PathValue("id")
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		return
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if body.Reason == "" {
+		jsonErr(w, fmt.Errorf("say why this run is reopened: what it approved was agreed"), http.StatusBadRequest)
+		return
+	}
+	if len(body.Reason) > 500 {
+		jsonErr(w, fmt.Errorf("the reason is limited to 500 characters"), http.StatusBadRequest)
+		return
+	}
+	ok, err := h.workflowInstanceCancellable(ctx, act, instanceID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		jsonErr(w, fmt.Errorf("workflow instance not found"), http.StatusNotFound)
+		return
+	}
+	res, err := h.workflowStore(ctx).ReopenInstance(ctx, instanceID, act.UserID, body.Reason)
+	if errors.Is(err, workflow.ErrInstanceNotReopenable) {
+		jsonErr(w, err, http.StatusConflict)
+		return
+	}
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryDataChange, EventType: auditlog.EventWorkflowInstanceReopened,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ApplicationID: res.ApplicationID, ResourceType: "workflow_instance", ResourceID: instanceID,
+		Metadata: map[string]string{"workflow": res.WorkflowName, "reason": body.Reason, "notified": fmt.Sprint(res.Notified)},
+	})
+	jsonOK(w, map[string]any{"status": "cancelled", "notified": res.Notified})
+}
+
 // workflowInstanceCancellable reports whether act may cancel instanceID: a
 // developer who builds its application (test runs included, which are a
 // developer's own), or a business admin whose History lists it — the

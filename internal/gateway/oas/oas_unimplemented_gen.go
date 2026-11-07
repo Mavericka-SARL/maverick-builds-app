@@ -221,6 +221,18 @@ func (UnimplementedHandler) ConfirmAiProposal(ctx context.Context, params Confir
 	return r, ht.ErrNotImplemented
 }
 
+// CopyBAValues implements copyBAValues operation.
+//
+// In the live revision of the model the admin has open, every value typed into a cell of `from` is
+// written to the same cell of `to` (values a table of records posts stay with their records). Each
+// is checked as a typed value is (access rules, workflow locks, closed and posted cells), all or
+// nothing. At most 20,000 values; `metric_ids` narrows the copy.
+//
+// POST /api/business-admin/copy-values
+func (UnimplementedHandler) CopyBAValues(ctx context.Context, req *CopyBAValuesReq) (r CopyBAValuesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // CreateAPIToken implements createAPIToken operation.
 //
 // Make a personal API token for a script; the answer carries the token, once.
@@ -761,6 +773,15 @@ func (UnimplementedHandler) DeleteIntegrationConnection(ctx context.Context, par
 	return r, ht.ErrNotImplemented
 }
 
+// DeleteIntegrationTemplate implements deleteIntegrationTemplate operation.
+//
+// Delete an integration template.
+//
+// DELETE /api/developer/integration-templates/{id}
+func (UnimplementedHandler) DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (r DeleteIntegrationTemplateRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DeleteMetric implements deleteMetric operation.
 //
 // Delete a metric definition.
@@ -921,6 +942,18 @@ func (UnimplementedHandler) ExportGrid(ctx context.Context, params ExportGridPar
 //
 // GET /api/admin/models/{id}/export
 func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelParams) (r ExportModelRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ExtendBACalendar implements extendBACalendar operation.
+//
+// Adds the periods after the last one through the period containing `through`, placed as the last
+// one is: under quarters and fiscal years of the same kind, reused or created and named after their
+// peers. Nothing is renamed, moved or deleted. Only a time dimension of the active revision of the
+// model the admin has open.
+//
+// POST /api/business-admin/calendars/{dimId}/extend
+func (UnimplementedHandler) ExtendBACalendar(ctx context.Context, req *ExtendBACalendarReq, params ExtendBACalendarParams) (r ExtendBACalendarRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1599,6 +1632,15 @@ func (UnimplementedHandler) ListBAAvailable(ctx context.Context, params ListBAAv
 	return r, ht.ErrNotImplemented
 }
 
+// ListBACalendars implements listBACalendars operation.
+//
+// The time dimensions of the open model's active revision, with their first and last period.
+//
+// GET /api/business-admin/calendars
+func (UnimplementedHandler) ListBACalendars(ctx context.Context) (r ListBACalendarsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ListBARoleDashboards implements listBARoleDashboards operation.
 //
 // List the dashboard IDs assigned to a business role.
@@ -1799,6 +1841,15 @@ func (UnimplementedHandler) ListIntegrationRuns(ctx context.Context, params List
 	return r, ht.ErrNotImplemented
 }
 
+// ListIntegrationTemplates implements listIntegrationTemplates operation.
+//
+// The integration templates of the open model's tenant.
+//
+// GET /api/developer/integration-templates
+func (UnimplementedHandler) ListIntegrationTemplates(ctx context.Context) (r ListIntegrationTemplatesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ListMetrics implements listMetrics operation.
 //
 // List all metrics for the demo model.
@@ -1878,6 +1929,15 @@ func (UnimplementedHandler) ListRevisions(ctx context.Context, params ListRevisi
 	return r, ht.ErrNotImplemented
 }
 
+// ListRoleAccessRules implements listRoleAccessRules operation.
+//
+// List a business role's access rules, which every member of the role holds.
+//
+// GET /api/business-admin/roles/{id}/access-rules
+func (UnimplementedHandler) ListRoleAccessRules(ctx context.Context, params ListRoleAccessRulesParams) (r ListRoleAccessRulesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ListScimTokens implements listScimTokens operation.
 //
 // This tenant's SCIM tokens, revoked ones included, never the secret (administrators; enterprise
@@ -1913,6 +1973,15 @@ func (UnimplementedHandler) ListUserAccessRules(ctx context.Context, params List
 //
 // GET /api/apps
 func (UnimplementedHandler) ListUserApps(ctx context.Context) (r []UserApp, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListUserRoleAccessRules implements listUserRoleAccessRules operation.
+//
+// The access rules a user holds through this workspace's business roles.
+//
+// GET /api/business-admin/users/{id}/role-access-rules
+func (UnimplementedHandler) ListUserRoleAccessRules(ctx context.Context, params ListUserRoleAccessRulesParams) (r ListUserRoleAccessRulesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2142,6 +2211,17 @@ func (UnimplementedHandler) RenameAiSession(ctx context.Context, req *RenameAiSe
 	return r, ht.ErrNotImplemented
 }
 
+// ReopenWorkflowInstance implements reopenWorkflowInstance operation.
+//
+// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
+// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
+// required: it goes into the audit log and the message the people involved receive.
+//
+// POST /api/workflow/instances/{id}/reopen
+func (UnimplementedHandler) ReopenWorkflowInstance(ctx context.Context, req *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (r ReopenWorkflowInstanceRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ReorderDashboards implements reorderDashboards operation.
 //
 // Dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the
@@ -2262,6 +2342,16 @@ func (UnimplementedHandler) RunIntegration(ctx context.Context, req *Integration
 //
 // PUT /api/ai/settings
 func (UnimplementedHandler) SaveAiSettings(ctx context.Context, req *AiSaveSettingsRequest) (r *SaveAiSettingsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// SaveIntegrationTemplate implements saveIntegrationTemplate operation.
+//
+// Its target is kept by name and its config as it is (it names metrics, dimensions and fields). A
+// REST connector or a model link holds a connection or another model and cannot be a template.
+//
+// POST /api/developer/integration-templates
+func (UnimplementedHandler) SaveIntegrationTemplate(ctx context.Context, req *SaveIntegrationTemplateReq) (r SaveIntegrationTemplateRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2477,6 +2567,16 @@ func (UnimplementedHandler) SetDefaultModel(ctx context.Context, params SetDefau
 //
 // PUT /api/developer/models/{id}/date-format
 func (UnimplementedHandler) SetModelDateFormat(ctx context.Context, req *SetModelDateFormatReq, params SetModelDateFormatParams) (r SetModelDateFormatRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// SetRoleAccessRules implements setRoleAccessRules operation.
+//
+// Every member of the role holds these rules as their own; where one of them and a person's own rule
+// land on the same member or metric, the stricter wins.
+//
+// PUT /api/business-admin/roles/{id}/access-rules
+func (UnimplementedHandler) SetRoleAccessRules(ctx context.Context, req *SetUserAccessRulesRequest, params SetRoleAccessRulesParams) (r SetRoleAccessRulesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2967,6 +3067,15 @@ func (UnimplementedHandler) UploadAiDocument(ctx context.Context, req *UploadAiD
 //
 // PUT /api/admin/plans/{key}
 func (UnimplementedHandler) UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (r UpsertPlanRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// UseIntegrationTemplate implements useIntegrationTemplate operation.
+//
+// Make a template in the open model's working revision, its target found by name.
+//
+// POST /api/developer/integration-templates/{id}/use
+func (UnimplementedHandler) UseIntegrationTemplate(ctx context.Context, req OptUseIntegrationTemplateReq, params UseIntegrationTemplateParams) (r UseIntegrationTemplateRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

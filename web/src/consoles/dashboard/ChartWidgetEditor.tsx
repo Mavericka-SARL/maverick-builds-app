@@ -4,6 +4,7 @@ import { api, type GridChartConfig, type GridChartType, type DemoContext } from 
 import { CHART_TYPE_LABELS } from "./chartTypes";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
+import { MemberChooser } from "../developer/MemberChooser";
 
 const inputS: React.CSSProperties = {
   border: "1px solid var(--color-border-muted)", borderRadius: 4, padding: "4px 8px",
@@ -89,7 +90,8 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
         newContextDefaults[d.id] = contextDefaults[d.id] ?? defaultLeafCode(d) ?? "";
       }
     });
-    onChange({ dimension_id: dimId, context_defaults: newContextDefaults });
+    // Members chosen on the old plotted dimension name nothing on the new one.
+    onChange({ dimension_id: dimId, context_defaults: newContextDefaults, plotted_members: undefined });
   }
 
   function toggleMetric(metricId: string) {
@@ -160,6 +162,25 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
               );
             })}
           </div>
+          {isBar && metricIds.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <label style={lbl}>LEGEND NAMES</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {metricIds.map(id => {
+                  const m = metrics.find(x => x.id === id);
+                  return (
+                    <input key={id} style={{ ...inputS, fontSize: 12 }} aria-label={`Legend name for ${m?.label || m?.name || id}`}
+                      placeholder={m?.label || m?.name || id} value={draft.series_names?.[id] ?? ""}
+                      onChange={e => {
+                        const next = { ...(draft.series_names ?? {}) };
+                        if (e.target.value) next[id] = e.target.value; else delete next[id];
+                        onChange({ series_names: Object.keys(next).length ? next : undefined });
+                      }} />
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -252,6 +273,14 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
         />
         Hide totals (e.g. "All Regions")
       </label>
+
+      {dimensionId && (
+        <div>
+          <label style={lbl}>MEMBERS PLOTTED</label>
+          <MemberChooser label="Members plotted" members={dims.find(d => d.id === dimensionId)?.members ?? []}
+            value={draft.plotted_members ?? []} onChange={codes => onChange({ plotted_members: codes.length ? codes : undefined })} />
+        </div>
+      )}
 
       {(chartType === "bar" || chartType === "line") && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>

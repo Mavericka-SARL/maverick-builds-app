@@ -601,6 +601,8 @@ type createMetricParams struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen closes its cells to input (metricformula.ClosedRule).
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
+	RowStyle string `json:"row_style"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -737,6 +739,15 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set highlight rules: %w", err)
 		}
 	}
+	if p.RowStyle != "" {
+		style, err := metricformula.RowStyle(p.RowStyle)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, newID, style); err != nil {
+			return "", "", fmt.Errorf("set row style: %w", err)
+		}
+	}
 	if string(closedRules) != "[]" {
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules)); err != nil {
 			return "", "", fmt.Errorf("set closed rules: %w", err)
@@ -797,6 +808,8 @@ type updateMetricParams struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen: left out keeps them; [] removes them.
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// RowStyle: "total" or ""; left out keeps it.
+	RowStyle *string `json:"row_style"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -1026,6 +1039,15 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, p.MetricID, string(highlights)); err != nil {
 			return "", "", fmt.Errorf("set highlight rules: %w", err)
+		}
+	}
+	if p.RowStyle != nil {
+		style, err := metricformula.RowStyle(*p.RowStyle)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, p.MetricID, style); err != nil {
+			return "", "", fmt.Errorf("set row style: %w", err)
 		}
 	}
 	if has("closed_when") {
@@ -2470,6 +2492,13 @@ type selectorBarParam struct {
 	Dimension   string `json:"dimension"`
 	DimensionID string `json:"dimension_id"`
 	Default     string `json:"default"`
+	// Members are the member codes it offers, in order; none: every member.
+	Members []string `json:"members"`
+	// DefaultMetric (name or id) makes the default follow the data:
+	// modeledit.SelectorBarEntry.DefaultMetricID, moved DefaultOffset on.
+	DefaultMetric   string `json:"default_metric"`
+	DefaultMetricID string `json:"default_metric_id"`
+	DefaultOffset   int    `json:"default_offset"`
 }
 
 // selectorBarEntries resolves each entry's dimension, by name or id, into
@@ -2493,7 +2522,15 @@ func (e *WriteExecutor) selectorBarEntries(ctx context.Context, ps []selectorBar
 			}
 			ref = id
 		}
-		out = append(out, modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default})
+		entry := modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default, Members: p.Members, DefaultOffset: p.DefaultOffset}
+		if m := firstNonEmpty(p.DefaultMetric, p.DefaultMetricID); m != "" {
+			id, err := e.requireInModel(ctx, "metric", m)
+			if err != nil {
+				return nil, fmt.Errorf("selector_bar default_metric: %w", err)
+			}
+			entry.DefaultMetricID = id
+		}
+		out = append(out, entry)
 	}
 	return out, nil
 }
@@ -2687,8 +2724,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -2970,7 +3007,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 			),
 			new_forms AS (
-				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only)
+				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
+					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
 				SELECT f.model_id, f.name, f.label,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -2980,7 +3018,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 							ORDER BY e.ord)
 						FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.fields) = 'array' THEN f.fields ELSE '[]'::jsonb END) WITH ORDINALITY AS e(elem, ord)
 					), '[]'::jsonb),
-					$2::uuid, f.own_records_only
+					$2::uuid, f.own_records_only,
+					f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
+					f.member_label_field, f.member_root_label, f.create_roles
 				FROM model.form_def f
 				WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 				RETURNING id AS new_id, name
@@ -3402,7 +3442,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				return "", "", fmt.Errorf("remap widget props into new revision: %w", err)
 			}
 		}
-		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, e.modelID, newID, dimIDMap); err != nil {
+		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, e.modelID, newID, dimIDMap, metricIDMap); err != nil {
 			return "", "", fmt.Errorf("remap selector bars into new revision: %w", err)
 		}
 		if err := modeltransfer.RemapRevisionTables(ctx, tx, e.modelID, newID, srcID); err != nil {
@@ -3638,12 +3678,14 @@ type tableSettingParams struct {
 	MemberLabelField *string `json:"member_label_field"`
 	MemberRootLabel  *string `json:"member_root_label"`
 	EditAccess       *string `json:"edit_access"`
+	// CreateRoles: the roles whose people may add records; [] for anyone.
+	CreateRoles *[]string `json:"create_roles"`
 }
 
 // applyTableSettings resolves p's dimension in revID and saves the
 // settings on form; it describes what it set for the tool's answer.
 func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.FormDef, revID string, p tableSettingParams) (string, error) {
-	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess}
+	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess, CreateRoles: p.CreateRoles}
 	if p.KeepsDimension != nil {
 		ref := strings.TrimSpace(*p.KeepsDimension)
 		id := ""
@@ -3658,7 +3700,7 @@ func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.Fo
 		}
 		s.KeepsDimensionID = &id
 	}
-	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil && s.EditAccess == nil {
+	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil && s.EditAccess == nil && s.CreateRoles == nil {
 		return "", nil
 	}
 	added, err := recordpost.ApplyTableSettingsOn(ctx, e.pool, form, s)
@@ -3671,6 +3713,13 @@ func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.Fo
 	}
 	if s.EditAccess != nil {
 		note += ", records editable by " + map[bool]string{true: "everyone who sees them", false: "their creator and administrators"}[form.EveryoneEdits()]
+	}
+	if s.CreateRoles != nil {
+		if len(form.CreateRoles) == 0 {
+			note += ", records added by anyone who opens the application"
+		} else {
+			note += ", records added only by " + strings.Join(form.CreateRoles, ", ") + " and administrators"
+		}
 	}
 	return note, nil
 }

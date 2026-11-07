@@ -215,3 +215,28 @@ func TestFormIntegrationPatchTriggeredReapplyIsAudited(t *testing.T) {
 		t.Errorf("metadata[trigger] = %q, want %q", meta["trigger"], "mapping_updated")
 	}
 }
+
+// A PATCH names only what it changes; the rest of the mapping stays
+// (2026-11-07: dimension_mappings alone was refused for the target metric it
+// did not name, and would have blanked the name and source field).
+func TestFormIntegrationPatchKeepsWhatItOmits(t *testing.T) {
+	f := setupDevAuthoringFixture(t)
+	status, body := f.do(t, "POST", "/api/developer/form-integrations", map[string]string{
+		"form_id": f.formID, "name": "Post to Revenue", "source_field": "amount", "target_metric_id": f.metricID,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+	if status, body := f.do(t, "PATCH", "/api/developer/form-integrations/"+id, map[string]any{"aggregation": "count"}); status != http.StatusOK {
+		t.Fatalf("partial PATCH: %d %v", status, body)
+	}
+	var name, field, target, agg string
+	if err := f.pool.QueryRow(context.Background(), `SELECT name, source_field, target_metric_id::text, aggregation
+		FROM model.form_metric_mapping WHERE id = $1::uuid`, id).Scan(&name, &field, &target, &agg); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Post to Revenue" || field != "amount" || target != f.metricID || agg != "count" {
+		t.Errorf("after a PATCH of aggregation alone: %q %q %s %q", name, field, target, agg)
+	}
+}

@@ -54,7 +54,8 @@ const uuidPattern = `'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // ref_id with ~* before casting it to uuid.
 const UUIDPatternSQL = uuidPattern
 
-// rulesForRevisionSQL translates user $1's rules into revision $2 by
+// rulesForRevisionSQL translates user $1's rules — their own and their
+// business roles' (identity.effective_access_rule, migration 156) — into revision $2 by
 // LINEAGE (migration 099). A rule stores the id of one member / metric row
 // and, in ref_lineage_id, that row's lineage — the identity it shares with
 // its copies in every revision of the model, whatever they are named. A
@@ -72,7 +73,7 @@ const UUIDPatternSQL = uuidPattern
 const rulesForRevisionSQL = `
 WITH r AS MATERIALIZED (
 	SELECT rule_type, ref_id, access, ref_lineage_id
-	FROM identity.user_access_rule
+	FROM identity.effective_access_rule
 	WHERE user_id = $1::uuid
 ), lin AS (
 	SELECT r.rule_type, r.access, COALESCE(r.ref_lineage_id, om.lineage_id, omd.lineage_id) AS lineage
@@ -108,7 +109,7 @@ WHERE rule_type NOT IN ('dimension_member', 'metric')
 // rulesAsStoredSQL is the revision-less form (a model without revisions):
 // every rule as stored.
 const rulesAsStoredSQL = `
-SELECT rule_type, ref_id, access FROM identity.user_access_rule WHERE user_id = $1::uuid
+SELECT rule_type, ref_id, access FROM identity.effective_access_rule WHERE user_id = $1::uuid
 `
 
 // RulesForRevision loads userID's access rules and resolves each one
@@ -365,9 +366,28 @@ func ReplaceUserMetricRulesInRevision(ctx context.Context, tx Execer, userID, re
 	return replaceRules(ctx, tx, userID, rules, metricInRevisionScopeSQL, revisionID)
 }
 
+// ruleTable is a table of access rules and the column naming whose they are.
+type ruleTable struct{ name, owner string }
+
+var (
+	userRuleTable = ruleTable{"identity.user_access_rule", "user_id"}
+	roleRuleTable = ruleTable{"identity.business_role_access_rule", "role_id"}
+)
+
+// ReplaceRoleRules is ReplaceUserRules for a business role's rules
+// (migration 156), which every member of the role holds.
+func ReplaceRoleRules(ctx context.Context, tx Execer, roleID string, rules []RuleInput) error {
+	return replaceRulesIn(ctx, tx, roleRuleTable, roleID, rules, "")
+}
+
 // replaceRules deletes userID's rules that match scopeSQL (all of them when
 // it is empty) and are not in rules, then upserts rules. scopeArgs are $4...
 func replaceRules(ctx context.Context, tx Execer, userID string, rules []RuleInput, scopeSQL string, scopeArgs ...any) error {
+	return replaceRulesIn(ctx, tx, userRuleTable, userID, rules, scopeSQL, scopeArgs...)
+}
+
+func replaceRulesIn(ctx context.Context, tx Execer, t ruleTable, ownerID string, rules []RuleInput, scopeSQL string, scopeArgs ...any) error {
+	userID := ownerID
 	types := make([]string, len(rules))
 	refs := make([]string, len(rules))
 	for i, r := range rules {
@@ -375,19 +395,19 @@ func replaceRules(ctx context.Context, tx Execer, userID string, rules []RuleInp
 	}
 	args := append([]any{userID, types, refs}, scopeArgs...)
 	if _, err := tx.Exec(ctx, `
-		DELETE FROM identity.user_access_rule
-		WHERE user_id = $1::uuid
+		DELETE FROM `+t.name+`
+		WHERE `+t.owner+` = $1::uuid
 		  AND (rule_type, ref_id) NOT IN (SELECT t, r FROM unnest($2::text[], $3::text[]) AS u(t, r))`+scopeSQL,
 		args...); err != nil {
 		return fmt.Errorf("clear removed rules: %w", err)
 	}
 	for _, r := range rules {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access, ref_lineage_id)
+			INSERT INTO `+t.name+` (`+t.owner+`, rule_type, ref_id, access, ref_lineage_id)
 			VALUES ($1::uuid, $2::text, $3::text, $4::text, `+refLineageSQL+`)
-			ON CONFLICT (user_id, rule_type, ref_id) DO UPDATE
+			ON CONFLICT (`+t.owner+`, rule_type, ref_id) DO UPDATE
 			SET access = EXCLUDED.access,
-			    ref_lineage_id = COALESCE(EXCLUDED.ref_lineage_id, identity.user_access_rule.ref_lineage_id)`,
+			    ref_lineage_id = COALESCE(EXCLUDED.ref_lineage_id, `+t.name+`.ref_lineage_id)`,
 			userID, r.Type, r.RefID, r.Access, refUUID(r.RefID)); err != nil {
 			return fmt.Errorf("rule %s %s: %w", r.Type, r.RefID, err)
 		}
@@ -415,12 +435,22 @@ func replaceRules(ctx context.Context, tx Execer, userID string, rules []RuleInp
 // Every activation runs it: the gateway's Set active and AI promotion,
 // and internal/startersync bringing a guide model up to date.
 func RemapRulesToRevision(ctx context.Context, db Execer, modelID, revisionID string) error {
+	for _, t := range []ruleTable{userRuleTable, roleRuleTable} {
+		if err := remapRuleTable(ctx, db, t, modelID, revisionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// remapRuleTable is RemapRulesToRevision for one table of rules.
+func remapRuleTable(ctx context.Context, db Execer, t ruleTable, modelID, revisionID string) error {
 	// Every rule writer sets ref_lineage_id; a rule stored without one (the
 	// resolver's belt-and-braces case) takes the lineage of the row its
 	// ref_id points at, here as in writeguard.RulesForRevision, so it is
 	// moved too.
 	if _, err := db.Exec(ctx, `
-		UPDATE identity.user_access_rule r
+		UPDATE `+t.name+` r
 		SET ref_lineage_id = COALESCE(
 		        (SELECT m.lineage_id FROM model.dimension_member m
 		         WHERE r.rule_type = 'dimension_member' AND m.id = CASE WHEN r.ref_id ~* `+UUIDPatternSQL+` THEN r.ref_id::uuid END),
@@ -444,18 +474,18 @@ func RemapRulesToRevision(ctx context.Context, db Execer, modelID, revisionID st
 			scope = "AND nm.model_id = $1::uuid AND nm.revision_id = $2::uuid"
 		}
 		if _, err := db.Exec(ctx, `
-			UPDATE identity.user_access_rule r
+			UPDATE `+t.name+` r
 			SET ref_id = c.new_ref
 			FROM (
-				SELECT DISTINCT ON (o.user_id, o.ref_lineage_id) o.id, nm.id::text AS new_ref
-				FROM identity.user_access_rule o
+				SELECT DISTINCT ON (o.`+t.owner+`, o.ref_lineage_id) o.id, nm.id::text AS new_ref
+				FROM `+t.name+` o
 				JOIN `+q.target+` ON nm.lineage_id = o.ref_lineage_id
 				WHERE o.rule_type = $3::text `+scope+`
 				  AND o.ref_id <> nm.id::text
 				  AND NOT EXISTS (
-				      SELECT 1 FROM identity.user_access_rule x
-				      WHERE x.user_id = o.user_id AND x.rule_type = o.rule_type AND x.ref_id = nm.id::text)
-				ORDER BY o.user_id, o.ref_lineage_id,
+				      SELECT 1 FROM `+t.name+` x
+				      WHERE x.`+t.owner+` = o.`+t.owner+` AND x.rule_type = o.rule_type AND x.ref_id = nm.id::text)
+				ORDER BY o.`+t.owner+`, o.ref_lineage_id,
 				         CASE o.access WHEN 'hidden' THEN 0 WHEN 'read' THEN 1 ELSE 2 END, o.id
 			) c
 			WHERE r.id = c.id

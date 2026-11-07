@@ -269,6 +269,23 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		                                            THEN jsonb_set(e, '{default}', to_jsonb($2::text)) ELSE e END ORDER BY o)
 		                      FROM jsonb_array_elements(selector_bar) WITH ORDINALITY AS x(e, o))
 		  WHERE selector_bar @> jsonb_build_array(jsonb_build_object('dimension_id', $1::text, 'default', $3::text))`, "dashboard selector_bar"},
+		// The members a selector offers, and a chart plots, by code.
+		{`UPDATE model.dashboard_def
+		  SET selector_bar = (SELECT jsonb_agg(CASE WHEN e->>'dimension_id' = $1 AND jsonb_typeof(e->'members') = 'array' AND e->'members' ? $3
+		                                            THEN jsonb_set(e, '{members}', (SELECT jsonb_agg(CASE WHEN m = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE m END ORDER BY mo)
+		                                                                            FROM jsonb_array_elements(e->'members') WITH ORDINALITY AS y(m, mo)))
+		                                            ELSE e END ORDER BY o)
+		                      FROM jsonb_array_elements(selector_bar) WITH ORDINALITY AS x(e, o))
+		  WHERE jsonb_typeof(selector_bar) = 'array'
+		    AND EXISTS (SELECT 1 FROM jsonb_array_elements(selector_bar) e
+		                WHERE e->>'dimension_id' = $1 AND jsonb_typeof(e->'members') = 'array' AND e->'members' ? $3)`, "dashboard selector_bar members"},
+		{`UPDATE model.dashboard_widget
+		  SET widget_props = jsonb_set(widget_props, '{chart,plotted_members}',
+		      (SELECT jsonb_agg(CASE WHEN m = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE m END ORDER BY o)
+		       FROM jsonb_array_elements(widget_props->'chart'->'plotted_members') WITH ORDINALITY AS x(m, o)))
+		  WHERE widget_props->'chart'->>'dimension_id' = $1
+		    AND jsonb_typeof(widget_props->'chart'->'plotted_members') = 'array'
+		    AND widget_props->'chart'->'plotted_members' ? $3`, "widget chart plotted_members"},
 		// A highlight rule names the members it colours by code — of its
 		// dimension (by name), or of any when it names none.
 		{`UPDATE model.metric_def md

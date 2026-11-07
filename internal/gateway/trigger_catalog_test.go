@@ -106,6 +106,9 @@ func TestBuildCatalogFormAndIntegrationEvents(t *testing.T) {
 		t.Fatalf("insert integration_def: %v", err)
 	}
 
+	var gridID string
+	mustScan(pool.QueryRow(ctx, `INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid, 'Plant capacity') RETURNING id::text`, modelID).Scan(&gridID), "grid")
+
 	catalog, err := buildWorkflowTriggerEventCatalog(ctx, pool, appID, "")
 	if err != nil {
 		t.Fatalf("buildWorkflowTriggerEventCatalog: %v", err)
@@ -164,6 +167,24 @@ func TestBuildCatalogFormAndIntegrationEvents(t *testing.T) {
 
 	if _, ok := byKey["actuals_csv.import.failed"]; !ok {
 		t.Error("expected actuals_csv.import.failed event")
+	}
+
+	// The two events the engine always dispatched and the catalog never
+	// named: a workflow could not start on them from the console.
+	for key, want := range map[string]struct{ sourceType, sourceID, category string }{
+		"form.approve":           {"system", "", "form"},
+		"expense_claim.approved": {"form", "", "form"},
+		"grid.change":            {"system", "", "planning"},
+		"plant_capacity.changed": {"grid", gridID, "planning"},
+	} {
+		ev, ok := byKey[key]
+		if !ok {
+			t.Errorf("expected the %s event", key)
+			continue
+		}
+		if ev.SourceType != want.sourceType || ev.Category != want.category || (want.sourceID != "" && ev.SourceID != want.sourceID) {
+			t.Errorf("%s: source %s %s, category %s; want %+v", key, ev.SourceType, ev.SourceID, ev.Category, want)
+		}
 	}
 
 	// Planning events were static placeholders nothing ever dispatched; a

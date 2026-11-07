@@ -68,7 +68,13 @@ func (h *handler) checkRestAPITargets(r *http.Request, modelID, revisionID strin
 	if cfg != nil {
 		targetType, targetID = string(cfg.TargetType), cfg.TargetID
 	}
-	return integration.CheckOwnership(r.Context(), h.db, modelID, revisionID, targetType, targetID, connectionID)
+	if err := integration.CheckOwnership(r.Context(), h.db, modelID, revisionID, targetType, targetID, connectionID); err != nil {
+		return err
+	}
+	if cfg != nil && cfg.ReplaceBy != "" && cfg.TargetType == integration.TargetForm {
+		return h.checkReplaceBy(r.Context(), cfg.TargetID, cfg.ReplaceBy)
+	}
+	return nil
 }
 
 // checkIntegrationTarget is the same check for a legacy csv_import /

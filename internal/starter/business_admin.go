@@ -157,10 +157,12 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 
 **Business Admin** is where you set things up:
 
-- **Workflow History** — the latest requests, with every decision and comment; where you unstick one
+- **Workflow History** — the latest requests, with every decision and comment; where you unstick one, or reopen an approved one, with a reason
 - **Roles** — groups of people, and which dashboards each group may open
-- **Access Rules** — per person, which numbers they may change, only read, or not see
-- **Models** — which model you are working in, and which revision of it is live`, 316),
+- **Access Rules** — per person or per role, which numbers they may change, only read, or not see
+- **Calendar** — add months when planning needs to run further than the model does
+- **Copy values** — write one member's values into another, such as the plan into the budget, before you lock it
+- **Models** — which model you are working in, and which revision of it is live`, 380),
 
 		baText(`## Three layers decide what someone can do
 
@@ -258,7 +260,7 @@ func baWhoSees() modeltransfer.Dashboard {
 	return baPage("ba-dash-4-access", "4 · Who sees which numbers",
 		baText(`# Who sees which numbers
 
-Roles decide which pages a person opens. **Access rules** decide, person by person, which numbers on those pages they can change, only read, or not see at all. A rule is set on a dimension member — an office, a region — or on a metric.`, 112),
+Roles decide which pages a person opens. **Access rules** decide which numbers on those pages they can change, only read, or not see at all, set for one person or for a role, which everyone in it then holds. A rule is set on a dimension member — an office, a region — or on a metric.`, 132),
 
 		baText(`## Three levels
 
@@ -377,7 +379,7 @@ func baLayers() string {
 	s := svgHead(860, 250)
 	rows := []struct{ name, where, what, how, note string }{
 		{"Roles", "Business Admin › Roles", "Which dashboards", "a person can open", "admins and developers see all"},
-		{"Access rules", "Business Admin › Access Rules", "Which numbers", "Write · Read · Hidden", "set per person, you included"},
+		{"Access rules", "Business Admin › Access Rules", "Which numbers", "Write · Read · Hidden", "set per person or per role, you included"},
 		{"Open requests", "running or approved workflows", "Which numbers are locked", "while it waits, and once approved", "released by reject or cancel"},
 	}
 	for i, r := range rows {

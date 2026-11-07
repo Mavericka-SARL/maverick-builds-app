@@ -78,7 +78,7 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		importpkg.RenumberRows(rows, body.RowLines)
 		return header, rows, body.FileName, err
 	}
-	return nil, nil, "", fmt.Errorf("csv or xlsx_base64 field required")
+	return nil, nil, "", fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)")
 }
 
 // rowsCSV re-serializes mapped rows for the form and dimension importers,

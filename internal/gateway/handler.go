@@ -471,6 +471,10 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/developer/debug/calc", "developer", dev(h.debugCalc))
 	register("GET", "/api/developer/integrations", "developer", dev(h.developerIntegrations))
 	register("POST", "/api/developer/integrations", "developer", dev(h.developerIntegrations))
+	register("GET", "/api/developer/integration-templates", "developer", dev(h.developerIntegrationTemplates))
+	register("POST", "/api/developer/integration-templates", "developer", dev(h.developerIntegrationTemplates))
+	register("POST", "/api/developer/integration-templates/{id}/use", "developer", dev(h.developerIntegrationTemplateUse))
+	register("DELETE", "/api/developer/integration-templates/{id}", "developer", dev(h.developerIntegrationTemplateDelete))
 	register("PATCH", "/api/developer/integrations/{id}/config", "developer", dev(h.developerIntegrationAction))
 	register("GET", "/api/developer/integrations/{id}/runs", "developer", dev(h.developerIntegrationAction))
 	register("GET", "/api/developer/integrations/{id}", "developer", dev(h.developerIntegrationAction))
@@ -637,7 +641,13 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/business-admin/users", "business_admin", ba(h.baUsers))
 	register("GET", "/api/business-admin/users/{id}/access-rules", "business_admin", ba(h.baUserAction))
 	register("PUT", "/api/business-admin/users/{id}/access-rules", "business_admin", ba(h.baUserAction))
+	register("GET", "/api/business-admin/users/{id}/role-access-rules", "business_admin", ba(h.baUserRoleRules))
+	register("GET", "/api/business-admin/roles/{id}/access-rules", "business_admin", ba(h.baRoleAccessRules))
+	register("PUT", "/api/business-admin/roles/{id}/access-rules", "business_admin", ba(h.baRoleAccessRules))
 	register("GET", "/api/business-admin/available", "business_admin", ba(h.baAvailable))
+	register("GET", "/api/business-admin/calendars", "business_admin", ba(h.baCalendars))
+	register("POST", "/api/business-admin/calendars/{dimId}/extend", "business_admin", ba(h.baCalendarExtend))
+	register("POST", "/api/business-admin/copy-values", "business_admin", ba(h.baCopyValues))
 
 	// Workflow / notifications (any authenticated user)
 	register("POST", "/api/workflow/submit", "any", cors(h.workflowSubmit))
@@ -649,6 +659,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
 	register("POST", "/api/workflow/instances/{id}/cancel", "developer_or_business_admin", baOrDev(h.workflowInstanceCancel))
+	register("POST", "/api/workflow/instances/{id}/reopen", "developer_or_business_admin", baOrDev(h.workflowInstanceReopen))
 	register("GET", "/api/notifications", "any", cors(h.notifications))
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
 	register("DELETE", "/api/notifications", "any", cors(h.deleteNotifications))
@@ -1923,6 +1934,8 @@ type metricRow struct {
 	// ClosedWhen: the cells that take no input (metricformula.ClosedRule,
 	// migration 147). Only set in /api/grid.
 	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
+	// RowStyle "total" draws the metric's row as a total (migration 159).
+	RowStyle string `json:"row_style,omitempty"`
 }
 
 // aggregateEvaluated reports metricRow.AggregateEvaluated for m — the
@@ -2004,7 +2017,7 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 		-- null, never a number that includes what they cannot see.
 		restricted AS (
 			SELECT EXISTS (
-				SELECT 1 FROM identity.user_access_rule ar
+				SELECT 1 FROM identity.effective_access_rule ar
 				WHERE ar.user_id = $3::uuid AND ar.rule_type = 'dimension_member' AND ar.access = 'hidden'
 			) AS any_hidden
 		)
@@ -3686,7 +3699,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
 			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
-			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when
+			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when, rev.row_style
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3700,7 +3713,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3711,7 +3724,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3770,7 +3783,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3780,7 +3793,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -3894,8 +3907,9 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	//     the ENTIRE read onto the multi-second recompute for every
 	//     sparse-data pin (a product item with facts in only some cells).
 	// The one remaining full-fallback trigger: a metric not dimensioned by
-	// the pin with a NON-zero total — its scoped value flows through its
-	// inputs and genuinely needs the recompute.
+	// the pin with a NON-zero total — a pin on a dimension related to its own
+	// reaches it through its inputs, and only the scoped read tells that from
+	// a pin that leaves it as it is (readsAcrossScope).
 	sliceFast := false
 	var sliceVals map[string]float64
 	if totalsOnly && len(scopePinned) == 1 && len(hiddenByDim) == 0 {
@@ -3945,9 +3959,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				if dimmedByPin {
 					continue // no slice row → omitted from totals (renders "—")
 				}
-				// Dimensioned, but by other dimensions than the pin. Its
-				// scoped value comes through its inputs and can't be read
-				// off the '{}' row — unless it's zero everywhere (a sum of
+				// Dimensioned, but by other dimensions than the pin. Left to
+				// the scoped read — unless it's zero everywhere (a sum of
 				// non-negative parts), in which case its slice is zero too.
 				loadTotals()
 				if calcTotals[m.ID] == 0 {
@@ -4762,8 +4775,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5060,7 +5073,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 		),
 		new_forms AS (
-			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only)
+			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
+				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
 			SELECT f.model_id, f.name, f.label,
 				COALESCE((
 					SELECT jsonb_agg(
@@ -5070,7 +5084,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 						ORDER BY e.ord)
 					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.fields) = 'array' THEN f.fields ELSE '[]'::jsonb END) WITH ORDINALITY AS e(elem, ord)
 				), '[]'::jsonb),
-				$2::uuid, f.own_records_only
+				$2::uuid, f.own_records_only,
+				f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
+				f.member_label_field, f.member_root_label, f.create_roles
 			FROM model.form_def f
 			WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 			RETURNING id AS new_id, name
@@ -5472,7 +5488,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		}
 
 		// A dashboard's selector bar names its dimensions by id too.
-		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, modelID, newID, dimMap); err != nil {
+		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, modelID, newID, dimMap, metricMap); err != nil {
 			return "", fmt.Errorf("revision selector-bar remap failed: %w", err)
 		}
 	}
@@ -5676,8 +5692,10 @@ type devMetric struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen: the cells that take no input (metricformula.ClosedRule).
 	ClosedWhen json.RawMessage `json:"closed_when"`
-	DependsOn  []string        `json:"depends_on"`
-	DependedBy []string        `json:"depended_by"`
+	// RowStyle: "total" draws the metric's row as a total; "" as any row.
+	RowStyle   string   `json:"row_style"`
+	DependsOn  []string `json:"depends_on"`
+	DependedBy []string `json:"depended_by"`
 	// Tags: free-form labels the developer console filters by.
 	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
@@ -5735,7 +5753,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when,
+		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when, m.row_style,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5767,7 +5785,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dm.RowStyle, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5849,6 +5867,8 @@ type addMetricReq struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen closes cells to input (metricformula.CheckClosedRules).
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
+	RowStyle string `json:"row_style"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -5909,6 +5929,11 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	closedRules, err := metricformula.CheckClosedRules(ctx, h.db.For(ctx), modelID, req.RevisionID, "", req.ClosedWhen)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	rowStyle, err := metricformula.RowStyle(req.RowStyle)
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
@@ -6022,6 +6047,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	if metricInsertErr == nil && string(closedRules) != "[]" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules))
 	}
+	if metricInsertErr == nil && rowStyle != "" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, newID, rowStyle)
+	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
 			jsonErr(w, metricformula.MetricNameTaken(metricInsertErr, req.Name), http.StatusConflict)
@@ -6104,6 +6132,9 @@ type historyInstance struct {
 	StartedAt   string         `json:"started_at"`
 	CompletedAt *string        `json:"completed_at,omitempty"`
 	Steps       []historyStep  `json:"steps"`
+	// Reopenable: finished and approved, so only the reopen route may take it
+	// out of completed.
+	Reopenable bool `json:"reopenable,omitempty"`
 	// Same resolution as taskRow.ContextDisplay — history readers need
 	// "Canada", not "CA", exactly as much as approvers do.
 	ContextDisplay []taskContextEntry `json:"context_display,omitempty"`
@@ -6192,10 +6223,12 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 		SELECT wi.id::text, wd.name, wi.status::text, wi.context,
 		       wi.started_at::text,
 		       CASE WHEN wi.completed_at IS NOT NULL THEN wi.completed_at::text END,
-		       COALESCE(wi.context_schema_snapshot, wd.context_schema)
+		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
+		       `+writeguard.ReopenableSQL+`
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		JOIN core.application app ON app.id = wd.application_id
+		`+writeguard.LastApprovalJoinSQL+`
 		WHERE wi.test_run = false
 		  AND ($4 = '' OR app.id::text = $4)
 		  AND `+workflowAdminScopeSQL+`
@@ -6212,7 +6245,7 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inst historyInstance
 		var ctxJSON, schemaJSON []byte
-		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.Reopenable); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6599,9 +6632,23 @@ func (h *handler) workflowInstanceAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// A finished, approved run leaves "completed" only by the reopen route,
+	// with its reason: this override released its lock without one.
+	if body.Status != "completed" {
+		reopenable, err := h.workflowStore(ctx).Reopenable(ctx, instanceID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if reopenable {
+			jsonErr(w, fmt.Errorf("this run is approved: reopen it and say why"), http.StatusConflict)
+			return
+		}
+	}
+
 	// Cancelling a running instance is CancelInstance, as from the cancel
 	// route: its execution follows and the people it involved are told.
-	// One that already ended (an approval to revoke) takes the override.
+	// One that already ended takes the override.
 	if body.Status == "cancelled" {
 		res, err := h.workflowStore(ctx).CancelInstance(ctx, instanceID, act.UserID, "")
 		if err == nil {
@@ -8052,7 +8099,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		FileName string `json:"file_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
-		jsonErr(w, fmt.Errorf("csv or xlsx_base64 field required"), http.StatusBadRequest)
+		jsonErr(w, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)"), http.StatusBadRequest)
 		return
 	}
 
@@ -8652,7 +8699,8 @@ type integrationDef struct {
 
 // integrationMayRun reports whether act could load anything with an import
 // integration, so its dashboard button shows only to someone it works for:
-// a table's when they may create its records, a grid's when an input metric
+// a table's when they may create its records (its create_roles) and write a
+// metric its records post into, a grid's when an input metric
 // of the grid is neither hidden nor read-only for them (the import refuses
 // those, internal/importpkg). An export, or any other target, always may.
 func (h *handler) integrationMayRun(ctx context.Context, act *actor, d integrationDef) bool {
@@ -8662,7 +8710,29 @@ func (h *handler) integrationMayRun(ctx context.Context, act *actor, d integrati
 	switch d.TargetType {
 	case "form":
 		scope, err := h.resolveFormRecordScope(ctx, act, d.TargetID)
-		return err == nil && scope.formPermissions().Create
+		if err != nil || !scope.formPermissions().Create {
+			return false
+		}
+		// A table whose records post into metrics: the load works only
+		// for someone who may write one of them (2026-11-07: a plant
+		// manager saw the GL loader, chose a file, and every row was
+		// refused). A table that posts nowhere is the records alone.
+		rows, err := h.db.Query(ctx, `
+			SELECT DISTINCT target_metric_id::text FROM model.form_metric_mapping
+			WHERE form_id::text = $1 AND target_metric_id IS NOT NULL`, d.TargetID)
+		if err != nil {
+			return true
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(ids) == 0 {
+			return true
+		}
+		for _, id := range ids {
+			if access, aErr := writeguard.MetricAccess(ctx, h.db.For(ctx), act.UserID, id); aErr == nil && access != "hidden" && access != "read" {
+				return true
+			}
+		}
+		return false
 	case "grid":
 		rows, err := h.db.Query(ctx, `
 			SELECT md.id::text FROM model.grid_metric gm
@@ -9439,6 +9509,22 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 			jsonErr(w, fmt.Errorf("config required"), http.StatusBadRequest)
 			return
 		}
+		// A table loader's replace_by must be a field it may replace by.
+		var rb struct {
+			ReplaceBy string `json:"replace_by"`
+		}
+		if json.Unmarshal(body.Config, &rb) == nil && strings.TrimSpace(rb.ReplaceBy) != "" {
+			var targetType, targetID string
+			_ = h.db.QueryRow(ctx, `SELECT target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&targetType, &targetID)
+			if targetType != "form" {
+				jsonErr(w, fmt.Errorf("replace_by applies to a table's loader; a grid's import_mode says what a file replaces"), http.StatusBadRequest)
+				return
+			}
+			if err := h.checkReplaceBy(ctx, targetID, rb.ReplaceBy); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
 		if _, err := h.db.Exec(ctx,
 			`UPDATE model.integration_def SET config=$2 WHERE id=$1::uuid`,
 			intID, body.Config,
@@ -9688,6 +9774,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		// Sheet is the workbook sheet a csv_import integration reads when a
 		// run's workbook names none: the one it was built from.
 		Sheet string `json:"sheet"`
+		// ReplaceBy (a table's loader) names the field whose values a file
+		// replaces: loading July again replaces July's records.
+		ReplaceBy string `json:"replace_by"`
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
 	// ?dry_run=true reads and checks the file as the run would and imports
@@ -9766,19 +9855,30 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("table not found"), http.StatusNotFound)
 			return
 		}
-		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun)
+		// A file with a header and no rows "loaded" a month with nothing in it
+		// (2026-11-07): it is refused, and a run counts as failed.
+		if len(rows) == 0 {
+			const msg = "the file holds no data rows: nothing was loaded"
+			if !dryRun {
+				h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", msg)
+			}
+			jsonErr(w, errors.New(msg), http.StatusBadRequest)
+			return
+		}
+		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy)
+		imported, rowErrs := res.Created, res.Errors
 		if dryRun && iErr == nil {
-			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "error_rows": len(rowErrs), "errors": rowErrs})
+			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
 			return
 		}
 		if iErr != nil {
 			if dryRun {
-				h.jsonLimitErr(w, iErr)
+				h.jsonImportErr(w, iErr)
 				return
 			}
-			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
+			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", iErr.Error())
 			h.recordImportJob(ctx, h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, nil, iErr))
-			h.jsonLimitErr(w, iErr)
+			h.jsonImportErr(w, iErr)
 			return
 		}
 		if len(rowErrs) > 0 {
@@ -9787,9 +9887,17 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonFormRowErrs(w, rowErrs)
 			return
 		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", "")
-		h.recordImportJob(ctx, h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, nil, nil))
-		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": 0})
+		note := ""
+		if res.Replaced > 0 {
+			note = replacedNote(res.Replaced)
+		}
+		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", note)
+		job := h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, nil, nil)
+		if cfg.ReplaceBy != "" {
+			job.Details.Mode = string(importpkg.ModeReplace)
+		}
+		h.recordImportJob(ctx, job)
+		jsonOK(w, map[string]any{"rows_imported": imported, "rows_replaced": res.Replaced, "error_rows": 0})
 
 	case "dimension":
 		cr, colIdx, cErr := rowsCSV(header, rows)
@@ -10050,17 +10158,27 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 			DimensionMappings map[string]string `json:"dimension_mappings"`
 			LivePosting       *bool             `json:"live_posting"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		// The mapping keeps its model, revision and table; what it names
+		// now must be theirs. A field the body leaves out keeps its value:
+		// the body is decoded over the mapping as it is (2026-11-07: a PATCH
+		// of dimension_mappings alone was refused for a target_metric_id it
+		// never named, and would have blanked the rest).
+		var mapModel, mapRevision, mapForm string
+		var dimRaw []byte
+		var live bool
+		if err := h.db.QueryRow(ctx, `
+			SELECT model_id::text, COALESCE(revision_id::text, ''), form_id::text,
+			       COALESCE(grid_id::text, ''), name, COALESCE(source_field, ''), COALESCE(target_metric_id::text, ''),
+			       COALESCE(aggregation, 'sum'), COALESCE(posting_statuses, '{}'), COALESCE(dimension_mappings, '{}'::jsonb), live_posting
+			FROM model.form_metric_mapping WHERE id = $1::uuid`, mappingID).Scan(&mapModel, &mapRevision, &mapForm,
+			&body.GridID, &body.Name, &body.SourceField, &body.TargetMetricID, &body.Aggregation, &body.PostingStatuses, &dimRaw, &live); err != nil {
+			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
 			return
 		}
-		// The mapping keeps its model, revision and table; what it names
-		// now must be theirs.
-		var mapModel, mapRevision, mapForm string
-		if err := h.db.QueryRow(ctx, `
-			SELECT model_id::text, COALESCE(revision_id::text, ''), form_id::text
-			FROM model.form_metric_mapping WHERE id = $1::uuid`, mappingID).Scan(&mapModel, &mapRevision, &mapForm); err != nil {
-			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
+		_ = json.Unmarshal(dimRaw, &body.DimensionMappings)
+		body.LivePosting = &live
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
 		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), mapModel, mapRevision, crudapp.MappingRefs{
@@ -11068,6 +11186,10 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			}
 			// Anyone who reaches the table creates drafts and submissions;
 			// a decided record is an administrator's.
+			if scope.noAdd {
+				jsonErr(w, fmt.Errorf("forbidden: %s", scope.noAddReason()), http.StatusForbidden)
+				return
+			}
 			if !scope.createAccess().CanCreate(body.Status) {
 				jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application creates a record as %s", body.Status), http.StatusForbidden)
 				return
@@ -11706,6 +11828,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			HighlightRules *json.RawMessage `json:"highlight_rules"`
 			// Omitted leaves the closed rules; [] removes them.
 			ClosedWhen *json.RawMessage `json:"closed_when"`
+			// RowStyle "total" draws the metric's row as a total; ""
+			// as any row; omitted leaves it.
+			RowStyle *string `json:"row_style"`
 			// IsInput switches the metric between input and calculated
 			// (modeledit.SwitchMetricKind); omitted keeps it. Becoming
 			// calculated takes a formula, and DropValues for an input that
@@ -11950,6 +12075,17 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		if closedRules != nil {
 			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, metricID, string(closedRules)); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if patch.RowStyle != nil {
+			style, err := metricformula.RowStyle(*patch.RowStyle)
+			if err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, metricID, style); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -15856,6 +15992,11 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 		for i, d := range dashboards {
+			// A selector following a metric opens on the member the data
+			// says (modeledit.SelectorBarEntry.DefaultMetricID).
+			if revisionID != "" {
+				dashboards[i].SelectorBar = modeledit.ResolveSelectorDefaults(ctx, h.db, revisionID, d.SelectorBar)
+			}
 			wRows, wErr := h.db.Query(ctx,
 				`SELECT id::text, widget_type, ref_id, content, title, show_title, widget_props, sort_order, col_start, col_span, pos_x, pos_y, size_w, size_h FROM model.dashboard_widget WHERE dashboard_id=$1::uuid ORDER BY pos_y, pos_x`, d.ID)
 			if wErr == nil {
@@ -16679,11 +16820,15 @@ func (h *handler) businessDashboardDetail(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var name string
+	var name, dashRevisionID string
 	var bar json.RawMessage
-	if err := h.db.QueryRow(ctx, `SELECT name, selector_bar FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&name, &bar); err != nil {
+	if err := h.db.QueryRow(ctx, `SELECT name, selector_bar, COALESCE(revision_id::text, '') FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&name, &bar, &dashRevisionID); err != nil {
 		jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
 		return
+	}
+	// A selector following a metric opens on the member the data says.
+	if dashRevisionID != "" {
+		bar = modeledit.ResolveSelectorDefaults(ctx, h.db, dashRevisionID, bar)
 	}
 
 	wRows, err := h.db.Query(ctx,
@@ -18062,9 +18207,18 @@ func (h *handler) baUserAction(w http.ResponseWriter, r *http.Request) {
 func accessRulesOnOtherModels(ctx context.Context, q interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }, userID, modelID string) ([]writeguard.RuleInput, error) {
+	return rulesOnOtherModels(ctx, q, "identity.user_access_rule", "user_id", userID, modelID)
+}
+
+// rulesOnOtherModels is accessRulesOnOtherModels for a table of rules and
+// its owner column (a person's, or a business role's).
+func rulesOnOtherModels(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, table, owner, ownerID, modelID string) ([]writeguard.RuleInput, error) {
+	userID := ownerID
 	rows, err := q.Query(ctx, `
 		SELECT r.rule_type, r.ref_id, r.access
-		FROM identity.user_access_rule r
+		FROM `+table+` r
 		CROSS JOIN LATERAL (
 		    SELECT d.model_id
 		    FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
@@ -18078,7 +18232,7 @@ func accessRulesOnOtherModels(ctx context.Context, q interface {
 		      AND (md.id = CASE WHEN r.ref_id ~* `+writeguard.UUIDPatternSQL+` THEN r.ref_id::uuid END
 		           OR md.lineage_id = r.ref_lineage_id)
 		) owner
-		WHERE r.user_id = $1::uuid AND r.rule_type IN ('dimension_member', 'metric')
+		WHERE r.`+owner+` = $1::uuid AND r.rule_type IN ('dimension_member', 'metric')
 		GROUP BY r.rule_type, r.ref_id, r.access
 		HAVING bool_and(owner.model_id <> $2::uuid)`, userID, modelID)
 	if err != nil {
@@ -18676,6 +18830,76 @@ func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, a
 					PayloadSchema: payload,
 					Enabled:       true,
 					CreatedFrom:   "form",
+				}, TriggerEventCatalogItem{
+					Key:           toEventKey(fname) + ".approved",
+					Label:         flabel + " approved",
+					Description:   "Starts when a " + flabel + " record is approved.",
+					Category:      "form",
+					SourceType:    "form",
+					SourceID:      fid,
+					SourceName:    flabel,
+					PayloadSchema: payload,
+					Enabled:       true,
+					CreatedFrom:   "form",
+				})
+			}
+		}
+		// The engine has always dispatched form_approval and grid_change
+		// rules, but the catalog named neither, so a workflow could not be
+		// set to start on them and the console offered only manual and
+		// schedule for it (2026-11-06; the API accepted both).
+		catalog = append(catalog, TriggerEventCatalogItem{
+			Key:         "form.approve",
+			Label:       "A record approved in any table",
+			Description: "Starts when a record of any table in this application is approved.",
+			Category:    "form",
+			SourceType:  "system",
+			PayloadSchema: []TriggerPayloadField{
+				{Key: "record_id", Type: "form_record", Required: true},
+				{Key: "form_id", Type: "text", Required: true},
+			},
+			Enabled:     true,
+			CreatedFrom: "system",
+		})
+
+		// ── Grid-generated events ──────────────────────────────────────────────
+		gridPayload := []TriggerPayloadField{
+			{Key: "grid_id", Type: "text", Required: true},
+			{Key: "metric_id", Type: "metric", Required: true},
+			{Key: "revision_id", Type: "text", Required: true},
+		}
+		catalog = append(catalog, TriggerEventCatalogItem{
+			Key:           "grid.change",
+			Label:         "A value changed in any grid",
+			Description:   "Starts when a value is written to any grid of this application.",
+			Category:      "planning",
+			SourceType:    "system",
+			PayloadSchema: gridPayload,
+			Enabled:       true,
+			CreatedFrom:   "system",
+		})
+		gridRows, err := pool.Query(ctx, `
+			SELECT id::text, name FROM model.grid_def
+			WHERE model_id = $1::uuid
+			  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
+			ORDER BY name
+		`, modelID, revisionID)
+		if err == nil {
+			defer gridRows.Close()
+			for gridRows.Next() {
+				var gid, gname string
+				_ = gridRows.Scan(&gid, &gname)
+				catalog = append(catalog, TriggerEventCatalogItem{
+					Key:           toEventKey(gname) + ".changed",
+					Label:         gname + " changed",
+					Description:   "Starts when a value is written to the " + gname + " grid.",
+					Category:      "planning",
+					SourceType:    "grid",
+					SourceID:      gid,
+					SourceName:    gname,
+					PayloadSchema: gridPayload,
+					Enabled:       true,
+					CreatedFrom:   "grid",
 				})
 			}
 		}

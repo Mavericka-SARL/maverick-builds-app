@@ -11,6 +11,7 @@ package recordpost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -254,6 +255,9 @@ type TableSettings struct {
 	MemberRootLabel *string `json:"member_root_label"`
 	// EditAccess: "creator" or "everyone".
 	EditAccess *string `json:"edit_access"`
+	// CreateRoles: the roles whose people may add records; empty, anyone
+	// who reaches the application (migration 157).
+	CreateRoles *[]string `json:"create_roles"`
 }
 
 // SettingError is a table setting refused: Status is the HTTP status it
@@ -289,6 +293,14 @@ func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef,
 			return 0, err
 		}
 		form.EditAccess = *s.EditAccess
+	}
+	if s.CreateRoles != nil {
+		roles := cleanRoleNames(*s.CreateRoles)
+		raw, _ := json.Marshal(roles)
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET create_roles=$2::jsonb WHERE id=$1::uuid`, form.ID, string(raw)); err != nil {
+			return 0, err
+		}
+		form.CreateRoles = roles
 	}
 	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil {
 		return 0, nil
@@ -361,4 +373,20 @@ func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef,
 		return 0, err
 	}
 	return added, nil
+}
+
+// cleanRoleNames trims role names and drops empty ones and repeats, as a
+// workflow's start roles are cleaned.
+func cleanRoleNames(names []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[strings.ToLower(n)] {
+			continue
+		}
+		seen[strings.ToLower(n)] = true
+		out = append(out, n)
+	}
+	return out
 }

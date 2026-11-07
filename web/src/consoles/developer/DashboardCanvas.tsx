@@ -664,6 +664,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
           dashId={dashId}
           bar={dash.selector_bar ?? []}
           dims={kpiScopeDims as DevDimension[]}
+          metrics={(metrics as Array<{ id: string; name: string; label?: string }>)}
           onSaved={invalidateAll}
           onClose={() => setShowBar(false)}
         />
@@ -1407,6 +1408,47 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     "Find a row or column…" above the grid. Untick it for a
                     grid of a few rows.
                   </p>
+                  <div className="mvx-prop-section" style={{ marginTop: 12 }}>Layout</div>
+                  {([
+                    ["hide_total_row", "Show the Total row", "Under rows with no hierarchy. Untick it where nothing adds up: prices, rates, dates."],
+                    ["hide_legend", "Show the legend and hints", "Editable / Calculated / Read-only and the click and paste hints under the grid."],
+                    ["hide_badges", "Show INPUT and CALC tags", "Beside each metric's label. A read-only statement reads better without them."],
+                  ] as const).map(([key, label, hint]) => (
+                    <div key={key} style={{ marginBottom: 6 }}>
+                      <Checkbox
+                        checked={!wp[key]}
+                        onChange={e => {
+                          const wid = selectedWidget!.id;
+                          setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, [key]: e.target.checked ? undefined : true } } }));
+                        }}
+                        label={label}
+                      />
+                      <p style={{ fontSize: 11, color: "var(--color-text-quiet)", margin: "2px 0 0" }}>{hint}</p>
+                    </div>
+                  ))}
+                  <Field label="Label column width (px)" description="Empty: as wide as the labels need, at least 160–180 px.">
+                    <NumberInput
+                      value={wp.label_width ?? ""}
+                      min={120}
+                      max={480}
+                      onChange={e => {
+                        const wid = selectedWidget!.id;
+                        const n = e.target.value === "" ? undefined : Math.min(480, Math.max(120, Number(e.target.value)));
+                        setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, label_width: n } } }));
+                      }}
+                      aria-label="Label column width"
+                    />
+                  </Field>
+                  <Field label="Footer" description="A line under the grid: a source, a unit, a note.">
+                    <TextInput
+                      value={wp.footer ?? ""}
+                      onChange={e => {
+                        const wid = selectedWidget!.id;
+                        setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, footer: e.target.value || undefined } } }));
+                      }}
+                      aria-label="Grid footer"
+                    />
+                  </Field>
                   <div className="mvx-prop-section" style={{ marginTop: 12 }}>Number scale</div>
                   <Select
                     value={wp.number_scale === "k" || wp.number_scale === "m" ? wp.number_scale : "none"}
