@@ -152,3 +152,83 @@ func listSome(names []string, n int) string {
 	}
 	return fmt.Sprintf("%s and %d more", strings.Join(names[:n], ", "), len(names)-n)
 }
+
+// splitWidgetWarnings names each grid widget the plan puts on a page that
+// already shows (or the plan also shows) the same grid with the same rows,
+// columns, selectors and number scale, where one of the two shows at most
+// three metrics: one widget shows them together (owner, 2026-11-08: "three
+// grid widgets with the same dimensions and view must be one grid widget
+// with 3 metrics"). A different scale, or a group that needs its own total
+// row, is the reason to keep two.
+func splitWidgetWarnings(ctx context.Context, tx pgx.Tx, steps []aiassistant.ProposalStep, created []string) []string {
+	var out []string
+	for i, step := range steps {
+		if step.Tool != "add_dashboard_widget" || i >= len(created) || created[i] == "" {
+			continue
+		}
+		var page, grid, other string
+		if tx.QueryRow(ctx, `
+			WITH w AS (
+				SELECT w.id, w.dashboard_id, w.ref_id, COALESCE(w.title, '') AS title,
+				       COALESCE(w.widget_props->'default_view', '{}'::jsonb) AS view,
+				       COALESCE(w.widget_props->>'number_scale', '') AS scale,
+				       COALESCE(NULLIF(jsonb_array_length(COALESCE(w.widget_props->'metric_ids', '[]'::jsonb)), 0),
+				                (SELECT count(*) FROM model.grid_metric gm WHERE gm.grid_id::text = w.ref_id)) AS metrics
+				FROM model.dashboard_widget w WHERE w.widget_type = 'grid')
+			SELECT d.name, g.name, COALESCE(NULLIF(o.title, ''), o.id::text)
+			FROM w n JOIN w o ON o.dashboard_id = n.dashboard_id AND o.id <> n.id AND o.ref_id = n.ref_id
+			                 AND o.view = n.view AND o.scale = n.scale AND LEAST(o.metrics, n.metrics) <= 3
+			JOIN model.dashboard_def d ON d.id = n.dashboard_id
+			JOIN model.grid_def g ON g.id::text = n.ref_id
+			WHERE n.id::text = $1 ORDER BY o.title LIMIT 1`, created[i]).Scan(&page, &grid, &other) != nil {
+			continue
+		}
+		out = append(out, fmt.Sprintf("step %d shows the grid %q on the page %q again, with the same rows, columns and scale as the widget %q: show them in one widget (their metrics, or the rows' members, together) — keep two only for a different number scale or a group that needs its own total row",
+			i+1, grid, page, other))
+	}
+	return out
+}
+
+// taggedModelSize is the number of metrics from which a model's metrics and
+// grids are found by tag rather than by scrolling.
+const taggedModelSize = 30
+
+// untaggedWarnings names the metrics and grids the plan creates without
+// tags, in a revision of taggedModelSize metrics or more (owner,
+// 2026-11-08: "we have a lot of metrics, use tags to navigate"): Developer ›
+// Metrics and Grids filter by tag.
+func untaggedWarnings(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	var metrics int
+	if tx.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE revision_id = $1::uuid`, revID).Scan(&metrics) != nil || metrics < taggedModelSize {
+		return nil
+	}
+	var names []string
+	for i, step := range steps {
+		if i >= len(created) || created[i] == "" {
+			continue
+		}
+		table := map[string]string{"create_metric": "model.metric_def", "create_grid": "model.grid_def"}[step.Tool]
+		if table == "" {
+			continue
+		}
+		var name string
+		if tx.QueryRow(ctx, `SELECT name FROM `+table+` WHERE id::text = $1 AND COALESCE(cardinality(tags), 0) = 0`, created[i]).Scan(&name) == nil {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	var known []string
+	_ = tx.QueryRow(ctx, `SELECT COALESCE(array_agg(t ORDER BY n DESC, t), '{}') FROM (
+		SELECT t, count(*) AS n FROM (
+			SELECT unnest(tags) AS t FROM model.metric_def WHERE revision_id = $1::uuid
+			UNION ALL SELECT unnest(tags) FROM model.grid_def WHERE revision_id = $1::uuid) x
+		GROUP BY t ORDER BY n DESC, t LIMIT 12) y`, revID).Scan(&known)
+	hint := "a tag of its area, as the workbook sheet it comes from (demand, capacity, p-and-l)"
+	if len(known) > 0 {
+		hint = "the tag of its area — the model's tags are " + strings.Join(known, ", ")
+	}
+	return []string{fmt.Sprintf("the plan creates %s with no tags, in a model of %d metrics the developer finds by tag: give each %s (\"tags\" on create, set_tags for what exists)",
+		listSome(names, 8), metrics, hint)}
+}

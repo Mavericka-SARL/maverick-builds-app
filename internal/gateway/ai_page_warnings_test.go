@@ -74,3 +74,45 @@ func TestLeaveToProposeAndManyItems(t *testing.T) {
 		t.Errorf("parseCoverageReply extra = %v %v", missing, extra)
 	}
 }
+
+// TestThePlanCheckWarnsOfSplitWidgetsAndUntaggedDefinitions: one grid shown
+// twice on a page with the same rows, columns and scale goes back to be one
+// widget (a different scale stays apart), and in a model of many metrics a
+// metric or grid created without tags goes back to be tagged (2026-11-08).
+func TestThePlanCheckWarnsOfSplitWidgetsAndUntaggedDefinitions(t *testing.T) {
+	f := newPlanFixture(t, &multiScriptProvider{})
+	sess := f.session(t)
+	f.q(`INSERT INTO model.metric_def (model_id, revision_id, name, tags)
+		SELECT $1::uuid, $2::uuid, 'driver_' || g, ARRAY['demand'] FROM generate_series(1, 30) g RETURNING 'x'`, f.modelID, f.revID)
+
+	var steps []aiassistant.ProposalStep
+	add := func(tool string, params map[string]any) {
+		b, _ := json.Marshal(params)
+		steps = append(steps, aiassistant.ProposalStep{Tool: tool, Description: tool, Params: b})
+	}
+	add("create_metric", map[string]any{"name": "units", "label": "Units", "is_input": true})
+	add("create_grid", map[string]any{"name": "Volumes", "metrics": []string{"amount", "units"}, "dimensions": []string{"Cost Center"}})
+	add("create_dashboard", map[string]any{"name": "Plan"})
+	add("add_dashboard_widget", map[string]any{"dashboard_id": ref(3), "widget_type": "grid", "ref_id": ref(2), "title": "Units", "show_title": true})
+	add("add_dashboard_widget", map[string]any{"dashboard_id": ref(3), "widget_type": "grid", "ref_id": ref(2), "title": "Amounts", "show_title": true})
+	add("add_dashboard_widget", map[string]any{"dashboard_id": ref(3), "widget_type": "grid", "ref_id": ref(2), "title": "Amounts in thousands", "show_title": true,
+		"widget_props": map[string]any{"number_scale": "k"}})
+	check, err := f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, steps)
+	if err != nil || len(check.problems) > 0 {
+		t.Fatalf("check: %v %v", err, check.problems)
+	}
+	all := strings.Join(check.warnings, "\n")
+	for _, want := range []string{
+		`step 4 shows the grid "Volumes" on the page "Plan" again, with the same rows, columns and scale as the widget "Amounts"`,
+		`step 5 shows the grid "Volumes" on the page "Plan" again, with the same rows, columns and scale as the widget "Units"`,
+		"the plan creates units, Volumes with no tags",
+		"the model's tags are demand",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing warning %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "step 6 shows") {
+		t.Errorf("a widget in another number scale is not a split view:\n%s", all)
+	}
+}

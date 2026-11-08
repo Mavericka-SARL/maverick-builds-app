@@ -274,7 +274,8 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 			steps = append(steps, map[string]any{
 				"tool":        "create_metric",
 				"description": fmt.Sprintf("Create metric m%d", i),
-				"params":      map[string]any{"name": fmt.Sprintf("m%d", i), "is_input": true},
+				// Tagged, as a plan of this many metrics must be (untaggedWarnings).
+				"params": map[string]any{"name": fmt.Sprintf("m%d", i), "is_input": true, "tags": []string{"batch"}},
 			})
 		}
 		raw, _ := json.Marshal(map[string]any{"steps": steps})

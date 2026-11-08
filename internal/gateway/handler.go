@@ -12176,6 +12176,15 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			revIDs = append(revIDs, rid)
 		}
 		revRows.Close()
+		// A change that moves no value — tags, the label, highlight rules,
+		// the row style — saves without recalculating the model: each tag a
+		// developer gave a metric recalculated all of it (2026-11-08).
+		if patch.Name == nil && patch.Formula == nil && patch.AggRule == nil && patch.AggNumeratorMetricID == nil &&
+			patch.AggDenominatorMetricID == nil && patch.Format == nil && patch.FormatDecimals == nil &&
+			patch.FormatCurrency == nil && patch.TimeSummary == nil && patch.PicklistDimensionID == nil &&
+			patch.PicklistAllowParents == nil && patch.ClosedWhen == nil && patch.IsInput == nil && !patch.DropValues {
+			revIDs = nil
+		}
 
 		calcStore := calculation.NewStore(h.db.For(ctx))
 		sched := calculation.NewScheduler(h.log, calcStore)

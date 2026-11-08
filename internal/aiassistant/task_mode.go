@@ -162,7 +162,8 @@ var playbooks = map[string]string{
    records, postings); calculations sheet by sheet in the workbook's order; pages; the process (workflows);
    who opens which page. Each sheet people read gets a page or a place on one.
 3. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
-   percentages in percent units); the workbook's own tests and guards stay in the formulas.
+   percentages in percent units); the workbook's own tests and guards stay in the formulas. Every metric and
+   grid gets the tag of its sheet's area ("tags" on create): a model of hundreds is navigated by them.
 4. After each calculation stage, compare_with_sheet every row of the sheets it built; a stage is done when they
    match, not when its metrics exist. Never type a workbook value into a calculated metric.
 5. Who may change which inputs is a business admin's to set: list it in your report, per the Guide.
@@ -182,6 +183,9 @@ var playbooks = map[string]string{
    set_role_dashboards for the roles that use it.
 3. Grids show labelled metrics (the workbook's row text), the workbook's formats, a title with the unit; charts
    name their series (series_names) and mark actuals (actual_metric_id).
+   One grid, one widget: what a page shows from one grid with the same rows, columns and scale goes in one
+   widget (its metrics, or the rows' members, together), not a widget per metric or per group of rows — two
+   only for a different number scale or a group that needs its own total row.
 4. A change to a text (the guide) changes only the lines asked: keep the rest word for word.
 `,
 	"records": `### Playbook: tables of records, postings and loads

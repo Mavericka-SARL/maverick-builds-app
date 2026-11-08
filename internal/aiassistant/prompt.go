@@ -1033,6 +1033,9 @@ To change the tags of anything that already exists use set_tags {"kind": "metric
 "id": "<its id, exact name, or created in step N>", "tags": [...]}: it REPLACES the whole list, so to add one
 tag send the existing ones too, and [] clears them. Tags are stored lower case with spaces as hyphens
 ("Cost Centre" becomes "cost-centre").
+A model of more than a few dozen metrics is found by its tags: give every metric and grid the tag of its area at
+creation — the workbook sheet it comes from or the part of the process it serves (demand, capacity, p-and-l,
+actuals), the same few tags throughout — so Developer › Metrics and Grids filter to one area.
 
 ## propose_actions format
 Never put more than 100 steps in one propose_actions call — the server rejects larger

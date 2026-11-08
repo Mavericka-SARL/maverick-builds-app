@@ -1500,6 +1500,21 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     return flatValue(metricId, combos, aggRule);
   }
 
+  // Whether colTotal gives a metric a total over the rows: text has none,
+  // agg none none across a non-time dimension, and a ratio (formula, rate,
+  // an evaluated average) only where one member stands for all rows.
+  function metricHasRowTotal(m: Metric): boolean {
+    if (isTextMetric(m) || m.format === "date") return false;
+    const aggRule = m.agg_rule ?? "sum";
+    const acrossNonTime = rowDims.some(dim => dim.dimension_type !== "time");
+    if (aggRule === "none") return !acrossNonTime;
+    if (aggRule === "formula" || aggRule === "rate" || (aggRule === "average" && !!m.aggregate_evaluated && acrossNonTime)) {
+      const roots = rowDims.map(dim => dim.members.filter(x => !x.parent_code));
+      return roots.every((r, i) => r.length === 1 && isAggNode(rowDims[i], r[0]));
+    }
+    return true;
+  }
+
   // Rows for "metrics in rows" mode: dim combos as group headers, metrics as sub-rows
   type RowEntry = { kind: "group"; rc: DimMember[] } | { kind: "metric"; metric: Metric; rc: DimMember[] };
   const metricRowEntries: RowEntry[] = metricsInRows
@@ -1794,7 +1809,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }
 
   return (
-    <div style={{ display: "flex", gap: 16, height: "100%" }}>
+    // minHeight 0: in a dashboard box that is at most as tall as designed
+    // (DashboardWidgets.tsx), the grid shrinks into it and its table area
+    // scrolls.
+    <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
       <CellHistoryDrawer cell={historyCell} onClose={() => setHistoryCell(null)} />
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
@@ -1947,6 +1965,38 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     </tr>
                   );
                 })}
+                {/* The Total group: each metric's total over the rows, as the
+                    metrics-in-columns table totals them — so one widget with
+                    several metrics by a dimension keeps the totals a widget
+                    per metric had (2026-11-08). A metric with no total over
+                    these rows (text, agg none, a ratio over a flat dimension)
+                    is left out. */}
+                {!hasRowHierarchy && rowDims.length > 0 && rowCombos.length > 1 && !hideTotalRow && (() => {
+                  const totalled = visibleMetrics.filter(metricHasRowTotal);
+                  if (totalled.length === 0) return null;
+                  const cols = hasColHierarchy ? effectiveColCombos : (colDims.length > 0 ? colCombos : [[]]);
+                  return (
+                    <>
+                      <tr key="grp-total" style={{ background: "var(--color-surface-muted)", borderTop: "2px solid var(--color-border)" }}>
+                        <td colSpan={cols.length + 1} style={{ ...td, fontWeight: 700, color: "var(--color-text-strong)", paddingLeft: 10 }}>Total</td>
+                      </tr>
+                      {totalled.map(m => (
+                        <tr key={`total-${m.id}`} style={{ borderBottom: "1px solid var(--color-surface-muted)", background: "var(--color-surface-faint)" }}>
+                          <td style={{ ...td, paddingLeft: 22, fontWeight: 700, color: "var(--color-text-strong)" }}>{m.label}</td>
+                          {cols.map(cc => {
+                            const total = colTotal(m.id, cc);
+                            return (
+                              <td key={`tot-${comboKey(cc)}`} className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
+                                style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
+                                {fmtCell(m, cc, total, gridScale, dateFormat)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </>
+                  );
+                })()}
               </tbody>
             </table>
 

@@ -77,6 +77,8 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		out.warnings = append(out.warnings, textRewriteWarnings(ctx, h.db.For(ctx), resolved)...)
 		out.warnings = append(out.warnings, pageRoleWarnings(ctx, tx, modelID, resolved, created)...)
 		out.warnings = append(out.warnings, pageMetricWarnings(ctx, tx, resolved, created)...)
+		out.warnings = append(out.warnings, splitWidgetWarnings(ctx, tx, resolved, created)...)
+		out.warnings = append(out.warnings, untaggedWarnings(ctx, tx, revID, resolved, created)...)
 	}
 	return out, err
 }

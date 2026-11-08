@@ -95,6 +95,9 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
             {row.map(widget => (
               <div
                 key={widget.id}
+                // Names the widget a box shows, for a script that measures
+                // or checks a page (as tests and layout fitting do).
+                data-widget-id={widget.id}
                 className={[
                   "mvx-dash-cell",
                   widget.widget_type === "metric_kpi" ? "mvx-dash-cell--kpi" : "",
@@ -125,8 +128,15 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                   // A button IS its designed box, as Design draws it: the
                   // minimum height an intrinsic type gets left it shrunk to
                   // its label (reported live, 2026-10-10).
+                  // A grid's designed size_h is its MOST: a grid with fewer
+                  // rows than its box shrinks to them and the rows below move
+                  // up, instead of leaving the rest of the box blank (owner,
+                  // 2026-11-08: "huge spaces between widgets must be
+                  // eliminated"); its frame below scrolls a taller one.
                   ...(widget.widget_type === "metric_kpi"
                     ? { minHeight: widget.size_h || undefined, alignSelf: "stretch" as const }
+                    : widget.size_h && widget.widget_type === "grid"
+                    ? { alignSelf: "start" as const }
                     : widget.size_h && BUTTON_WIDGET_TYPES.has(widget.widget_type)
                     ? { height: widget.size_h + (buttonTitleBand(widget) ? BUTTON_TITLE_BAND_PX : 0), alignSelf: "start" as const }
                     : widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type)
@@ -146,7 +156,14 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                     </button>
                   )}
                   <div key="frame" className={full?.id === widget.id ? "mvx-dash-full" : "mvx-dash-cell__frame"}
-                    style={full?.id === widget.id ? { left: full.left } : { overflow: widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type) && !BUTTON_WIDGET_TYPES.has(widget.widget_type) && widget.widget_type !== "metric_kpi" ? "auto" : undefined }}
+                    style={full?.id === widget.id ? { left: full.left } : {
+                      overflow: widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type) && !BUTTON_WIDGET_TYPES.has(widget.widget_type) && widget.widget_type !== "metric_kpi" ? "auto" : undefined,
+                      // A grid's box: a column at most size_h tall that its
+                      // body and the grid shrink into, so the grid's own
+                      // table area scrolls a taller grid under a header that
+                      // stays in view.
+                      ...(widget.size_h && widget.widget_type === "grid" ? { display: "flex", flexDirection: "column" as const, maxHeight: widget.size_h } : {}),
+                    }}
                     role={full?.id === widget.id ? "dialog" : undefined} aria-modal={full?.id === widget.id || undefined}
                     aria-label={full?.id === widget.id ? (widget.title || widget.widget_type) : undefined}>
                     {full?.id === widget.id && (
@@ -159,7 +176,8 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                         </button>
                       </div>
                     )}
-                    <div key="body" className={full?.id === widget.id ? "mvx-dash-full__body" : "mvx-dash-cell__body"}>
+                    <div key="body" className={full?.id === widget.id ? "mvx-dash-full__body" : "mvx-dash-cell__body"}
+                      style={full?.id !== widget.id && widget.size_h && widget.widget_type === "grid" ? { height: "auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
                       <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
                     </div>
                   </div>

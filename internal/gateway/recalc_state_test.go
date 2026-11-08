@@ -78,3 +78,71 @@ func TestBackgroundRecalcAfterACellWrite(t *testing.T) {
 		t.Errorf("right after a plain write: bg_double = %v, recalc_pending = %v; want 10, false", v, pending)
 	}
 }
+
+// TestATagOnAMetricRecalculatesNothing: a metric's tags, label or highlight
+// rules move no value, so saving them leaves the calculated results as they
+// are; a formula still recalculates (2026-11-08: each tag a developer gave a
+// metric recalculated the whole model).
+func TestATagOnAMetricRecalculatesNothing(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	ctx := context.Background()
+	dev := "rollup-test-approver"
+	rev := f.workingRevID
+	call := func(method, path string, body any) (int, string) {
+		t.Helper()
+		return doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+	}
+	must := func(method, path string, body any) string {
+		t.Helper()
+		status, raw := call(method, path, body)
+		if status != http.StatusOK && status != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, status, raw)
+		}
+		return raw
+	}
+	id := func(raw string) string {
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out.ID
+	}
+	amount := id(must("POST", "/api/developer/metrics", map[string]any{"name": "tg_amount", "is_input": true, "revision_id": rev}))
+	double := id(must("POST", "/api/developer/metrics", map[string]any{"name": "tg_double", "formula": "tg_amount * 2", "revision_id": rev}))
+	grid := id(must("POST", "/api/developer/grids", map[string]any{"name": "Tagged", "revision_id": rev}))
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+amount, nil)
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+double, nil)
+	must("POST", "/api/cells", map[string]any{"model_id": f.modelID, "revision_id": rev, "metric_id": amount, "value": 21})
+	calculated := func() (time.Time, float64) {
+		t.Helper()
+		var at time.Time
+		var v float64
+		if err := f.pool.QueryRow(ctx, `SELECT calc_at, value::float8 FROM runtime.calc_result
+			WHERE metric_id=$1::uuid AND revision_id=$2::uuid AND dim_members='{}' ORDER BY calc_at DESC LIMIT 1`, double, rev).Scan(&at, &v); err != nil {
+			t.Fatalf("read tg_double: %v", err)
+		}
+		return at, v
+	}
+	at, v := calculated()
+	if v != 42 {
+		t.Fatalf("tg_double = %v, want 42", v)
+	}
+
+	raw := must("PATCH", "/api/developer/metrics/"+double, map[string]any{"tags": []string{"demand"}, "label": "Double"})
+	if strings.Contains(raw, `"revision_id"`) {
+		t.Errorf("a tag and a label recalculated: %s", raw)
+	}
+	if again, _ := calculated(); !again.Equal(at) {
+		t.Errorf("a tag and a label recalculated tg_double (%v, then %v)", at, again)
+	}
+	var tags []string
+	_ = f.pool.QueryRow(ctx, `SELECT tags FROM model.metric_def WHERE id=$1::uuid`, double).Scan(&tags)
+	if len(tags) != 1 || tags[0] != "demand" {
+		t.Errorf("tags = %v, want [demand]", tags)
+	}
+
+	must("PATCH", "/api/developer/metrics/"+double, map[string]any{"formula": "tg_amount * 3"})
+	if _, v := calculated(); v != 63 {
+		t.Errorf("after a formula change tg_double = %v, want 63", v)
+	}
+}
