@@ -645,8 +645,6 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/business-admin/roles/{id}/access-rules", "business_admin", ba(h.baRoleAccessRules))
 	register("PUT", "/api/business-admin/roles/{id}/access-rules", "business_admin", ba(h.baRoleAccessRules))
 	register("GET", "/api/business-admin/available", "business_admin", ba(h.baAvailable))
-	register("GET", "/api/business-admin/calendars", "business_admin", ba(h.baCalendars))
-	register("POST", "/api/business-admin/calendars/{dimId}/extend", "business_admin", ba(h.baCalendarExtend))
 	register("POST", "/api/business-admin/copy-values", "business_admin", ba(h.baCopyValues))
 
 	// Workflow / notifications (any authenticated user)
@@ -4800,9 +4798,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_dims AS (
 			INSERT INTO model.dimension_def
 			  (model_id, name, agg_rule, properties, revision_id, source_property,
-			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
+			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
 			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label
+			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5107,7 +5105,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_mappings AS (
 			INSERT INTO model.form_metric_mapping
 			  (model_id, form_id, grid_id, name, source_field, target_metric_id, aggregation,
-			   posting_statuses, dimension_mappings, live_posting, revision_id)
+			   posting_statuses, dimension_mappings, live_posting, revision_id, row_filter)
 			SELECT fmm.model_id, fm.new_id,
 				(SELECT ng.id FROM model.grid_def og
 				 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
@@ -5119,7 +5117,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 					FROM jsonb_each(fmm.dimension_mappings) kv
 					LEFT JOIN dim_map dm ON dm.old_id::text = kv.key
 				), '{}'::jsonb),
-				fmm.live_posting, $2::uuid
+				fmm.live_posting, $2::uuid, fmm.row_filter
 			FROM model.form_metric_mapping fmm
 			JOIN form_map fm ON fm.old_id = fmm.form_id
 			JOIN metric_map mm ON mm.old_id = fmm.target_metric_id
@@ -6791,8 +6789,11 @@ type devDimension struct {
 	SourceDimensionID *string `json:"source_dimension_id,omitempty"`
 	SourceProperty    *string `json:"source_property,omitempty"`
 	// BusinessMaintained: users add, rename and remove members.
-	BusinessMaintained bool        `json:"business_maintained"`
-	Members            []devMember `json:"members"`
+	BusinessMaintained bool `json:"business_maintained"`
+	// EditorRoles: the business roles that may change its members ([] for
+	// any user who may; dimension_editors.go).
+	EditorRoles []string    `json:"editor_roles"`
+	Members     []devMember `json:"members"`
 	// keptBy is the table whose records are the dimension's members, ""
 	// for none (GET /api/dimensions reads it with the dimension).
 	keptBy string
@@ -6987,7 +6988,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	}
 	dimRows, err := h.db.Query(ctx,
 		`SELECT id::text, name, COALESCE(label, ''), agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags,
-		        source_dimension_id::text, source_property, business_maintained
+		        source_dimension_id::text, source_property, business_maintained, editor_roles
 		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
 	if err != nil {
@@ -7000,7 +7001,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	for dimRows.Next() {
 		var d devDimension
 		if err := dimRows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags,
-			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained); err != nil {
+			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained, &d.EditorRoles); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -10002,6 +10003,8 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 			PostingStatuses   []string          `json:"posting_statuses"`
 			DimensionMappings map[string]string `json:"dimension_mappings"`
 			LivePosting       *bool             `json:"live_posting"`
+			// RowFilter: the conditions a record meets to post (migration 161).
+			RowFilter []crudapp.RowCondition `json:"row_filter"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FormID == "" || body.Name == "" {
 			jsonErr(w, fmt.Errorf("form_id and name required"), http.StatusBadRequest)
@@ -10021,7 +10024,7 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 		// records into this model's facts.
 		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), modelID, revisionID, crudapp.MappingRefs{
 			FormID: body.FormID, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
-			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings,
+			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings, RowFilter: body.RowFilter,
 		}); crudapp.IsMappingRefError(err) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -10030,6 +10033,7 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		dimJSON, _ := json.Marshal(body.DimensionMappings)
+		filterJSON := rowFilterJSON(body.RowFilter)
 
 		livePosting := true
 		if body.LivePosting != nil {
@@ -10039,11 +10043,11 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 		if err := h.db.QueryRow(ctx, `
 			INSERT INTO model.form_metric_mapping
 			  (model_id, form_id, grid_id, name, source_field, target_metric_id, aggregation,
-			   posting_statuses, dimension_mappings, live_posting, revision_id)
-			VALUES ($1::uuid, $2::uuid, NULLIF($3,'')::uuid, $4, $5, $6::uuid, $7, $8, $9, $10, NULLIF($11,'')::uuid)
+			   posting_statuses, dimension_mappings, live_posting, revision_id, row_filter)
+			VALUES ($1::uuid, $2::uuid, NULLIF($3,'')::uuid, $4, $5, $6::uuid, $7, $8, $9, $10, NULLIF($11,'')::uuid, $12::jsonb)
 			RETURNING id::text`,
 			modelID, body.FormID, body.GridID, body.Name, body.SourceField, body.TargetMetricID,
-			body.Aggregation, body.PostingStatuses, dimJSON, livePosting, revisionID,
+			body.Aggregation, body.PostingStatuses, dimJSON, livePosting, revisionID, filterJSON,
 		).Scan(&newID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -10064,7 +10068,7 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 
 	rows, err := h.db.Query(ctx, `
 		SELECT id::text, form_id::text, COALESCE(grid_id::text,''), name, source_field,
-		       target_metric_id::text, aggregation, posting_statuses, dimension_mappings, live_posting
+		       target_metric_id::text, aggregation, posting_statuses, dimension_mappings, live_posting, row_filter
 		FROM model.form_metric_mapping
 		WHERE model_id=$1::uuid
 		  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
@@ -10080,21 +10084,23 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 			id, formID, gridID, name, sourceField, targetMetricID string
 			aggregation                                           string
 			postingStatuses                                       []string
-			dimMappingsRaw                                        []byte
+			dimMappingsRaw, rowFilterRaw                          []byte
 			livePosting                                           bool
 		)
 		if err := rows.Scan(&id, &formID, &gridID, &name, &sourceField, &targetMetricID,
-			&aggregation, &postingStatuses, &dimMappingsRaw, &livePosting,
+			&aggregation, &postingStatuses, &dimMappingsRaw, &livePosting, &rowFilterRaw,
 		); err != nil {
 			continue
 		}
 		var dimMappings map[string]string
 		_ = json.Unmarshal(dimMappingsRaw, &dimMappings)
+		rowFilter := []crudapp.RowCondition{}
+		_ = json.Unmarshal(rowFilterRaw, &rowFilter)
 		list = append(list, map[string]any{
 			"id": id, "form_id": formID, "grid_id": gridID, "name": name,
 			"source_field": sourceField, "target_metric_id": targetMetricID,
 			"aggregation": aggregation, "posting_statuses": postingStatuses,
-			"dimension_mappings": dimMappings, "live_posting": livePosting,
+			"dimension_mappings": dimMappings, "live_posting": livePosting, "row_filter": rowFilter,
 		})
 	}
 	if list == nil {
@@ -10149,14 +10155,15 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 	switch r.Method {
 	case http.MethodPatch:
 		var body struct {
-			GridID            string            `json:"grid_id"`
-			Name              string            `json:"name"`
-			SourceField       string            `json:"source_field"`
-			TargetMetricID    string            `json:"target_metric_id"`
-			Aggregation       string            `json:"aggregation"`
-			PostingStatuses   []string          `json:"posting_statuses"`
-			DimensionMappings map[string]string `json:"dimension_mappings"`
-			LivePosting       *bool             `json:"live_posting"`
+			GridID            string                 `json:"grid_id"`
+			Name              string                 `json:"name"`
+			SourceField       string                 `json:"source_field"`
+			TargetMetricID    string                 `json:"target_metric_id"`
+			Aggregation       string                 `json:"aggregation"`
+			PostingStatuses   []string               `json:"posting_statuses"`
+			DimensionMappings map[string]string      `json:"dimension_mappings"`
+			LivePosting       *bool                  `json:"live_posting"`
+			RowFilter         []crudapp.RowCondition `json:"row_filter"`
 		}
 		// The mapping keeps its model, revision and table; what it names
 		// now must be theirs. A field the body leaves out keeps its value:
@@ -10164,18 +10171,19 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		// of dimension_mappings alone was refused for a target_metric_id it
 		// never named, and would have blanked the rest).
 		var mapModel, mapRevision, mapForm string
-		var dimRaw []byte
+		var dimRaw, filterRaw []byte
 		var live bool
 		if err := h.db.QueryRow(ctx, `
 			SELECT model_id::text, COALESCE(revision_id::text, ''), form_id::text,
 			       COALESCE(grid_id::text, ''), name, COALESCE(source_field, ''), COALESCE(target_metric_id::text, ''),
-			       COALESCE(aggregation, 'sum'), COALESCE(posting_statuses, '{}'), COALESCE(dimension_mappings, '{}'::jsonb), live_posting
+			       COALESCE(aggregation, 'sum'), COALESCE(posting_statuses, '{}'), COALESCE(dimension_mappings, '{}'::jsonb), live_posting, row_filter
 			FROM model.form_metric_mapping WHERE id = $1::uuid`, mappingID).Scan(&mapModel, &mapRevision, &mapForm,
-			&body.GridID, &body.Name, &body.SourceField, &body.TargetMetricID, &body.Aggregation, &body.PostingStatuses, &dimRaw, &live); err != nil {
+			&body.GridID, &body.Name, &body.SourceField, &body.TargetMetricID, &body.Aggregation, &body.PostingStatuses, &dimRaw, &live, &filterRaw); err != nil {
 			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
 			return
 		}
 		_ = json.Unmarshal(dimRaw, &body.DimensionMappings)
+		_ = json.Unmarshal(filterRaw, &body.RowFilter)
 		body.LivePosting = &live
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -10183,7 +10191,7 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		}
 		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), mapModel, mapRevision, crudapp.MappingRefs{
 			FormID: mapForm, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
-			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings,
+			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings, RowFilter: body.RowFilter,
 		}); crudapp.IsMappingRefError(err) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -10200,10 +10208,10 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 			UPDATE model.form_metric_mapping SET
 			  grid_id=NULLIF($2,'')::uuid, name=$3, source_field=$4,
 			  target_metric_id=$5::uuid, aggregation=$6,
-			  posting_statuses=$7, dimension_mappings=$8, live_posting=$9
+			  posting_statuses=$7, dimension_mappings=$8, live_posting=$9, row_filter=$10::jsonb
 			WHERE id=$1::uuid`,
 			mappingID, body.GridID, body.Name, body.SourceField, body.TargetMetricID, body.Aggregation,
-			body.PostingStatuses, dimJSON, livePosting,
+			body.PostingStatuses, dimJSON, livePosting, rowFilterJSON(body.RowFilter),
 		); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -12498,6 +12506,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				Label *string `json:"label"`
 				// Users maintain its members (business_members.go).
 				BusinessMaintained *bool `json:"business_maintained"`
+				// Who of them may (dimension_editors.go); [] lifts it.
+				EditorRoles *[]string `json:"editor_roles"`
 			}
 			var sent map[string]json.RawMessage
 			raw, err := io.ReadAll(r.Body)
@@ -12542,6 +12552,20 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					}
 				}
 				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET business_maintained=$2 WHERE id=$1::uuid`, dimID, *body.BusinessMaintained); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
+			if body.EditorRoles != nil {
+				roles := *body.EditorRoles
+				if roles == nil {
+					roles = []string{}
+				}
+				if err := crudapp.CheckEditorRoles(ctx, h.db.For(ctx), dimID, roles); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET editor_roles=$2 WHERE id=$1::uuid`, dimID, roles); err != nil {
 					jsonErr(w, err, http.StatusInternalServerError)
 					return
 				}
@@ -19215,9 +19239,15 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Decode runtime context override from request body
+	// Decode runtime context override from request body. Shared is the
+	// dashboard's selector values (dimension id -> member code): a chart
+	// knows which of its dimensions they cover only from its first answer,
+	// so its first request used to go out with none and drew every
+	// scenario added together until the second (2026-11-08). The ones on
+	// the chart's grid, not plotted and not in Context, apply.
 	var req struct {
 		Context map[string]string `json:"context"`
+		Shared  map[string]string `json:"shared"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		req.Context = map[string]string{}
@@ -19272,6 +19302,12 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 	if !h.revisionOpen(ctx, a, modelID, revisionID) {
 		jsonErr(w, fmt.Errorf("dashboard not accessible"), http.StatusForbidden)
 		return
+	}
+	if len(req.Shared) > 0 {
+		if err := applySharedChartContext(ctx, h.db.For(ctx), gridDefID, cfg.DimensionID, req.Context, req.Shared); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 	}
 	resolver := query.NewChartResolver(h.db.For(ctx))
 	result, err := resolver.Resolve(ctx, cfg, req.Context, modelID, revisionID, gridDefID, a.UserID)
@@ -19415,4 +19451,34 @@ func (h *handler) recalcGridMetrics(ctx context.Context, gridID string) {
 			h.log.Warn().Err(err).Str("grid", gridID).Msg("recalculation after a grid change failed")
 		}
 	}()
+}
+
+// applySharedChartContext copies into chartCtx the dashboard's selector values
+// for the dimensions of grid gridDefID other than the plotted one that
+// chartCtx does not name already; the rest are another widget's.
+func applySharedChartContext(ctx context.Context, db dbx.DB, gridDefID, plottedDimID string, chartCtx, shared map[string]string) error {
+	rows, err := db.Query(ctx, `SELECT dimension_id::text FROM model.grid_dimension WHERE grid_id = $1::uuid`, gridDefID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dimID string
+		if err := rows.Scan(&dimID); err != nil {
+			return err
+		}
+		if code := shared[dimID]; code != "" && dimID != plottedDimID && chartCtx[dimID] == "" {
+			chartCtx[dimID] = code
+		}
+	}
+	return rows.Err()
+}
+
+// rowFilterJSON is a posting's row filter as stored: [] for none.
+func rowFilterJSON(filter []crudapp.RowCondition) string {
+	if len(filter) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(filter)
+	return string(b)
 }

@@ -441,6 +441,18 @@ type formIntegrationParams struct {
 	PostingStatuses   []string          `json:"posting_statuses"`
 	DimensionMappings map[string]string `json:"dimension_mappings"`
 	LivePosting       *bool             `json:"live_posting"`
+	// RowFilter: the conditions a record meets to post (migration 161); nil
+	// on an update keeps the one it has, [] removes it.
+	RowFilter *[]crudapp.RowCondition `json:"row_filter"`
+}
+
+// rowFilter is p's row filter as stored ([] for none).
+func (p formIntegrationParams) rowFilter() ([]crudapp.RowCondition, string) {
+	if p.RowFilter == nil || len(*p.RowFilter) == 0 {
+		return nil, "[]"
+	}
+	b, _ := json.Marshal(*p.RowFilter)
+	return *p.RowFilter, string(b)
 }
 
 // checkIntegrationFields confirms the fields the mapping reads actually exist
@@ -501,8 +513,10 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 	if err := e.checkIntegrationFields(ctx, formID, &p); err != nil {
 		return "", "", err
 	}
+	filter, filterJSON := p.rowFilter()
 	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
 		FormID: formID, GridID: p.GridID, TargetMetricID: metricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
+		RowFilter: filter,
 	}); err != nil {
 		return "", "", err
 	}
@@ -521,18 +535,22 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 	if err := e.pool.QueryRow(ctx, `
 		INSERT INTO model.form_metric_mapping
 		  (model_id, form_id, grid_id, name, source_field, target_metric_id, aggregation,
-		   posting_statuses, dimension_mappings, live_posting, revision_id)
-		VALUES ($1::uuid, $2::uuid, NULLIF($3,'')::uuid, $4, $5, $6::uuid, $7, $8, $9, $10, NULLIF($11,'')::uuid)
+		   posting_statuses, dimension_mappings, live_posting, revision_id, row_filter)
+		VALUES ($1::uuid, $2::uuid, NULLIF($3,'')::uuid, $4, $5, $6::uuid, $7, $8, $9, $10, NULLIF($11,'')::uuid, $12::jsonb)
 		RETURNING id::text`,
 		e.modelID, formID, p.GridID, p.Name, p.SourceField, metricID, p.Aggregation,
-		p.PostingStatuses, dimJSON, live, e.revID,
+		p.PostingStatuses, dimJSON, live, e.revID, filterJSON,
 	).Scan(&id); err != nil {
 		return "", "", fmt.Errorf("create form integration: %w", err)
 	}
 	var metricName string
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&metricName)
-	return fmt.Sprintf("Form integration '%s' created (id: %s): field '%s' posts to metric '%s' (%s) for records with status %s, %d dimension mapping(s)",
-		p.Name, id, p.SourceField, metricName, p.Aggregation, strings.Join(p.PostingStatuses, "/"), len(p.DimensionMappings)), id, nil
+	only := ""
+	if len(filter) > 0 {
+		only = fmt.Sprintf(", only records meeting %d condition(s)", len(filter))
+	}
+	return fmt.Sprintf("Form integration '%s' created (id: %s): field '%s' posts to metric '%s' (%s) for records with status %s, %d dimension mapping(s)%s",
+		p.Name, id, p.SourceField, metricName, p.Aggregation, strings.Join(p.PostingStatuses, "/"), len(p.DimensionMappings), only), id, nil
 }
 
 // loadIntegration checks *id names a form integration of this model's
@@ -583,15 +601,20 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	// Partial update: the console's PATCH overwrites every column, so read
 	// the row first and only replace what the caller supplied.
 	var cur formIntegrationParams
-	var dimRaw []byte
+	var dimRaw, filterRaw []byte
 	var live bool
 	if err := e.pool.QueryRow(ctx, `
-		SELECT COALESCE(grid_id::text,''), name, source_field, target_metric_id::text, aggregation, posting_statuses, dimension_mappings, live_posting
+		SELECT COALESCE(grid_id::text,''), name, source_field, target_metric_id::text, aggregation, posting_statuses, dimension_mappings, live_posting, row_filter
 		FROM model.form_metric_mapping WHERE id=$1::uuid
-	`, p.FormIntegrationID).Scan(&cur.GridID, &cur.Name, &cur.SourceField, &cur.TargetMetricID, &cur.Aggregation, &cur.PostingStatuses, &dimRaw, &live); err != nil {
+	`, p.FormIntegrationID).Scan(&cur.GridID, &cur.Name, &cur.SourceField, &cur.TargetMetricID, &cur.Aggregation, &cur.PostingStatuses, &dimRaw, &live, &filterRaw); err != nil {
 		return "", "", fmt.Errorf("load form integration: %w", err)
 	}
 	_ = json.Unmarshal(dimRaw, &cur.DimensionMappings)
+	if p.RowFilter == nil {
+		var kept []crudapp.RowCondition
+		_ = json.Unmarshal(filterRaw, &kept)
+		p.RowFilter = &kept
+	}
 	if p.Name == "" {
 		p.Name = cur.Name
 	}
@@ -623,8 +646,10 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	if err := e.checkIntegrationFields(ctx, formID, &p); err != nil {
 		return "", "", err
 	}
+	filter, filterJSON := p.rowFilter()
 	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
 		FormID: formID, GridID: p.GridID, TargetMetricID: p.TargetMetricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
+		RowFilter: filter,
 	}); err != nil {
 		return "", "", err
 	}
@@ -632,10 +657,10 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.form_metric_mapping SET
 		  grid_id=NULLIF($2,'')::uuid, name=$3, source_field=$4, target_metric_id=$5::uuid, aggregation=$6,
-		  posting_statuses=$7, dimension_mappings=$8, live_posting=$9
+		  posting_statuses=$7, dimension_mappings=$8, live_posting=$9, row_filter=$10::jsonb
 		WHERE id=$1::uuid`,
 		p.FormIntegrationID, p.GridID, p.Name, p.SourceField, p.TargetMetricID, p.Aggregation,
-		p.PostingStatuses, dimJSON, *p.LivePosting,
+		p.PostingStatuses, dimJSON, *p.LivePosting, filterJSON,
 	); err != nil {
 		return "", "", fmt.Errorf("update form integration: %w", err)
 	}

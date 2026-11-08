@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -41,5 +42,43 @@ func TestChartContextDefaultsAreCheckedAtSave(t *testing.T) {
 	}
 	if pts := f.chartPoints(f.dev, w); len(pts["revenue"]) == 0 {
 		t.Errorf("the valid chart draws nothing: %v", pts)
+	}
+}
+
+// TestChartFirstRequestTakesThePageSelectors: the dashboard's selector values
+// sent as "shared" apply on the chart's own non-plotted dimensions; a plotted
+// or foreign one is ignored, and the chart's context wins. The first request
+// of a chart used to go out without them and drew every member added
+// together until the second (2026-11-08).
+func TestChartFirstRequestTakesThePageSelectors(t *testing.T) {
+	f := setupRestrictedFixture(t)
+	dash := f.dev_("POST", "/api/developer/dashboards", map[string]any{"name": "S", "revision_id": f.revID})
+	w := f.chartWidget(dash, f.region, []string{"revenue"}, nil)
+	// The series drawn (as_of, the answer's time, differs between calls).
+	data := func(body map[string]any) string {
+		status, raw := f.req("POST", "/api/dashboard-widgets/"+w+"/chart-data", f.dev, body)
+		if status != http.StatusOK {
+			t.Fatalf("chart-data %v: %d %s", body, status, raw)
+		}
+		var answer struct {
+			Series json.RawMessage `json:"series"`
+		}
+		if err := json.Unmarshal(raw, &answer); err != nil {
+			t.Fatalf("chart-data answer: %v", err)
+		}
+		return string(answer.Series)
+	}
+	pinned := data(map[string]any{"context": map[string]string{f.period: "2026-02"}})
+	shared := data(map[string]any{"context": map[string]string{},
+		"shared": map[string]string{f.period: "2026-02", f.region: "UK", f.currency: "EUR"}})
+	if shared != pinned {
+		t.Errorf("shared period 2026-02 drew %s, want what the context 2026-02 draws: %s", shared, pinned)
+	}
+	if total := data(map[string]any{"context": map[string]string{}}); total == pinned {
+		t.Fatalf("the fixture's February equals its total: the test proves nothing")
+	}
+	if own := data(map[string]any{"context": map[string]string{f.period: "2026-02"},
+		"shared": map[string]string{f.period: "2026-01"}}); own != pinned {
+		t.Errorf("the chart's own context must win over the shared value: %s", own)
 	}
 }

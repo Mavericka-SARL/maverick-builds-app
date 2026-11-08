@@ -53,6 +53,10 @@ type RecordAccess struct {
 	// NoAdd: the table names who may add records (FormDef.CreateRoles) and
 	// the caller, no administrator, is none of them.
 	NoAdd bool
+	// NotEditor: the table keeps a dimension whose editor roles the caller,
+	// no administrator, holds none of (migration 161): its records are the
+	// dimension's members, theirs to read only.
+	NotEditor bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -94,6 +98,7 @@ func (a RecordAccess) Permissions(status string) RecordPermissions {
 		if a.Statuses {
 			p.SetStatus = otherStatuses(RecordStatuses, status)
 		}
+	case a.NotEditor:
 	case a.Everyone && a.ReadOnly:
 	case (a.Creator || a.Everyone) && (status == "" || slices.Contains(creatorStatuses, status)):
 		p.Edit, p.Delete = true, true

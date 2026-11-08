@@ -4,6 +4,8 @@ import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, Chevr
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
 import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm, CollapseToggle, useExpanded, Txt } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
+import { useDemo } from "../../api/useDemo";
+import { RolePicker } from "./RolePicker";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
 interface DimMemberNode extends DevDimensionMember {
@@ -333,8 +335,12 @@ function DimInlineRow({
 }
 
 // The header's edit mode, shared by both card kinds: the name and the tags.
-function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => void }) {
+function DimHeaderEditor({ dim, onClose, revisionId }: { dim: DevDimension; onClose: () => void; revisionId?: string }) {
   const qc = useQueryClient();
+  // Who may change its members outside the developer's tools (migration 161).
+  const [editorRoles, setEditorRoles] = useState<string[]>(dim.editor_roles ?? []);
+  const { data: demoCtx } = useDemo(revisionId, { staleTime: 60_000 });
+  const rolesChanged = editorRoles.join("\u0000") !== (dim.editor_roles ?? []).join("\u0000");
   const [name, setName] = useState(dim.name);
   const [label, setLabel] = useState(dim.label ?? "");
   const [tags, setTags] = useState<string[]>(dim.tags ?? []);
@@ -342,7 +348,7 @@ function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => v
   // A time dimension's periods and a grouping's derived members are not typed.
   const canOpen = dim.dimension_type !== "time" && !dim.source_dimension_id;
   const save = useMutation({
-    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}) }),
+    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}), ...(rolesChanged ? { editor_roles: editorRoles } : {}) }),
     onSuccess: () => { void refreshMembers(qc); onClose(); },
   });
   return (
@@ -368,6 +374,13 @@ function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => v
           <input type="checkbox" checked={businessMaintained} onChange={(e) => setBusinessMaintained(e.target.checked)} />
           Users maintain its members <span className="mvx-admin-muted">(add, rename and remove them from the grid)</span>
         </label>
+      )}
+      {demoCtx?.app_id && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="mvx-admin-muted">Who may change its members:</span>
+          <RolePicker applicationId={demoCtx.app_id} value={editorRoles} onChange={setEditorRoles} />
+          <span className="mvx-admin-muted">none chosen: every user who may; administrators always may</span>
+        </div>
       )}
       {save.isError && <p className="mvx-admin-error">{(save.error as Error).message}</p>}
     </div>
@@ -585,7 +598,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
       {/* ── Header ── */}
       <div style={{ background: "var(--color-surface-subtle)", padding: "10px 16px", borderBottom: "1px solid var(--color-border)" }}>
         {editDimName ? (
-          <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} />
+          <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} revisionId={revisionId} />
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <CollapseToggle expanded={open} onToggle={onToggleOpen} label={dim.name} />

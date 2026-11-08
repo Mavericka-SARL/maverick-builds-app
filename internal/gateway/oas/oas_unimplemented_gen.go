@@ -945,18 +945,6 @@ func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelP
 	return r, ht.ErrNotImplemented
 }
 
-// ExtendBACalendar implements extendBACalendar operation.
-//
-// Adds the periods after the last one through the period containing `through`, placed as the last
-// one is: under quarters and fiscal years of the same kind, reused or created and named after their
-// peers. Nothing is renamed, moved or deleted. Only a time dimension of the active revision of the
-// model the admin has open.
-//
-// POST /api/business-admin/calendars/{dimId}/extend
-func (UnimplementedHandler) ExtendBACalendar(ctx context.Context, req *ExtendBACalendarReq, params ExtendBACalendarParams) (r ExtendBACalendarRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
 // ExtractFormulaRefs implements extractFormulaRefs operation.
 //
 // Parse a formula string and return the metric/dimension names it references.
@@ -1629,15 +1617,6 @@ func (UnimplementedHandler) ListAutomationRules(ctx context.Context, params List
 //
 // GET /api/business-admin/available
 func (UnimplementedHandler) ListBAAvailable(ctx context.Context, params ListBAAvailableParams) (r ListBAAvailableRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
-// ListBACalendars implements listBACalendars operation.
-//
-// The time dimensions of the open model's active revision, with their first and last period.
-//
-// GET /api/business-admin/calendars
-func (UnimplementedHandler) ListBACalendars(ctx context.Context) (r ListBACalendarsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

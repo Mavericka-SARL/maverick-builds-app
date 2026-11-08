@@ -297,10 +297,6 @@ type ExportModelRes interface {
 	exportModelRes()
 }
 
-type ExtendBACalendarRes interface {
-	extendBACalendarRes()
-}
-
 type FillSampleValuesRes interface {
 	fillSampleValuesRes()
 }
@@ -479,10 +475,6 @@ type ListAutomationRulesRes interface {
 
 type ListBAAvailableRes interface {
 	listBAAvailableRes()
-}
-
-type ListBACalendarsRes interface {
-	listBACalendarsRes()
 }
 
 type ListBARoleDashboardsRes interface {

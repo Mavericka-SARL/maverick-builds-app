@@ -29,6 +29,8 @@ type MappingRefs struct {
 	SourceField    string
 	// DimensionMappings: dimension id → field name.
 	DimensionMappings map[string]string
+	// RowFilter: the conditions a record meets to post (row_filter.go).
+	RowFilter []RowCondition
 }
 
 // MappingRefError is a reference a mapping may not hold; its message says
@@ -121,6 +123,9 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 		if field := m.DimensionMappings[dimID]; !has(field) {
 			return refErr("dimension_mappings maps a dimension to %q, which is no field of the table", field)
 		}
+	}
+	if err := checkRowFilter(ctx, db, fields, m.RowFilter); err != nil {
+		return err
 	}
 	return checkMappedDimensionsPlaced(ctx, db, m, dims)
 }

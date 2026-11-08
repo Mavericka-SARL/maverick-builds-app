@@ -3,7 +3,7 @@ import { IntegrationTemplatesPanel } from "./IntegrationTemplatesPanel";
 import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
-import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting } from "../../api/client";
+import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting, type RowCondition } from "../../api/client";
 import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm, Txt } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
 import { ExportSection } from "./ExportSection";
@@ -41,6 +41,10 @@ function FormMappingEditor({
   const [postingStatuses, setPostingStatuses] = useState<string[]>(initial?.posting_statuses ?? ["approved"]);
   const [dimMappings, setDimMappings] = useState<Record<string, string>>(initial?.dimension_mappings ?? {});
   const [livePosting, setLivePosting] = useState(initial?.live_posting ?? true);
+  // "Only records where": the conditions a record meets to post — one
+  // measure of a register that keeps several in a code column.
+  const [rowFilter, setRowFilter] = useState<RowCondition[]>(initial?.row_filter ?? []);
+  const setCondition = (i: number, c: RowCondition) => setRowFilter(prev => prev.map((x, j) => j === i ? c : x));
 
   const selectedForm = forms.find(f => f.id === formId);
   const formFields = selectedForm?.fields ?? [];
@@ -93,7 +97,7 @@ function FormMappingEditor({
         <Field label="Source value field">
           <Select value={sourceField} onChange={e => setSourceField(e.target.value)}>
             <option value="">Select field…</option>
-            {formFields.filter(f => f.type === "number").map(f => (
+            {formFields.filter(f => aggregation === "count" || f.type === "number").map(f => (
               <option key={f.name} value={f.name}>{f.label || f.name}</option>
             ))}
           </Select>
@@ -165,6 +169,42 @@ function FormMappingEditor({
         </div>
       )}
 
+      {formFields.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>
+            Only records where
+            <span className="mvx-admin-muted" style={{ fontWeight: 400, marginLeft: 4 }}>
+              (none: every record posts; a register keeping several measures in a code column posts each into its own metric)
+            </span>
+          </div>
+          {rowFilter.map((c, i) => {
+            const negated = (c.is_not?.length ?? 0) > 0;
+            const values = (negated ? c.is_not : c.is) ?? [];
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <Select aria-label="Field" value={c.field} onChange={e => setCondition(i, { ...c, field: e.target.value })} style={{ flex: 1 }}>
+                  <option value="">Select field…</option>
+                  {formFields.map(f => <option key={f.name} value={f.name}>{f.label || f.name}</option>)}
+                </Select>
+                <Select aria-label="Condition" value={negated ? "is_not" : "is"} style={{ width: 120 }}
+                  onChange={e => setCondition(i, e.target.value === "is_not" ? { field: c.field, is_not: values } : { field: c.field, is: values })}>
+                  <option value="is">is one of</option>
+                  <option value="is_not">is none of</option>
+                </Select>
+                <TextInput aria-label="Values" value={values.join(", ")} placeholder="e.g. Produced tonnes"
+                  style={{ flex: 2 }}
+                  onChange={e => {
+                    const list = e.target.value.split(",").map(v => v.trim()).filter(Boolean);
+                    setCondition(i, negated ? { field: c.field, is_not: list } : { field: c.field, is: list });
+                  }} />
+                <Button onClick={() => setRowFilter(prev => prev.filter((_, j) => j !== i))}>Remove</Button>
+              </div>
+            );
+          })}
+          <Button onClick={() => setRowFilter(prev => [...prev, { field: "", is: [] }])}>Add a condition</Button>
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 12 }}>
         <Switch checked={livePosting} onChange={setLivePosting} aria-label="Live update" />
         <span style={{ fontWeight: 500 }}>Live update</span>
@@ -180,7 +220,8 @@ function FormMappingEditor({
             onSave({ form_id: formId, grid_id: gridId || undefined, name,
               source_field: sourceField, target_metric_id: targetMetricId,
               aggregation, posting_statuses: postingStatuses, dimension_mappings: dimMappings,
-              live_posting: livePosting });
+              live_posting: livePosting,
+              row_filter: rowFilter.filter(c => c.field && ((c.is?.length ?? 0) > 0 || (c.is_not?.length ?? 0) > 0)) });
           }}
         >
           Save
@@ -260,6 +301,14 @@ function FormMappingCard({
             <span style={{ marginRight: 12 }}>→ <Txt>{grid ? <><b>{grid.name}</b> grid</> : "all grids using this metric"}</Txt></span>
             <span>Agg: <b>{mapping.aggregation}</b></span>
           </div>
+          {(mapping.row_filter?.length ?? 0) > 0 && (
+            <div className="mvx-admin-muted" style={{ marginTop: 4 }}>
+              Only records where{" "}
+              {(mapping.row_filter ?? []).map((c, i) => (
+                <span key={i}><Txt>{i > 0 ? " and " : ""}</Txt><b>{c.field}</b> <Txt>{c.is_not?.length ? "is none of" : "is"}</Txt> <b>{(c.is_not?.length ? c.is_not : c.is ?? []).join(", ")}</b></span>
+              ))}
+            </div>
+          )}
           <div className="mvx-admin-muted" style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {form && !form.fields.some(f => f.type === "status") ? (
               <span>Posts every record as it is saved</span>

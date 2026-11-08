@@ -159,6 +159,18 @@ func asksToPropose(reply string) bool {
 	return false
 }
 
+// leaveToPropose: a reply holding back a plan the developer asked for, for
+// leave or for a yes to defaults it named itself (2026-11-08: "Reply 'Yes' to
+// accept the owner-title mapping above", "say proceed to propose this plan",
+// "once you confirm the titles I will propose") — whatever options it lists.
+var leaveToPropose = regexp.MustCompile(`(?i)(reply\s+(with\s*:?)?[\s\-*]*["“']?yes|say\s+["“']?(proceed|yes|go)\b|once you confirm[^.?!]{0,80}\bi will (propose|prepare)|before i (propose|prepare|build) the plan|reply ["“']?proceed)`)
+
+// asksLeaveToPropose reports whether reply holds a plan back for leave.
+func asksLeaveToPropose(reply string) bool { return leaveToPropose.MatchString(reply) }
+
+// leaveNudge sends such a reply back: the developer answers on the plan.
+const leaveNudge = "Propose the plan now, with the defaults you named: the developer confirms or changes it on the plan itself. Ask before proposing only where the workbook or the request leaves a choice that changes numbers, and then propose the parts you are sure of in the same reply."
+
 // choiceLine is a line starting an option: "1)", "2.", "A)", "Option B".
 var choiceLine = regexp.MustCompile(`(?mi)^\s*(?:[-*]\s*)?(?:\*\*)?(?:\d[.)]|[a-c]\)|option [a-c1-3]\b)`)
 

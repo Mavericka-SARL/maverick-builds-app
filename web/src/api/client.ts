@@ -640,17 +640,6 @@ export interface HistoryStep {
   completed_at?: string;
 }
 
-/** A time dimension of the open model's live revision (Business Admin › Calendar). */
-export interface BACalendar {
-  id: string;
-  name: string;
-  granularity: string;
-  first?: string;
-  last?: string;
-  last_label?: string;
-  periods: number;
-}
-
 export interface HistoryInstance {
   id: string;
   workflow_name: string;
@@ -708,6 +697,8 @@ export interface DevDimension {
   source_property?: string;
   // Business users add, rename and remove its members.
   business_maintained?: boolean;
+  // The business roles that may change its members ([]: anyone who may).
+  editor_roles?: string[];
   members: DevDimensionMember[];       // time members in chronological order
 }
 
@@ -1754,6 +1745,16 @@ export interface FormMetricMapping {
   posting_statuses: string[];
   dimension_mappings: Record<string, string>;
   live_posting: boolean;
+  // The conditions a record meets to post (migration 161); none: every record.
+  row_filter?: RowCondition[];
+}
+
+// One condition of a posting's row filter: the field holds one of `is`, or
+// none of `is_not` (text, ignoring case).
+export interface RowCondition {
+  field: string;
+  is?: string[];
+  is_not?: string[];
 }
 
 export interface FormRecordPosting {
@@ -2252,8 +2253,23 @@ export interface HighlightRule {
 // One SSE event from the streaming /messages endpoint. Fields are populated
 // according to `type` — see internal/gateway/ai_handler.go's sendSSE calls
 // for the exact payload shape per event type.
+/** The task plan of a goal the AI Developer was delegated (migration 162). */
+export interface AITaskStage {
+  title: string;
+  items: string[];
+  check?: string;
+  status: "pending" | "in_progress" | "done" | "skipped";
+  note?: string;
+}
+export interface AITaskPlan {
+  goal: string;
+  stages: AITaskStage[];
+  updated_at?: string;
+}
+
 export interface AISendMessageEvent {
-  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error";
+  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error" | "task_plan";
+  task_plan?: AITaskPlan | null; // task_plan | done: the session's plan
   content?: string; // delta
   tool?: string; // tool_status | progress
   chars?: number; // progress: how much of the tool call is written
@@ -2905,7 +2921,7 @@ export const api = {
   // A partial update: a field left out keeps its value; parent_dimension_id: null detaches,
   // source_dimension_id: null clears a property grouping.
   updateDimension: (id: string, body: { name?: string; label?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
-    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean }) =>
+    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean; editor_roles?: string[] }) =>
     apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
@@ -3034,12 +3050,6 @@ export const api = {
   // execution read "cancelled", and its assignees and starter are told.
   copyBAValues: (body: { dimension_id: string; from: string; to: string; metric_ids?: string[]; dry_run?: boolean }) =>
     apiFetch<{ cells: number; dry_run: boolean }>("/api/business-admin/copy-values", { method: "POST", body: JSON.stringify(body) }),
-  listBACalendars: () => apiFetch<BACalendar[]>("/api/business-admin/calendars"),
-  extendBACalendar: (dimId: string, through: string) =>
-    apiFetch<{ periods: number; aggregates: number }>(`/api/business-admin/calendars/${dimId}/extend`, {
-      method: "POST",
-      body: JSON.stringify({ through }),
-    }),
   reopenWorkflowInstance: (instanceId: string, reason: string) =>
     apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/reopen`, {
       method: "POST",
@@ -3123,10 +3133,12 @@ export const api = {
   listUserDashboards: () => apiFetch<DashboardDef[]>("/api/dashboards"),
   getUserDashboard: (id: string) => apiFetch<DashboardDef>(`/api/dashboards/${id}`),
 
-  getChartData: (widgetId: string, context: Record<string, string>) =>
+  // shared: the dashboard's selector values; the server applies those on the
+  // chart's own dimensions (a first request, before the chart knows them).
+  getChartData: (widgetId: string, context: Record<string, string>, shared?: Record<string, string>) =>
     apiFetch<ChartData>(`/api/dashboard-widgets/${widgetId}/chart-data`, {
       method: "POST",
-      body: JSON.stringify({ context }),
+      body: JSON.stringify(shared ? { context, shared } : { context }),
     }),
 
 
@@ -3305,7 +3317,7 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   aiGetSession: (id: string) =>
-    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[]; usage?: AISessionUsage }>(`/api/ai/sessions/${id}`),
+    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[]; usage?: AISessionUsage; task_plan?: AITaskPlan | null }>(`/api/ai/sessions/${id}`),
   aiUploadDocument: async (sessionId: string, file: File): Promise<AIDocument> => {
     // multipart — bypass apiFetch so the browser sets the Content-Type boundary
     const appId = localStorage.getItem("selected_app_id") ?? "";

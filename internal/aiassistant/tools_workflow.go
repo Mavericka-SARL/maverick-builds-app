@@ -140,7 +140,7 @@ func (e *ToolExecutor) getForm(ctx context.Context, raw json.RawMessage) (string
 
 func (e *ToolExecutor) integrationsForForm(ctx context.Context, formID string) ([]string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT fm.id::text, fm.name, fm.source_field, md.name, fm.aggregation, fm.posting_statuses, fm.live_posting
+		SELECT fm.id::text, fm.name, fm.source_field, md.name, fm.aggregation, fm.posting_statuses, fm.live_posting, fm.row_filter
 		FROM model.form_metric_mapping fm
 		JOIN model.metric_def md ON md.id = fm.target_metric_id
 		WHERE fm.form_id = $1::uuid ORDER BY fm.created_at
@@ -154,10 +154,15 @@ func (e *ToolExecutor) integrationsForForm(ctx context.Context, formID string) (
 		var id, name, field, metric, agg string
 		var statuses []string
 		var live bool
-		if rows.Scan(&id, &name, &field, &metric, &agg, &statuses, &live) != nil {
+		var filter []byte
+		if rows.Scan(&id, &name, &field, &metric, &agg, &statuses, &live, &filter) != nil {
 			continue
 		}
-		out = append(out, fmt.Sprintf("%s (id:%s): field '%s' → metric '%s' (%s, statuses %s, live_posting:%v)", name, id, field, metric, agg, strings.Join(statuses, "/"), live))
+		only := ""
+		if f := strings.TrimSpace(string(filter)); f != "" && f != "[]" {
+			only = ", row_filter " + f
+		}
+		out = append(out, fmt.Sprintf("%s (id:%s): field '%s' → metric '%s' (%s, statuses %s, live_posting:%v%s)", name, id, field, metric, agg, strings.Join(statuses, "/"), live, only))
 	}
 	return out, rows.Err()
 }

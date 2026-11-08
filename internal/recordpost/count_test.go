@@ -134,3 +134,61 @@ func TestRemovingAGridDimensionRemovesItsValues(t *testing.T) {
 		t.Errorf("grid dimensions after the removal: %v, want 0", n)
 	}
 }
+
+// A posting's row filter posts the records that meet it and only those: a
+// register of several measures posts each into its own metric, as the
+// workbook's SUMIFS on its code column reads it (migration 161).
+func TestRowFilterPostsTheRecordsThatMeetIt(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	set := func(filter string) {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `UPDATE model.form_metric_mapping SET row_filter=$2::jsonb WHERE id=$1::uuid`, f.mapping, filter); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(`[{"field":"region","is":["eu"]}]`) // case is ignored, as SUMIFS ignores it
+	ps := recordpost.OnPool(f.pool, logger.New("test"))
+	if _, err := ps.Import(ctx, recordpost.ImportRequest{Form: f.form, CreatorID: f.userID,
+		Header: []string{"region", "amount"}, Rows: spendRows("10", "20", "5"), Inline: true}); err != nil { // EU, US, EU
+		t.Fatal(err)
+	}
+	if eu, us := f.spend(t, "EU"), f.spend(t, "US"); eu != 15 || us != 0 {
+		t.Errorf("filter region is EU: EU = %v, US = %v; want 15 and 0", eu, us)
+	}
+	// Changed, the filter takes effect on what is saved once re-posted.
+	set(`[{"field":"region","is_not":["EU"]}]`)
+	if _, err := ps.Backfill(ctx, f.mapping, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	if eu, us := f.spend(t, "EU"), f.spend(t, "US"); eu != 0 || us != 20 {
+		t.Errorf("filter region is not EU, re-posted: EU = %v, US = %v; want 0 and 20", eu, us)
+	}
+}
+
+// A row filter names the table's fields and, on a dimension field, member
+// codes of its dimension; each condition holds values to match.
+func TestRowFilterIsChecked(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	var revID string
+	if err := f.pool.QueryRow(ctx, `SELECT revision_id::text FROM model.form_def WHERE id=$1::uuid`, f.form.ID).Scan(&revID); err != nil {
+		t.Fatal(err)
+	}
+	refs := func(filter ...crudapp.RowCondition) crudapp.MappingRefs {
+		return crudapp.MappingRefs{FormID: f.form.ID, TargetMetricID: f.metricID, SourceField: "amount",
+			DimensionMappings: map[string]string{f.regionDim: "region"}, RowFilter: filter}
+	}
+	if err := crudapp.CheckMappingRefs(ctx, f.pool, f.form.ModelID, revID, refs(crudapp.RowCondition{Field: "region", Is: []string{"US"}})); err != nil {
+		t.Fatalf("a valid filter: %v", err)
+	}
+	for want, c := range map[string]crudapp.RowCondition{
+		"no field of the table":  {Field: "nope", Is: []string{"x"}},
+		`needs "is" or "is_not"`: {Field: "region"},
+		"no member code":         {Field: "region", Is: []string{"MARS"}},
+	} {
+		if err := crudapp.CheckMappingRefs(ctx, f.pool, f.form.ModelID, revID, refs(c)); !crudapp.IsMappingRefError(err) || !strings.Contains(err.Error(), want) {
+			t.Errorf("filter %+v: %v, want %q", c, err, want)
+		}
+	}
+}

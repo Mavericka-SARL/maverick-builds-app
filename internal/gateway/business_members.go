@@ -132,6 +132,14 @@ func (h *handler) checkBusinessMember(w http.ResponseWriter, r *http.Request, di
 		jsonErr(w, errNotBusinessMaintained, http.StatusForbidden)
 		return businessMember{}, false
 	}
+	// Its editor roles, when it names any (dimension_editors.go).
+	if reason, err := h.dimensionEditorRefusal(ctx, act, dimID); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return businessMember{}, false
+	} else if reason != "" {
+		jsonErr(w, fmt.Errorf("%s", reason), http.StatusForbidden)
+		return businessMember{}, false
+	}
 	if memberID != "" {
 		var inDim bool
 		if err := h.db.QueryRow(ctx,

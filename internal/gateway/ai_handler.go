@@ -321,7 +321,8 @@ func (h *handler) aiGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 	// What the session's calls were billed for (migration 160).
 	usage, _ := store.Usage(ctx, sessionID)
-	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": usage})
+	plan, _ := store.TaskPlan(ctx, sessionID)
+	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": usage, "task_plan": plan})
 }
 
 // ── POST /api/ai/sessions/{id}/messages ─────────────────────────────────────
@@ -497,6 +498,12 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	if docs, dErr := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID); dErr == nil {
 		systemPrompt += buildDocumentContext(docs)
 	}
+	// The message read as a direct order, a delegated goal or a question,
+	// with the playbooks of its tasks and the session's plan (ai_task.go).
+	taskPlan, _ := store.TaskPlan(ctx, sessionID)
+	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
+	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
+	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
 
 	// 4. Tool executors.
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
@@ -573,7 +580,11 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// sentBack: a plan of this turn went back to be fixed. A model that then
 	// ends the turn asking leave to propose ("confirm and I will post it" —
 	// gpt-5-mini did, stage after stage) is told once to propose instead.
+	sendSSE("tool_status", map[string]string{"tool": modeStatus(reqMode)})
 	sentBack, nudged := false, false
+	// coverageChecked: the turn's first plan that runs was checked against
+	// the request (ai_coverage.go); later ones are its corrections.
+	coverageChecked := false
 
 turn:
 	for {
@@ -651,6 +662,14 @@ turn:
 		}
 
 		if llmResp.FinishReason != "tool_calls" || len(llmResp.Message.ToolCalls) == 0 {
+			// Asking leave to propose, or to confirm defaults it named, when
+			// the developer asked for a change: propose instead (ai_turn.go).
+			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksLeaveToPropose(llmResp.Message.Content) {
+				nudged = true
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: leaveNudge})
+				continue
+			}
 			if sentBack && !nudged && asksToPropose(llmResp.Message.Content) {
 				nudged = true
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
@@ -665,6 +684,14 @@ turn:
 			}
 			// A sheet called done is checked against the session's value
 			// comparisons first (ai_sheet_check.go).
+			if !nudged {
+				if nudge := h.pagesDoneNudge(ctx, sessionID, revID, llmResp.Message.Content); nudge != "" {
+					nudged = true
+					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: nudge})
+					continue
+				}
+			}
 			if !nudged {
 				if nudge := h.sheetDoneNudge(ctx, store, sessionID, llmResp.Message.Content); nudge != "" {
 					nudged = true
@@ -725,7 +752,7 @@ turn:
 						oversized, maxProposalSteps, maxProposalSteps, maxProposalSteps)
 				} else {
 					var execErr error
-					result, execErr = readExecutor.Execute(ctx, tc.Name, tc.Arguments)
+					result, execErr = runTool(ctx, store, sessionID, readExecutor, tc.Name, tc.Arguments)
 					if execErr != nil {
 						result = fmt.Sprintf("error: %v", execErr)
 					}
@@ -764,6 +791,26 @@ turn:
 			if stopTurn() {
 				return
 			}
+			// A plan that runs goes back once more when it leaves out part
+			// of a request naming several things (ai_coverage.go).
+			if cErr == nil && len(check.problems) == 0 && !coverageChecked {
+				coverageChecked = true
+				plan, _ := store.TaskPlan(ctx, sessionID)
+				var stageItems []string
+				if cur := plan.Current(); cur >= 0 && reqMode.Mode == aiassistant.ModeDelegated {
+					stageItems = plan.Stages[cur].Items
+				}
+				missing, extra, usage := planCoverage(turnCtx, llmProvider, llmModel, req.Content, stageItems, reqMode.Mode == aiassistant.ModeDirect, args.Steps)
+				if usage.InputTokens+usage.CacheReadTokens > 0 {
+					_ = store.AddUsage(context.WithoutCancel(ctx), sessionID, usage)
+				}
+				if len(missing) > 0 {
+					check.warnings = append(check.warnings, coverageWarning(missing))
+				}
+				if len(extra) > 0 {
+					check.warnings = append(check.warnings, extraWarning(extra))
+				}
+			}
 			// A plan that runs but whose formulas look wrong goes back once;
 			// proposed again unchanged, it reaches the developer with them.
 			warnBack := cErr == nil && len(check.problems) == 0 && len(check.warnings) > 0 && !retries.warnedBefore(check.warnings)
@@ -791,7 +838,7 @@ turn:
 					result := planResult
 					if !aiassistant.IsWriteTool(call.Name) {
 						var execErr error
-						if result, execErr = readExecutor.Execute(ctx, call.Name, call.Arguments); execErr != nil {
+						if result, execErr = runTool(ctx, store, sessionID, readExecutor, call.Name, call.Arguments); execErr != nil {
 							result = fmt.Sprintf("error: %v", execErr)
 						}
 					}
@@ -827,7 +874,7 @@ turn:
 					result = "Not created: only one proposal is shown per turn. After the developer confirms or rejects the proposal above, call propose_actions again with these steps."
 				} else {
 					var execErr error
-					if result, execErr = readExecutor.Execute(ctx, other.Name, other.Arguments); execErr != nil {
+					if result, execErr = runTool(ctx, store, sessionID, readExecutor, other.Name, other.Arguments); execErr != nil {
 						result = fmt.Sprintf("error: %v", execErr)
 					}
 				}
@@ -858,9 +905,13 @@ turn:
 
 		for _, tc := range llmResp.Message.ToolCalls {
 			sendSSE("tool_status", map[string]string{"tool": tc.Name})
-			result, execErr := readExecutor.Execute(ctx, tc.Name, tc.Arguments)
+			result, execErr := runTool(ctx, store, sessionID, readExecutor, tc.Name, tc.Arguments)
 			if execErr != nil {
 				result = fmt.Sprintf("error: %v", execErr)
+			} else if isTaskPlanTool(tc.Name) {
+				if plan, pErr := store.TaskPlan(ctx, sessionID); pErr == nil && plan != nil {
+					sendSSE("task_plan", map[string]any{"task_plan": plan})
+				}
 			}
 			_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, tc.ID, tc.Name)
 			provMessages = append(provMessages, providers.Message{
@@ -907,10 +958,11 @@ turn:
 	}
 	doneUsage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
 	sendSSE("done", map[string]any{
-		"reply":    saved,
-		"messages": allMsgs,
-		"session":  sess,
-		"usage":    doneUsage,
+		"reply":     saved,
+		"messages":  allMsgs,
+		"session":   sess,
+		"usage":     doneUsage,
+		"task_plan": func() *aiassistant.TaskPlan { p, _ := store.TaskPlan(ctx, sessionID); return p }(),
 	})
 }
 

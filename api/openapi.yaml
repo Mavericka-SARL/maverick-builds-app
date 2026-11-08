@@ -758,6 +758,7 @@ components:
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
         business_maintained: { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members)" }
+        editor_roles: { type: array, items: { type: string }, description: "Business roles that may add, change and delete its members and properties (with the application's administrators); empty: every user who may" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
 
     GridAccessRules:
@@ -1181,6 +1182,7 @@ components:
         source_property:      { type: string, description: "Change the grouping's property; recalculates the metrics reading through it" }
         derive_members:       { type: boolean, description: "Add a member for every value of the property that has none yet (e.g. after a new value appears)" }
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        editor_roles:         { type: array, items: { type: string }, description: "Business roles that may change its members and properties; [] lifts the rule. Each must be a business role of the customer" }
 
     MemberRequest:
       type: object
@@ -1415,6 +1417,7 @@ components:
         posting_statuses:   { type: array, items: { type: string } }
         dimension_mappings: { type: object, additionalProperties: { type: string } }
         live_posting:       { type: boolean }
+        row_filter:         { type: array, description: "Conditions a record meets to post through the mapping (all of them): the field holds one of is, or none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.", items: { type: object, required: [field], properties: { field: { type: string }, is: { type: array, items: { type: string } }, is_not: { type: array, items: { type: string } } } } }
 
     CreateFormMappingRequest:
       type: object
@@ -1429,6 +1432,7 @@ components:
         posting_statuses:   { type: array, items: { type: string }, description: "Defaults to [\"approved\"] when omitted" }
         dimension_mappings: { type: object, additionalProperties: { type: string } }
         live_posting:       { type: boolean, default: true }
+        row_filter:         { type: array, description: "Conditions a record meets to post through the mapping (all of them): the field holds one of is, or none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.", items: { type: object, required: [field], properties: { field: { type: string }, is: { type: array, items: { type: string } }, is_not: { type: array, items: { type: string } } } } }
 
     UpdateFormMappingRequest:
       type: object
@@ -1441,6 +1445,7 @@ components:
         posting_statuses:   { type: array, items: { type: string } }
         dimension_mappings: { type: object, additionalProperties: { type: string } }
         live_posting:       { type: boolean, default: true }
+        row_filter:         { type: array, description: "Conditions a record meets to post through the mapping (all of them): the field holds one of is, or none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.", items: { type: object, required: [field], properties: { field: { type: string }, is: { type: array, items: { type: string } }, is_not: { type: array, items: { type: string } } } } }
 
     WorkflowDefSummary:
       type: object
@@ -2668,6 +2673,7 @@ components:
       type: object
       properties:
         context: { type: object, additionalProperties: { type: string }, description: "Overrides the widget's saved context_defaults for this render" }
+        shared:  { type: object, additionalProperties: { type: string }, description: "The dashboard's selector values (dimension id -> member code): applied on the chart's own non-plotted dimensions that context does not name; others are ignored" }
 
     ChartContextMember:
       type: object
@@ -8742,74 +8748,6 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
 
-  /api/business-admin/calendars:
-    get:
-      operationId: listBACalendars
-      tags: [Business Admin]
-      summary: The time dimensions of the open model's active revision, with their first and last period
-      responses:
-        "200":
-          description: Calendars
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    id:          { type: string, format: uuid }
-                    name:        { type: string }
-                    granularity: { type: string }
-                    first:       { type: string, format: date }
-                    last:        { type: string, format: date }
-                    last_label:  { type: string }
-                    periods:     { type: integer }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
-  /api/business-admin/calendars/{dimId}/extend:
-    post:
-      operationId: extendBACalendar
-      tags: [Business Admin]
-      summary: Add periods after a calendar's last one (business_admin)
-      description: >-
-        Adds the periods after the last one through the period containing `through`, placed as the
-        last one is: under quarters and fiscal years of the same kind, reused or created and named
-        after their peers. Nothing is renamed, moved or deleted. Only a time dimension of the active
-        revision of the model the admin has open.
-      parameters:
-        - name: dimId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [through]
-              properties:
-                through: { type: string, format: date }
-      responses:
-        "200":
-          description: Periods and aggregate periods created
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  periods:    { type: integer }
-                  aggregates: { type: integer }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: Not a calendar of the model the admin has open
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
   /api/ai/sessions:
     get:
       operationId: listAiSessions
@@ -8879,6 +8817,23 @@ paths:
                       output_tokens:      { type: integer, format: int64 }
                       cache_read_tokens:  { type: integer, format: int64 }
                       cache_write_tokens: { type: integer, format: int64 }
+                  task_plan:
+                    type: object
+                    nullable: true
+                    description: The plan of a goal the developer delegated (plan_task); null for a session without one
+                    properties:
+                      goal: { type: string }
+                      updated_at: { type: string, format: date-time }
+                      stages:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            title:  { type: string }
+                            items:  { type: array, items: { type: string } }
+                            check:  { type: string }
+                            status: { type: string, enum: [pending, in_progress, done, skipped] }
+                            note:   { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       operationId: renameAiSession

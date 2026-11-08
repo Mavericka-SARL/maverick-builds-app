@@ -506,13 +506,23 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   }, [configKey, chartConfig?.context_defaults]);
 
   const refreshMs = (chartConfig?.refresh_seconds ?? 2) * 1000;
+  // Sync is ON unless the widget explicitly opts out — a dashboard's
+  // widgets sharing one context (and one set of selectors) is the norm.
+  const syncOn = widget.widget_props?.sync_context !== false;
+  const sharedValues = useContext(DashboardContextSyncContext)?.values;
+  // The page's selector values go with every request of a synced chart; the
+  // server applies those on the chart's dimensions its context does not name.
+  // A chart learns its dimensions only from its first answer, so that first
+  // request used to go out with none and drew every scenario added together
+  // until the second (2026-11-08).
+  const shared = syncOn && sharedValues && Object.keys(sharedValues).length > 0 ? sharedValues : undefined;
 
   // Fetch chart data — resolved and rolled up server-side (internal/rollup
   // via chart.go), matching the grid exactly instead of a second client-side
   // computation over raw grid cells.
   const { data: chartData, isPending, isError } = useQuery({
-    queryKey: ["chart-data", ctx.revision_id, widget.id, context],
-    queryFn: () => api.getChartData(widget.id, context),
+    queryKey: ["chart-data", ctx.revision_id, widget.id, context, shared],
+    queryFn: () => api.getChartData(widget.id, context, shared),
     enabled: !!chartConfig && isChartConfigComplete(chartConfig),
     staleTime: 0,
     refetchInterval: refreshMs,
@@ -526,9 +536,6 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   // this sits before the early-return guard below — dims/context/setContext
   // are all already available at this point regardless of chartConfig.
   const dims: ChartContextDim[] = chartData?.context_dims ?? [];
-  // Sync is ON unless the widget explicitly opts out — a dashboard's
-  // widgets sharing one context (and one set of selectors) is the norm.
-  const syncOn = widget.widget_props?.sync_context !== false;
   const setContextValue = useWidgetContextSync(dims, syncOn, context, setContext);
   const ownsSelector = useSelectorOwnership(syncOn);
   // The server resolves for a VISIBLE member when the requested one is hidden
@@ -542,7 +549,6 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   // adopts it here in the same render, so pushing the server's pick would
   // only override what every other widget already agreed on.
   const effectiveContext = chartData?.context;
-  const sharedValues = useContext(DashboardContextSyncContext)?.values;
   useEffect(() => {
     if (!effectiveContext) return;
     for (const [dimId, code] of Object.entries(effectiveContext)) {

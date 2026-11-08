@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
@@ -89,6 +90,8 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		SourceProperty      json.RawMessage `json:"source_property"`
 		// Users add, rename and remove its members.
 		BusinessMaintained *bool `json:"business_maintained"`
+		// EditorRoles: which business roles of them may ([] lifts it).
+		EditorRoles *[]string `json:"editor_roles"`
 		// Label: the display name selectors and headers show; "" clears it.
 		Label *string `json:"label"`
 	}
@@ -172,9 +175,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
 		return "", "", err
 	}
-	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil {
+	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil && p.EditorRoles == nil {
 		return "", "", fmt.Errorf("nothing to change: provide name, label, tags, parent_dimension_id, " +
-			"source_dimension_id, source_property, business_maintained or derive_members")
+			"source_dimension_id, source_property, business_maintained, editor_roles or derive_members")
 	}
 	if p.Label != nil && len(strings.TrimSpace(*p.Label)) > 80 {
 		return "", "", fmt.Errorf("label: at most 80 characters")
@@ -226,11 +229,31 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		}
 	}
 
+	if p.EditorRoles != nil {
+		roles := *p.EditorRoles
+		if roles == nil {
+			roles = []string{}
+		}
+		if err := crudapp.CheckEditorRoles(ctx, e.pool, dimID, roles); err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET editor_roles=$2 WHERE id=$1::uuid`, dimID, roles); err != nil {
+			return "", "", fmt.Errorf("update dimension: %w", err)
+		}
+	}
+
 	display := curName
 	if name != "" {
 		display = name
 	}
 	var changes []string
+	if p.EditorRoles != nil {
+		if len(*p.EditorRoles) > 0 {
+			changes = append(changes, "only "+strings.Join(*p.EditorRoles, ", ")+" (and administrators) change its members")
+		} else {
+			changes = append(changes, "every user who maintains it may change its members")
+		}
+	}
 	if p.BusinessMaintained != nil {
 		if *p.BusinessMaintained {
 			changes = append(changes, "users now maintain its members")

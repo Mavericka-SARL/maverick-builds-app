@@ -67,6 +67,12 @@ func (v Value) IsError() bool      { return v.kind == KindError }
 func (v Value) IsBlank() bool      { return v.kind == KindBlank }
 func (v Value) Err() *FormulaError { return v.err }
 
+// EmptyText reports whether v is the empty text "": a workbook's
+// IF(closed, x, "") leaves a number cell empty, and a number metric stores no
+// value for it, as for a blank (2026-11-08: each forecast month of such a
+// formula failed with #VALUE! and the whole metric kept stale values).
+func (v Value) EmptyText() bool { return v.kind == KindString && strings.TrimSpace(v.str) == "" }
+
 func (v Value) Number() (float64, bool) {
 	switch v.kind {
 	case KindNumber:

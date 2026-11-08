@@ -288,7 +288,10 @@ func TestSendMessage_PromotedSessionIsFinished(t *testing.T) {
 // would run for minutes.
 type blockingProvider struct{}
 
-func (blockingProvider) Chat(ctx context.Context, _ providers.ChatRequest) (providers.ChatResponse, error) {
+func (blockingProvider) Chat(ctx context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
+	if r, ok := sideCall(req); ok {
+		return r, nil
+	}
 	<-ctx.Done()
 	return providers.ChatResponse{}, ctx.Err()
 }

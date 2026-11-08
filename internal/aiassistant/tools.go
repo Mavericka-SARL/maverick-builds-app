@@ -122,7 +122,40 @@ func ReadTools() []providers.ToolDef {
 	for _, d := range append(integrationToolDefs(), connectorToolDefs()...) {
 		tools = append(tools, providers.ToolDef{Name: d.Name, Description: d.Description, Parameters: json.RawMessage(d.Parameters)})
 	}
-	return tools
+	return append(tools, taskPlanTools...)
+}
+
+// Task plan tools (task_plan.go): they write the session's plan, not the
+// model, so they run at once, as reads do — the gateway runs them.
+const (
+	PlanTaskTool       = "plan_task"
+	UpdateTaskPlanTool = "update_task_plan"
+)
+
+var taskPlanTools = []providers.ToolDef{
+	{
+		Name: PlanTaskTool,
+		Description: "Plans a goal the developer delegated (build a model from this workbook, add the pages people need, make the numbers match) before building it: " +
+			"stages in build order, each one proposal of at most a few dozen steps, each naming the items it delivers and how you will check it. " +
+			"Replaces the session's plan; the developer sees it. Not for a direct order or a goal one proposal does.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"goal":{"type":"string","description":"the goal, in the developer's words"},
+			"stages":{"type":"array","items":{"type":"object","properties":{
+				"title":{"type":"string"},
+				"items":{"type":"array","items":{"type":"string"},"description":"what the stage delivers, named: metrics, grids, pages, postings, rows"},
+				"check":{"type":"string","description":"how you will check it once confirmed: compare_with_sheet of which rows, describe_dashboard of which page"}},
+				"required":["title","items"]}}},
+			"required":["goal","stages"]}`),
+	},
+	{
+		Name:        UpdateTaskPlanTool,
+		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. The note says what the check showed.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"stage":{"type":"integer","description":"1-based"},
+			"status":{"type":"string","enum":["pending","in_progress","done","skipped"]},
+			"note":{"type":"string"}},
+			"required":["stage","status"]}`),
+	},
 }
 
 // WriteToolNames lists every tool a proposal step may name, grouped the way

@@ -7,7 +7,7 @@ import {
 import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
 import { credentialSteps, credentialsComplete } from "./proposalCredentials";
-import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage } from "../../api/client";
+import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage, type AITaskPlan, type AITaskStage } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
@@ -647,6 +647,38 @@ function formatElapsed(ms: number): string {
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
 
+// TaskPlanCard shows the plan of a delegated goal: its stages, which is
+// current, and what each delivers — the developer sees where the work stands.
+function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
+  const [open, setOpen] = useState(true);
+  const current = plan.stages.findIndex(s => s.status !== "done" && s.status !== "skipped");
+  const done = plan.stages.filter(s => s.status === "done").length;
+  const mark = (s: AITaskStage, i: number) =>
+    s.status === "done" ? "✓" : s.status === "skipped" ? "–" : i === current ? "▶" : "○";
+  return (
+    <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)" }}>
+        <Txt>{`Plan: ${plan.goal} — ${done} of ${plan.stages.length} stages done`}</Txt>
+      </button>
+      {open && (
+        <ol style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          {plan.stages.map((s, i) => (
+            <li key={i} style={{ listStyle: "none", marginLeft: -18, fontWeight: i === current ? 600 : 400, color: s.status === "done" || s.status === "skipped" ? "var(--color-text-muted)" : "var(--color-text)" }}>
+              <span aria-hidden style={{ display: "inline-block", width: 18 }}>{mark(s, i)}</span>
+              <Txt>{`${i + 1}. ${s.title}`}</Txt>
+              {s.note && <span className="mvx-admin-muted"><Txt>{` — ${s.note}`}</Txt></span>}
+              {i === current && s.items.length > 0 && (
+                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}><Txt>{s.items.join("; ")}</Txt></div>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 // fmtTokens writes a token count briefly: 950, 12.4k, 1.25M.
 function fmtTokens(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
@@ -671,6 +703,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
   // What this session's calls were billed for, from the provider's reports.
   const [usage, setUsage] = useState<AISessionUsage | null>(null);
+  // The plan of a goal the developer delegated (plan_task); null for none.
+  const [taskPlan, setTaskPlan] = useState<AITaskPlan | null>(null);
   const [messages, setMessages]     = useState<AIMessage[]>([]);
   const [pendingProposal, setPendingProposal] = useState<AIProposal | null>(null);
   const [input, setInput]           = useState("");
@@ -770,6 +804,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     const data = await api.aiGetSession(id);
     setCurrentSession(data.session);
     setUsage(data.usage ?? null);
+    setTaskPlan(data.task_plan ?? null);
     setMessages(data.messages ?? []);
     setDocuments(data.documents ?? []);
     const lastSent = (data.messages ?? []).filter(m => m.role === "user").at(-1)?.created_at;
@@ -1021,6 +1056,9 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             if (event.usage) setUsage(event.usage);
             qc.invalidateQueries({ queryKey: ["ai-proposals", sid] });
             break;
+          case "task_plan":
+            setTaskPlan(event.task_plan ?? null);
+            break;
           case "done":
             setStreamingContent("");
             setToolStatus(null);
@@ -1028,6 +1066,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setPendingProposal(null);
             if (event.session) setCurrentSession(event.session);
             if (event.usage) setUsage(event.usage);
+            if (event.task_plan !== undefined) setTaskPlan(event.task_plan ?? null);
             break;
           case "error":
             setError(event.error ?? "Something went wrong");
@@ -1235,6 +1274,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             )}
           </div>
         )}
+
+        {taskPlan && taskPlan.stages.length > 0 && <TaskPlanCard plan={taskPlan} />}
 
         {showActivity && sessionId && (
           <ActivityPanel sessionId={sessionId} onClose={() => setShowActivity(false)} />

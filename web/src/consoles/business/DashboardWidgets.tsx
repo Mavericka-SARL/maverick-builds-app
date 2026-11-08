@@ -128,7 +128,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                   ...(widget.widget_type === "metric_kpi"
                     ? { minHeight: widget.size_h || undefined, alignSelf: "stretch" as const }
                     : widget.size_h && BUTTON_WIDGET_TYPES.has(widget.widget_type)
-                    ? { height: widget.size_h, alignSelf: "start" as const }
+                    ? { height: widget.size_h + (buttonTitleBand(widget) ? BUTTON_TITLE_BAND_PX : 0), alignSelf: "start" as const }
                     : widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type)
                     ? { height: widget.size_h, alignSelf: "start" as const } // scrolls inside its frame
                     : {
@@ -258,6 +258,19 @@ function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: Select
 
 // onOpenInstance is optional because this same renderer powers the Developer
 // Console's Preview, where there's no console tab to navigate to.
+// A button's title is its label when it has none of its own: a title band
+// above a button sized for the button alone pushed the button out of its box
+// (an AI-built Start here and Actuals & checks, 2026-11-08). A button with a
+// label of its own keeps its title band, and its box grows by the band.
+const BUTTON_TITLE_BAND_PX = 34;
+function buttonTitleBand(widget: DashboardWidget): boolean {
+  return BUTTON_WIDGET_TYPES.has(widget.widget_type) && !!widget.show_title && !!widget.title && !!widget.content?.trim();
+}
+function buttonLabel(widget: DashboardWidget, fallback: string): string {
+  if (widget.content?.trim()) return widget.content;
+  return widget.show_title && widget.title ? widget.title : fallback;
+}
+
 export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: DashboardWidget; ctx: DemoContext; onOpenInstance?: (instanceId: string) => void }) {
   let inner: React.ReactNode = null;
 
@@ -295,7 +308,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // ref_id holds the workflow's name: a revision copy or a package keeps it.
     inner = <div className="mvx-panel" style={{ padding: 14 }}><WorkflowStatusWidget name={widget.ref_id} /></div>;
   } else if (widget.widget_type === "automation_button" && widget.ref_id) {
-    inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
+    inner = <AutomationButtonWidget ruleId={widget.ref_id} label={buttonLabel(widget, "Trigger")} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
@@ -311,7 +324,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
-    inner = <IntegrationButtonWidget integrationId={widget.ref_id} label={widget.content ?? "Import"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} />;
+    inner = <IntegrationButtonWidget integrationId={widget.ref_id} label={buttonLabel(widget, "Import")} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} />;
   } else if (widget.widget_type === "chart" && widget.ref_id && widget.widget_props?.chart) {
     inner = <ChartWidget widget={widget} ctx={ctx} />;
   } else if (widget.widget_type === "metric_kpi" && widget.ref_id) {
@@ -331,7 +344,8 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
 
   // A grid, a records list, a board and a KPI tile carry their title in
   // their own header or card; the others get a title band above them.
-  const titleInside = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "board" || widget.widget_type === "metric_kpi";
+  const titleInside = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "board" || widget.widget_type === "metric_kpi"
+    || (BUTTON_WIDGET_TYPES.has(widget.widget_type) && !buttonTitleBand(widget));
   if (widget.show_title && widget.title && !titleInside) {
     return (
       <WidgetErrorBoundary widgetLabel={widgetLabel}>

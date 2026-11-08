@@ -52,6 +52,10 @@ type formRecordScope struct {
 	// noAdd: the table names who may add records and the caller, no
 	// administrator, holds none of those roles.
 	noAdd bool
+	// notEditor: the table keeps a dimension whose editor roles the caller
+	// holds none of; notEditorReason says who may change it.
+	notEditor       bool
+	notEditorReason string
 }
 
 // resolveFormRecordScope decides reach and admin for act on formID. A form
@@ -121,6 +125,19 @@ func (h *handler) tableScope(ctx context.Context, s formRecordScope) (formRecord
 			return s, err
 		}
 	}
+	// A table keeping a dimension with editor roles: its records are the
+	// dimension's members, changed by those roles only (dimension_editors.go).
+	s.notEditor = false
+	if s.form.KeepsDimension() && !s.admin {
+		reason, err := h.dimensionEditorRefusal(ctx, &actor{UserID: s.userID}, s.form.KeepsDimensionID)
+		if err != nil {
+			return s, err
+		}
+		if reason != "" {
+			s.notEditor, s.notEditorReason = true, reason
+			s.noAdd = true
+		}
+	}
 	return s, nil
 }
 
@@ -186,11 +203,12 @@ func (s formRecordScope) changesEveryRecord() bool {
 // access is who the scope's caller is to rec.
 func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 	a := crudapp.RecordAccess{
-		Reach:    s.reach,
-		Admin:    s.admin,
-		Creator:  rec != nil && rec.CreatedBy != nil && *rec.CreatedBy == s.userID,
-		Statuses: s.hasStatus(),
-		Everyone: s.everyoneEdits(),
+		Reach:     s.reach,
+		Admin:     s.admin,
+		Creator:   rec != nil && rec.CreatedBy != nil && *rec.CreatedBy == s.userID,
+		Statuses:  s.hasStatus(),
+		Everyone:  s.everyoneEdits(),
+		NotEditor: s.notEditor,
 	}
 	if a.Everyone && rec != nil {
 		a.ReadOnly = s.readOnlyMember(rec.Data) != ""
@@ -219,6 +237,9 @@ func (s formRecordScope) readOnlyMember(data map[string]any) string {
 
 // noAddReason says who may add the table's records, for a caller who may not.
 func (s formRecordScope) noAddReason() string {
+	if s.notEditor {
+		return s.notEditorReason
+	}
 	label := "this table"
 	if s.form != nil && s.form.Label != "" {
 		label = s.form.Label

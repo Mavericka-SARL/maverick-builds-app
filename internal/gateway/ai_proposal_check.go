@@ -72,6 +72,11 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		out.warnings = append(out.warnings, currencyWarnings(ctx, tx, modelID, revID, resolved)...)
 		out.warnings = append(out.warnings, dashboardLayoutWarnings(ctx, tx, revID, resolved, created)...)
 		out.warnings = append(out.warnings, otherDashboardsWarnings(ctx, tx, revID, resolved, created)...)
+		// Page mistakes (ai_page_warnings.go); a text's old content is read
+		// as it is, outside the dry run.
+		out.warnings = append(out.warnings, textRewriteWarnings(ctx, h.db.For(ctx), resolved)...)
+		out.warnings = append(out.warnings, pageRoleWarnings(ctx, tx, modelID, resolved, created)...)
+		out.warnings = append(out.warnings, pageMetricWarnings(ctx, tx, resolved, created)...)
 	}
 	return out, err
 }

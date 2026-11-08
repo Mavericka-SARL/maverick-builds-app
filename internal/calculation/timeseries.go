@@ -568,8 +568,8 @@ func (e *tsEvaluator) evalAtOnce(combo map[string]string, pos int) (float64, boo
 		}
 		return 0, noData, v.Err()
 	}
-	if v.IsBlank() {
-		return 0, true, errBlankResult // no value: no row, never a 0
+	if v.IsBlank() || v.EmptyText() {
+		return 0, true, errBlankResult // no value ("" included): no row, never a 0
 	}
 	n, ok := v.Number()
 	if !ok {

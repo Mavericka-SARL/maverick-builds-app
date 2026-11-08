@@ -433,9 +433,10 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 			// before the member check failed (a LOOKUP-only formula).
 			return formula.Value{}, noData() && !formula.IsMemberNotAvailable(result.Err()), result.Err()
 		}
-		if result.IsBlank() {
+		if result.IsBlank() || (!def.Text && result.EmptyText()) {
 			// Blank (YEARVALUE of a time_summary 'none' source, a bare
-			// unset property): no value, so no row — never a persisted 0.
+			// unset property, "" in a number metric): no value, so no row —
+			// never a persisted 0.
 			return formula.Value{}, true, errBlankResult
 		}
 		if _, ok := result.Number(); !ok && !def.Text {

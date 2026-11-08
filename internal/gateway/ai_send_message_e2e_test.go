@@ -37,7 +37,10 @@ type scriptedProvider struct {
 	resp  providers.ChatResponse
 }
 
-func (p *scriptedProvider) Chat(_ context.Context, _ providers.ChatRequest) (providers.ChatResponse, error) {
+func (p *scriptedProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
+	if r, ok := sideCall(req); ok {
+		return r, nil
+	}
 	p.calls++
 	return p.resp, nil
 }
@@ -220,7 +223,10 @@ type multiScriptProvider struct {
 	resps []providers.ChatResponse
 }
 
-func (p *multiScriptProvider) Chat(_ context.Context, _ providers.ChatRequest) (providers.ChatResponse, error) {
+func (p *multiScriptProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
+	if r, ok := sideCall(req); ok {
+		return r, nil
+	}
 	p.calls++
 	if p.calls > len(p.resps) {
 		return p.resps[len(p.resps)-1], nil

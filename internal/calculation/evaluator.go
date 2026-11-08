@@ -63,8 +63,9 @@ func EvaluateMetricWithDimContext(meta *DimMetadata, metric, expr string, values
 	if result.IsError() {
 		return 0, result.Err()
 	}
-	if result.IsBlank() {
-		// No value (a bare unset property, PARENT of a root): the caller
+	if result.IsBlank() || result.EmptyText() {
+		// No value (a bare unset property, PARENT of a root, a workbook's
+		// IF(…, x, "") in a number metric): the caller
 		// leaves the cell out, as the scheduler persists no row — never a
 		// 0 that would enter a total or an average.
 		return 0, ErrBlankResult

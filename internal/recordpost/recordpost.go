@@ -750,7 +750,8 @@ func sameValue(a, b any) bool {
 // formMapping is a live mapping of a table's records into a metric.
 type formMapping struct {
 	id, sourceField, targetMetricID string
-	aggregation                     string // "count" counts records, whatever the field holds
+	aggregation                     string                 // "count" counts records, whatever the field holds
+	rowFilter                       []crudapp.RowCondition // a record failing it posts nothing (migration 161)
 	postingStatuses                 []string
 	dimMappings                     map[string]string // dimension id → field name
 	modelID, revisionID             string            // revisionID "" for a revision-global mapping
@@ -759,7 +760,7 @@ type formMapping struct {
 // liveFormMappings lists formID's live mappings.
 func (ps *Poster) liveFormMappings(ctx context.Context, formID string) ([]formMapping, error) {
 	rows, err := ps.db(ctx).Query(ctx, `
-		SELECT m.id::text, m.source_field, m.target_metric_id::text, COALESCE(m.aggregation,''), m.posting_statuses, m.dimension_mappings,
+		SELECT m.id::text, m.source_field, m.target_metric_id::text, COALESCE(m.aggregation,''), m.row_filter, m.posting_statuses, m.dimension_mappings,
 		       m.model_id::text, COALESCE(m.revision_id::text,'')
 		FROM model.form_metric_mapping m
 		WHERE m.form_id=$1::uuid AND m.live_posting = TRUE
@@ -775,11 +776,12 @@ func (ps *Poster) liveFormMappings(ctx context.Context, formID string) ([]formMa
 	var out []formMapping
 	for rows.Next() {
 		var m formMapping
-		var dimRaw []byte
-		if err := rows.Scan(&m.id, &m.sourceField, &m.targetMetricID, &m.aggregation, &m.postingStatuses, &dimRaw, &m.modelID, &m.revisionID); err != nil {
+		var dimRaw, filterRaw []byte
+		if err := rows.Scan(&m.id, &m.sourceField, &m.targetMetricID, &m.aggregation, &filterRaw, &m.postingStatuses, &dimRaw, &m.modelID, &m.revisionID); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(dimRaw, &m.dimMappings)
+		_ = json.Unmarshal(filterRaw, &m.rowFilter)
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -799,6 +801,11 @@ func (m formMapping) postsAt(hasStatus bool, status string) bool {
 // and every record was skipped as "not a number", so each import read
 // MISSING though all were loaded).
 func (m formMapping) value(data map[string]any) (float64, bool) {
+	// A record its row filter leaves out posts nothing, like one with no
+	// value: a change that takes it out of the filter retracts its posting.
+	if !crudapp.RowFilterMatches(m.rowFilter, data) {
+		return 0, false
+	}
 	if m.aggregation == "count" {
 		v, ok := data[m.sourceField]
 		return 1, ok && v != nil && strings.TrimSpace(fmt.Sprint(v)) != ""

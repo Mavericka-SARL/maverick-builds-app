@@ -2799,9 +2799,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label
+				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),
@@ -3041,7 +3041,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			new_mappings AS (
 				INSERT INTO model.form_metric_mapping
 				  (model_id, form_id, grid_id, name, source_field, target_metric_id, aggregation,
-				   posting_statuses, dimension_mappings, live_posting, revision_id)
+				   posting_statuses, dimension_mappings, live_posting, revision_id, row_filter)
 				SELECT fmm.model_id, fm.new_id,
 					(SELECT ng.id FROM model.grid_def og
 					 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
@@ -3053,7 +3053,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 						FROM jsonb_each(fmm.dimension_mappings) kv
 						LEFT JOIN dim_map dm ON dm.old_id::text = kv.key
 					), '{}'::jsonb),
-					fmm.live_posting, $2::uuid
+					fmm.live_posting, $2::uuid, fmm.row_filter
 				FROM model.form_metric_mapping fmm
 				JOIN form_map fm ON fm.old_id = fmm.form_id
 				JOIN metric_map mm ON mm.old_id = fmm.target_metric_id

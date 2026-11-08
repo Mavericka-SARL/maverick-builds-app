@@ -107,9 +107,13 @@ type Dimension struct {
 	FiscalYearStart *int     `json:"fiscal_year_start_month,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
 	// BusinessMaintained: business users keep its members (migration 111).
-	BusinessMaintained bool          `json:"business_maintained,omitempty"`
-	Members            []Member      `json:"members"`
-	TypedProperties    []DimProperty `json:"typed_properties,omitempty"`
+	BusinessMaintained bool `json:"business_maintained,omitempty"`
+	// EditorRoles: the business roles, by name, that may change its members
+	// (migration 161). A tenant without a role of that name: only its
+	// administrators may.
+	EditorRoles     []string      `json:"editor_roles,omitempty"`
+	Members         []Member      `json:"members"`
+	TypedProperties []DimProperty `json:"typed_properties,omitempty"`
 }
 
 type Metric struct {
@@ -263,6 +267,9 @@ type FormMapping struct {
 	Aggregation       string          `json:"aggregation"`
 	PostingStatuses   []string        `json:"posting_statuses"`
 	DimensionMappings json.RawMessage `json:"dimension_mappings"`
+	// RowFilter: field names and member codes (migration 161), so it travels
+	// as it is; absent in a package from before it.
+	RowFilter json.RawMessage `json:"row_filter,omitempty"`
 	// LivePosting is a pointer so a package that leaves it out gets the
 	// column default (true, as the console creates a mapping) rather than
 	// Go's false. Export always sets it.
@@ -453,7 +460,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
 		SELECT id::text, name, NULLIF(label, ''), agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
-		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained
+		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained, editor_roles
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -462,7 +469,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dimension
 		if err := rows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
-			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained); err != nil {
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained, &d.EditorRoles); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -751,7 +758,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	rows, err = q.Query(ctx, `
 		SELECT fmm.id::text, fmm.form_id::text, fmm.grid_id::text, fmm.name, fmm.source_field, fmm.target_metric_id::text,
-		       fmm.aggregation, fmm.posting_statuses, fmm.dimension_mappings, fmm.live_posting
+		       fmm.aggregation, fmm.posting_statuses, fmm.dimension_mappings, fmm.live_posting, fmm.row_filter
 		FROM model.form_metric_mapping fmm
 		JOIN model.form_def fd ON fd.id = fmm.form_id
 		WHERE fd.model_id=$1::uuid AND (fd.revision_id=$2::uuid OR fd.revision_id IS NULL)
@@ -763,7 +770,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m FormMapping
 		if err := rows.Scan(&m.ID, &m.FormID, &m.GridID, &m.Name, &m.SourceField, &m.TargetMetricID,
-			&m.Aggregation, &m.PostingStatuses, &m.DimensionMappings, &m.LivePosting); err != nil {
+			&m.Aggregation, &m.PostingStatuses, &m.DimensionMappings, &m.LivePosting, &m.RowFilter); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1884,13 +1891,13 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'sum'), COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9,
-			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12, NULLIF(btrim($13), ''))
+			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12, NULLIF(btrim($13), ''), COALESCE($14::text[],'{}'))
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, jsonArg(d.Properties), d.SourceProperty,
 			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID),
-			d.BusinessMaintained && dimType != timedim.TypeTime, d.Label).Scan(&newID); err != nil {
+			d.BusinessMaintained && dimType != timedim.TypeTime, d.Label, d.EditorRoles).Scan(&newID); err != nil {
 			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
@@ -2196,12 +2203,13 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.form_metric_mapping
 			  (model_id, revision_id, form_id, grid_id, name, source_field, target_metric_id,
-			   aggregation, posting_statuses, dimension_mappings, live_posting)
+			   aggregation, posting_statuses, dimension_mappings, live_posting, row_filter)
 			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::uuid, COALESCE(NULLIF($8::text,''),'sum'),
-			        COALESCE($9::text[],'{approved}'), COALESCE($10::jsonb,'{}'::jsonb), COALESCE($11::bool, true))
+			        COALESCE($9::text[],'{approved}'), COALESCE($10::jsonb,'{}'::jsonb), COALESCE($11::bool, true),
+			        COALESCE($12::jsonb,'[]'::jsonb))
 			RETURNING id::text`,
 			modelID, revisionID, fid, gridID, m.Name, m.SourceField, mid,
-			m.Aggregation, m.PostingStatuses, jsonArg(dimMappings), m.LivePosting,
+			m.Aggregation, m.PostingStatuses, jsonArg(dimMappings), m.LivePosting, jsonArg(m.RowFilter),
 		).Scan(&newMappingID); err != nil {
 			return "", fmt.Errorf("form mapping %q: %w", m.Name, err)
 		}

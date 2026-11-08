@@ -31,6 +31,9 @@ type promptCapturingProvider struct {
 }
 
 func (p *promptCapturingProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
+	if r, ok := sideCall(req); ok {
+		return r, nil
+	}
 	p.lastSystemPrompt = req.SystemPrompt
 	return providers.ChatResponse{
 		FinishReason: "stop",

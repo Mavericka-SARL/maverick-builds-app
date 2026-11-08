@@ -1,8 +1,7 @@
 /**
  * The business admin's tools added 2026-11-07: Reopen on an approved run
- * (with a reason), Calendar (extend the time window), Copy values (one
- * member's values into another), and a role's access rules in the Access
- * Rules editor. Self-contained: CI runs without a gateway.
+ * (with a reason), Copy values (one member's values into another), and a
+ * role's access rules in the Access Rules editor. Self-contained: CI runs without a gateway.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { mockApi, loadAs } from "./mocks";
@@ -34,24 +33,6 @@ test("an approved run is reopened with a reason, not by a status change", async 
   await page.getByLabel("Reason").fill("March was locked with a wrong figure");
   await page.getByRole("button", { name: "Reopen run" }).click();
   await expect.poll(() => reason).toBe("March was locked with a wrong figure");
-});
-
-test("a business admin extends the calendar", async ({ page }) => {
-  await mockApi(page);
-  await page.route("**/api/business-admin/calendars", (r) => r.fulfill(json([
-    { id: "dim-month", name: "Month", granularity: "month", first: "2026-01-01", last: "2026-12-31", last_label: "Dec 2026", periods: 12 },
-  ])));
-  let through = "";
-  await page.route("**/api/business-admin/calendars/dim-month/extend", async (r) => {
-    through = (r.request().postDataJSON() as { through: string }).through;
-    await r.fulfill(json({ periods: 6, aggregates: 3 }));
-  });
-  await open(page, "Calendar");
-  await expect(page.getByText("12 month periods, through Dec 2026")).toBeVisible();
-  await page.getByLabel("Extend Month through").fill("2027-06-30");
-  await page.getByRole("button", { name: "Extend" }).click();
-  await expect(page.getByRole("status")).toHaveText("Added 6 periods and 3 quarters or years.");
-  expect(through).toBe("2027-06-30");
 });
 
 test("a business admin checks, then copies one member's values into another", async ({ page }) => {

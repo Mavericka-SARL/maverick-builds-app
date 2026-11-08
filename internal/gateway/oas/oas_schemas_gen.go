@@ -5057,6 +5057,9 @@ func (s *ChartMetricLabel) SetFormatCurrency(val string) {
 type ChartRuntimeRequest struct {
 	// Overrides the widget's saved context_defaults for this render.
 	Context OptChartRuntimeRequestContext `json:"context"`
+	// The dashboard's selector values (dimension id -> member code): applied on the chart's own
+	// non-plotted dimensions that context does not name; others are ignored.
+	Shared OptChartRuntimeRequestShared `json:"shared"`
 }
 
 // GetContext returns the value of Context.
@@ -5064,15 +5067,38 @@ func (s *ChartRuntimeRequest) GetContext() OptChartRuntimeRequestContext {
 	return s.Context
 }
 
+// GetShared returns the value of Shared.
+func (s *ChartRuntimeRequest) GetShared() OptChartRuntimeRequestShared {
+	return s.Shared
+}
+
 // SetContext sets the value of Context.
 func (s *ChartRuntimeRequest) SetContext(val OptChartRuntimeRequestContext) {
 	s.Context = val
+}
+
+// SetShared sets the value of Shared.
+func (s *ChartRuntimeRequest) SetShared(val OptChartRuntimeRequestShared) {
+	s.Shared = val
 }
 
 // Overrides the widget's saved context_defaults for this render.
 type ChartRuntimeRequestContext map[string]string
 
 func (s *ChartRuntimeRequestContext) init() ChartRuntimeRequestContext {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+// The dashboard's selector values (dimension id -> member code): applied on the chart's own
+// non-plotted dimensions that context does not name; others are ignored.
+type ChartRuntimeRequestShared map[string]string
+
+func (s *ChartRuntimeRequestShared) init() ChartRuntimeRequestShared {
 	m := *s
 	if m == nil {
 		m = map[string]string{}
@@ -6782,6 +6808,9 @@ type CreateFormMappingRequest struct {
 	PostingStatuses   []string                                     `json:"posting_statuses"`
 	DimensionMappings OptCreateFormMappingRequestDimensionMappings `json:"dimension_mappings"`
 	LivePosting       OptBool                                      `json:"live_posting"`
+	// Conditions a record meets to post through the mapping (all of them): the field holds one of is, or
+	// none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.
+	RowFilter []CreateFormMappingRequestRowFilterItem `json:"row_filter"`
 }
 
 // GetFormID returns the value of FormID.
@@ -6829,6 +6858,11 @@ func (s *CreateFormMappingRequest) GetLivePosting() OptBool {
 	return s.LivePosting
 }
 
+// GetRowFilter returns the value of RowFilter.
+func (s *CreateFormMappingRequest) GetRowFilter() []CreateFormMappingRequestRowFilterItem {
+	return s.RowFilter
+}
+
 // SetFormID sets the value of FormID.
 func (s *CreateFormMappingRequest) SetFormID(val uuid.UUID) {
 	s.FormID = val
@@ -6874,6 +6908,11 @@ func (s *CreateFormMappingRequest) SetLivePosting(val OptBool) {
 	s.LivePosting = val
 }
 
+// SetRowFilter sets the value of RowFilter.
+func (s *CreateFormMappingRequest) SetRowFilter(val []CreateFormMappingRequestRowFilterItem) {
+	s.RowFilter = val
+}
+
 type CreateFormMappingRequestDimensionMappings map[string]string
 
 func (s *CreateFormMappingRequestDimensionMappings) init() CreateFormMappingRequestDimensionMappings {
@@ -6883,6 +6922,42 @@ func (s *CreateFormMappingRequestDimensionMappings) init() CreateFormMappingRequ
 		*s = m
 	}
 	return m
+}
+
+type CreateFormMappingRequestRowFilterItem struct {
+	Field string   `json:"field"`
+	Is    []string `json:"is"`
+	IsNot []string `json:"is_not"`
+}
+
+// GetField returns the value of Field.
+func (s *CreateFormMappingRequestRowFilterItem) GetField() string {
+	return s.Field
+}
+
+// GetIs returns the value of Is.
+func (s *CreateFormMappingRequestRowFilterItem) GetIs() []string {
+	return s.Is
+}
+
+// GetIsNot returns the value of IsNot.
+func (s *CreateFormMappingRequestRowFilterItem) GetIsNot() []string {
+	return s.IsNot
+}
+
+// SetField sets the value of Field.
+func (s *CreateFormMappingRequestRowFilterItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetIs sets the value of Is.
+func (s *CreateFormMappingRequestRowFilterItem) SetIs(val []string) {
+	s.Is = val
+}
+
+// SetIsNot sets the value of IsNot.
+func (s *CreateFormMappingRequestRowFilterItem) SetIsNot(val []string) {
+	s.IsNot = val
 }
 
 type CreateFormRecordBadRequest Error
@@ -10996,63 +11071,6 @@ func (s *ExportSpecMetricDisplay) UnmarshalText(data []byte) error {
 	}
 }
 
-type ExtendBACalendarBadRequest Error
-
-func (*ExtendBACalendarBadRequest) extendBACalendarRes() {}
-
-type ExtendBACalendarForbidden Error
-
-func (*ExtendBACalendarForbidden) extendBACalendarRes() {}
-
-type ExtendBACalendarInternalServerError Error
-
-func (*ExtendBACalendarInternalServerError) extendBACalendarRes() {}
-
-type ExtendBACalendarNotFound Error
-
-func (*ExtendBACalendarNotFound) extendBACalendarRes() {}
-
-type ExtendBACalendarOK struct {
-	Periods    OptInt `json:"periods"`
-	Aggregates OptInt `json:"aggregates"`
-}
-
-// GetPeriods returns the value of Periods.
-func (s *ExtendBACalendarOK) GetPeriods() OptInt {
-	return s.Periods
-}
-
-// GetAggregates returns the value of Aggregates.
-func (s *ExtendBACalendarOK) GetAggregates() OptInt {
-	return s.Aggregates
-}
-
-// SetPeriods sets the value of Periods.
-func (s *ExtendBACalendarOK) SetPeriods(val OptInt) {
-	s.Periods = val
-}
-
-// SetAggregates sets the value of Aggregates.
-func (s *ExtendBACalendarOK) SetAggregates(val OptInt) {
-	s.Aggregates = val
-}
-
-func (*ExtendBACalendarOK) extendBACalendarRes() {}
-
-type ExtendBACalendarReq struct {
-	Through time.Time `json:"through"`
-}
-
-// GetThrough returns the value of Through.
-func (s *ExtendBACalendarReq) GetThrough() time.Time {
-	return s.Through
-}
-
-// SetThrough sets the value of Through.
-func (s *ExtendBACalendarReq) SetThrough(val time.Time) {
-	s.Through = val
-}
-
 type ExtractFormulaRefsOK struct {
 	Refs  []string  `json:"refs"`
 	Error OptString `json:"error"`
@@ -12106,6 +12124,9 @@ type FormMetricMapping struct {
 	PostingStatuses   []string                           `json:"posting_statuses"`
 	DimensionMappings FormMetricMappingDimensionMappings `json:"dimension_mappings"`
 	LivePosting       bool                               `json:"live_posting"`
+	// Conditions a record meets to post through the mapping (all of them): the field holds one of is, or
+	// none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.
+	RowFilter []FormMetricMappingRowFilterItem `json:"row_filter"`
 }
 
 // GetID returns the value of ID.
@@ -12158,6 +12179,11 @@ func (s *FormMetricMapping) GetLivePosting() bool {
 	return s.LivePosting
 }
 
+// GetRowFilter returns the value of RowFilter.
+func (s *FormMetricMapping) GetRowFilter() []FormMetricMappingRowFilterItem {
+	return s.RowFilter
+}
+
 // SetID sets the value of ID.
 func (s *FormMetricMapping) SetID(val uuid.UUID) {
 	s.ID = val
@@ -12208,6 +12234,11 @@ func (s *FormMetricMapping) SetLivePosting(val bool) {
 	s.LivePosting = val
 }
 
+// SetRowFilter sets the value of RowFilter.
+func (s *FormMetricMapping) SetRowFilter(val []FormMetricMappingRowFilterItem) {
+	s.RowFilter = val
+}
+
 type FormMetricMappingDimensionMappings map[string]string
 
 func (s *FormMetricMappingDimensionMappings) init() FormMetricMappingDimensionMappings {
@@ -12217,6 +12248,42 @@ func (s *FormMetricMappingDimensionMappings) init() FormMetricMappingDimensionMa
 		*s = m
 	}
 	return m
+}
+
+type FormMetricMappingRowFilterItem struct {
+	Field string   `json:"field"`
+	Is    []string `json:"is"`
+	IsNot []string `json:"is_not"`
+}
+
+// GetField returns the value of Field.
+func (s *FormMetricMappingRowFilterItem) GetField() string {
+	return s.Field
+}
+
+// GetIs returns the value of Is.
+func (s *FormMetricMappingRowFilterItem) GetIs() []string {
+	return s.Is
+}
+
+// GetIsNot returns the value of IsNot.
+func (s *FormMetricMappingRowFilterItem) GetIsNot() []string {
+	return s.IsNot
+}
+
+// SetField sets the value of Field.
+func (s *FormMetricMappingRowFilterItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetIs sets the value of Is.
+func (s *FormMetricMappingRowFilterItem) SetIs(val []string) {
+	s.Is = val
+}
+
+// SetIsNot sets the value of IsNot.
+func (s *FormMetricMappingRowFilterItem) SetIsNot(val []string) {
+	s.IsNot = val
 }
 
 // What the caller the table is listed to may do with its records as a whole, decided by the same
@@ -12561,6 +12628,8 @@ type GetAiSessionOK struct {
 	Documents []AiDocument    `json:"documents"`
 	// What the session's calls to the AI provider were billed for, as the provider reported them.
 	Usage OptGetAiSessionOKUsage `json:"usage"`
+	// The plan of a goal the developer delegated (plan_task); null for a session without one.
+	TaskPlan OptNilGetAiSessionOKTaskPlan `json:"task_plan"`
 }
 
 // GetSession returns the value of Session.
@@ -12583,6 +12652,11 @@ func (s *GetAiSessionOK) GetUsage() OptGetAiSessionOKUsage {
 	return s.Usage
 }
 
+// GetTaskPlan returns the value of TaskPlan.
+func (s *GetAiSessionOK) GetTaskPlan() OptNilGetAiSessionOKTaskPlan {
+	return s.TaskPlan
+}
+
 // SetSession sets the value of Session.
 func (s *GetAiSessionOK) SetSession(val OptAiSession) {
 	s.Session = val
@@ -12603,7 +12677,162 @@ func (s *GetAiSessionOK) SetUsage(val OptGetAiSessionOKUsage) {
 	s.Usage = val
 }
 
+// SetTaskPlan sets the value of TaskPlan.
+func (s *GetAiSessionOK) SetTaskPlan(val OptNilGetAiSessionOKTaskPlan) {
+	s.TaskPlan = val
+}
+
 func (*GetAiSessionOK) getAiSessionRes() {}
+
+// The plan of a goal the developer delegated (plan_task); null for a session without one.
+type GetAiSessionOKTaskPlan struct {
+	Goal      OptString                          `json:"goal"`
+	UpdatedAt OptDateTime                        `json:"updated_at"`
+	Stages    []GetAiSessionOKTaskPlanStagesItem `json:"stages"`
+}
+
+// GetGoal returns the value of Goal.
+func (s *GetAiSessionOKTaskPlan) GetGoal() OptString {
+	return s.Goal
+}
+
+// GetUpdatedAt returns the value of UpdatedAt.
+func (s *GetAiSessionOKTaskPlan) GetUpdatedAt() OptDateTime {
+	return s.UpdatedAt
+}
+
+// GetStages returns the value of Stages.
+func (s *GetAiSessionOKTaskPlan) GetStages() []GetAiSessionOKTaskPlanStagesItem {
+	return s.Stages
+}
+
+// SetGoal sets the value of Goal.
+func (s *GetAiSessionOKTaskPlan) SetGoal(val OptString) {
+	s.Goal = val
+}
+
+// SetUpdatedAt sets the value of UpdatedAt.
+func (s *GetAiSessionOKTaskPlan) SetUpdatedAt(val OptDateTime) {
+	s.UpdatedAt = val
+}
+
+// SetStages sets the value of Stages.
+func (s *GetAiSessionOKTaskPlan) SetStages(val []GetAiSessionOKTaskPlanStagesItem) {
+	s.Stages = val
+}
+
+type GetAiSessionOKTaskPlanStagesItem struct {
+	Title  OptString                                 `json:"title"`
+	Items  []string                                  `json:"items"`
+	Check  OptString                                 `json:"check"`
+	Status OptGetAiSessionOKTaskPlanStagesItemStatus `json:"status"`
+	Note   OptString                                 `json:"note"`
+}
+
+// GetTitle returns the value of Title.
+func (s *GetAiSessionOKTaskPlanStagesItem) GetTitle() OptString {
+	return s.Title
+}
+
+// GetItems returns the value of Items.
+func (s *GetAiSessionOKTaskPlanStagesItem) GetItems() []string {
+	return s.Items
+}
+
+// GetCheck returns the value of Check.
+func (s *GetAiSessionOKTaskPlanStagesItem) GetCheck() OptString {
+	return s.Check
+}
+
+// GetStatus returns the value of Status.
+func (s *GetAiSessionOKTaskPlanStagesItem) GetStatus() OptGetAiSessionOKTaskPlanStagesItemStatus {
+	return s.Status
+}
+
+// GetNote returns the value of Note.
+func (s *GetAiSessionOKTaskPlanStagesItem) GetNote() OptString {
+	return s.Note
+}
+
+// SetTitle sets the value of Title.
+func (s *GetAiSessionOKTaskPlanStagesItem) SetTitle(val OptString) {
+	s.Title = val
+}
+
+// SetItems sets the value of Items.
+func (s *GetAiSessionOKTaskPlanStagesItem) SetItems(val []string) {
+	s.Items = val
+}
+
+// SetCheck sets the value of Check.
+func (s *GetAiSessionOKTaskPlanStagesItem) SetCheck(val OptString) {
+	s.Check = val
+}
+
+// SetStatus sets the value of Status.
+func (s *GetAiSessionOKTaskPlanStagesItem) SetStatus(val OptGetAiSessionOKTaskPlanStagesItemStatus) {
+	s.Status = val
+}
+
+// SetNote sets the value of Note.
+func (s *GetAiSessionOKTaskPlanStagesItem) SetNote(val OptString) {
+	s.Note = val
+}
+
+type GetAiSessionOKTaskPlanStagesItemStatus string
+
+const (
+	GetAiSessionOKTaskPlanStagesItemStatusPending    GetAiSessionOKTaskPlanStagesItemStatus = "pending"
+	GetAiSessionOKTaskPlanStagesItemStatusInProgress GetAiSessionOKTaskPlanStagesItemStatus = "in_progress"
+	GetAiSessionOKTaskPlanStagesItemStatusDone       GetAiSessionOKTaskPlanStagesItemStatus = "done"
+	GetAiSessionOKTaskPlanStagesItemStatusSkipped    GetAiSessionOKTaskPlanStagesItemStatus = "skipped"
+)
+
+// AllValues returns all GetAiSessionOKTaskPlanStagesItemStatus values.
+func (GetAiSessionOKTaskPlanStagesItemStatus) AllValues() []GetAiSessionOKTaskPlanStagesItemStatus {
+	return []GetAiSessionOKTaskPlanStagesItemStatus{
+		GetAiSessionOKTaskPlanStagesItemStatusPending,
+		GetAiSessionOKTaskPlanStagesItemStatusInProgress,
+		GetAiSessionOKTaskPlanStagesItemStatusDone,
+		GetAiSessionOKTaskPlanStagesItemStatusSkipped,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetAiSessionOKTaskPlanStagesItemStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case GetAiSessionOKTaskPlanStagesItemStatusPending:
+		return []byte(s), nil
+	case GetAiSessionOKTaskPlanStagesItemStatusInProgress:
+		return []byte(s), nil
+	case GetAiSessionOKTaskPlanStagesItemStatusDone:
+		return []byte(s), nil
+	case GetAiSessionOKTaskPlanStagesItemStatusSkipped:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetAiSessionOKTaskPlanStagesItemStatus) UnmarshalText(data []byte) error {
+	switch GetAiSessionOKTaskPlanStagesItemStatus(data) {
+	case GetAiSessionOKTaskPlanStagesItemStatusPending:
+		*s = GetAiSessionOKTaskPlanStagesItemStatusPending
+		return nil
+	case GetAiSessionOKTaskPlanStagesItemStatusInProgress:
+		*s = GetAiSessionOKTaskPlanStagesItemStatusInProgress
+		return nil
+	case GetAiSessionOKTaskPlanStagesItemStatusDone:
+		*s = GetAiSessionOKTaskPlanStagesItemStatusDone
+		return nil
+	case GetAiSessionOKTaskPlanStagesItemStatusSkipped:
+		*s = GetAiSessionOKTaskPlanStagesItemStatusSkipped
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // What the session's calls to the AI provider were billed for, as the provider reported them.
 type GetAiSessionOKUsage struct {
@@ -14744,8 +14973,11 @@ type GridDimension struct {
 	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members).
-	BusinessMaintained OptBool      `json:"business_maintained"`
-	Members            []Department `json:"members"`
+	BusinessMaintained OptBool `json:"business_maintained"`
+	// Business roles that may add, change and delete its members and properties (with the application's
+	// administrators); empty: every user who may.
+	EditorRoles []string     `json:"editor_roles"`
+	Members     []Department `json:"members"`
 }
 
 // GetID returns the value of ID.
@@ -14781,6 +15013,11 @@ func (s *GridDimension) GetFiscalYearStartMonth() OptInt {
 // GetBusinessMaintained returns the value of BusinessMaintained.
 func (s *GridDimension) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
+}
+
+// GetEditorRoles returns the value of EditorRoles.
+func (s *GridDimension) GetEditorRoles() []string {
+	return s.EditorRoles
 }
 
 // GetMembers returns the value of Members.
@@ -14821,6 +15058,11 @@ func (s *GridDimension) SetFiscalYearStartMonth(val OptInt) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *GridDimension) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetEditorRoles sets the value of EditorRoles.
+func (s *GridDimension) SetEditorRoles(val []string) {
+	s.EditorRoles = val
 }
 
 // SetMembers sets the value of Members.
@@ -17735,98 +17977,6 @@ func (s *ListBAAvailableType) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
-}
-
-type ListBACalendarsForbidden Error
-
-func (*ListBACalendarsForbidden) listBACalendarsRes() {}
-
-type ListBACalendarsInternalServerError Error
-
-func (*ListBACalendarsInternalServerError) listBACalendarsRes() {}
-
-type ListBACalendarsOKApplicationJSON []ListBACalendarsOKItem
-
-func (*ListBACalendarsOKApplicationJSON) listBACalendarsRes() {}
-
-type ListBACalendarsOKItem struct {
-	ID          OptUUID   `json:"id"`
-	Name        OptString `json:"name"`
-	Granularity OptString `json:"granularity"`
-	First       OptDate   `json:"first"`
-	Last        OptDate   `json:"last"`
-	LastLabel   OptString `json:"last_label"`
-	Periods     OptInt    `json:"periods"`
-}
-
-// GetID returns the value of ID.
-func (s *ListBACalendarsOKItem) GetID() OptUUID {
-	return s.ID
-}
-
-// GetName returns the value of Name.
-func (s *ListBACalendarsOKItem) GetName() OptString {
-	return s.Name
-}
-
-// GetGranularity returns the value of Granularity.
-func (s *ListBACalendarsOKItem) GetGranularity() OptString {
-	return s.Granularity
-}
-
-// GetFirst returns the value of First.
-func (s *ListBACalendarsOKItem) GetFirst() OptDate {
-	return s.First
-}
-
-// GetLast returns the value of Last.
-func (s *ListBACalendarsOKItem) GetLast() OptDate {
-	return s.Last
-}
-
-// GetLastLabel returns the value of LastLabel.
-func (s *ListBACalendarsOKItem) GetLastLabel() OptString {
-	return s.LastLabel
-}
-
-// GetPeriods returns the value of Periods.
-func (s *ListBACalendarsOKItem) GetPeriods() OptInt {
-	return s.Periods
-}
-
-// SetID sets the value of ID.
-func (s *ListBACalendarsOKItem) SetID(val OptUUID) {
-	s.ID = val
-}
-
-// SetName sets the value of Name.
-func (s *ListBACalendarsOKItem) SetName(val OptString) {
-	s.Name = val
-}
-
-// SetGranularity sets the value of Granularity.
-func (s *ListBACalendarsOKItem) SetGranularity(val OptString) {
-	s.Granularity = val
-}
-
-// SetFirst sets the value of First.
-func (s *ListBACalendarsOKItem) SetFirst(val OptDate) {
-	s.First = val
-}
-
-// SetLast sets the value of Last.
-func (s *ListBACalendarsOKItem) SetLast(val OptDate) {
-	s.Last = val
-}
-
-// SetLastLabel sets the value of LastLabel.
-func (s *ListBACalendarsOKItem) SetLastLabel(val OptString) {
-	s.LastLabel = val
-}
-
-// SetPeriods sets the value of Periods.
-func (s *ListBACalendarsOKItem) SetPeriods(val OptInt) {
-	s.Periods = val
 }
 
 type ListBARoleDashboardsForbidden Error
@@ -21537,6 +21687,52 @@ func (o OptChartRuntimeRequestContext) Or(d ChartRuntimeRequestContext) ChartRun
 	return d
 }
 
+// NewOptChartRuntimeRequestShared returns new OptChartRuntimeRequestShared with value set to v.
+func NewOptChartRuntimeRequestShared(v ChartRuntimeRequestShared) OptChartRuntimeRequestShared {
+	return OptChartRuntimeRequestShared{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptChartRuntimeRequestShared is optional ChartRuntimeRequestShared.
+type OptChartRuntimeRequestShared struct {
+	Value ChartRuntimeRequestShared
+	Set   bool
+}
+
+// IsSet returns true if OptChartRuntimeRequestShared was set.
+func (o OptChartRuntimeRequestShared) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptChartRuntimeRequestShared) Reset() {
+	var v ChartRuntimeRequestShared
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptChartRuntimeRequestShared) SetTo(v ChartRuntimeRequestShared) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptChartRuntimeRequestShared) Get() (v ChartRuntimeRequestShared, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptChartRuntimeRequestShared) Or(d ChartRuntimeRequestShared) ChartRuntimeRequestShared {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptClearValuesRequest returns new OptClearValuesRequest with value set to v.
 func NewOptClearValuesRequest(v ClearValuesRequest) OptClearValuesRequest {
 	return OptClearValuesRequest{
@@ -23285,6 +23481,52 @@ func (o OptFormRecord) Or(d FormRecord) FormRecord {
 	return d
 }
 
+// NewOptGetAiSessionOKTaskPlanStagesItemStatus returns new OptGetAiSessionOKTaskPlanStagesItemStatus with value set to v.
+func NewOptGetAiSessionOKTaskPlanStagesItemStatus(v GetAiSessionOKTaskPlanStagesItemStatus) OptGetAiSessionOKTaskPlanStagesItemStatus {
+	return OptGetAiSessionOKTaskPlanStagesItemStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiSessionOKTaskPlanStagesItemStatus is optional GetAiSessionOKTaskPlanStagesItemStatus.
+type OptGetAiSessionOKTaskPlanStagesItemStatus struct {
+	Value GetAiSessionOKTaskPlanStagesItemStatus
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiSessionOKTaskPlanStagesItemStatus was set.
+func (o OptGetAiSessionOKTaskPlanStagesItemStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiSessionOKTaskPlanStagesItemStatus) Reset() {
+	var v GetAiSessionOKTaskPlanStagesItemStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiSessionOKTaskPlanStagesItemStatus) SetTo(v GetAiSessionOKTaskPlanStagesItemStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiSessionOKTaskPlanStagesItemStatus) Get() (v GetAiSessionOKTaskPlanStagesItemStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiSessionOKTaskPlanStagesItemStatus) Or(d GetAiSessionOKTaskPlanStagesItemStatus) GetAiSessionOKTaskPlanStagesItemStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGetAiSessionOKUsage returns new OptGetAiSessionOKUsage with value set to v.
 func NewOptGetAiSessionOKUsage(v GetAiSessionOKUsage) OptGetAiSessionOKUsage {
 	return OptGetAiSessionOKUsage{
@@ -24819,6 +25061,69 @@ func (o OptNilFloat64) Get() (v float64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptNilFloat64) Or(d float64) float64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilGetAiSessionOKTaskPlan returns new OptNilGetAiSessionOKTaskPlan with value set to v.
+func NewOptNilGetAiSessionOKTaskPlan(v GetAiSessionOKTaskPlan) OptNilGetAiSessionOKTaskPlan {
+	return OptNilGetAiSessionOKTaskPlan{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilGetAiSessionOKTaskPlan is optional nullable GetAiSessionOKTaskPlan.
+type OptNilGetAiSessionOKTaskPlan struct {
+	Value GetAiSessionOKTaskPlan
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilGetAiSessionOKTaskPlan was set.
+func (o OptNilGetAiSessionOKTaskPlan) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilGetAiSessionOKTaskPlan) Reset() {
+	var v GetAiSessionOKTaskPlan
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilGetAiSessionOKTaskPlan) SetTo(v GetAiSessionOKTaskPlan) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilGetAiSessionOKTaskPlan) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilGetAiSessionOKTaskPlan) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v GetAiSessionOKTaskPlan
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilGetAiSessionOKTaskPlan) Get() (v GetAiSessionOKTaskPlan, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilGetAiSessionOKTaskPlan) Or(d GetAiSessionOKTaskPlan) GetAiSessionOKTaskPlan {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -34095,6 +34400,9 @@ type UpdateDimensionRequest struct {
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
+	// Business roles that may change its members and properties; [] lifts the rule. Each must be a
+	// business role of the customer.
+	EditorRoles []string `json:"editor_roles"`
 }
 
 // GetName returns the value of Name.
@@ -34142,6 +34450,11 @@ func (s *UpdateDimensionRequest) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
 }
 
+// GetEditorRoles returns the value of EditorRoles.
+func (s *UpdateDimensionRequest) GetEditorRoles() []string {
+	return s.EditorRoles
+}
+
 // SetName sets the value of Name.
 func (s *UpdateDimensionRequest) SetName(val OptString) {
 	s.Name = val
@@ -34185,6 +34498,11 @@ func (s *UpdateDimensionRequest) SetDeriveMembers(val OptBool) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *UpdateDimensionRequest) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetEditorRoles sets the value of EditorRoles.
+func (s *UpdateDimensionRequest) SetEditorRoles(val []string) {
+	s.EditorRoles = val
 }
 
 type UpdateFolderOK struct {
@@ -34237,6 +34555,9 @@ type UpdateFormMappingRequest struct {
 	PostingStatuses   []string                                     `json:"posting_statuses"`
 	DimensionMappings OptUpdateFormMappingRequestDimensionMappings `json:"dimension_mappings"`
 	LivePosting       OptBool                                      `json:"live_posting"`
+	// Conditions a record meets to post through the mapping (all of them): the field holds one of is, or
+	// none of is_not (text, case ignored; member codes on a dimension field). Empty: every record posts.
+	RowFilter []UpdateFormMappingRequestRowFilterItem `json:"row_filter"`
 }
 
 // GetGridID returns the value of GridID.
@@ -34279,6 +34600,11 @@ func (s *UpdateFormMappingRequest) GetLivePosting() OptBool {
 	return s.LivePosting
 }
 
+// GetRowFilter returns the value of RowFilter.
+func (s *UpdateFormMappingRequest) GetRowFilter() []UpdateFormMappingRequestRowFilterItem {
+	return s.RowFilter
+}
+
 // SetGridID sets the value of GridID.
 func (s *UpdateFormMappingRequest) SetGridID(val OptUUID) {
 	s.GridID = val
@@ -34319,6 +34645,11 @@ func (s *UpdateFormMappingRequest) SetLivePosting(val OptBool) {
 	s.LivePosting = val
 }
 
+// SetRowFilter sets the value of RowFilter.
+func (s *UpdateFormMappingRequest) SetRowFilter(val []UpdateFormMappingRequestRowFilterItem) {
+	s.RowFilter = val
+}
+
 type UpdateFormMappingRequestDimensionMappings map[string]string
 
 func (s *UpdateFormMappingRequestDimensionMappings) init() UpdateFormMappingRequestDimensionMappings {
@@ -34328,6 +34659,42 @@ func (s *UpdateFormMappingRequestDimensionMappings) init() UpdateFormMappingRequ
 		*s = m
 	}
 	return m
+}
+
+type UpdateFormMappingRequestRowFilterItem struct {
+	Field string   `json:"field"`
+	Is    []string `json:"is"`
+	IsNot []string `json:"is_not"`
+}
+
+// GetField returns the value of Field.
+func (s *UpdateFormMappingRequestRowFilterItem) GetField() string {
+	return s.Field
+}
+
+// GetIs returns the value of Is.
+func (s *UpdateFormMappingRequestRowFilterItem) GetIs() []string {
+	return s.Is
+}
+
+// GetIsNot returns the value of IsNot.
+func (s *UpdateFormMappingRequestRowFilterItem) GetIsNot() []string {
+	return s.IsNot
+}
+
+// SetField sets the value of Field.
+func (s *UpdateFormMappingRequestRowFilterItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetIs sets the value of Is.
+func (s *UpdateFormMappingRequestRowFilterItem) SetIs(val []string) {
+	s.Is = val
+}
+
+// SetIsNot sets the value of IsNot.
+func (s *UpdateFormMappingRequestRowFilterItem) SetIsNot(val []string) {
+	s.IsNot = val
 }
 
 type UpdateFormNotFound Error
