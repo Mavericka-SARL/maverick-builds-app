@@ -25,6 +25,10 @@ type KeyedJob struct {
 	RevisionID string
 	TotalRows  int
 	CreatedAt  time.Time
+	// TargetType is what the import wrote into ("grid", "dimension",
+	// "table"; "" on a grid import from before 2026-10-23): a key is one
+	// import's, and another kind of import sent under it is refused.
+	TargetType string
 }
 
 // JobByKey is the import job userID sent for modelID under key; nil when
@@ -32,10 +36,10 @@ type KeyedJob struct {
 func (s *Store) JobByKey(ctx context.Context, modelID, userID, key string) (*KeyedJob, error) {
 	var j KeyedJob
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, status::text, COALESCE(revision_id::text, ''), valid_rows, created_at
+		SELECT id::text, status::text, COALESCE(revision_id::text, ''), valid_rows, created_at, COALESCE(target_type, '')
 		FROM import.import_job
 		WHERE model_id = $1::uuid AND created_by = $2::uuid AND idempotency_key = $3
-	`, modelID, userID, key).Scan(&j.ID, &j.Status, &j.RevisionID, &j.TotalRows, &j.CreatedAt)
+	`, modelID, userID, key).Scan(&j.ID, &j.Status, &j.RevisionID, &j.TotalRows, &j.CreatedAt, &j.TargetType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

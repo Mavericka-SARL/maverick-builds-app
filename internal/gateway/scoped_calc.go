@@ -736,7 +736,10 @@ func scopeOrdinaryMetric(
 				values[refM.Name] = v
 				continue
 			}
-			v, found, err := rollup.ResolveTime(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
+			// Recorded, as resolveDependency: nothing entered beneath the
+			// cell (a month with no postings on any account) is blank to
+			// ISBLANK and "", and 0 in arithmetic.
+			v, found, err := rollup.ResolveTimeRecorded(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
 				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 			if err != nil {
 				return 0, err

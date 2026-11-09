@@ -17,8 +17,9 @@ import (
 //
 //   - chart-data of a SERVED one (PREVIOUS(revenue)) reads the persisted row
 //     at the point, a pin on the region's sole root (World) dropped, as the
-//     grid's scope drops it; no row (EMEA × Feb) is no point, and a
-//     restricted viewer whose grid withholds the total gets no World bar;
+//     grid's scope drops it; its rollup rows (EMEA × Feb) are its formula
+//     there, and a restricted viewer whose grid withholds the total gets no
+//     World bar;
 //   - a non-served one (revenue * 2) on a time dimension gets its '{}'
 //     total row, which the scoped read at World equals, and keeps its cells;
 //   - /api/grid flags both aggregate_evaluated, so the browser reads their
@@ -131,7 +132,10 @@ func TestPureRatioAverageReadsTheSchedulersAggregate(t *testing.T) {
 	f.point("all periods", all, "prva", "US", v(us))
 	feb := f.chartPoints(f.dev, f.chartWidget(dash, f.region, []string{"prva"}, map[string]string{f.period: "2026-02"}))
 	f.point("February", feb, "prva", "World", v(603))
-	f.point("February", feb, "prva", "EMEA", nil) // no persisted row: none, as the scoped read
+	// The rollup row EMEA × February is the formula there, as rav's is (and
+	// a formula-rule metric's): PREVIOUS(EMEA revenue) = 101 + 201. It used
+	// to be missing for a time-series pure ratio, so no point.
+	f.point("February", feb, "prva", "EMEA", v(302))
 	f.point("February", feb, "prva", "US", v(301))
 
 	// A viewer with US hidden: the grid withholds the total, and the chart

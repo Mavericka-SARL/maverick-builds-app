@@ -115,7 +115,8 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		if errors.As(err, &ae) {
 			return nil, invalidCode(ae.Code, "%s", ae.Message)
 		}
-		return nil, invalid("formula does not parse: %v%s", err, singleQuoteHint(req.Formula))
+		return nil, invalid("formula does not parse: %v%s%s", err, singleQuoteHint(req.Formula),
+			bracesHint(ctx, pool, req.ModelID, req.RevisionID, req.Formula))
 	}
 
 	// 2. Every called function must exist.
@@ -259,9 +260,14 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	}
 
 	// 3c. Where the dimensions are known — a source placed on a grid, this
-	//     metric's own time axis — check them now, with the same rules the
-	//     placement and activation checks apply.
-	if len(an.DimensionalCalls) > 0 || len(an.TimeSums) > 0 {
+	//     metric's own time axis and grid — check them now, with the same
+	//     rules the placement and activation checks apply. A new metric is
+	//     not placed yet: its cell reads are checked at placement.
+	var cellReads []formula.CellDimRead
+	if req.MetricID != "" {
+		cellReads = cellDimReads(an, rd, isMetric)
+	}
+	if len(an.DimensionalCalls) > 0 || len(an.TimeSums) > 0 || len(cellReads) > 0 {
 		metricDims, err := loadMetricGridDims(ctx, pool, req.ModelID, req.RevisionID)
 		if err != nil {
 			return nil, err
@@ -271,6 +277,9 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 			return nil, err
 		}
 		if own, placed := metricDims[req.MetricID]; req.MetricID != "" && placed {
+			if err := checkCellDimensions(req.Name, cellReads, rd, own); err != nil {
+				return nil, err
+			}
 			if err := checkTimeSumCodes(ctx, pool, req.Name, an, rd, timeAxisOf(rd, own)); err != nil {
 				return nil, err
 			}
@@ -488,6 +497,47 @@ var singleQuoted = regexp.MustCompile(`'[^']*'`)
 // singleQuoteHint names the fix when a formula quotes text with single
 // quotes: LOOKUP(x, Region, 'ALL_REGIONS') failed to parse with no word on
 // why (the AI Developer wrote it live).
+// bracesHint names the revision's dimensions and metrics with a space (or
+// another character a bare name cannot hold) that the formula writes without
+// braces: the AI Developer named dimensions "KPI Name" and "GL Account",
+// then wrote them bare and was told only "expected ',' or ')' … got Name"
+// (2026-11-08).
+func bracesHint(ctx context.Context, q Querier, modelID, revisionID, text string) string {
+	rows, err := q.Query(ctx, `
+		SELECT name FROM model.dimension_def WHERE model_id = $1::uuid AND revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND name !~ '^[A-Za-z_][A-Za-z0-9_]*$'
+		UNION SELECT name FROM model.metric_def WHERE model_id = $1::uuid AND revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND name !~ '^[A-Za-z_][A-Za-z0-9_]*$'`,
+		modelID, revisionID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	low := strings.ToLower(text)
+	var bare []string
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) != nil {
+			continue
+		}
+		n := strings.ToLower(name)
+		for i := strings.Index(low, n); i >= 0; {
+			if i == 0 || low[i-1] != '{' {
+				bare = append(bare, name)
+				break
+			}
+			next := strings.Index(low[i+1:], n)
+			if next < 0 {
+				break
+			}
+			i += 1 + next
+		}
+	}
+	if len(bare) == 0 {
+		return ""
+	}
+	sort.Strings(bare)
+	return fmt.Sprintf(" — a name with a space is written in braces: {%s}", strings.Join(bare, "}, {"))
+}
+
 func singleQuoteHint(text string) string {
 	m := singleQuoted.FindString(text)
 	if m == "" {

@@ -496,6 +496,8 @@ func (*AddBusinessMemberOK) addBusinessMemberRes() {}
 
 type AddGridDimensionOK struct {
 	Status OptString `json:"status"`
+	// Stored values filed under member.
+	Moved OptInt `json:"moved"`
 }
 
 // GetStatus returns the value of Status.
@@ -503,23 +505,44 @@ func (s *AddGridDimensionOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetMoved returns the value of Moved.
+func (s *AddGridDimensionOK) GetMoved() OptInt {
+	return s.Moved
+}
+
 // SetStatus sets the value of Status.
 func (s *AddGridDimensionOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetMoved sets the value of Moved.
+func (s *AddGridDimensionOK) SetMoved(val OptInt) {
+	s.Moved = val
+}
+
 func (*AddGridDimensionOK) addGridDimensionRes() {}
 
-type AddGridMetricBadRequest Error
+type AddGridDimensionReq struct {
+	// The member (code or id) of the dimension the stored values belong to: a leaf that takes input.
+	Member OptString `json:"member"`
+}
 
-func (*AddGridMetricBadRequest) addGridMetricRes() {}
+// GetMember returns the value of Member.
+func (s *AddGridDimensionReq) GetMember() OptString {
+	return s.Member
+}
 
-type AddGridMetricConflict Error
-
-func (*AddGridMetricConflict) addGridMetricRes() {}
+// SetMember sets the value of Member.
+func (s *AddGridDimensionReq) SetMember(val OptString) {
+	s.Member = val
+}
 
 type AddGridMetricOK struct {
 	Status OptString `json:"status"`
+	// Stored values filed under a member named in members.
+	Moved OptInt `json:"moved"`
+	// Stored values combined by the metric's own rule along dimensions the grid has not got.
+	Combined OptInt `json:"combined"`
 }
 
 // GetStatus returns the value of Status.
@@ -527,12 +550,61 @@ func (s *AddGridMetricOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetMoved returns the value of Moved.
+func (s *AddGridMetricOK) GetMoved() OptInt {
+	return s.Moved
+}
+
+// GetCombined returns the value of Combined.
+func (s *AddGridMetricOK) GetCombined() OptInt {
+	return s.Combined
+}
+
 // SetStatus sets the value of Status.
 func (s *AddGridMetricOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetMoved sets the value of Moved.
+func (s *AddGridMetricOK) SetMoved(val OptInt) {
+	s.Moved = val
+}
+
+// SetCombined sets the value of Combined.
+func (s *AddGridMetricOK) SetCombined(val OptInt) {
+	s.Combined = val
+}
+
 func (*AddGridMetricOK) addGridMetricRes() {}
+
+type AddGridMetricReq struct {
+	// Dimension id → the member (code or id) the metric's values belong to, for each grid dimension
+	// they lack.
+	Members OptAddGridMetricReqMembers `json:"members"`
+}
+
+// GetMembers returns the value of Members.
+func (s *AddGridMetricReq) GetMembers() OptAddGridMetricReqMembers {
+	return s.Members
+}
+
+// SetMembers sets the value of Members.
+func (s *AddGridMetricReq) SetMembers(val OptAddGridMetricReqMembers) {
+	s.Members = val
+}
+
+// Dimension id → the member (code or id) the metric's values belong to, for each grid dimension
+// they lack.
+type AddGridMetricReqMembers map[string]string
+
+func (s *AddGridMetricReqMembers) init() AddGridMetricReqMembers {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
 
 // Ref: #/components/schemas/AddRoleMemberRequest
 type AddRoleMemberRequest struct {
@@ -6287,7 +6359,7 @@ type CreateDashboardRequest struct {
 	Tags       []string `json:"tags"`
 	RevisionID OptUUID  `json:"revision_id"`
 	// Folder to file the new dashboard under; omit or empty for the root. Must be a folder of the same
-	// model.
+	// model and revision.
 	FolderID OptUUID `json:"folder_id"`
 	// Each dimension once, from the dashboard's revision; each default a member code of its dimension.
 	SelectorBar []SelectorBarEntry `json:"selector_bar"`
@@ -6441,18 +6513,52 @@ func (s *CreateDimensionOK) SetDerivedMembers(val []string) {
 
 func (*CreateDimensionOK) createDimensionRes() {}
 
+type CreateDimensionPropertyBadRequest Error
+
+func (*CreateDimensionPropertyBadRequest) createDimensionPropertyRes() {}
+
+type CreateDimensionPropertyConflict Error
+
+func (*CreateDimensionPropertyConflict) createDimensionPropertyRes() {}
+
 type CreateDimensionPropertyOK struct {
-	ID OptUUID `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// Members that already held a value under the name (any case) before it was declared — kept from a
+	// declaration deleted before, or set before — which formulas read now.
+	ExistingValues int `json:"existing_values"`
+	// Present when existing_values > 0: "N member(s) already hold values under "name" from before;
+	// formulas read them now", with the offer to clear them (PATCH clear_values).
+	Notice OptString `json:"notice"`
 }
 
 // GetID returns the value of ID.
-func (s *CreateDimensionPropertyOK) GetID() OptUUID {
+func (s *CreateDimensionPropertyOK) GetID() uuid.UUID {
 	return s.ID
 }
 
+// GetExistingValues returns the value of ExistingValues.
+func (s *CreateDimensionPropertyOK) GetExistingValues() int {
+	return s.ExistingValues
+}
+
+// GetNotice returns the value of Notice.
+func (s *CreateDimensionPropertyOK) GetNotice() OptString {
+	return s.Notice
+}
+
 // SetID sets the value of ID.
-func (s *CreateDimensionPropertyOK) SetID(val OptUUID) {
+func (s *CreateDimensionPropertyOK) SetID(val uuid.UUID) {
 	s.ID = val
+}
+
+// SetExistingValues sets the value of ExistingValues.
+func (s *CreateDimensionPropertyOK) SetExistingValues(val int) {
+	s.ExistingValues = val
+}
+
+// SetNotice sets the value of Notice.
+func (s *CreateDimensionPropertyOK) SetNotice(val OptString) {
+	s.Notice = val
 }
 
 func (*CreateDimensionPropertyOK) createDimensionPropertyRes() {}
@@ -6772,6 +6878,8 @@ func (*CreateFormMappingNotFound) createFormMappingRes() {}
 type CreateFormMappingOK struct {
 	ID     OptUUID   `json:"id"`
 	Status OptString `json:"status"`
+	// The cells of the target metric holding a typed value, now set aside.
+	TypedSetAside OptInt `json:"typed_set_aside"`
 }
 
 // GetID returns the value of ID.
@@ -6784,6 +6892,11 @@ func (s *CreateFormMappingOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetTypedSetAside returns the value of TypedSetAside.
+func (s *CreateFormMappingOK) GetTypedSetAside() OptInt {
+	return s.TypedSetAside
+}
+
 // SetID sets the value of ID.
 func (s *CreateFormMappingOK) SetID(val OptUUID) {
 	s.ID = val
@@ -6792,6 +6905,11 @@ func (s *CreateFormMappingOK) SetID(val OptUUID) {
 // SetStatus sets the value of Status.
 func (s *CreateFormMappingOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetTypedSetAside sets the value of TypedSetAside.
+func (s *CreateFormMappingOK) SetTypedSetAside(val OptInt) {
+	s.TypedSetAside = val
 }
 
 func (*CreateFormMappingOK) createFormMappingRes() {}
@@ -10229,12 +10347,12 @@ func (s *Error) SetError(val string) {
 }
 
 func (*Error) addGridDimensionRes()            {}
+func (*Error) addGridMetricRes()               {}
 func (*Error) createAdminApplicationRes()      {}
 func (*Error) createAdminModelRes()            {}
 func (*Error) createAdminRevisionRes()         {}
 func (*Error) createDashboardRes()             {}
 func (*Error) createDashboardWidgetRes()       {}
-func (*Error) createDimensionPropertyRes()     {}
 func (*Error) createFormRes()                  {}
 func (*Error) createIntegrationConnectionRes() {}
 func (*Error) debugFactsRes()                  {}
@@ -10303,7 +10421,6 @@ func (*Error) updateAutomationRuleRes()        {}
 func (*Error) updateConnectorSettingsRes()     {}
 func (*Error) updateDashboardRes()             {}
 func (*Error) updateDashboardWidgetRes()       {}
-func (*Error) updateFolderRes()                {}
 func (*Error) updateFormMappingRes()           {}
 func (*Error) updateGridRes()                  {}
 func (*Error) updateIntegrationConfigRes()     {}
@@ -11382,7 +11499,9 @@ func (s *FillSampleValuesReqMetricsItem) SetValue(val OptFloat64) {
 
 // Ref: #/components/schemas/FolderRequest
 type FolderRequest struct {
-	Name     string  `json:"name"`
+	Name string `json:"name"`
+	// Folder to create the new folder under; omit for the top level. Must be a folder of the same model
+	// and revision.
 	ParentID OptUUID `json:"parent_id"`
 }
 
@@ -14591,6 +14710,10 @@ type GridData struct {
 	// A write answered before its recalculation (recalc background) is still being calculated:
 	// calculated cells are about to change. Omitted when false.
 	RecalcPending OptBool `json:"recalc_pending"`
+	// The grid's dimensions that have no member yet, which `dimensions` leaves out: the grid has no rows
+	// along them until members are added. No member is made for them. `kept_by` names the table whose
+	// records are the dimension's members, when one keeps it. Omitted when every dimension has members.
+	DimensionsWithoutMembers []GridDataDimensionsWithoutMembersItem `json:"dimensions_without_members"`
 	// MetricId to its aggregate across the grid.
 	Totals GridDataTotals `json:"totals"`
 	// Each metric a table of records posts into, by id, to that table's name: its cells take no typed
@@ -14655,6 +14778,11 @@ func (s *GridData) GetTexts() OptGridDataTexts {
 // GetRecalcPending returns the value of RecalcPending.
 func (s *GridData) GetRecalcPending() OptBool {
 	return s.RecalcPending
+}
+
+// GetDimensionsWithoutMembers returns the value of DimensionsWithoutMembers.
+func (s *GridData) GetDimensionsWithoutMembers() []GridDataDimensionsWithoutMembersItem {
+	return s.DimensionsWithoutMembers
 }
 
 // GetTotals returns the value of Totals.
@@ -14732,6 +14860,11 @@ func (s *GridData) SetRecalcPending(val OptBool) {
 	s.RecalcPending = val
 }
 
+// SetDimensionsWithoutMembers sets the value of DimensionsWithoutMembers.
+func (s *GridData) SetDimensionsWithoutMembers(val []GridDataDimensionsWithoutMembersItem) {
+	s.DimensionsWithoutMembers = val
+}
+
 // SetTotals sets the value of Totals.
 func (s *GridData) SetTotals(val GridDataTotals) {
 	s.Totals = val
@@ -14775,6 +14908,65 @@ func (s *GridDataCells) init() GridDataCells {
 		*s = m
 	}
 	return m
+}
+
+type GridDataDimensionsWithoutMembersItem struct {
+	ID     uuid.UUID `json:"id"`
+	Name   string    `json:"name"`
+	Label  OptString `json:"label"`
+	KeptBy OptString `json:"kept_by"`
+	// What to do: add members first, or add records to the table keeping it.
+	Guidance string `json:"guidance"`
+}
+
+// GetID returns the value of ID.
+func (s *GridDataDimensionsWithoutMembersItem) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GridDataDimensionsWithoutMembersItem) GetName() string {
+	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *GridDataDimensionsWithoutMembersItem) GetLabel() OptString {
+	return s.Label
+}
+
+// GetKeptBy returns the value of KeptBy.
+func (s *GridDataDimensionsWithoutMembersItem) GetKeptBy() OptString {
+	return s.KeptBy
+}
+
+// GetGuidance returns the value of Guidance.
+func (s *GridDataDimensionsWithoutMembersItem) GetGuidance() string {
+	return s.Guidance
+}
+
+// SetID sets the value of ID.
+func (s *GridDataDimensionsWithoutMembersItem) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GridDataDimensionsWithoutMembersItem) SetName(val string) {
+	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *GridDataDimensionsWithoutMembersItem) SetLabel(val OptString) {
+	s.Label = val
+}
+
+// SetKeptBy sets the value of KeptBy.
+func (s *GridDataDimensionsWithoutMembersItem) SetKeptBy(val OptString) {
+	s.KeptBy = val
+}
+
+// SetGuidance sets the value of Guidance.
+func (s *GridDataDimensionsWithoutMembersItem) SetGuidance(val string) {
+	s.Guidance = val
 }
 
 // Each metric a table of records posts into, by id, to that table's name: its cells take no typed
@@ -15198,6 +15390,107 @@ func (s *GridDimensionTimeGranularity) UnmarshalText(data []byte) error {
 		return nil
 	case GridDimensionTimeGranularityCustom:
 		*s = GridDimensionTimeGranularityCustom
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/GridValuesConflict
+type GridValuesConflict struct {
+	Error string                    `json:"error"`
+	Code  OptGridValuesConflictCode `json:"code"`
+	// The dimensions the values need a member of, or cannot be combined along.
+	DimensionIds OptNilStringArray `json:"dimension_ids"`
+	// How many stored values need a member.
+	Count OptInt `json:"count"`
+}
+
+// GetError returns the value of Error.
+func (s *GridValuesConflict) GetError() string {
+	return s.Error
+}
+
+// GetCode returns the value of Code.
+func (s *GridValuesConflict) GetCode() OptGridValuesConflictCode {
+	return s.Code
+}
+
+// GetDimensionIds returns the value of DimensionIds.
+func (s *GridValuesConflict) GetDimensionIds() OptNilStringArray {
+	return s.DimensionIds
+}
+
+// GetCount returns the value of Count.
+func (s *GridValuesConflict) GetCount() OptInt {
+	return s.Count
+}
+
+// SetError sets the value of Error.
+func (s *GridValuesConflict) SetError(val string) {
+	s.Error = val
+}
+
+// SetCode sets the value of Code.
+func (s *GridValuesConflict) SetCode(val OptGridValuesConflictCode) {
+	s.Code = val
+}
+
+// SetDimensionIds sets the value of DimensionIds.
+func (s *GridValuesConflict) SetDimensionIds(val OptNilStringArray) {
+	s.DimensionIds = val
+}
+
+// SetCount sets the value of Count.
+func (s *GridValuesConflict) SetCount(val OptInt) {
+	s.Count = val
+}
+
+func (*GridValuesConflict) addGridDimensionRes() {}
+func (*GridValuesConflict) addGridMetricRes()    {}
+
+type GridValuesConflictCode string
+
+const (
+	GridValuesConflictCodeVALUESNEEDMEMBER    GridValuesConflictCode = "VALUES_NEED_MEMBER"
+	GridValuesConflictCodeVALUESCANNOTCOMBINE GridValuesConflictCode = "VALUES_CANNOT_COMBINE"
+	GridValuesConflictCodePOSTINGSDONOTFIT    GridValuesConflictCode = "POSTINGS_DO_NOT_FIT"
+)
+
+// AllValues returns all GridValuesConflictCode values.
+func (GridValuesConflictCode) AllValues() []GridValuesConflictCode {
+	return []GridValuesConflictCode{
+		GridValuesConflictCodeVALUESNEEDMEMBER,
+		GridValuesConflictCodeVALUESCANNOTCOMBINE,
+		GridValuesConflictCodePOSTINGSDONOTFIT,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GridValuesConflictCode) MarshalText() ([]byte, error) {
+	switch s {
+	case GridValuesConflictCodeVALUESNEEDMEMBER:
+		return []byte(s), nil
+	case GridValuesConflictCodeVALUESCANNOTCOMBINE:
+		return []byte(s), nil
+	case GridValuesConflictCodePOSTINGSDONOTFIT:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GridValuesConflictCode) UnmarshalText(data []byte) error {
+	switch GridValuesConflictCode(data) {
+	case GridValuesConflictCodeVALUESNEEDMEMBER:
+		*s = GridValuesConflictCodeVALUESNEEDMEMBER
+		return nil
+	case GridValuesConflictCodeVALUESCANNOTCOMBINE:
+		*s = GridValuesConflictCodeVALUESCANNOTCOMBINE
+		return nil
+	case GridValuesConflictCodePOSTINGSDONOTFIT:
+		*s = GridValuesConflictCodePOSTINGSDONOTFIT
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
@@ -15720,6 +16013,9 @@ func (s *HistogramChartDataContext) init() HistogramChartDataContext {
 type ImportDimensionMembersOK struct {
 	RowsImported OptInt `json:"rows_imported"`
 	ErrorRows    OptInt `json:"error_rows"`
+	// For each property the file declared under a name members not in the file already held values
+	// under: how many, which formulas read now, and how to clear them.
+	Notices []string `json:"notices"`
 }
 
 // GetRowsImported returns the value of RowsImported.
@@ -15732,6 +16028,11 @@ func (s *ImportDimensionMembersOK) GetErrorRows() OptInt {
 	return s.ErrorRows
 }
 
+// GetNotices returns the value of Notices.
+func (s *ImportDimensionMembersOK) GetNotices() []string {
+	return s.Notices
+}
+
 // SetRowsImported sets the value of RowsImported.
 func (s *ImportDimensionMembersOK) SetRowsImported(val OptInt) {
 	s.RowsImported = val
@@ -15740,6 +16041,11 @@ func (s *ImportDimensionMembersOK) SetRowsImported(val OptInt) {
 // SetErrorRows sets the value of ErrorRows.
 func (s *ImportDimensionMembersOK) SetErrorRows(val OptInt) {
 	s.ErrorRows = val
+}
+
+// SetNotices sets the value of Notices.
+func (s *ImportDimensionMembersOK) SetNotices(val []string) {
+	s.Notices = val
 }
 
 func (*ImportDimensionMembersOK) importDimensionMembersRes() {}
@@ -15786,6 +16092,10 @@ type ImportFormRecordsBadRequest Error
 
 func (*ImportFormRecordsBadRequest) importFormRecordsRes() {}
 
+type ImportFormRecordsConflict Error
+
+func (*ImportFormRecordsConflict) importFormRecordsRes() {}
+
 type ImportFormRecordsNotFound Error
 
 func (*ImportFormRecordsNotFound) importFormRecordsRes() {}
@@ -15793,9 +16103,14 @@ func (*ImportFormRecordsNotFound) importFormRecordsRes() {}
 type ImportFormRecordsOK struct {
 	Status         OptString `json:"status"`
 	RecordsCreated OptInt    `json:"records_created"`
-	// With replace_by — the earlier records deleted.
-	RecordsReplaced OptInt  `json:"records_replaced"`
-	DryRun          OptBool `json:"dry_run"`
+	// With replace_by — the earlier records deleted (not in a replayed answer).
+	RecordsReplaced OptInt `json:"records_replaced"`
+	// The import's line in Recent Imports.
+	JobID OptUUID `json:"job_id"`
+	// True when this is the answer of an import sent before under the same Idempotency-Key; nothing was
+	// created.
+	Replayed OptBool `json:"replayed"`
+	DryRun   OptBool `json:"dry_run"`
 	// With dry_run and replace_by — the earlier records the file would replace.
 	RowsReplaced OptInt `json:"rows_replaced"`
 	// With dry_run — the records that would be created.
@@ -15818,6 +16133,16 @@ func (s *ImportFormRecordsOK) GetRecordsCreated() OptInt {
 // GetRecordsReplaced returns the value of RecordsReplaced.
 func (s *ImportFormRecordsOK) GetRecordsReplaced() OptInt {
 	return s.RecordsReplaced
+}
+
+// GetJobID returns the value of JobID.
+func (s *ImportFormRecordsOK) GetJobID() OptUUID {
+	return s.JobID
+}
+
+// GetReplayed returns the value of Replayed.
+func (s *ImportFormRecordsOK) GetReplayed() OptBool {
+	return s.Replayed
 }
 
 // GetDryRun returns the value of DryRun.
@@ -15858,6 +16183,16 @@ func (s *ImportFormRecordsOK) SetRecordsCreated(val OptInt) {
 // SetRecordsReplaced sets the value of RecordsReplaced.
 func (s *ImportFormRecordsOK) SetRecordsReplaced(val OptInt) {
 	s.RecordsReplaced = val
+}
+
+// SetJobID sets the value of JobID.
+func (s *ImportFormRecordsOK) SetJobID(val OptUUID) {
+	s.JobID = val
+}
+
+// SetReplayed sets the value of Replayed.
+func (s *ImportFormRecordsOK) SetReplayed(val OptBool) {
+	s.Replayed = val
 }
 
 // SetDryRun sets the value of DryRun.
@@ -16368,8 +16703,13 @@ func (*ImportModelForbidden) importModelRes() {}
 type ImportModelOK struct {
 	ModelID    OptUUID `json:"model_id"`
 	RevisionID OptUUID `json:"revision_id"`
-	// What the import left out of the package, such as widget_props keys the console does not read.
-	// Absent when nothing was.
+	// What the import left out of the package, one note each, naming where it was: widget_props keys the
+	// console does not read; a reference to a row the package does not hold (a grid's metric or
+	// dimension, a dashboard's folder, a widget's, a table's, a workflow's, an automation rule's or an
+	// integration's link, a table mapping's table or metric, the records of a table and the values of a
+	// metric or a mapping it lacks); and a member whose parent is in neither its dimension nor that
+	// dimension's parent dimension, which is imported without the parent, its values kept. Absent when
+	// nothing was.
 	Notes []string `json:"notes"`
 }
 
@@ -16842,8 +17182,11 @@ type ImportUploadRequest struct {
 	// about the import.
 	FileName OptString `json:"file_name"`
 	// Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
-	// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
-	// revision's typed values the caller may write, then sets the file's.
+	// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload first removes
+	// the typed values of the grids the file writes into — every input metric of each, plus a file
+	// metric on no grid; other grids keep theirs — that the caller may write and no table's records
+	// post, then sets the file's (403 when a running approval locks a value it would remove); the
+	// calculated metrics of what it removed are recalculated.
 	ImportMode OptImportUploadRequestImportMode `json:"import_mode"`
 }
 
@@ -16928,8 +17271,11 @@ func (s *ImportUploadRequest) SetImportMode(val OptImportUploadRequestImportMode
 }
 
 // Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
-// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
-// revision's typed values the caller may write, then sets the file's.
+// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload first removes
+// the typed values of the grids the file writes into — every input metric of each, plus a file
+// metric on no grid; other grids keep theirs — that the caller may write and no table's records
+// post, then sets the file's (403 when a running approval locks a value it would remove); the
+// calculated metrics of what it removed are recalculated.
 type ImportUploadRequestImportMode string
 
 const (
@@ -17193,6 +17539,11 @@ type IntegrationRunRequest struct {
 	// The workbook's sheet; when omitted, the sheet the integration's config saved (config.sheet), else
 	// the first. A workbook without that sheet is refused.
 	Sheet OptString `json:"sheet"`
+	// True when csv is already shaped and mapped — the Import Wizard's Run Import sends the file its
+	// own Shape and Map steps wrote, its columns under the model's names — so the integration's saved
+	// reshape and column_map are not applied to it again. Only with csv; a workbook sent with it is
+	// refused (400). Omitted or false, the saved reshape and column_map apply.
+	Mapped OptBool `json:"mapped"`
 }
 
 // GetCsv returns the value of Csv.
@@ -17220,6 +17571,11 @@ func (s *IntegrationRunRequest) GetSheet() OptString {
 	return s.Sheet
 }
 
+// GetMapped returns the value of Mapped.
+func (s *IntegrationRunRequest) GetMapped() OptBool {
+	return s.Mapped
+}
+
 // SetCsv sets the value of Csv.
 func (s *IntegrationRunRequest) SetCsv(val OptString) {
 	s.Csv = val
@@ -17243,6 +17599,11 @@ func (s *IntegrationRunRequest) SetXlsxBase64(val OptString) {
 // SetSheet sets the value of Sheet.
 func (s *IntegrationRunRequest) SetSheet(val OptString) {
 	s.Sheet = val
+}
+
+// SetMapped sets the value of Mapped.
+func (s *IntegrationRunRequest) SetMapped(val OptBool) {
+	s.Mapped = val
 }
 
 type IssueAdminUserTemporaryPasswordBadGateway Error
@@ -20859,6 +21220,144 @@ func (o OptAPITokenAccess) Or(d APITokenAccess) APITokenAccess {
 	return d
 }
 
+// NewOptAddGridDimensionReq returns new OptAddGridDimensionReq with value set to v.
+func NewOptAddGridDimensionReq(v AddGridDimensionReq) OptAddGridDimensionReq {
+	return OptAddGridDimensionReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAddGridDimensionReq is optional AddGridDimensionReq.
+type OptAddGridDimensionReq struct {
+	Value AddGridDimensionReq
+	Set   bool
+}
+
+// IsSet returns true if OptAddGridDimensionReq was set.
+func (o OptAddGridDimensionReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAddGridDimensionReq) Reset() {
+	var v AddGridDimensionReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAddGridDimensionReq) SetTo(v AddGridDimensionReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAddGridDimensionReq) Get() (v AddGridDimensionReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAddGridDimensionReq) Or(d AddGridDimensionReq) AddGridDimensionReq {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAddGridMetricReq returns new OptAddGridMetricReq with value set to v.
+func NewOptAddGridMetricReq(v AddGridMetricReq) OptAddGridMetricReq {
+	return OptAddGridMetricReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAddGridMetricReq is optional AddGridMetricReq.
+type OptAddGridMetricReq struct {
+	Value AddGridMetricReq
+	Set   bool
+}
+
+// IsSet returns true if OptAddGridMetricReq was set.
+func (o OptAddGridMetricReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAddGridMetricReq) Reset() {
+	var v AddGridMetricReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAddGridMetricReq) SetTo(v AddGridMetricReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAddGridMetricReq) Get() (v AddGridMetricReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAddGridMetricReq) Or(d AddGridMetricReq) AddGridMetricReq {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAddGridMetricReqMembers returns new OptAddGridMetricReqMembers with value set to v.
+func NewOptAddGridMetricReqMembers(v AddGridMetricReqMembers) OptAddGridMetricReqMembers {
+	return OptAddGridMetricReqMembers{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAddGridMetricReqMembers is optional AddGridMetricReqMembers.
+type OptAddGridMetricReqMembers struct {
+	Value AddGridMetricReqMembers
+	Set   bool
+}
+
+// IsSet returns true if OptAddGridMetricReqMembers was set.
+func (o OptAddGridMetricReqMembers) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAddGridMetricReqMembers) Reset() {
+	var v AddGridMetricReqMembers
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAddGridMetricReqMembers) SetTo(v AddGridMetricReqMembers) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAddGridMetricReqMembers) Get() (v AddGridMetricReqMembers, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAddGridMetricReqMembers) Or(d AddGridMetricReqMembers) AddGridMetricReqMembers {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiConversionColumnMap returns new OptAiConversionColumnMap with value set to v.
 func NewOptAiConversionColumnMap(v AiConversionColumnMap) OptAiConversionColumnMap {
 	return OptAiConversionColumnMap{
@@ -24079,6 +24578,52 @@ func (o OptGridDimensionTimeGranularity) Or(d GridDimensionTimeGranularity) Grid
 	return d
 }
 
+// NewOptGridValuesConflictCode returns new OptGridValuesConflictCode with value set to v.
+func NewOptGridValuesConflictCode(v GridValuesConflictCode) OptGridValuesConflictCode {
+	return OptGridValuesConflictCode{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGridValuesConflictCode is optional GridValuesConflictCode.
+type OptGridValuesConflictCode struct {
+	Value GridValuesConflictCode
+	Set   bool
+}
+
+// IsSet returns true if OptGridValuesConflictCode was set.
+func (o OptGridValuesConflictCode) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGridValuesConflictCode) Reset() {
+	var v GridValuesConflictCode
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGridValuesConflictCode) SetTo(v GridValuesConflictCode) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGridValuesConflictCode) Get() (v GridValuesConflictCode, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGridValuesConflictCode) Or(d GridValuesConflictCode) GridValuesConflictCode {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptHighlightRuleValue returns new OptHighlightRuleValue with value set to v.
 func NewOptHighlightRuleValue(v HighlightRuleValue) OptHighlightRuleValue {
 	return OptHighlightRuleValue{
@@ -25445,6 +25990,69 @@ func (o OptNilString) Or(d string) string {
 	return d
 }
 
+// NewOptNilStringArray returns new OptNilStringArray with value set to v.
+func NewOptNilStringArray(v []string) OptNilStringArray {
+	return OptNilStringArray{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilStringArray is optional nullable []string.
+type OptNilStringArray struct {
+	Value []string
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilStringArray was set.
+func (o OptNilStringArray) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilStringArray) Reset() {
+	var v []string
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilStringArray) SetTo(v []string) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilStringArray) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilStringArray) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v []string
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilStringArray) Get() (v []string, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilStringArray) Or(d []string) []string {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilUUID returns new OptNilUUID with value set to v.
 func NewOptNilUUID(v uuid.UUID) OptNilUUID {
 	return OptNilUUID{
@@ -25824,6 +26432,52 @@ func (o OptPromoteAiDraftOKRevision) Get() (v PromoteAiDraftOKRevision, ok bool)
 
 // Or returns value if set, or given parameter if does not.
 func (o OptPromoteAiDraftOKRevision) Or(d PromoteAiDraftOKRevision) PromoteAiDraftOKRevision {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptPromoteAiDraftReq returns new OptPromoteAiDraftReq with value set to v.
+func NewOptPromoteAiDraftReq(v PromoteAiDraftReq) OptPromoteAiDraftReq {
+	return OptPromoteAiDraftReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptPromoteAiDraftReq is optional PromoteAiDraftReq.
+type OptPromoteAiDraftReq struct {
+	Value PromoteAiDraftReq
+	Set   bool
+}
+
+// IsSet returns true if OptPromoteAiDraftReq was set.
+func (o OptPromoteAiDraftReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptPromoteAiDraftReq) Reset() {
+	var v PromoteAiDraftReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptPromoteAiDraftReq) SetTo(v PromoteAiDraftReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptPromoteAiDraftReq) Get() (v PromoteAiDraftReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptPromoteAiDraftReq) Or(d PromoteAiDraftReq) PromoteAiDraftReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -28568,6 +29222,10 @@ type PromoteAiDraftBadRequest Error
 
 func (*PromoteAiDraftBadRequest) promoteAiDraftRes() {}
 
+type PromoteAiDraftConflict Error
+
+func (*PromoteAiDraftConflict) promoteAiDraftRes() {}
+
 type PromoteAiDraftNotFound Error
 
 func (*PromoteAiDraftNotFound) promoteAiDraftRes() {}
@@ -28637,10 +29295,30 @@ func (s *PromoteAiDraftOKRevision) SetName(val OptString) {
 	s.Name = val
 }
 
+type PromoteAiDraftReq struct {
+	// A name for the revision, given as it is promoted; omitted or blank keeps the draft's own ("AI
+	// Draft" and its time).
+	Name OptString `json:"name"`
+}
+
+// GetName returns the value of Name.
+func (s *PromoteAiDraftReq) GetName() OptString {
+	return s.Name
+}
+
+// SetName sets the value of Name.
+func (s *PromoteAiDraftReq) SetName(val OptString) {
+	s.Name = val
+}
+
 // Ref: #/components/schemas/PropertyRequest
 type PropertyRequest struct {
 	Name     OptString `json:"name"`
 	DataType OptString `json:"data_type"`
+	// Update only: remove the property's value (under its name in any case) from every member of the
+	// dimension — what a developer asks for when a declaration made again brought back stale values.
+	// Values are never cleared otherwise; deleting a property keeps them.
+	ClearValues OptBool `json:"clear_values"`
 }
 
 // GetName returns the value of Name.
@@ -28653,6 +29331,11 @@ func (s *PropertyRequest) GetDataType() OptString {
 	return s.DataType
 }
 
+// GetClearValues returns the value of ClearValues.
+func (s *PropertyRequest) GetClearValues() OptBool {
+	return s.ClearValues
+}
+
 // SetName sets the value of Name.
 func (s *PropertyRequest) SetName(val OptString) {
 	s.Name = val
@@ -28661,6 +29344,11 @@ func (s *PropertyRequest) SetName(val OptString) {
 // SetDataType sets the value of DataType.
 func (s *PropertyRequest) SetDataType(val OptString) {
 	s.DataType = val
+}
+
+// SetClearValues sets the value of ClearValues.
+func (s *PropertyRequest) SetClearValues(val OptBool) {
+	s.ClearValues = val
 }
 
 // The wire shape of a google.protobuf.Timestamp field on this endpoint — ImportJob is a
@@ -30152,6 +30840,72 @@ func (s *RenameAiSessionReq) SetTitle(val string) {
 	s.Title = val
 }
 
+type RenameRevisionBadRequest Error
+
+func (*RenameRevisionBadRequest) renameRevisionRes() {}
+
+type RenameRevisionConflict Error
+
+func (*RenameRevisionConflict) renameRevisionRes() {}
+
+type RenameRevisionNotFound Error
+
+func (*RenameRevisionNotFound) renameRevisionRes() {}
+
+type RenameRevisionOK struct {
+	ID   OptString `json:"id"`
+	Name OptString `json:"name"`
+}
+
+// GetID returns the value of ID.
+func (s *RenameRevisionOK) GetID() OptString {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *RenameRevisionOK) GetName() OptString {
+	return s.Name
+}
+
+// SetID sets the value of ID.
+func (s *RenameRevisionOK) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *RenameRevisionOK) SetName(val OptString) {
+	s.Name = val
+}
+
+func (*RenameRevisionOK) renameRevisionRes() {}
+
+type RenameRevisionReq struct {
+	// The new name; surrounding spaces are dropped.
+	Name string `json:"name"`
+	// Left as it is when omitted.
+	Description OptString `json:"description"`
+}
+
+// GetName returns the value of Name.
+func (s *RenameRevisionReq) GetName() string {
+	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *RenameRevisionReq) GetDescription() OptString {
+	return s.Description
+}
+
+// SetName sets the value of Name.
+func (s *RenameRevisionReq) SetName(val string) {
+	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *RenameRevisionReq) SetDescription(val OptString) {
+	s.Description = val
+}
+
 type ReopenWorkflowInstanceBadRequest Error
 
 func (*ReopenWorkflowInstanceBadRequest) reopenWorkflowInstanceRes() {}
@@ -30597,6 +31351,9 @@ type RunIntegrationOK struct {
 	Values OptInt `json:"values"`
 	// With dry_run — each problem the run would refuse, by the row's line in the file.
 	Errors []RunIntegrationOKErrorsItem `json:"errors"`
+	// Dimension runs — for each property the file declared under a name members not in the file
+	// already held values under: how many, which formulas read now, and how to clear them.
+	Notices []string `json:"notices"`
 }
 
 // GetRowsImported returns the value of RowsImported.
@@ -30639,6 +31396,11 @@ func (s *RunIntegrationOK) GetErrors() []RunIntegrationOKErrorsItem {
 	return s.Errors
 }
 
+// GetNotices returns the value of Notices.
+func (s *RunIntegrationOK) GetNotices() []string {
+	return s.Notices
+}
+
 // SetRowsImported sets the value of RowsImported.
 func (s *RunIntegrationOK) SetRowsImported(val OptInt) {
 	s.RowsImported = val
@@ -30677,6 +31439,11 @@ func (s *RunIntegrationOK) SetValues(val OptInt) {
 // SetErrors sets the value of Errors.
 func (s *RunIntegrationOK) SetErrors(val []RunIntegrationOKErrorsItem) {
 	s.Errors = val
+}
+
+// SetNotices sets the value of Notices.
+func (s *RunIntegrationOK) SetNotices(val []string) {
+	s.Notices = val
 }
 
 func (*RunIntegrationOK) runIntegrationRes() {}
@@ -32785,12 +33552,19 @@ func (*SyncFormMappingsOK) syncFormMappingsRes() {}
 type Task struct {
 	// The tenant of the task's application; an inbox spans every database that holds the person, and
 	// completing the task addresses this tenant (X-Tenant-Id).
-	TenantID     OptString      `json:"tenant_id"`
-	ID           uuid.UUID      `json:"id"`
-	InstanceID   uuid.UUID      `json:"instance_id"`
-	WorkflowName string         `json:"workflow_name"`
-	StepDefID    string         `json:"step_def_id"`
-	Context      OptTaskContext `json:"context"`
+	TenantID OptString `json:"tenant_id"`
+	// The model the task's run works on: the revision its context names, else its workflow's revision,
+	// else its application's first model.
+	ModelID OptUUID `json:"model_id"`
+	// That model's name, shown on the task's card.
+	ModelName OptString `json:"model_name"`
+	// The task's application.
+	ApplicationID OptUUID        `json:"application_id"`
+	ID            uuid.UUID      `json:"id"`
+	InstanceID    uuid.UUID      `json:"instance_id"`
+	WorkflowName  string         `json:"workflow_name"`
+	StepDefID     string         `json:"step_def_id"`
+	Context       OptTaskContext `json:"context"`
 	// Human-readable context lines — dimension member codes and metric ids resolved to display names.
 	ContextDisplay []TaskContextEntry `json:"context_display"`
 	CreatedAt      time.Time          `json:"created_at"`
@@ -32799,6 +33573,21 @@ type Task struct {
 // GetTenantID returns the value of TenantID.
 func (s *Task) GetTenantID() OptString {
 	return s.TenantID
+}
+
+// GetModelID returns the value of ModelID.
+func (s *Task) GetModelID() OptUUID {
+	return s.ModelID
+}
+
+// GetModelName returns the value of ModelName.
+func (s *Task) GetModelName() OptString {
+	return s.ModelName
+}
+
+// GetApplicationID returns the value of ApplicationID.
+func (s *Task) GetApplicationID() OptUUID {
+	return s.ApplicationID
 }
 
 // GetID returns the value of ID.
@@ -32839,6 +33628,21 @@ func (s *Task) GetCreatedAt() time.Time {
 // SetTenantID sets the value of TenantID.
 func (s *Task) SetTenantID(val OptString) {
 	s.TenantID = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *Task) SetModelID(val OptUUID) {
+	s.ModelID = val
+}
+
+// SetModelName sets the value of ModelName.
+func (s *Task) SetModelName(val OptString) {
+	s.ModelName = val
+}
+
+// SetApplicationID sets the value of ApplicationID.
+func (s *Task) SetApplicationID(val OptUUID) {
+	s.ApplicationID = val
 }
 
 // SetID sets the value of ID.
@@ -34359,12 +35163,18 @@ type UpdateDimensionPropertyBadRequest Error
 
 func (*UpdateDimensionPropertyBadRequest) updateDimensionPropertyRes() {}
 
+type UpdateDimensionPropertyConflict Error
+
+func (*UpdateDimensionPropertyConflict) updateDimensionPropertyRes() {}
+
 type UpdateDimensionPropertyNotFound Error
 
 func (*UpdateDimensionPropertyNotFound) updateDimensionPropertyRes() {}
 
 type UpdateDimensionPropertyOK struct {
 	Status OptString `json:"status"`
+	// With clear_values, how many members held a value that was removed.
+	ValuesCleared OptInt `json:"values_cleared"`
 }
 
 // GetStatus returns the value of Status.
@@ -34372,9 +35182,19 @@ func (s *UpdateDimensionPropertyOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetValuesCleared returns the value of ValuesCleared.
+func (s *UpdateDimensionPropertyOK) GetValuesCleared() OptInt {
+	return s.ValuesCleared
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateDimensionPropertyOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetValuesCleared sets the value of ValuesCleared.
+func (s *UpdateDimensionPropertyOK) SetValuesCleared(val OptInt) {
+	s.ValuesCleared = val
 }
 
 func (*UpdateDimensionPropertyOK) updateDimensionPropertyRes() {}
@@ -34505,6 +35325,14 @@ func (s *UpdateDimensionRequest) SetEditorRoles(val []string) {
 	s.EditorRoles = val
 }
 
+type UpdateFolderBadRequest Error
+
+func (*UpdateFolderBadRequest) updateFolderRes() {}
+
+type UpdateFolderNotFound Error
+
+func (*UpdateFolderNotFound) updateFolderRes() {}
+
 type UpdateFolderOK struct {
 	Status OptString `json:"status"`
 }
@@ -34521,6 +35349,37 @@ func (s *UpdateFolderOK) SetStatus(val OptString) {
 
 func (*UpdateFolderOK) updateFolderRes() {}
 
+// Partial: an omitted field keeps what the folder has. At least one field must be sent.
+// Ref: #/components/schemas/UpdateFolderRequest
+type UpdateFolderRequest struct {
+	// New name; must not be blank.
+	Name OptString `json:"name"`
+	// Omit to leave the folder where it is; null or an empty string moves it to the top level; a folder
+	// UUID files it under that folder, which must be of the same model and revision and not the folder
+	// itself or one inside it. Not format:uuid because the empty string is an accepted value.
+	ParentID OptNilString `json:"parent_id"`
+}
+
+// GetName returns the value of Name.
+func (s *UpdateFolderRequest) GetName() OptString {
+	return s.Name
+}
+
+// GetParentID returns the value of ParentID.
+func (s *UpdateFolderRequest) GetParentID() OptNilString {
+	return s.ParentID
+}
+
+// SetName sets the value of Name.
+func (s *UpdateFolderRequest) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetParentID sets the value of ParentID.
+func (s *UpdateFolderRequest) SetParentID(val OptNilString) {
+	s.ParentID = val
+}
+
 type UpdateFormBadRequest Error
 
 func (*UpdateFormBadRequest) updateFormRes() {}
@@ -34531,6 +35390,9 @@ func (*UpdateFormForbidden) updateFormRes() {}
 
 type UpdateFormMappingOK struct {
 	Status OptString `json:"status"`
+	// Present when the update names a new target metric — its cells holding a typed value, now set
+	// aside.
+	TypedSetAside OptInt `json:"typed_set_aside"`
 }
 
 // GetStatus returns the value of Status.
@@ -34538,9 +35400,19 @@ func (s *UpdateFormMappingOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetTypedSetAside returns the value of TypedSetAside.
+func (s *UpdateFormMappingOK) GetTypedSetAside() OptInt {
+	return s.TypedSetAside
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateFormMappingOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetTypedSetAside sets the value of TypedSetAside.
+func (s *UpdateFormMappingOK) SetTypedSetAside(val OptInt) {
+	s.TypedSetAside = val
 }
 
 func (*UpdateFormMappingOK) updateFormMappingRes() {}
@@ -36861,8 +37733,10 @@ type WorkflowInstance struct {
 	// Human-readable context lines — dimension member codes and metric ids resolved to display names.
 	ContextDisplay []TaskContextEntry `json:"context_display"`
 	Steps          []WorkflowStep     `json:"steps"`
-	StartedAt      time.Time          `json:"started_at"`
-	CompletedAt    OptNilDateTime     `json:"completed_at"`
+	// GET /api/workflow/my-history: the application the run belongs to.
+	ApplicationID OptUUID        `json:"application_id"`
+	StartedAt     time.Time      `json:"started_at"`
+	CompletedAt   OptNilDateTime `json:"completed_at"`
 }
 
 // GetID returns the value of ID.
@@ -36893,6 +37767,11 @@ func (s *WorkflowInstance) GetContextDisplay() []TaskContextEntry {
 // GetSteps returns the value of Steps.
 func (s *WorkflowInstance) GetSteps() []WorkflowStep {
 	return s.Steps
+}
+
+// GetApplicationID returns the value of ApplicationID.
+func (s *WorkflowInstance) GetApplicationID() OptUUID {
+	return s.ApplicationID
 }
 
 // GetStartedAt returns the value of StartedAt.
@@ -36933,6 +37812,11 @@ func (s *WorkflowInstance) SetContextDisplay(val []TaskContextEntry) {
 // SetSteps sets the value of Steps.
 func (s *WorkflowInstance) SetSteps(val []WorkflowStep) {
 	s.Steps = val
+}
+
+// SetApplicationID sets the value of ApplicationID.
+func (s *WorkflowInstance) SetApplicationID(val OptUUID) {
+	s.ApplicationID = val
 }
 
 // SetStartedAt sets the value of StartedAt.

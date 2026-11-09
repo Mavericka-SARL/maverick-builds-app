@@ -352,6 +352,11 @@ type Fact struct {
 	// SourceMappingID is the FormMapping.ID that posted this fact, or nil
 	// for a direct (manually entered) fact. See FactsPolicy.
 	SourceMappingID *string `json:"source_mapping_id,omitempty"`
+	// LinkIntegrationID is the Integration.ID of the model link that wrote
+	// this typed fact (fact_input.link_ref, migration 169), nil for one
+	// typed or imported otherwise: the imported link's later runs clear
+	// what its source no longer holds.
+	LinkIntegrationID *string `json:"link_integration_id,omitempty"`
 }
 
 type Package struct {
@@ -882,18 +887,22 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		// or any cell a form has ever posted into silently loses or corrupts
 		// data on import. See FactsPolicy.
 		rows, err = q.Query(ctx, `
-			SELECT DISTINCT ON (metric_id, dim_members)
-			       metric_id::text, dim_members, value, text_value
-			FROM runtime.fact_input
-			WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) AND source_ref IS NULL
-			ORDER BY metric_id, dim_members, entered_at DESC, id DESC`,
+			SELECT DISTINCT ON (fi.metric_id, fi.dim_members)
+			       fi.metric_id::text, fi.dim_members, fi.value, fi.text_value,
+			       (SELECT i.id::text FROM model.integration_def i
+			        WHERE i.link_id = fi.link_ref AND i.model_id = fi.model_id
+			          AND (i.revision_id = $2::uuid OR i.revision_id IS NULL)
+			        ORDER BY (i.revision_id IS NOT NULL) DESC LIMIT 1)
+			FROM runtime.fact_input fi
+			WHERE fi.model_id=$1::uuid AND (fi.revision_id=$2::uuid OR fi.revision_id IS NULL) AND fi.source_ref IS NULL
+			ORDER BY fi.metric_id, fi.dim_members, fi.entered_at DESC, fi.id DESC`,
 			modelID, revisionID)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var f Fact
-			if err := rows.Scan(&f.MetricID, &f.DimMembers, &f.Value, &f.Text); err != nil {
+			if err := rows.Scan(&f.MetricID, &f.DimMembers, &f.Value, &f.Text, &f.LinkIntegrationID); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -962,14 +971,18 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 //
 //   - a missing or malformed lineage (a package from before migration 099,
 //     or a hand-edited one);
-//   - a lineage a row of ANOTHER model in this database already carries —
-//     most often the very model the package was exported from, re-imported
-//     as a copy in the same tenant. A lineage is one model's identity:
+//   - a lineage a row of ANOTHER model of the importing model's tenant
+//     already carries — most often the very model the package was exported
+//     from, re-imported as a copy. A lineage is one model's identity:
 //     shared across models, a rule on one model's member would also
 //     restrict its twin in the other. Rows of modelID itself do not count:
 //     Import's model is new and has none, and ImportRevision's package is
 //     the next revision of that model, whose rows keep their lineage as a
-//     revision copy's do.
+//     revision copy's do. Rows of other tenants do not count either: an
+//     export showed whether a lineage was kept, so a tenant admin could
+//     test whether any tenant of the database held a given lineage id
+//     (private observations, 2026-09-29). A rule resolves a lineage for its
+//     own user only, whose tenant is the importing one.
 //
 // A re-minted lineage is re-minted consistently: every row of the package
 // that carried it gets the same new value.
@@ -998,10 +1011,17 @@ func importLineages(ctx context.Context, tx pgx.Tx, pkg *Package, modelID string
 	}
 	if len(valid) > 0 {
 		rows, err := tx.Query(ctx, `
-			SELECT lineage_id::text FROM model.dimension_def WHERE lineage_id = ANY($1::uuid[]) AND model_id <> $2::uuid
+			WITH tenant_models AS (
+			    SELECT m2.id FROM core.model m2 JOIN core.application a2 ON a2.id = m2.application_id
+			    WHERE m2.id <> $2::uuid AND a2.customer_id IS NOT DISTINCT FROM (
+			        SELECT a.customer_id FROM core.model m JOIN core.application a ON a.id = m.application_id
+			        WHERE m.id = $2::uuid))
+			SELECT lineage_id::text FROM model.dimension_def
+			      WHERE lineage_id = ANY($1::uuid[]) AND model_id IN (SELECT id FROM tenant_models)
 			UNION SELECT m.lineage_id::text FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
-			      WHERE m.lineage_id = ANY($1::uuid[]) AND d.model_id <> $2::uuid
-			UNION SELECT lineage_id::text FROM model.metric_def WHERE lineage_id = ANY($1::uuid[]) AND model_id <> $2::uuid`, valid, modelID)
+			      WHERE m.lineage_id = ANY($1::uuid[]) AND d.model_id IN (SELECT id FROM tenant_models)
+			UNION SELECT lineage_id::text FROM model.metric_def
+			      WHERE lineage_id = ANY($1::uuid[]) AND model_id IN (SELECT id FROM tenant_models)`, valid, modelID)
 		if err != nil {
 			return nil, fmt.Errorf("check package lineages: %w", err)
 		}
@@ -1142,7 +1162,8 @@ func rowIDOf(s string) (string, bool) {
 //   - a string field whose name ends in _id (dimension_id, x_metric_id,
 //     form_id, target_id, target_revision_id …);
 //   - the strings of an array field whose name ends in _ids (metric_ids);
-//   - the keys of an object field named in dimensionKeyedObjects;
+//   - the keys of an object field named in dimensionKeyedObjects, or in
+//     metricKeyedObjects;
 //   - the strings of a saved grid layout's axes (layoutAxes);
 //   - with keys, the document's own top-level keys.
 //
@@ -1162,6 +1183,10 @@ type jsonRefs struct {
 // are member codes: a chart's context_defaults, a grid layout's filter_sel, a
 // grid widget's show_members (lists of codes).
 var dimensionKeyedObjects = map[string]bool{"context_defaults": true, "filter_sel": true, "show_members": true}
+
+// metricKeyedObjects are object fields keyed by metric ID whose values are
+// data: a chart's series_names (a series' name in the legend).
+var metricKeyedObjects = map[string]bool{"series_names": true}
 
 // layoutAxes are the axis arrays of a grid widget's default_view: dimension
 // IDs in order, and the "__metrics__" sentinel.
@@ -1204,12 +1229,13 @@ func rewriteRefs(raw json.RawMessage, spec jsonRefs, fn refFunc) (json.RawMessag
 		}
 		return to, keep
 	}
-	// keysOf rebuilds a dimension-keyed object, so a rewritten key cannot
-	// collide with one not yet visited; a dropped key takes its entry along.
-	keysOf := func(obj map[string]any) map[string]any {
+	// keysOf rebuilds an object keyed by rows of kind, so a rewritten key
+	// cannot collide with one not yet visited; a dropped key takes its
+	// entry along.
+	keysOf := func(kind string, obj map[string]any) map[string]any {
 		out := make(map[string]any, len(obj))
 		for k, v := range obj {
-			if to, keep := ref("dimension", k); keep {
+			if to, keep := ref(kind, k); keep {
 				out[to] = v
 			}
 		}
@@ -1257,8 +1283,12 @@ func rewriteRefs(raw json.RawMessage, spec jsonRefs, fn refFunc) (json.RawMessag
 				if spec.topOnly {
 					continue
 				}
-				if dimensionKeyedObjects[k] {
-					t = keysOf(t)
+				switch {
+				case dimensionKeyedObjects[k]:
+					t = keysOf("dimension", t)
+					obj[k] = t
+				case metricKeyedObjects[k]:
+					t = keysOf("metric", t)
 					obj[k] = t
 				}
 				walkObj(t, k)
@@ -1278,7 +1308,7 @@ func rewriteRefs(raw json.RawMessage, spec jsonRefs, fn refFunc) (json.RawMessag
 	switch t := doc.(type) {
 	case map[string]any:
 		if spec.keys {
-			t = keysOf(t)
+			t = keysOf("dimension", t)
 			doc = t
 		}
 		walkObj(t, "")
@@ -1297,54 +1327,70 @@ func rewriteRefs(raw json.RawMessage, spec jsonRefs, fn refFunc) (json.RawMessag
 
 // looseRefs visits every reference of the package held without a foreign
 // key (see References), plus an automation rule's references — which fall
-// away when unresolved — through fn, and stores what it returns: a dropped
-// column reference becomes nil. Import resolves the same positions as it
-// creates the rows; this is the one list of them for everything else.
-func (pkg *Package) looseRefs(fn refFunc) {
-	col := func(kind string, p **string) {
+// away when unresolved — through fn(at), and stores what it returns: a
+// dropped column reference becomes nil. at says where the reference is, in
+// words ("dashboard "Plan", widget "Revenue""); every fact's is "facts".
+// Import resolves the same positions as it creates the rows; this is the
+// one list of them for everything else.
+func (pkg *Package) looseRefs(fn func(at string) refFunc) {
+	col := func(ref refFunc, kind string, p **string) {
 		if *p == nil || **p == "" {
 			return
 		}
-		if to, keep := fn(kind, **p); !keep {
+		if to, keep := ref(kind, **p); !keep {
 			*p = nil
 		} else if to != **p {
 			*p = &to
 		}
 	}
-	doc := func(p *json.RawMessage, spec jsonRefs) { *p, _ = rewriteRefs(*p, spec, fn) }
+	doc := func(ref refFunc, p *json.RawMessage, spec jsonRefs) { *p, _ = rewriteRefs(*p, spec, ref) }
 	for i := range pkg.Forms {
-		doc(&pkg.Forms[i].Fields, jsonRefs{})
+		doc(fn(fmt.Sprintf("table %q", pkg.Forms[i].Name)), &pkg.Forms[i].Fields, jsonRefs{})
 	}
 	for i := range pkg.FormMappings {
-		doc(&pkg.FormMappings[i].DimensionMappings, jsonRefs{keys: true})
+		doc(fn(fmt.Sprintf("table mapping %q", pkg.FormMappings[i].Name)), &pkg.FormMappings[i].DimensionMappings, jsonRefs{keys: true})
 	}
 	for i := range pkg.Workflows {
-		doc(&pkg.Workflows[i].SubjectConfig, jsonRefs{})
-		doc(&pkg.Workflows[i].ContextSchema, jsonRefs{})
+		ref := fn(fmt.Sprintf("workflow %q", pkg.Workflows[i].Name))
+		doc(ref, &pkg.Workflows[i].SubjectConfig, jsonRefs{})
+		doc(ref, &pkg.Workflows[i].ContextSchema, jsonRefs{})
 	}
 	for i := range pkg.AutomationRules {
 		ar := &pkg.AutomationRules[i]
-		col("workflow", &ar.WorkflowDefID)
-		col("form", &ar.SourceFormID)
-		col("grid", &ar.SourceGridID)
+		ref := fn(fmt.Sprintf("automation rule %q", ar.Name))
+		col(ref, "workflow", &ar.WorkflowDefID)
+		col(ref, "form", &ar.SourceFormID)
+		col(ref, "grid", &ar.SourceGridID)
 	}
 	for i := range pkg.Integrations {
 		ig := &pkg.Integrations[i]
+		ref := fn(fmt.Sprintf("integration %q", ig.Name))
 		column, config := ig.targetKinds()
-		col(column, &ig.TargetID)
-		ig.Config, _ = rewriteRefs(ig.Config, jsonRefs{topOnly: true}, targetRefs(fn, config))
+		col(ref, column, &ig.TargetID)
+		ig.Config, _ = rewriteRefs(ig.Config, jsonRefs{topOnly: true}, targetRefs(ref, config))
 	}
 	for i := range pkg.Dashboards {
-		doc(&pkg.Dashboards[i].SelectorBar, jsonRefs{})
-		for j := range pkg.Dashboards[i].Widgets {
-			wd := &pkg.Dashboards[i].Widgets[j]
-			col(widgetRefKinds[wd.WidgetType], &wd.RefID)
-			doc(&wd.Props, jsonRefs{})
+		d := &pkg.Dashboards[i]
+		doc(fn(fmt.Sprintf("dashboard %q", d.Name)), &d.SelectorBar, jsonRefs{})
+		for j := range d.Widgets {
+			wd := &d.Widgets[j]
+			ref := fn(fmt.Sprintf("dashboard %q, widget %q", d.Name, wd.name()))
+			col(ref, widgetRefKinds[wd.WidgetType], &wd.RefID)
+			doc(ref, &wd.Props, jsonRefs{})
 		}
 	}
+	facts := fn("facts")
 	for i := range pkg.Facts {
-		doc(&pkg.Facts[i].DimMembers, jsonRefs{keys: true})
+		doc(facts, &pkg.Facts[i].DimMembers, jsonRefs{keys: true})
 	}
+}
+
+// name is how a note names a widget: its title, or its type.
+func (w Widget) name() string {
+	if w.Title != nil && *w.Title != "" {
+		return *w.Title
+	}
+	return w.WidgetType
 }
 
 // widgetRefKinds is the kind of row each widget type's ref_id names (the
@@ -1520,12 +1566,14 @@ func resolveSiblingRefs(ctx context.Context, q Queryer, pkg *Package, modelID, r
 	own := pkg.rowIDs()
 	seen := map[string]bool{}
 	var outside []string
-	pkg.looseRefs(func(_, id string) (string, bool) {
-		if c, ok := rowIDOf(id); ok && !own[c] && !seen[c] {
-			seen[c] = true
-			outside = append(outside, c)
+	pkg.looseRefs(func(string) refFunc {
+		return func(_, id string) (string, bool) {
+			if c, ok := rowIDOf(id); ok && !own[c] && !seen[c] {
+				seen[c] = true
+				outside = append(outside, c)
+			}
+			return id, true
 		}
-		return id, true
 	})
 	if len(outside) == 0 {
 		return nil
@@ -1552,11 +1600,13 @@ func resolveSiblingRefs(ctx context.Context, q Queryer, pkg *Package, modelID, r
 	if len(copies) == 0 {
 		return nil
 	}
-	pkg.looseRefs(func(_, id string) (string, bool) {
-		if c, ok := rowIDOf(id); ok && len(copies[c]) == 1 {
-			return copies[c][0], true
+	pkg.looseRefs(func(string) refFunc {
+		return func(_, id string) (string, bool) {
+			if c, ok := rowIDOf(id); ok && len(copies[c]) == 1 {
+				return copies[c][0], true
+			}
+			return id, true
 		}
-		return id, true
 	})
 	return nil
 }
@@ -1728,6 +1778,12 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	if revisionID, err = importRevision(ctx, tx, modelID, revisionName, pkg, importerID); err != nil {
 		return "", "", err
 	}
+	// The revision goes live, so it passes the time checks publishing a
+	// revision applies (ImportRevision's callers run them when they make
+	// theirs live).
+	if err = metricformula.ValidateTime(ctx, tx, modelID, revisionID); err != nil {
+		return "", "", err
+	}
 	// A freshly imported model needs an active revision to be usable.
 	if _, err = tx.Exec(ctx, `
 		UPDATE core.model SET active_revision_id=$2::uuid, active_revision_name=$3
@@ -1834,12 +1890,8 @@ func (pkg *Package) StripUnreadWidgetProps() []string {
 				continue
 			}
 			w.Props = props
-			name := w.WidgetType
-			if w.Title != nil && *w.Title != "" {
-				name = *w.Title
-			}
 			notes = append(notes, fmt.Sprintf("dashboard %q, widget %q: dropped widget_props %s, which the console does not read",
-				d.Name, name, strings.Join(dropped, ", ")))
+				d.Name, w.name(), strings.Join(dropped, ", ")))
 		}
 	}
 	return notes
@@ -1851,6 +1903,9 @@ const ImportedDescription = "Imported from package"
 func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg *Package, importerID string) (revisionID string, err error) {
 	pkg.upgrade()
 	pkg.StripUnreadWidgetProps()
+	if err = pkg.checkMemberParents(); err != nil {
+		return "", err
+	}
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, $3) RETURNING id::text`,
 		modelID, revisionName, ImportedDescription).Scan(&revisionID); err != nil {
@@ -1923,7 +1978,20 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			memberMap[m.ID] = newMemberID
 		}
 
+		// A package exported before property names were unique regardless
+		// of case (migration 170) can declare Segment and segment: the
+		// first the package lists is kept, and the members' values under
+		// the other spelling move under it — that spelling's value winning,
+		// as the migration merged them.
+		kept := map[string]string{}
 		for _, p := range d.TypedProperties {
+			if first, dup := kept[strings.ToLower(p.Name)]; dup {
+				if err = metricformula.FoldPropertyVariant(ctx, tx, newID, first, p.Name); err != nil {
+					return "", fmt.Errorf("dimension property %q: %w", p.Name, err)
+				}
+				continue
+			}
+			kept[strings.ToLower(p.Name)] = p.Name
 			if _, err = tx.Exec(ctx,
 				`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid, $2, COALESCE(NULLIF($3::text,''),'text'))`,
 				newID, p.Name, p.DataType); err != nil {
@@ -1931,6 +1999,7 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 		}
 	}
+	packageMembers := pkg.members()
 	for _, d := range pkg.Dimensions {
 		parent, err := optionalPackageRef(dimMap, d.ParentDimensionID)
 		if err != nil {
@@ -1960,6 +2029,12 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			if parent == nil {
 				continue
 			}
+			// A parent outside the member's dimension and its parent
+			// dimension is left out (strayParent; DroppedReferences names
+			// it): the member is at the top level, its values kept.
+			if _, stray := strayParent(&d, m, packageMembers); stray {
+				continue
+			}
 			if _, err = tx.Exec(ctx, `UPDATE model.dimension_member SET parent_member_id=$2::uuid WHERE id=$1::uuid`,
 				memberMap[m.ID], parent); err != nil {
 				return "", fmt.Errorf("member parent of %q: %w", m.Code, err)
@@ -1972,6 +2047,18 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		// which the time_index placeholder above would otherwise let in.
 		if err = timedim.ValidateAndReindex(ctx, tx, dimMap[d.ID]); err != nil {
 			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
+		}
+	}
+	// A calculated member is held to the check its save applies, once every
+	// member and parent of every dimension is in place.
+	for _, d := range pkg.Dimensions {
+		for _, m := range d.Members {
+			if strings.TrimSpace(m.Formula) == "" {
+				continue
+			}
+			if err = metricformula.ValidateMemberFormula(ctx, tx, dimMap[d.ID], m.Code, m.Formula); err != nil {
+				return "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
+			}
 		}
 	}
 
@@ -2061,20 +2148,11 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			return "", fmt.Errorf("metric %q operands: %w", m.Name, err)
 		}
 	}
-	for _, dep := range pkg.Dependencies {
-		from, okFrom := metricMap[dep.MetricID]
-		to, okTo := metricMap[dep.DependsOn]
-		if !okFrom || !okTo {
-			continue // dangling dependency in the package; skip rather than abort
-		}
-		if _, err = tx.Exec(ctx, `
-			INSERT INTO model.calc_dependency
-			    (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-			from, to, dep.MinTimeOffset, dep.MaxTimeOffset, dep.UnboundedPast, dep.UnboundedFuture); err != nil {
-			return "", fmt.Errorf("dependency: %w", err)
-		}
-	}
+	// The package's dependencies are not read: each calculated metric's
+	// edges are derived from its formula once the grids exist (below), as
+	// every save derives them. The scheduler orders a recalculation and
+	// finds what an edit reaches by these edges, so one a hand edit left
+	// behind computed a metric before what it reads.
 
 	// Grids (rollup ref remapped after), memberships.
 	gridMap := make(map[string]string, len(pkg.Grids))
@@ -2120,6 +2198,28 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 				gridMap[g.ID], did, gd.DisplayLevel); err != nil {
 				return "", fmt.Errorf("grid dimension: %w", err)
 			}
+		}
+	}
+
+	// Every calculated metric is held to the check its save applies, and
+	// its dependency edges are the ones that check derives. After the
+	// grids, since the check reads where a formula's sources are placed.
+	// Metric by metric is enough: the graph only gains edges, so a cycle
+	// the edges written so far close is a cycle of the whole graph, and the
+	// last metric of a cycle is checked against all of it.
+	for _, m := range pkg.Metrics {
+		if m.IsInput || m.Formula == nil || strings.TrimSpace(*m.Formula) == "" {
+			continue
+		}
+		res, vErr := metricformula.Validate(ctx, tx, metricformula.Request{
+			ModelID: modelID, RevisionID: revisionID, MetricID: metricMap[m.ID],
+			Name: m.Name, Formula: *m.Formula, Text: m.Format == metricformula.FormatText,
+		})
+		if vErr != nil {
+			return "", fmt.Errorf("metric %q: %w", m.Name, vErr)
+		}
+		if err = metricformula.WriteDependencies(ctx, tx, metricMap[m.ID], res.Edges); err != nil {
+			return "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 	}
 
@@ -2308,7 +2408,10 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	// "Auto-start approval" button).
 	ruleMap := make(map[string]string, len(pkg.AutomationRules))
 	refs.add("rule", ruleMap)
-	for _, ar := range pkg.AutomationRules {
+	// ruleIDs is each rule's new ID by its place in the package, which a
+	// rule without an ID has too.
+	ruleIDs := make([]string, len(pkg.AutomationRules))
+	for i, ar := range pkg.AutomationRules {
 		var wfID *string
 		if ar.WorkflowDefID != nil {
 			if id, ok := wfMap[*ar.WorkflowDefID]; ok {
@@ -2346,6 +2449,7 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds, ar.FiresOnImport).Scan(&newRuleID); err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
+		ruleIDs[i] = newRuleID
 		if ar.ID != "" {
 			ruleMap[ar.ID] = newRuleID
 		}
@@ -2395,16 +2499,16 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	// rule waiting for an integration the package does not carry (another
 	// model's) arrives switched off: unscoped, it would start after every
 	// integration of the application.
-	for _, ar := range pkg.AutomationRules {
-		if ar.SourceIntegrationID == nil || ar.ID == "" {
+	for i, ar := range pkg.AutomationRules {
+		if ar.SourceIntegrationID == nil || *ar.SourceIntegrationID == "" {
 			continue
 		}
 		newIntegrationID, ok := integrationMap[*ar.SourceIntegrationID]
 		if ok {
 			_, err = tx.Exec(ctx, `UPDATE workflow.automation_rule SET source_integration_id = $2::uuid WHERE id = $1::uuid`,
-				ruleMap[ar.ID], newIntegrationID)
+				ruleIDs[i], newIntegrationID)
 		} else {
-			_, err = tx.Exec(ctx, `UPDATE workflow.automation_rule SET enabled = false WHERE id = $1::uuid`, ruleMap[ar.ID])
+			_, err = tx.Exec(ctx, `UPDATE workflow.automation_rule SET enabled = false WHERE id = $1::uuid`, ruleIDs[i])
 		}
 		if err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
@@ -2453,12 +2557,20 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 			sourceRef = &newMappingID
 		}
+		// A value a model link wrote names the imported link, by its
+		// link_id (migration 169); a link the package does not carry names
+		// nothing.
+		var linkIntegration string
+		if f.LinkIntegrationID != nil {
+			linkIntegration = integrationMap[*f.LinkIntegrationID]
+		}
 		dimMembers := refs.cellDoc(f.DimMembers)
 		if _, err = tx.Exec(ctx, `
-			INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, source_ref, text_value)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, COALESCE($5::jsonb,'{}'::jsonb), $6, $7::uuid, $8::uuid, $9)`,
+			INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, source_ref, text_value, link_ref)
+			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, COALESCE($5::jsonb,'{}'::jsonb), $6, $7::uuid, $8::uuid, $9,
+			        (SELECT link_id FROM model.integration_def WHERE id::text = NULLIF($10, '')))`,
 			modelID, revisionID, revisionName, mid,
-			jsonArg(dimMembers), f.Value, importerID, sourceRef, f.Text); err != nil {
+			jsonArg(dimMembers), f.Value, importerID, sourceRef, f.Text, linkIntegration); err != nil {
 			return "", fmt.Errorf("fact: %w", err)
 		}
 	}

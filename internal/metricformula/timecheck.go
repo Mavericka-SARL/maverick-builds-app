@@ -253,16 +253,22 @@ func ValidateGridDimensional(ctx context.Context, q Querier, modelID, revisionID
 // (DIMENSION_NOT_ON_SOURCE), no two select members of the same own
 // dimension (CONFLICTING_DIMENSION_ARGUMENTS), every literal LOOKUP member
 // still exists and TIMESUM's literal period codes are members of the
-// metric's time axis (UNKNOWN_MEMBER).
+// metric's time axis (UNKNOWN_MEMBER) — and that every dimension a placed
+// metric reads at the cell (bare, dim.property, PARENT) is on its own grid
+// (DIMENSION_NOT_ON_METRIC).
 //
 // Restricted to one grid, it checks the grid's own metrics and every
 // metric — on any grid — whose dimensional call reads a source placed on
-// this grid, since changing the grid changes that source's dimensions.
+// this grid, since changing the grid changes that source's dimensions. A
+// metric on another grid is not checked for its own cell reads there.
 func validateDimensionalPlacement(ctx context.Context, q Querier, modelID, revisionID, gridID string,
 	infos map[string]*metricTimeInfo, byName map[string]*metricTimeInfo) error {
 	type candidate struct {
 		mi *metricTimeInfo
 		an *formula.Analysis
+		// own: the metric is on the grid checked (or every grid is), so
+		// its cell reads are checked.
+		own bool
 	}
 	sourceID := func(name string) string {
 		if dep, ok := byName[strings.ToUpper(name)]; ok {
@@ -270,13 +276,34 @@ func validateDimensionalPlacement(ctx context.Context, q Querier, modelID, revis
 		}
 		return ""
 	}
+	isMetric := func(name string) bool {
+		_, ok := byName[strings.ToUpper(name)]
+		return ok
+	}
+	// readsAtCell: a dim.property or PARENT, or a plain name that is no
+	// metric (a dimension, or unknown — rd decides below).
+	readsAtCell := func(an *formula.Analysis) bool {
+		if len(an.CellDims) > 0 {
+			return true
+		}
+		for _, ref := range an.References {
+			if !ref.Dimensional && !isMetric(ref.Name) {
+				return true
+			}
+		}
+		return false
+	}
 	var cands []candidate
 	for _, mi := range infos {
 		if mi.isInput || strings.TrimSpace(mi.formula) == "" {
 			continue
 		}
 		an, err := formula.Analyze(mi.formula)
-		if err != nil || (len(an.DimensionalCalls) == 0 && len(an.TimeSums) == 0) {
+		if err != nil {
+			continue
+		}
+		own := (gridID == "" || mi.gridID == gridID) && mi.gridID != "" && readsAtCell(an)
+		if !own && len(an.DimensionalCalls) == 0 && len(an.TimeSums) == 0 {
 			continue
 		}
 		relevant := gridID == "" || mi.gridID == gridID
@@ -289,7 +316,7 @@ func validateDimensionalPlacement(ctx context.Context, q Querier, modelID, revis
 			}
 		}
 		if relevant {
-			cands = append(cands, candidate{mi: mi, an: an})
+			cands = append(cands, candidate{mi: mi, an: an, own: own})
 		}
 	}
 	if len(cands) == 0 {
@@ -305,6 +332,13 @@ func validateDimensionalPlacement(ctx context.Context, q Querier, modelID, revis
 		return err
 	}
 	for _, c := range cands {
+		if c.own {
+			if dims, placed := metricDims[c.mi.id]; placed {
+				if err := checkCellDimensions(c.mi.name, cellDimReads(c.an, rd, isMetric), rd, dims); err != nil {
+					return err
+				}
+			}
+		}
 		if err := checkSourceDimensions(c.mi.name, c.an, rd, sourceID, metricDims); err != nil {
 			return err
 		}

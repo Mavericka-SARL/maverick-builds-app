@@ -42,8 +42,10 @@ func TestOrderByDependenciesCreatesWhatIsNamedFirst(t *testing.T) {
 	}
 }
 
-// Steps of other kinds are fixed points; a positional reference leaves the
-// plan as written, and a cycle is created first and filled in after.
+// Steps of other kinds are fixed points; a positional reference to a named
+// object becomes its name and the plan is ordered, one that names nothing
+// leaves the plan as written, and a cycle is created first and filled in
+// after.
 func TestOrderByDependenciesKeepsFixedStepsAndCycles(t *testing.T) {
 	fixed := []ProposalStep{
 		step("create_metric", map[string]any{"name": "a", "formula": "b"}),
@@ -65,9 +67,52 @@ func TestOrderByDependenciesKeepsFixedStepsAndCycles(t *testing.T) {
 		step("create_grid", map[string]any{"name": "G"}),
 		step("create_metric", map[string]any{"name": "x"}),
 	}
-	if got := toolsOf(OrderByDependencies(positional)); !strings.HasPrefix(got, "add_grid_metric") {
-		t.Errorf("a plan with positional references was reordered: %s", got)
+	if got := toolsOf(OrderByDependencies(positional)); got != "create_grid:G create_metric:x add_grid_metric:x" {
+		t.Errorf("a positional reference to a grid: %s", got)
 	}
+	unnamed := []ProposalStep{
+		step("add_grid_metric", map[string]any{"grid_id": "G", "metric_id": "x"}),
+		step("add_dashboard_widget", map[string]any{"dashboard_id": "D", "widget_type": "kpi"}),
+		step("update_dashboard_widget", map[string]any{"widget_id": "<created in step 2>"}),
+		step("create_metric", map[string]any{"name": "x"}),
+	}
+	if got := toolsOf(OrderByDependencies(unnamed)); !strings.HasPrefix(got, "add_grid_metric") {
+		t.Errorf("a plan with a positional reference to a widget was reordered: %s", got)
+	}
+}
+
+// A placeholder stands for the name of what its step creates; one pointing
+// at a step that creates no such object is the object of that kind the
+// step's description names, when only one is; else it stays.
+func TestNamePlaceholders(t *testing.T) {
+	steps := []ProposalStep{
+		step("create_grid", map[string]any{"name": "Audience", "dimensions": []string{"<created in step 6>"}}),
+		step("create_metric", map[string]any{"name": "opening"}),
+		step("create_metric", map[string]any{"name": "closing"}),
+		{Tool: "add_grid_metric", Description: "Add 'closing' to Audience", Params: mustRaw(map[string]any{"grid_id": "<created in step 1>", "metric_id": "<created in step 4>"})},
+		{Tool: "add_grid_metric", Description: "Add opening and closing", Params: mustRaw(map[string]any{"grid_id": "<created in step 1>", "metric_id": "<created in step 5>"})},
+		step("create_dimension", map[string]any{"name": "period"}),
+		step("update_metric", map[string]any{"metric_id": "opening", "formula": "LAG(closing, 1, 0)"}),
+		step("create_grid", map[string]any{"name": "Roll", "metrics": []string{"<created in step 7>", "<created in step 3>"}}),
+	}
+	got := NamePlaceholders(steps)
+	if p := string(got[7].Params); p != `{"metrics":["opening","closing"],"name":"Roll"}` {
+		t.Errorf("a placeholder pointing at the update of a metric: %s", p)
+	}
+	for i, want := range map[int]string{
+		0: `{"dimensions":["period"],"name":"Audience"}`,
+		3: `{"grid_id":"Audience","metric_id":"closing"}`,
+		4: `{"grid_id":"Audience","metric_id":"<created in step 5>"}`,
+	} {
+		if string(got[i].Params) != want {
+			t.Errorf("step %d params = %s, want %s", i+1, got[i].Params, want)
+		}
+	}
+}
+
+func mustRaw(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // A carried-forward pair — each formula names the other, the cycle broken

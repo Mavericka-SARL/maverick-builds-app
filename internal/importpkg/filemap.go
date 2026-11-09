@@ -75,6 +75,15 @@ const ColumnOthers = "*"
 // ids. Two columns mapped to the same field is an error, not a silent
 // last-one-wins.
 func ApplyColumnMap(header []string, rows []RawRow, columnMap map[string]string) ([]string, error) {
+	return ApplyColumnMapTo(header, rows, columnMap, "grid")
+}
+
+// ApplyColumnMapTo is ApplyColumnMap for an import into kind ("grid",
+// "form" or "dimension"): only a grid import spells "metric" as the long
+// file's metric_id. A table field named Metric was turned into that keyword,
+// matched no field and was dropped while the import reported success — the
+// AI build's KPI table lost every KPI name (2026-11-08).
+func ApplyColumnMapTo(header []string, rows []RawRow, columnMap map[string]string, kind string) ([]string, error) {
 	if len(columnMap) == 0 {
 		return header, nil
 	}
@@ -115,9 +124,11 @@ func ApplyColumnMap(header []string, rows []RawRow, columnMap map[string]string)
 			dropped = append(dropped, col)
 			continue
 		}
-		switch strings.ToLower(target) {
-		case "metric", "metric_name", "metric_id":
-			target = "metric_id"
+		if kind == "" || kind == "grid" {
+			switch strings.ToLower(target) {
+			case "metric", "metric_name", "metric_id":
+				target = "metric_id"
+			}
 		}
 		key := strings.ToLower(target)
 		if prev, dup := usedBy[key]; dup && strings.TrimSpace(col) != "" {

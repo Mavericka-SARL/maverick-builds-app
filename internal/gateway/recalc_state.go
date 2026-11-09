@@ -57,6 +57,16 @@ func (h *handler) recalcDone(ctx context.Context, revisionID string, seq int64) 
 	if err := calculation.RecalcFinished(ctx, h.db.For(ctx), revisionID, seq); err != nil {
 		h.log.Warn().Err(err).Str("revision", revisionID).Msg("record a finished recalculation")
 	}
+	h.resumeHeldConditions(ctx)
+}
+
+// resumeHeldConditions decides the workflow conditions held while a
+// recalculation was pending (workflow.ResumeHeldConditions), now that one
+// finished.
+func (h *handler) resumeHeldConditions(ctx context.Context) {
+	if n := h.workflowStore(ctx).ResumeHeldConditions(context.WithoutCancel(ctx)); n > 0 {
+		h.log.Info().Int("steps", n).Msg("decided workflow conditions held for a recalculation")
+	}
 }
 
 // recalcPending reports whether revisionID has a recalculation still to land.

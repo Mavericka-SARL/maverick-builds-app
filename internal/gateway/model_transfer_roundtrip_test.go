@@ -89,9 +89,11 @@ func setupRoundTripFixture(t *testing.T) *roundTripFixture {
 		INSERT INTO model.form_metric_mapping (model_id, revision_id, form_id, grid_id, name, source_field, target_metric_id, dimension_mappings)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'post amt', 'amt', $5::uuid, jsonb_build_object($6::text, 'staff'))
 		RETURNING id::text`, f.modelID, f.workingRevID, f.formID, f.gridStaffID, f.amountMetricID, f.staffDimID)
-	// One direct fact and one form-posted fact on the SAME cell: the grid
-	// sums them (FactsPolicy), so the cell/total reads 100 + 7 = 107 only
-	// while the form-posted row survives every copy.
+	// One direct fact and one form-posted fact on the SAME cell. amount is
+	// fed by the mapping, so the grid reads its posting only (the typed 100
+	// is set aside, writeguard.FedMetricsCTE): the cell reads 7 only while
+	// the form-posted row survives every copy, and the typed row is copied
+	// with it.
 	exec(`INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by)
 	      VALUES ($1::uuid, $2::uuid, 'Working', $3::uuid, $4::jsonb, 100, $5::uuid)`,
 		f.modelID, f.workingRevID, f.amountMetricID, fmt.Sprintf(`{"%s":"STAFF_A1"}`, f.staffDimID), f.managerID)

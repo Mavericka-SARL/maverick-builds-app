@@ -7901,6 +7901,70 @@ func decodeGetIntegrationRunParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// GetMyWorkflowHistoryParams is parameters of getMyWorkflowHistory operation.
+type GetMyWorkflowHistoryParams struct {
+	InstanceID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetMyWorkflowHistoryParams(packed middleware.Parameters) (params GetMyWorkflowHistoryParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "instance_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.InstanceID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetMyWorkflowHistoryParams(args [0]string, argsEscaped bool, r *http.Request) (params GetMyWorkflowHistoryParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: instance_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "instance_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotInstanceIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotInstanceIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.InstanceID.SetTo(paramsDotInstanceIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "instance_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetRecordDeletePlanParams is parameters of getRecordDeletePlan operation.
 type GetRecordDeletePlanParams struct {
 	ID uuid.UUID
@@ -8717,6 +8781,9 @@ func decodeGrantAdminUserModelAccessParams(args [2]string, argsEscaped bool, r *
 // ImportFormRecordsParams is parameters of importFormRecords operation.
 type ImportFormRecordsParams struct {
 	ID uuid.UUID
+	// Any string up to 255 characters naming this import, new for each file. Sent again, the file
+	// creates no records a second time.
+	IdempotencyKey OptString `json:",omitempty,omitzero"`
 }
 
 func unpackImportFormRecordsParams(packed middleware.Parameters) (params ImportFormRecordsParams) {
@@ -8727,10 +8794,20 @@ func unpackImportFormRecordsParams(packed middleware.Parameters) (params ImportF
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "Idempotency-Key",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.IdempotencyKey = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeImportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Request) (params ImportFormRecordsParams, _ error) {
+	h := uri.NewHeaderDecoder(r.Header)
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -8773,6 +8850,72 @@ func decodeImportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Req
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode header: Idempotency-Key.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "Idempotency-Key",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotIdempotencyKeyVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotIdempotencyKeyVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.IdempotencyKey.SetTo(paramsDotIdempotencyKeyVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.IdempotencyKey.Get(); ok {
+					if err := func() error {
+						if err := (validate.String{
+							MinLength:     0,
+							MinLengthSet:  false,
+							MaxLength:     255,
+							MaxLengthSet:  true,
+							Email:         false,
+							Hostname:      false,
+							Regex:         nil,
+							MinNumeric:    0,
+							MinNumericSet: false,
+							MaxNumeric:    0,
+							MaxNumericSet: false,
+						}).Validate(string(value)); err != nil {
+							return errors.Wrap(err, "string")
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "Idempotency-Key",
+			In:   "header",
 			Err:  err,
 		}
 	}
@@ -12481,6 +12624,71 @@ func unpackRenameAiSessionParams(packed middleware.Parameters) (params RenameAiS
 }
 
 func decodeRenameAiSessionParams(args [1]string, argsEscaped bool, r *http.Request) (params RenameAiSessionParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// RenameRevisionParams is parameters of renameRevision operation.
+type RenameRevisionParams struct {
+	ID uuid.UUID
+}
+
+func unpackRenameRevisionParams(packed middleware.Parameters) (params RenameRevisionParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeRenameRevisionParams(args [1]string, argsEscaped bool, r *http.Request) (params RenameRevisionParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

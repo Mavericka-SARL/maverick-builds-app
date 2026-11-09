@@ -346,6 +346,51 @@ async function expectTimeTotals(page: Page, metric: string, jan: string, feb: st
   }
 }
 
+// A ratio's Total over a flat row dimension is known only for the whole grid
+// (the server's one total). Under two root periods as columns, neither stands
+// for the grid: each Total is "—", not that one total twice (2026-11-08).
+const RATIO_DASH_ID = "ratio-roots-dash";
+const RATIO_GRID_ID = "ratio-roots-grid";
+
+const ratioRootsGrid = {
+  scenario: "Working",
+  version: "draft",
+  metrics: [
+    { id: "m-util", name: "utilization", label: "Utilization", is_input: false, formula: "=output/capacity", agg_rule: "formula", format: "number", format_decimals: 2, dimension_ids: ["plant", "month"] },
+  ],
+  dimensions: [
+    { id: "plant", name: "Plant", display_level: null, members: [
+      { id: "p-a", code: "PA", label: "Plant A" },
+      { id: "p-b", code: "PB", label: "Plant B" },
+    ] },
+    { id: "month", name: "Month", dimension_type: "time", time_granularity: "month", display_level: null, members: [
+      { id: "t-q1", code: "Q1", label: "Q1" },
+      { id: "t-jan", code: "M01", label: "Jan", parent_code: "Q1", time_index: 0, period_start: "2026-01-01" },
+      { id: "t-q2", code: "Q2", label: "Q2" },
+      { id: "t-apr", code: "M04", label: "Apr", parent_code: "Q2", time_index: 3, period_start: "2026-04-01" },
+    ] },
+  ],
+  departments: [],
+  cells: { "m-util:PA:M01": 0.8, "m-util:PB:M01": 0.6, "m-util:PA:M04": 0.9, "m-util:PB:M04": 0.5 },
+  totals: { "m-util": 0.71 },
+  access_rules: { dim_members: {}, metrics: {} },
+};
+
+test("Business Console grid: a ratio's Total under two root periods is not the grid's one total", async ({ page }) => {
+  await mockApi(page);
+  await mockGridDashboard(page, RATIO_DASH_ID, RATIO_GRID_ID, "Ratio Roots Dashboard",
+    { rows: ["plant"], cols: ["month"], context: ["__metrics__"] }, ratioRootsGrid);
+  await loadAs(page, "dept_head");
+  await expect(page.getByText("Ratio Roots Dashboard")).toBeVisible({ timeout: 15_000 });
+  const table = page.locator("table").first();
+  // Columns: [Plant, Jan, Q1, Apr, Q2].
+  await expect(table.getByRole("row", { name: /^Plant A / }).getByRole("cell").nth(1)).toHaveText("0.80");
+  const total = table.getByRole("row", { name: /^Total/ }).getByRole("cell");
+  await expect(total.nth(2), "Q1 total").toHaveText("—");
+  await expect(total.nth(4), "Q2 total").toHaveText("—");
+  await expect(total.nth(2)).not.toHaveText("0.71");
+});
+
 test("Business Console grid: the Total row reduces flat, and an aggregate period by time_summary", async ({ page }) => {
   await mockApi(page);
   await mockGridDashboard(page, TIME_DASH_ID, TIME_GRID_ID, "Flat Total Dashboard",

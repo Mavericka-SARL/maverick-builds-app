@@ -199,9 +199,14 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 	sort.Strings(sorted)
 	for _, id := range sorted {
 		if fn := g.Dimensional[id]; fn != "" {
+			// The way out, spelled out: the AI Developer did not find it in
+			// eleven tries building a closing balance that takes the
+			// closed month's KPI when there is one (2026-11-08).
 			return Component{}, &TemporalError{Members: scc, Detail: fmt.Sprintf(
-				"%s calls %s, which reads other cells along a dimension, so it cannot be part of a dependency cycle broken by time (cycle: %s); LOOKUP and the conditional aggregations (SUMIFS, COUNTIFS, ...) are not allowed in such a cycle",
-				label(names, id), fn, strings.Join(memberNames(sorted, names), ", "))}
+				"%s calls %s, which reads other cells along a dimension, so it cannot be part of a dependency cycle broken by time (cycle: %s); LOOKUP and the conditional aggregations (SUMIFS, COUNTIFS, ...) are not allowed in such a cycle. "+
+					"Put the %s call in a metric of its own — %s_%s = %s(…), on the same grid — and read that metric here instead: a plain read of a metric is allowed in the cycle, as long as what the call reads is not in it",
+				label(names, id), fn, strings.Join(memberNames(sorted, names), ", "),
+				fn, label(names, id), strings.ToLower(fn), fn)}
 		}
 	}
 

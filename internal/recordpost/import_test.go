@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
@@ -129,6 +130,58 @@ func TestImportRowsIsAllOrNothing(t *testing.T) {
 	var first string
 	if err := f.pool.QueryRow(ctx, `SELECT min(data->>'code') FROM runtime.form_record WHERE form_id=$1::uuid`, f.form.ID).Scan(&first); err != nil || first != "S-0001" {
 		t.Errorf("first code after a rolled-back import = %q (%v), want S-0001", first, err)
+	}
+}
+
+// BeforeCommit runs in the records' own transaction, once they are all
+// created: what it writes commits with them, and its error rolls the whole
+// file back. The records import writes its Recent Imports line, with the
+// Idempotency-Key it was sent under, this way: a key in use by another
+// request refuses the file instead of creating its records twice.
+func TestImportBeforeCommitIsPartOfTheFile(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	ps := recordpost.OnPool(f.pool, logger.New("test"))
+	refused := fmt.Errorf("the key is in use")
+	var seen recordpost.ImportResult
+	_, err := ps.Import(ctx, recordpost.ImportRequest{
+		Form: f.form, CreatorID: f.userID, Header: []string{"region", "amount"},
+		Rows: spendRows("10", "20"), Inline: true,
+		BeforeCommit: func(ctx context.Context, tx pgx.Tx, res recordpost.ImportResult) error {
+			seen = res
+			var n int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, f.form.ID).Scan(&n); err != nil || n != 2 {
+				t.Errorf("BeforeCommit sees %d record(s) in its transaction (%v), want the file's 2", n, err)
+			}
+			return refused
+		},
+	})
+	if err != refused {
+		t.Fatalf("import: %v, want BeforeCommit's error", err)
+	}
+	if seen.Created != 2 {
+		t.Errorf("BeforeCommit was told %d record(s) created, want 2", seen.Created)
+	}
+	if n := f.count(t, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, f.form.ID); n != 0 {
+		t.Fatalf("a file whose BeforeCommit failed left %v record(s); want none", n)
+	}
+	if n := f.count(t, `SELECT COALESCE(sum(value), 0) FROM runtime.fact_input WHERE source_ref=$1::uuid`, f.mapping); n != 0 {
+		t.Fatalf("a file whose BeforeCommit failed posted %v; want nothing", n)
+	}
+	// What it writes commits with the records.
+	res, err := ps.Import(ctx, recordpost.ImportRequest{
+		Form: f.form, CreatorID: f.userID, Header: []string{"region", "amount"},
+		Rows: spendRows("10", "20"), Inline: true,
+		BeforeCommit: func(ctx context.Context, tx pgx.Tx, _ recordpost.ImportResult) error {
+			_, err := tx.Exec(ctx, `CREATE TABLE public.before_commit_ran (id int)`)
+			return err
+		},
+	})
+	if err != nil || res.Created != 2 {
+		t.Fatalf("import: created=%d err=%v", res.Created, err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM pg_tables WHERE tablename = 'before_commit_ran'`); n != 1 {
+		t.Error("BeforeCommit's write did not commit with the records")
 	}
 }
 

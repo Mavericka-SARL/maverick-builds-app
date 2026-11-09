@@ -100,8 +100,10 @@ func TestDeveloperRoutesIgnoreAdminScopeElsewhere(t *testing.T) {
 				// The reorder answers 404 for a dimension outside the
 				// caller's scope, as for an unknown one.
 				{"PUT", "/api/developer/dimensions/" + f.dimD + "/members/order", "", map[string]any{"member_ids": []string{f.memberD2, f.memberD}}, http.StatusNotFound},
-				{"PATCH", "/api/developer/dimensions/" + f.dimD, "", map[string]string{"name": "Hijacked dimension"}, http.StatusForbidden},
-				{"PATCH", "/api/developer/metrics/" + f.metricD, "", map[string]string{"name": "Hijacked metric"}, http.StatusForbidden},
+				// Another tenant's dimension or metric answers as an unknown
+				// one: a 403 told the caller the id exists somewhere.
+				{"PATCH", "/api/developer/dimensions/" + f.dimD, "", map[string]string{"name": "Hijacked dimension"}, http.StatusNotFound},
+				{"PATCH", "/api/developer/metrics/" + f.metricD, "", map[string]string{"name": "Hijacked metric"}, http.StatusNotFound},
 				{"POST", "/api/developer/metrics", f.app3, map[string]any{"name": "Planted metric", "is_input": true, "agg_rule": "sum", "revision_id": f.revD}, http.StatusForbidden},
 				{"POST", "/api/developer/dimensions", f.app3, map[string]any{"name": "Planted dimension", "revision_id": f.revD}, http.StatusForbidden},
 				{"GET", "/api/developer/model", f.app3, nil, http.StatusForbidden},
@@ -252,8 +254,8 @@ func TestDeveloperRoutesKeepOwnerAdminReach(t *testing.T) {
 	}
 	for _, sub := range f.crossSubs {
 		calls = append(calls,
-			call{sub, "GET", "/api/developer/workflows?application_id=" + appX2, "", nil, http.StatusForbidden},
-			call{sub, "POST", "/api/developer/workflows?application_id=" + appX2, "", map[string]string{"name": "Planted workflow"}, http.StatusForbidden},
+			call{sub, "GET", "/api/developer/workflows?application_id=" + appX2, "", nil, http.StatusNotFound},
+			call{sub, "POST", "/api/developer/workflows?application_id=" + appX2, "", map[string]string{"name": "Planted workflow"}, http.StatusNotFound},
 			call{sub, "GET", "/api/developer/workflow-roles?application_id=" + appX2, "", nil, http.StatusForbidden},
 			call{sub, "GET", "/api/developer/workflow-trigger-events?application_id=" + appX2, "", nil, http.StatusForbidden},
 			call{sub, "POST", "/api/automation/rules", appX2, map[string]string{"name": "Planted rule", "trigger_type": "manual"}, http.StatusForbidden},
@@ -301,9 +303,9 @@ func TestPlainDeveloperBuildsOnAModelLessApplication(t *testing.T) {
 	if _, err := f.pool.Exec(context.Background(), `INSERT INTO identity.user_model_access (user_id, model_id) VALUES ($1::uuid, $2::uuid)`, narrowed, f.modelA); err != nil {
 		t.Fatal(err)
 	}
-	f.expect(t, "ml-model-narrowed", "GET", "/api/developer/workflows?application_id="+appX, "", nil, http.StatusForbidden)
+	f.expect(t, "ml-model-narrowed", "GET", "/api/developer/workflows?application_id="+appX, "", nil, http.StatusNotFound)
 	appX2 := f.one(t, `INSERT INTO core.application (customer_id, name, mode) VALUES ($1::uuid, 'Execution only two', 'execution') RETURNING id::text`, f.cust2)
-	f.expect(t, "mm-dev", "GET", "/api/developer/workflows?application_id="+appX2, "", nil, http.StatusForbidden)
+	f.expect(t, "mm-dev", "GET", "/api/developer/workflows?application_id="+appX2, "", nil, http.StatusNotFound)
 }
 
 // Business Admin › Roles grants a working revision's dashboards for someone
@@ -321,4 +323,21 @@ func TestBuilderGrantsAWorkingRevisionsDashboards(t *testing.T) {
 	if n := f.one(t, `SELECT count(*)::text FROM identity.business_role_dashboard WHERE role_id=$1::uuid AND dashboard_id=$2::uuid`, f.roleID, dash); n != "1" {
 		t.Errorf("%s grants of the working revision's dashboard, want 1", n)
 	}
+}
+
+// A developer of tenant 1 who is tenant admin of ws2 (tenant 2) opened and
+// changed ws2's business roles: the developer grant passed the routes'
+// guard and the tenant-admin grant opened tenant 2, though neither allowed
+// it alone. The tenant-admin arm now counts only where the account also
+// holds business_admin (or developer, on the routes a developer shares) in
+// that tenant (decided 2026-11-08).
+func TestTenantAdminArmNeedsTheRoutesRoleInItsTenant(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	for _, sub := range []string{"dr-dev1-ta2", "dr-devws-ta2"} {
+		f.expect(t, sub, "GET", "/api/business-admin/roles", f.app3, nil, http.StatusForbidden)
+		f.expect(t, sub, "POST", "/api/business-admin/roles", f.app3, map[string]string{"name": "Planted"}, http.StatusForbidden)
+	}
+	// A tenant admin of tenant 2 who is its business admin too keeps it.
+	f.gbUser(t, "ta2-ba2", f.cust2, [2]string{"tenant_admin", f.ws2}, [2]string{"business_admin", f.ws2})
+	f.expect(t, "ta2-ba2", "GET", "/api/business-admin/roles", f.app3, nil, http.StatusOK)
 }

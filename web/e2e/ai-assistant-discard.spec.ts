@@ -124,14 +124,18 @@ test("Use as working revision switches the console to the draft without activati
     activateCalls.push(route.request().url());
     await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
+  // The revision is named as it is taken (blank keeps the draft's name).
+  const promoteNames: string[] = [];
   await page.route(`**/api/ai/sessions/${SESSION_ID}/promote-draft`, async (route) => {
+    const name = String((route.request().postDataJSON() ?? {}).name ?? "");
+    promoteNames.push(name);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         session: { ...session(false), promoted_at: "2026-08-01T09:10:00Z" },
         messages: [{ id: "m-1", session_id: SESSION_ID, role: "assistant", content: "The draft is now your working revision. It is not live.", created_at: "2026-08-01T09:10:00Z" }],
-        revision: { id: DRAFT_REV_ID, name: "AI Draft 2026-08-01 09:05:00.000" },
+        revision: { id: DRAFT_REV_ID, name: name || "AI Draft 2026-08-01 09:05:00.000" },
       }),
     });
   });
@@ -139,8 +143,11 @@ test("Use as working revision switches the console to the draft without activati
   await openAiAssistantSession(page);
   await expect(page.getByText("AI draft", { exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: "Use as working revision" }).click();
+  await page.getByRole("textbox", { name: "Name of the revision" }).fill("Production FP&A");
+  await page.getByRole("button", { name: "Use as working revision" }).click();
 
-  await expect(page.getByText("AI Draft 2026-08-01 09:05:00.000").first()).toBeVisible();
+  expect(promoteNames).toEqual(["Production FP&A"]);
+  await expect(page.getByText("Production FP&A").first()).toBeVisible();
   await expect(page.getByText("The draft is now your working revision")).toBeVisible();
   expect(activateCalls).toEqual([]);
 });

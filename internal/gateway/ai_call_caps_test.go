@@ -26,10 +26,9 @@ func TestLLMCallCapsAreSettings(t *testing.T) {
 }
 
 // At the cap, a session with confirmed work says how to carry on from it:
-// a new session starts from the developer's working revision, so the draft
-// is taken as the working revision first.
-func TestSessionCapMessageSaysToPromoteTheDraft(t *testing.T) {
-	if m := sessionCapMessage(200, "draft-1"); !strings.Contains(m, "Use as working revision") || !strings.Contains(m, "new session") {
+// a new session continues the draft, with its task plan and checked rows.
+func TestSessionCapMessageSaysANewSessionContinuesTheDraft(t *testing.T) {
+	if m := sessionCapMessage(200, "draft-1"); !strings.Contains(m, "continues that draft") || !strings.Contains(m, "task plan") {
 		t.Errorf("with a draft: %q", m)
 	}
 	if m := sessionCapMessage(200, ""); strings.Contains(m, "promote") || !strings.Contains(m, "new session") {
@@ -52,5 +51,15 @@ func TestResolveParamRefs(t *testing.T) {
 		if got := string(resolveParamRefs([]byte(in), created)); got != want {
 			t.Errorf("%s -> %s, want %s", in, got, want)
 		}
+	}
+}
+
+// From 70% of its calls a session asks the model to suggest a new one.
+func TestSessionLengthNote(t *testing.T) {
+	if n := sessionLengthNote(139, 200); n != "" {
+		t.Errorf("at 139 of 200: %q", n)
+	}
+	if n := sessionLengthNote(140, 200); !strings.Contains(n, "140 of its 200") || !strings.Contains(n, "new session") {
+		t.Errorf("at 140 of 200: %q", n)
 	}
 }

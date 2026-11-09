@@ -61,6 +61,23 @@ func (s *ProposalStore) CreateProposal(ctx context.Context, sessionID string, st
 	return p, nil
 }
 
+// WithdrawPending withdraws the session's pending proposals other than
+// keepID — a newer proposal replaces them: the console shows only the newest,
+// and the assistant once told the developer the 32 steps of a replaced one
+// "remain in the pending plan" (2026-11-08). They are marked rejected, so
+// none can still be confirmed. It returns how many were withdrawn and their
+// steps in all.
+func (s *ProposalStore) WithdrawPending(ctx context.Context, sessionID, keepID string) (proposals, steps int, err error) {
+	err = s.pool.QueryRow(ctx, `
+		WITH w AS (
+			UPDATE ai_assistant.proposal SET status='rejected'
+			WHERE session_id=$1::uuid AND status='pending' AND id <> $2::uuid
+			RETURNING jsonb_array_length(steps) AS n)
+		SELECT count(*), COALESCE(sum(n), 0) FROM w
+	`, sessionID, keepID).Scan(&proposals, &steps)
+	return proposals, steps, err
+}
+
 // GetProposal fetches a proposal by ID.
 func (s *ProposalStore) GetProposal(ctx context.Context, proposalID string) (Proposal, error) {
 	var p Proposal

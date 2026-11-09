@@ -39,16 +39,25 @@ type Handler interface {
 	AddBusinessMember(ctx context.Context, req *BusinessMemberRequest, params AddBusinessMemberParams) (AddBusinessMemberRes, error)
 	// AddGridDimension implements addGridDimension operation.
 	//
-	// Add a dimension to a grid.
+	// Every metric of the grid takes the dimension. Values already typed into them are filed under
+	// member in the same transaction (and their cell history with them); while they hold any, the add
+	// without a member is refused (409 VALUES_NEED_MEMBER). A posting into one of the grid's metrics
+	// that maps no dimension of its family refuses the add (409 POSTINGS_DO_NOT_FIT).
 	//
 	// POST /api/developer/grids/{id}/dimensions/{dimId}
-	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error)
+	AddGridDimension(ctx context.Context, req OptAddGridDimensionReq, params AddGridDimensionParams) (AddGridDimensionRes, error)
 	// AddGridMetric implements addGridMetric operation.
 	//
-	// Add a metric to a grid (a metric may belong to only one grid at a time).
+	// The metric's typed values move to the grid's coordinate in the same transaction. A grid dimension
+	// they lack takes the member named in members (refused 409 VALUES_NEED_MEMBER without one). A
+	// dimension they carry that the grid has not got is combined away by the metric's own rule — its
+	// aggregation rule across a standard dimension (sum added up, average averaged, count counted), its
+	// time summary across a time dimension — and the values replaced stay in the cell history; a rule
+	// that cannot combine stored values (none, rate, formula, a text or pick-list metric) refuses (409
+	// VALUES_CANNOT_COMBINE). Every posting into the metric must fit the grid (409 POSTINGS_DO_NOT_FIT).
 	//
 	// POST /api/developer/grids/{id}/metrics/{metricId}
-	AddGridMetric(ctx context.Context, params AddGridMetricParams) (AddGridMetricRes, error)
+	AddGridMetric(ctx context.Context, req OptAddGridMetricReq, params AddGridMetricParams) (AddGridMetricRes, error)
 	// AdminInfraNodes implements adminInfraNodes operation.
 	//
 	// Latest health sample per cluster node (disk/memory/load), fed by the node-stats DaemonSet.
@@ -295,7 +304,10 @@ type Handler interface {
 	//
 	// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
 	// without saying whether the id exists elsewhere); the source field and every mapped field must be
-	// fields of the table.
+	// fields of the table. A metric a mapping feeds shows its records only: values typed into it before
+	// are set aside (kept, read by no grid, chart, export or calculation until no mapping feeds the
+	// metric), and typed_set_aside says how many cells hold one. Metrics > Clear values removes them. A
+	// record holding a value is refused when a mapped field is empty.
 	//
 	// POST /api/developer/form-integrations
 	CreateFormMapping(ctx context.Context, req *CreateFormMappingRequest) (CreateFormMappingRes, error)
@@ -432,7 +444,7 @@ type Handler interface {
 	DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error)
 	// DeleteAllNotifications implements deleteAllNotifications operation.
 	//
-	// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+	// They leave the list; the rows stay marked, so Workflow History and queued mail are unaffected.
 	//
 	// DELETE /api/notifications
 	DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error)
@@ -837,11 +849,13 @@ type Handler interface {
 	GetMe(ctx context.Context) (GetMeRes, error)
 	// GetMyWorkflowHistory implements getMyWorkflowHistory operation.
 	//
-	// List the 50 most recent workflow instances where the caller started the instance or was assigned a
-	// step.
+	// The caller's runs — started, assigned a step, or notified of — in the selected application
+	// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
+	// answer for it. With instance_id, that one run of the caller's in any application, with its
+	// application_id, so a notification about another application's run can switch there.
 	//
 	// GET /api/workflow/my-history
-	GetMyWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error)
 	// GetNotificationSettings implements getNotificationSettings operation.
 	//
 	// Outbound notification settings for this tenant — which channels deliver, and whether overdue
@@ -967,8 +981,11 @@ type Handler interface {
 	Healthz(ctx context.Context) (*HealthzOK, error)
 	// ImportDimensionMembers implements importDimensionMembers operation.
 	//
-	// One-off dimension member import (code/label/parent_code/property:<name> columns; codes
-	// auto-generated from labels when absent).
+	// A property:<name> column fills the property declared under that name whatever its case, or under
+	// its identifier (property:Sales Segment fills a declared sales_segment); any other column declares
+	// a text property named by its identifier (lower case, other characters as underscores). A column
+	// with no letter or digit, or two columns filling one property, refuse the file (400). A value a
+	// number or date property cannot read refuses the file (422 INVALID_PROPERTY_VALUE, by row).
 	//
 	// POST /api/import/dimension-members
 	ImportDimensionMembers(ctx context.Context, req *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
@@ -976,14 +993,22 @@ type Handler interface {
 	//
 	// For a caller who reaches the table's application (404 otherwise), who becomes each record's
 	// creator. A row's optional status column sets its status; a row whose status the caller may not
-	// create (approved or rejected, unless the caller administers the application) fails validation.
+	// create (approved or rejected, unless the caller administers the application) fails validation. A
+	// client that may send a file again — after a closed connection, a timeout or a 502 — sends an
+	// Idempotency-Key: the same key from the same person for the same model returns the first import's
+	// answer ("replayed": true) and creates nothing. The key is kept with the import's Recent Imports
+	// line, written in the transaction that creates the records; a refused file holds none, so its
+	// correction goes under the same key.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, req *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
 	// ImportModel implements importModel operation.
 	//
-	// Import a model export package into an application, creating a new model and revision (tenant
-	// admins for their own tenant, platform admins for any).
+	// The package is held to the checks the engine applies when the same things are saved: a calculated
+	// metric's formula or a calculated member's formula that a save would refuse, a member hierarchy
+	// cycle, or a revision that would fail publishing's time checks refuses the import (400), naming the
+	// metric, member or grid. A calculated metric's dependencies are derived from its formula; the
+	// package's own dependencies are not read.
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, req *ModelImportRequest) (ImportModelRes, error)
@@ -1424,7 +1449,7 @@ type Handler interface {
 	// theirs working in the draft, and clear their draft; the response names the revision.
 	//
 	// POST /api/ai/sessions/{id}/promote-draft
-	PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
+	PromoteAiDraft(ctx context.Context, req OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
 	// PublishWorkflow implements publishWorkflow operation.
 	//
 	// Publish a workflow definition (rejected if it fails validation).
@@ -1524,6 +1549,12 @@ type Handler interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// RenameRevision implements renameRevision operation.
+	//
+	// Rename a revision (the live one too; the model's header follows).
+	//
+	// PATCH /api/developer/revisions/{id}
+	RenameRevision(ctx context.Context, req *RenameRevisionReq, params RenameRevisionParams) (RenameRevisionRes, error)
 	// ReopenWorkflowInstance implements reopenWorkflowInstance operation.
 	//
 	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
@@ -2001,10 +2032,10 @@ type Handler interface {
 	UpdateDimensionProperty(ctx context.Context, req *PropertyRequest, params UpdateDimensionPropertyParams) (UpdateDimensionPropertyRes, error)
 	// UpdateFolder implements updateFolder operation.
 	//
-	// Rename or reparent a dashboard folder.
+	// Rename or reparent a dashboard folder (partial; only the fields sent change).
 	//
 	// PATCH /api/developer/folders/{id}
-	UpdateFolder(ctx context.Context, req *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
+	UpdateFolder(ctx context.Context, req *UpdateFolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm implements updateForm operation.
 	//
 	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
@@ -2014,7 +2045,7 @@ type Handler interface {
 	// UpdateFormMapping implements updateFormMapping operation.
 	//
 	// What the mapping names is checked as on create, against the mapping's own model, revision and
-	// table (400).
+	// table (400). A new target metric sets its typed values aside, as on create (typed_set_aside).
 	//
 	// PATCH /api/developer/form-integrations/{id}
 	UpdateFormMapping(ctx context.Context, req *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)
@@ -2061,7 +2092,7 @@ type Handler interface {
 	UpdateIntegrationConnection(ctx context.Context, req *UpdateIntegrationConnectionReq, params UpdateIntegrationConnectionParams) (UpdateIntegrationConnectionRes, error)
 	// UpdateMetric implements updateMetric operation.
 	//
-	// Update a metric definition (re-wires formula dependencies and recalculates affected revisions).
+	// Update a metric definition (re-wires formula dependencies and recalculates the metric's revision).
 	//
 	// PATCH /api/developer/metrics/{id}
 	UpdateMetric(ctx context.Context, req *UpdateMetricRequest, params UpdateMetricParams) (UpdateMetricRes, error)
@@ -2145,17 +2176,21 @@ type Handler interface {
 	ValidateWorkflow(ctx context.Context, req OptValidateWorkflowReq, params ValidateWorkflowParams) (ValidateWorkflowRes, error)
 	// Writeback implements writeback operation.
 	//
-	// Write a single cell value (triggers recalculation).
+	// Dim_codes names one leaf member of each dimension of the grid the metric is on, and no other
+	// dimension: a dimension the grid has not got is refused (400 NOT_METRIC_DIMENSION), and so is one
+	// missing (400 MISSING_DIMENSION). A clear is not held to this, so a value stored at another
+	// coordinate before the check can be removed by naming that coordinate exactly.
 	//
 	// POST /api/cells
 	Writeback(ctx context.Context, req *WritebackRequest) (WritebackRes, error)
 	// WritebackBatch implements writebackBatch operation.
 	//
 	// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
-	// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
-	// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
-	// refused. With dry_run every cell is checked and none written. A chat connection's write (the
-	// connector's write_cells) is also refused when the tenant turned chat writes off.
+	// rules, workflow locks, the plan's limits, one member of each of the metric's grid dimensions and
+	// no other (NOT_METRIC_DIMENSION, MISSING_DIMENSION) — before any is written; a refused cell
+	// refuses the batch (422, each refused cell by its index) and nothing is written. Two writes to one
+	// cell are refused. With dry_run every cell is checked and none written. A chat connection's write
+	// (the connector's write_cells) is also refused when the tenant turned chat writes off.
 	//
 	// POST /api/cells/batch
 	WritebackBatch(ctx context.Context, req *WritebackBatchReq) (WritebackBatchRes, error)

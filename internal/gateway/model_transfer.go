@@ -182,6 +182,10 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 
 	notes := req.Package.StripUnreadWidgetProps()
+	// What the import leaves out — a link to a row the package does not
+	// hold, a member's parent in an unrelated dimension — is named, so a
+	// package that imports with less than it says is told so.
+	notes = append(notes, req.Package.DroppedReferences()...)
 	modelID, revisionID, err := modeltransfer.Import(ctx, tx, req, act.UserID)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("import failed: %w", err), http.StatusBadRequest)

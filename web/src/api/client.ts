@@ -138,6 +138,8 @@ export interface GridData {
   all_metrics: Metric[];           // every metric in the revision, regardless of grid membership
   dimensions: DimInfo[];           // all configured dims, ordered
   all_dimensions: DimInfo[];       // every dimension in the revision, regardless of grid — needed to resolve cross-dimension formula refs
+  /** The grid's dimensions with no member yet (left out of `dimensions`): what to do about each. */
+  dimensions_without_members?: { id: string; name: string; label?: string; kept_by?: string; guidance: string }[];
   departments: Department[];       // = first dim members (compat)
   cells: Record<string, number>;   // "metricId:code1[:code2...]" composite key, keyed per each metric's OWN grid dims
   totals: Record<string, number>;  // "metricId" -> aggregate
@@ -599,6 +601,10 @@ export interface Task {
   rework_note?: string;
   /** The tenant of the task's application; completing it addresses this tenant. */
   tenant_id?: string;
+  /** The model the task's run works on, and its application: the Inbox spans every application. */
+  model_id?: string;
+  model_name?: string;
+  application_id?: string;
 }
 
 // One human-readable context line: value is the stable code, display the
@@ -649,6 +655,8 @@ export interface HistoryInstance {
   completed_at?: string;
   steps: HistoryStep[];
   context_display?: TaskContextEntry[];
+  /** The application the run belongs to (GET /api/workflow/my-history). */
+  application_id?: string;
   /** Finished and approved: only Reopen, with a reason, takes it out of completed. */
   reopenable?: boolean;
 }
@@ -1974,6 +1982,14 @@ export interface ImportAbout {
 
 export type ImportModeParam = "incremental" | "replace" | "full_reload";
 
+// newImportKey names one import for its Idempotency-Key: a file sent again
+// under it — Commit clicked again after a 502 or a closed connection — is
+// answered from the first and not applied twice. crypto.randomUUID needs a
+// secure context; a self-hosted server on plain http has getRandomValues.
+export function newImportKey(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
+}
+
 export interface ImportUploadResult {
   job_id: string;
   status: string;
@@ -2036,10 +2052,11 @@ export interface BAUser {
 }
 
 export interface UserAccessRule {
-  rule_type: "dimension" | "metric" | "button";
+  rule_type: "dimension" | "metric";
   ref_id: string;
   ref_name: string;
-  access: "write" | "read" | "hidden";
+  // "only" / "only_read": the member is on the allow-list for its dimension (migration 168).
+  access: "write" | "read" | "hidden" | "only" | "only_read";
 }
 
 export interface BAAvailableItem {
@@ -2595,6 +2612,11 @@ export const api = {
   createDevRevision: (modelId: string, name: string, sourceRevisionId?: string) =>
     apiFetch<{ id: string }>(`/api/developer/revisions?model_id=${encodeURIComponent(modelId)}`, { method: "POST", body: JSON.stringify({ name, source_revision_id: sourceRevisionId }) }),
 
+  // The live revision too: the model's header follows. 409 when another
+  // revision of the model has the name.
+  renameDevRevision: (id: string, name: string) =>
+    apiFetch<{ id: string; name: string }>(`/api/developer/revisions/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+
   deleteDevRevision: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/revisions/${id}`, { method: "DELETE" }),
 
@@ -2640,7 +2662,11 @@ export const api = {
     }),
 
   getWorkflowHistory: () => apiFetch<HistoryInstance[]>("/api/workflow/history"),
+  // The person's runs in the selected application (X-App-Id).
   getMyWorkflowHistory: () => apiFetch<HistoryInstance[]>("/api/workflow/my-history"),
+  // One run of the person's, in whichever application it is, with its application_id.
+  findMyWorkflowRun: (instanceId: string) =>
+    apiFetch<HistoryInstance[]>(`/api/workflow/my-history?instance_id=${encodeURIComponent(instanceId)}`),
   updateWorkflowInstance: (id: string, status: string) =>
     apiFetch<{ status: string }>(`/api/workflow/instances/${id}`, {
       method: "PATCH",
@@ -2737,10 +2763,14 @@ export const api = {
   // rowLines: the line in the person's file of each data row of csv, when
   // csv was written out of it (the Import Wizard's) — every answer, and the
   // import's history, then names a row by its line in that file.
-  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam, rowLines?: number[], about?: ImportAbout) =>
+  // key: the import's Idempotency-Key (newImportKey) — sent again under it,
+  // after a 502 or a closed connection, the import is answered from the
+  // first and applied once.
+  uploadImport: (csv: string, revisionId?: string, importMode?: ImportModeParam, rowLines?: number[], about?: ImportAbout, key?: string) =>
     apiFetch<ImportUploadResult>(
       "/api/import/upload",
-      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental", row_lines: rowLines, grid_id: about?.gridId, file_name: about?.fileName }) },
+      { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, import_mode: importMode ?? "incremental", row_lines: rowLines, grid_id: about?.gridId, file_name: about?.fileName }),
+        ...(key ? { headers: { "Idempotency-Key": key } } : {}) },
     ),
   checkImport: (csv: string, revisionId?: string, rowLines?: number[]) =>
     apiFetch<ImportCheck>("/api/import/upload", { method: "POST", body: JSON.stringify({ csv, revision_id: revisionId, dry_run: true, row_lines: rowLines }) }),
@@ -2787,9 +2817,11 @@ export const api = {
   listFormMappings: (revisionId?: string) =>
     apiFetch<FormMetricMapping[]>(`/api/developer/form-integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
   createFormMapping: (body: Omit<FormMetricMapping, "id">, revisionId?: string) =>
-    apiFetch<{ id: string }>(`/api/developer/form-integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
+    apiFetch<{ id: string; typed_set_aside?: number }>(`/api/developer/form-integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
+  // typed_set_aside: the target metric's cells holding a typed value, set
+  // aside now that records feed it (on create, and on a new target).
   updateFormMapping: (id: string, body: Omit<FormMetricMapping, "id">) =>
-    apiFetch<{ status: string }>(`/api/developer/form-integrations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    apiFetch<{ status: string; typed_set_aside?: number }>(`/api/developer/form-integrations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteFormMapping: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/form-integrations/${id}`, { method: "DELETE" }),
   backfillFormMapping: (id: string) =>
@@ -2810,8 +2842,10 @@ export const api = {
     apiFetch<IntegrationRun[]>(`/api/developer/integrations/${id}/runs`),
   // A dimension file imports whole: a refusal (422) lists each failing row
   // by its line in the person's file (rowLines).
+  // notices: a property the file declared again, whose name members not in
+  // the file already held values under — formulas read those now.
   importDimensionMembers: (dimensionId: string, csv: string, about?: ImportAbout, rowLines?: number[]) =>
-    apiFetch<{ rows_imported: number; error_rows: number }>("/api/import/dimension-members", {
+    apiFetch<{ rows_imported: number; error_rows: number; notices?: string[] }>("/api/import/dimension-members", {
       method: "POST",
       body: JSON.stringify({ dimension_id: dimensionId, csv, file_name: about?.fileName, row_lines: rowLines }),
     }),
@@ -2843,14 +2877,17 @@ export const api = {
   // xlsx_base64 (+ sheet); google_sheets ones carry no body — the server
   // re-fetches the configured sheet at run time. The integration's saved
   // column map is applied server-side, so a file of metric and member names
-  // runs as it is.
-  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout) =>
-    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
+  // runs as it is. mapped: the csv is the Import Wizard's, already shaped and
+  // mapped by its own steps, so the saved reshape and column map are not
+  // applied a second time (they would read the model's names as source
+  // columns).
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout, mapped?: boolean) =>
+    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[] }>(`/api/integrations/${id}/run`, {
       method: "POST",
-      body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}) }),
+      body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}), ...(mapped ? { mapped: true } : {}) }),
     }),
-  checkIntegrationRun: (id: string, csv: string, rowLines?: number[]) =>
-    apiFetch<ImportCheck>(`/api/integrations/${id}/run?dry_run=true`, { method: "POST", body: JSON.stringify({ csv, row_lines: rowLines }) }),
+  checkIntegrationRun: (id: string, csv: string, rowLines?: number[], mapped?: boolean) =>
+    apiFetch<ImportCheck>(`/api/integrations/${id}/run?dry_run=true`, { method: "POST", body: JSON.stringify({ csv, row_lines: rowLines, ...(mapped ? { mapped: true } : {}) }) }),
 
   getDimensions: () => apiFetch<DevDimension[]>("/api/dimensions"),
   listForms: (revisionId?: string) =>
@@ -2895,10 +2932,12 @@ export const api = {
     apiFetchBlob(`/api/forms/${formId}/export?format=${format}${query ? `&query=${encodeURIComponent(JSON.stringify(query))}` : ""}`),
   // replaceBy: the field whose values the file replaces (IntegrationDef
   // config.replace_by); omitted, the file's records are added.
-  importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout, replaceBy?: string) =>
-    apiFetch<{ status: string; records_created: number; records_replaced?: number }>(`/api/forms/${formId}/import`, {
+  // key: the import's Idempotency-Key (newImportKey), as for uploadImport.
+  importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout, replaceBy?: string, key?: string) =>
+    apiFetch<{ status: string; records_created: number; records_replaced?: number; job_id?: string; replayed?: boolean }>(`/api/forms/${formId}/import`, {
       method: "POST",
       body: JSON.stringify({ csv, row_lines: rowLines, file_name: about?.fileName, ...(replaceBy ? { replace_by: replaceBy } : {}) }),
+      ...(key ? { headers: { "Idempotency-Key": key } } : {}),
     }),
   checkFormRecords: (formId: string, csv: string, rowLines?: number[], replaceBy?: string) =>
     apiFetch<ImportCheck>(`/api/forms/${formId}/import`, { method: "POST", body: JSON.stringify({ csv, dry_run: true, row_lines: rowLines, ...(replaceBy ? { replace_by: replaceBy } : {}) }) }),
@@ -2945,10 +2984,14 @@ export const api = {
 
   listDimProperties: (dimId: string) =>
     apiFetch<DimProperty[]>(`/api/developer/dimensions/${dimId}/properties`),
+  // existing_values: members that already held a value under the name
+  // (kept from a declaration deleted before, or set before) — formulas read
+  // them now; notice says so, and the panel offers to clear them.
   addDimProperty: (dimId: string, body: { name: string; data_type: string }) =>
-    apiFetch<{ id: string }>(`/api/developer/dimensions/${dimId}/properties`, { method: "POST", body: JSON.stringify(body) }),
-  updateDimProperty: (dimId: string, propId: string, body: { name: string; data_type: string }) =>
-    apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/properties/${propId}`, { method: "PATCH", body: JSON.stringify(body) }),
+    apiFetch<{ id: string; existing_values?: number; notice?: string }>(`/api/developer/dimensions/${dimId}/properties`, { method: "POST", body: JSON.stringify(body) }),
+  // clear_values removes the property's value from every member.
+  updateDimProperty: (dimId: string, propId: string, body: { name?: string; data_type?: string; clear_values?: boolean }) =>
+    apiFetch<{ status: string; values_cleared?: number }>(`/api/developer/dimensions/${dimId}/properties/${propId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimProperty: (dimId: string, propId: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/properties/${propId}`, { method: "DELETE" }),
 
@@ -3033,7 +3076,8 @@ export const api = {
   exportModel: (modelId: string, revisionId?: string, includeData = true) =>
     apiFetch<ModelExportPackage>(`/api/admin/models/${modelId}/export${exportQuery(revisionId, includeData)}`),
   importModel: (body: { application_id: string; model_name?: string; revision_name?: string; package: ModelExportPackage }) =>
-    apiFetch<{ model_id: string; revision_id: string }>("/api/admin/models/import", { method: "POST", body: JSON.stringify(body) }),
+    // notes: what the import left out of the package, one each (absent when nothing was).
+    apiFetch<{ model_id: string; revision_id: string; notes?: string[] }>("/api/admin/models/import", { method: "POST", body: JSON.stringify(body) }),
 
   createAdminRevision: (body: { model_id: string; name: string }) =>
     apiFetch<{ id: string }>("/api/admin/revisions", { method: "POST", body: JSON.stringify({ ...body, description: "" }) }),
@@ -3069,14 +3113,23 @@ export const api = {
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteGrid: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "DELETE" }),
-  addGridMetric: (gridId: string, metricId: string) =>
-    apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/${metricId}`, { method: "POST" }),
+  // members: for each grid dimension the metric's stored values lack, the
+  // member (code) they belong to (asked on 409 VALUES_NEED_MEMBER). combined:
+  // values the grid has no dimension for, combined by the metric's own rule.
+  addGridMetric: (gridId: string, metricId: string, members?: Record<string, string>) =>
+    apiFetch<{ status: string; moved?: number; combined?: number }>(`/api/developer/grids/${gridId}/metrics/${metricId}`, {
+      method: "POST", ...(members ? { body: JSON.stringify({ members }) } : {}),
+    }),
   reorderGridMetrics: (gridId: string, metricIds: string[]) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/order`, { method: "PUT", body: JSON.stringify({ metric_ids: metricIds }) }),
   removeGridMetric: (gridId: string, metricId: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/${metricId}`, { method: "DELETE" }),
-  addGridDimension: (gridId: string, dimId: string) =>
-    apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/dimensions/${dimId}`, { method: "POST" }),
+  // member: the member (code) of the dimension the grid's stored values
+  // belong to; required while its metrics hold any (409 VALUES_NEED_MEMBER).
+  addGridDimension: (gridId: string, dimId: string, member?: string) =>
+    apiFetch<{ status: string; moved?: number }>(`/api/developer/grids/${gridId}/dimensions/${dimId}`, {
+      method: "POST", ...(member ? { body: JSON.stringify({ member }) } : {}),
+    }),
   removeGridDimension: (gridId: string, dimId: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/dimensions/${dimId}`, { method: "DELETE" }),
   setGridDimLevel: (gridId: string, dimId: string, display_level: number | null) =>
@@ -3116,7 +3169,7 @@ export const api = {
   // Into revisionId, as listFolders reads it; omitted, the model's open revision.
   createFolder: (body: { name: string; parent_id?: string }, revisionId?: string) =>
     apiFetch<{ id: string }>(`/api/developer/folders${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
-  updateFolder: (id: string, body: { name: string; parent_id?: string }) =>
+  updateFolder: (id: string, body: { name?: string; parent_id?: string | null }) =>
     apiFetch<{ status: string }>(`/api/developer/folders/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteFolder: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/folders/${id}`, { method: "DELETE" }),
@@ -3367,10 +3420,11 @@ export const api = {
       { method: "POST" },
     ),
   // The draft becomes the developer's working revision (not the active one).
-  aiPromoteDraft: (sessionId: string) =>
+  // A name given renames the draft as it is taken; blank keeps its own.
+  aiPromoteDraft: (sessionId: string, name = "") =>
     apiFetch<{ session: AISession; messages: AIMessage[]; revision?: { id: string; name: string } }>(
       `/api/ai/sessions/${sessionId}/promote-draft`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ name }) },
     ),
   // Replaces the old deleteDevRevision(draftId) + local-state-only approach:
   // this clears session.draft_revision_id server-side too, so a reload (or

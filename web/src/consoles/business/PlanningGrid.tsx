@@ -1470,8 +1470,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   //     has none there.
   function colTotal(metricId: string, cc: DimMember[]): number | null | undefined {
     if (cellsLoading) return undefined;
+    // The column stands for the whole grid only where it is the ONE root of
+    // each column dimension: with FY 2026 and FY 2027 both roots, each
+    // column took the grid's one total (both years), and a ratio's Total
+    // read the same, neither year's, under each (2026-11-08).
     const spansGrid = ctxDims.length === 0 &&
-      colDims.every((dim, i) => cc[i] !== undefined && isAggNode(dim, cc[i]) && !cc[i].parent_code);
+      colDims.every((dim, i) => cc[i] !== undefined && isAggNode(dim, cc[i]) && !cc[i].parent_code &&
+        dim.members.every(m => m.parent_code || m.code === cc[i].code));
     if (spansGrid && withheld.has(metricId)) return null;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
@@ -2206,6 +2211,11 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             </span>
           )}
         </div>}
+        {(g.dimensions_without_members ?? []).map(d => (
+          // A dimension of this grid with no member yet: no rows along it until
+          // members are added — said, not shown as a grid of fewer dimensions.
+          <p key={d.id} className="mvx-grid-status" role="note">{d.guidance}.</p>
+        ))}
         {writeback.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Saving…</p>}
         {pasteBatch.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Pasting…</p>}
         {!pasteBatch.isPending && pasteNote && (

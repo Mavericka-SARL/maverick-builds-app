@@ -21,6 +21,9 @@ type TaskPlan struct {
 	Goal      string      `json:"goal"`
 	Stages    []TaskStage `json:"stages"`
 	UpdatedAt time.Time   `json:"updated_at"`
+	// CarriedFrom is the earlier session this plan was carried over from
+	// (CarryTaskPlan): a session ends at its call limit, the goal does not.
+	CarriedFrom string `json:"carried_from,omitempty"`
 }
 
 // TaskStage is one stage: what it delivers (named, so a plan for it can be
@@ -31,6 +34,10 @@ type TaskStage struct {
 	Check  string   `json:"check,omitempty"`
 	Status string   `json:"status"` // pending | in_progress | done | skipped
 	Note   string   `json:"note,omitempty"`
+	// Confirmed counts the plans the developer confirmed while the stage
+	// was current, and their steps (RecordConfirmed).
+	Confirmed      int `json:"confirmed,omitempty"`
+	ConfirmedSteps int `json:"confirmed_steps,omitempty"`
 }
 
 // Stage statuses.
@@ -61,6 +68,9 @@ func (p *TaskPlan) Render() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Goal: %s\n", p.Goal)
+	if p.CarriedFrom != "" {
+		b.WriteString("(Carried over from an earlier session in this draft: go on from the CURRENT stage.)\n")
+	}
 	cur := p.Current()
 	for i, s := range p.Stages {
 		mark := map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress"}[s.Status]
@@ -79,6 +89,9 @@ func (p *TaskPlan) Render() string {
 		}
 		if s.Note != "" {
 			fmt.Fprintf(&b, " — note: %s", s.Note)
+		}
+		if s.Confirmed > 0 {
+			fmt.Fprintf(&b, " — confirmed: %d plan(s), %d step(s)", s.Confirmed, s.ConfirmedSteps)
 		}
 		b.WriteByte('\n')
 	}
@@ -115,6 +128,61 @@ func (s *ChatStore) SetTaskPlan(ctx context.Context, sessionID string, p *TaskPl
 	}
 	_, err := s.pool.Exec(ctx, `UPDATE ai_assistant.session SET task_plan = $2::jsonb WHERE id = $1::uuid`, sessionID, raw)
 	return err
+}
+
+// RecordConfirmed notes a confirmed plan of steps steps on the current
+// stage, which is then in progress. Stage 1 stayed "in progress" after three
+// stages were confirmed (2026-11-08): the AI marks a stage done, but the
+// server knows a plan for it was confirmed. It reports whether the plan
+// changed.
+func (p *TaskPlan) RecordConfirmed(steps int) bool {
+	cur := p.Current()
+	if cur < 0 {
+		return false
+	}
+	st := &p.Stages[cur]
+	if st.Status == StagePending {
+		st.Status = StageInProgress
+	}
+	st.Confirmed++
+	st.ConfirmedSteps += steps
+	return true
+}
+
+// Finished reports whether every stage is done or skipped.
+func (p *TaskPlan) Finished() bool { return p != nil && len(p.Stages) > 0 && p.Current() < 0 }
+
+// CarryTaskPlan gives sessionID, new and without a plan, the plan of the
+// developer's latest earlier session in the model that has one, when that
+// plan is unfinished and the session worked in the same draft (draftID) or
+// was promoted — its draft became the developer's working revision. The
+// Creator & Agency build ran thirteen sessions (200 calls each) and every
+// new one started without its plan (2026-11-08). It returns the plan
+// carried, or nil.
+func (s *ChatStore) CarryTaskPlan(ctx context.Context, sessionID, modelID, userID, draftID string) (*TaskPlan, error) {
+	var from string
+	var raw []byte
+	var sameDraft, promoted bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, task_plan, COALESCE(draft_revision_id::text, '') = $4 AND $4 <> '', promoted_at IS NOT NULL
+		FROM ai_assistant.session
+		WHERE model_id = $1::uuid AND user_id = $2::uuid AND id <> $3::uuid AND task_plan IS NOT NULL
+		ORDER BY created_at DESC LIMIT 1`, modelID, userID, sessionID, draftID).Scan(&from, &raw, &sameDraft, &promoted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var p TaskPlan
+	if json.Unmarshal(raw, &p) != nil || p.Finished() || (!sameDraft && !promoted) {
+		return nil, nil
+	}
+	p.CarriedFrom = from
+	if err := s.SetTaskPlan(ctx, sessionID, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // NewTaskPlan checks a plan the AI wrote and gives each stage its status.

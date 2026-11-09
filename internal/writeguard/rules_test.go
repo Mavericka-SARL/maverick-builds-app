@@ -2,6 +2,7 @@ package writeguard
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -145,17 +146,24 @@ func TestRulesForRevisionResolvesByLineage(t *testing.T) {
 		RuleInput{"dimension_member", web, "hidden"},
 		RuleInput{"dimension_member", "not-a-member-id", "hidden"},
 		RuleInput{"metric", revenueB, "hidden"},
-		RuleInput{"button", "btn-1", "write"},
 	)
-	var withLineage, buttonLineage int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE ref_lineage_id IS NOT NULL),
-	                                     count(*) FILTER (WHERE rule_type = 'button' AND ref_lineage_id IS NOT NULL)
-	                              FROM identity.user_access_rule WHERE user_id = $1::uuid`, lf.f.userID).Scan(&withLineage, &buttonLineage); err != nil {
+	var withLineage int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE ref_lineage_id IS NOT NULL)
+	                              FROM identity.user_access_rule WHERE user_id = $1::uuid`, lf.f.userID).Scan(&withLineage); err != nil {
 		t.Fatal(err)
 	}
-	if withLineage != 6 || buttonLineage != 0 {
-		t.Errorf("ReplaceUserRules stored %d rules with a lineage (%d buttons), want 6 (0)", withLineage, buttonLineage)
+	if withLineage != 6 {
+		t.Errorf("ReplaceUserRules stored %d rules with a lineage, want 6", withLineage)
 	}
+	// A rule of a type nothing enforces is refused (migration 163).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceUserRules(ctx, tx, lf.f.userID, []RuleInput{{"button", "btn-1", "write"}}); !errors.Is(err, ErrRuleType) {
+		t.Errorf("a button rule: %v, want ErrRuleType", err)
+	}
+	_ = tx.Rollback(ctx)
 
 	lf.check("lineage", lf.revA, map[string]string{
 		"dimension_member:" + usA: "hidden",
@@ -163,18 +171,16 @@ func TestRulesForRevisionResolvesByLineage(t *testing.T) {
 		"dimension_member:" + deA: "hidden",
 		"dimension_member:" + web: "hidden",
 		"metric:" + revenueA:      "hidden",
-		"button:btn-1":            "write",
 	})
 	lf.check("lineage", lf.revB, map[string]string{
 		"dimension_member:" + usB: "hidden",
 		"dimension_member:" + caB: "read", // read (from A) beats write (on B)
 		"dimension_member:" + web: "hidden",
 		"metric:" + revenueB:      "hidden",
-		"button:btn-1":            "write",
 		// deB is a new lineage: unrestricted.
 	})
-	if rules, err := RulesForRevision(ctx, pool, lf.f.userID, ""); err != nil || len(rules) != 8 {
-		t.Errorf("no revision: %d rules (err %v), want the 8 stored", len(rules), err)
+	if rules, err := RulesForRevision(ctx, pool, lf.f.userID, ""); err != nil || len(rules) != 7 {
+		t.Errorf("no revision: %d rules (err %v), want the 7 stored", len(rules), err)
 	}
 	if _, err := RulesForRevision(ctx, pool, lf.f.userID, "not-a-revision"); err == nil {
 		t.Error("a malformed revision id resolved; want an error (callers fail closed)")
@@ -190,7 +196,6 @@ func TestRulesForRevisionResolvesByLineage(t *testing.T) {
 		"dimension_member:" + deA: "hidden",
 		"dimension_member:" + web: "hidden",
 		"metric:" + revenueA:      "hidden",
-		"button:btn-1":            "write",
 	})
 
 	if got, err := HiddenAccess(ctx, pool, lf.f.userID, usA); err != nil || got != "hidden" {
@@ -289,7 +294,7 @@ func TestRuleLineageSurvivesRenameAndDelete(t *testing.T) {
 // lineage) in the given revision — including a rule stored against another
 // revision's copy of a row in it, and a revision-less member — and keeps
 // every rule the caller cannot name there: a member gone from that revision
-// (it still restricts the old revision's copy), metric and button rules.
+// (it still restricts the old revision's copy), and metric rules.
 func TestReplaceUserMemberRulesInRevisionScope(t *testing.T) {
 	pool, cleanup := setupWriteguardDB(t)
 	defer cleanup()
@@ -302,13 +307,11 @@ func TestReplaceUserMemberRulesInRevisionScope(t *testing.T) {
 	caB := lf.member(dimB, "CA", "ca")
 	shared := lf.member(lf.dim("", "channel", "channel"), "WEB", "web")
 	costB := lf.metric(lf.revB, "cost", "cost")
-	button := uuid.NewString()
 	lf.setRules(
 		RuleInput{"dimension_member", usA, "hidden"},
 		RuleInput{"dimension_member", ukA, "hidden"}, // stored against A's copy
 		RuleInput{"dimension_member", shared, "read"},
 		RuleInput{"metric", costB, "hidden"},
-		RuleInput{"button", button, "hidden"},
 	)
 
 	replace := func(rules ...RuleInput) error {
@@ -331,12 +334,10 @@ func TestReplaceUserMemberRulesInRevisionScope(t *testing.T) {
 
 	lf.check("A after the scoped replace", lf.revA, map[string]string{
 		"dimension_member:" + usA: "hidden", // kept: not in B
-		"button:" + button:        "hidden",
 	})
 	lf.check("B after the scoped replace", lf.revB, map[string]string{
 		"dimension_member:" + caB: "read",
 		"metric:" + costB:         "hidden",
-		"button:" + button:        "hidden",
 	})
 	if a, err := HiddenAccess(ctx, pool, lf.f.userID, ukB); err != nil || a != "" {
 		t.Errorf("UK (in B, not re-listed) = %q, %v; want unrestricted", a, err)
@@ -379,5 +380,94 @@ func TestRuleMapsHidesWhatAHiddenMetricFlowsInto(t *testing.T) {
 		if got := rules[c.id]; got != c.want {
 			t.Errorf("%s: %q, want %q", name, got, c.want)
 		}
+	}
+}
+
+// Hiding a member of a property grouping (regions grouping employees by
+// their region property) hid none of the employees it groups: no parent
+// link joins them, so their facts stayed visible (2026-09-28). The rules
+// view now hides every source member whose property names the hidden one —
+// for every check — while the rules an administrator set stay as set.
+func TestHiddenGroupingMemberHidesTheMembersItGroups(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	lf := newLineageFixture(t, pool)
+
+	staff := lf.dim(lf.revA, "Employees", "")
+	ann, bob, cy := lf.member(staff, "E1", ""), lf.member(staff, "E2", ""), lf.member(staff, "E3", "")
+	lf.exec(`UPDATE model.dimension_member SET properties = '{"Region":"EMEA"}' WHERE id = ANY($1::uuid[])`, []string{ann, cy})
+	lf.exec(`UPDATE model.dimension_member SET properties = '{"region":"AMER"}' WHERE id = $1::uuid`, bob)
+	regions := lf.q(`INSERT INTO model.dimension_def (model_id, name, revision_id, source_dimension_id, source_property)
+		VALUES ($1::uuid, 'Regions', $2::uuid, $3::uuid, 'region') RETURNING id::text`, lf.f.modelID, lf.revA, staff)
+	emea := lf.member(regions, "EMEA", "")
+	lf.member(regions, "AMER", "")
+	lf.setRules(RuleInput{"dimension_member", emea, "hidden"})
+
+	for id, want := range map[string]string{ann: "hidden", cy: "hidden", bob: ""} {
+		if got, err := HiddenAccess(ctx, pool, lf.f.userID, id); err != nil || got != want {
+			t.Errorf("HiddenAccess(%s) = %q, %v; want %q", id, got, err, want)
+		}
+	}
+	rules, err := RulesForRevision(ctx, pool, lf.f.userID, lf.revA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range rules {
+		got[r.RefID] = r.Access
+	}
+	if got[ann] != "hidden" || got[cy] != "hidden" || got[bob] != "" {
+		t.Errorf("RulesForRevision = %v, want E1 and E3 hidden through EMEA", got)
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity.user_access_rule WHERE user_id = $1::uuid`, lf.f.userID).Scan(&stored); err != nil || stored != 1 {
+		t.Errorf("stored rules = %d, %v; want the administrator's 1", stored, err)
+	}
+}
+
+// An allow-list: "this manager sees only these accounts". Hide rules named
+// members, so every account added later was visible to them until an
+// administrator hid it (2026-10-17). A member rule "only" (or "only_read")
+// hides every other member of its dimension — one added later too — and
+// keeps the allowed members' totals above and members below.
+func TestOnlyTheseMembersHidesTheRestOfTheDimension(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	lf := newLineageFixture(t, pool)
+
+	accounts := lf.dim(lf.revA, "Accounts", "")
+	all := lf.member(accounts, "ALL", "")
+	child := func(code, parent string) string {
+		id := lf.member(accounts, code, "")
+		lf.exec(`UPDATE model.dimension_member SET parent_member_id = $2::uuid WHERE id = $1::uuid`, id, parent)
+		return id
+	}
+	acme, globex, initech := child("ACME", all), child("GLOBEX", all), child("INITECH", all)
+	acmeEU := child("ACME-EU", acme)
+	lf.setRules(RuleInput{"dimension_member", acme, AccessOnly}, RuleInput{"dimension_member", initech, AccessOnlyRead})
+	added := child("UMBRELLA", all) // added after the rules were set
+
+	for id, want := range map[string]string{
+		all: "", acme: "write", acmeEU: "", initech: "read",
+		globex: "hidden", added: "hidden",
+	} {
+		got, err := HiddenAccess(ctx, pool, lf.f.userID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("access to %s = %q, want %q", id, got, want)
+		}
+	}
+	// A metric rule is no allow-list.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := ReplaceUserRules(ctx, tx, lf.f.userID, []RuleInput{{"metric", lf.metric(lf.revA, "sales", ""), AccessOnly}}); !errors.Is(err, ErrRuleAccess) {
+		t.Errorf("an only metric rule: %v, want ErrRuleAccess", err)
 	}
 }

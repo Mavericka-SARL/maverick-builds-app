@@ -73,8 +73,8 @@ test("business_user + business_admin: the user role's User group and the admin s
   await expect(nav(page, "Dashboards")).toHaveCount(1);
   await expect(nav(page, "Workflow Inbox")).toHaveCount(1);
   await expect(nav(page, "Models")).toHaveCount(1);
-  await expect(nav(page, "My Workflow History")).toBeVisible();
-  await expect(nav(page, "Workflow History")).toBeVisible();
+  // The person's own history (User) and the application's (Business Admin).
+  await expect(nav(page, "Workflow History")).toHaveCount(2);
   await expect(nav(page, "Roles")).toBeVisible();
 });
 

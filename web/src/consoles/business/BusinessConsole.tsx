@@ -9,7 +9,8 @@ import { WorkflowInbox } from "./WorkflowInboxTab";
 import { WorkflowMyHistory } from "./WorkflowHistoryTab";
 import { DashboardsView } from "./DashboardsView";
 import { AppsTab } from "./AppsTab";
-import { SELECTED_APP_KEY } from "./modelSelection";
+import { SELECTED_APP_KEY, useSelectModel } from "./modelSelection";
+import { api } from "../../api/client";
 import { useModelLabel } from "./modelLabel";
 
 // ── Section ───────────────────────────────────────────────────────────────────
@@ -18,7 +19,7 @@ const SECTION: SectionId = "business";
 
 /**
  * The user role's section of the console (key business_user): User ›
- * Dashboards, Workflow Inbox, My Workflow History, Models — whatever other roles the
+ * Dashboards, Workflow Inbox, Workflow History, Models — whatever other roles the
  * person holds (see router/sections.ts).
  */
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
@@ -26,6 +27,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
   const qc = useQueryClient();
   const { data: ctx, isLoading, error } = useDemo(undefined, { enabled });
   const modelLabel = useModelLabel(ctx, enabled);
+  const selectModel = useSelectModel();
 
   // Sync the user's primary app into localStorage so X-App-Id is always sent.
   // Without this, the first load has no selected_app_id and the backend falls back
@@ -42,7 +44,16 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
 
   if (!enabled) return null;
   const t = (id: string) => tabId(SECTION, id);
-  const openInstance = (instanceId: string) => { setTab(t("history")); setFocusInstanceId(instanceId); };
+  const openInstance = (instanceId: string) => {
+    setTab(t("history"));
+    setFocusInstanceId(instanceId);
+    // Workflow History lists the selected application's runs; a notification
+    // may name another application's run: switch there to show it.
+    void api.findMyWorkflowRun(instanceId).then((runs) => {
+      const appId = runs[0]?.application_id;
+      if (appId && appId !== localStorage.getItem(SELECTED_APP_KEY)) selectModel(appId, null);
+    }).catch(() => { /* the run stays unfocused: nothing to switch to */ });
+  };
   return {
     id: SECTION,
     navGroups: [{
@@ -50,7 +61,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
       items: [
         { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
         { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
-        { id: t("history"), label: "My Workflow History", icon: <HistoryIcon size={16} /> },
+        { id: t("history"), label: "Workflow History", icon: <HistoryIcon size={16} /> },
         { id: t("models"), label: "Models", icon: <Boxes size={16} /> },
       ],
     }],

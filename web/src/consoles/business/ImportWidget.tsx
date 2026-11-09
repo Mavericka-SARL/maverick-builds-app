@@ -123,7 +123,7 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
           <Select value={mode} onChange={(e) => setMode(e.target.value as ImportModeParam)} aria-label="Import mode" style={{ width: 160 }}>
             <option value="replace">Replace listed cells</option>
             <option value="incremental">Add to existing</option>
-            <option value="full_reload">Full reload (danger)</option>
+            <option value="full_reload">Full reload (clears this grid)</option>
           </Select>
         </Field>
       </div>

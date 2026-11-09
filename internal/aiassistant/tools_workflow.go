@@ -171,8 +171,12 @@ func (e *ToolExecutor) integrationsForForm(ctx context.Context, formID string) (
 
 // The two vocabularies a step's assignee_roles and a notification's
 // recipient_role accept: the built-in roles every deployment has, and the
-// business roles of this application's customer (the console's own picker
-// lists the same set through /api/developer/workflow-roles).
+// business roles a step of this application can be assigned to — those of
+// its workspace, or of any workspace of its tenant for a tenant-level
+// application (internal/workflow/assignee); the console's own picker lists
+// the same set through /api/developer/workflow-roles. Every workspace of the
+// customer was listed before, so the assistant was shown roles it could not
+// change and that assigned a step to no one.
 func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("Built-in roles (use the code): business_user, business_admin, developer (tenant roles); platform_admin (the platform role)\n")
@@ -186,13 +190,10 @@ func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 		                   AND d.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid), '')
 		FROM identity.business_role br
 		JOIN core.workspace w ON w.id = br.workspace_id
-		WHERE w.customer_id = (
-		    SELECT COALESCE(a.customer_id, ws.customer_id)
-		    FROM core.model mo
-		    JOIN core.application a ON a.id = mo.application_id
-		    LEFT JOIN core.workspace ws ON ws.id = a.workspace_id
-		    WHERE mo.id = $1::uuid
-		)
+		JOIN core.model mo ON mo.id = $1::uuid
+		JOIN core.application a ON a.id = mo.application_id
+		WHERE a.workspace_id = w.id
+		   OR (a.workspace_id IS NULL AND a.customer_id = w.customer_id)
 		ORDER BY br.name
 	`, e.modelID, e.revID)
 	if err != nil {

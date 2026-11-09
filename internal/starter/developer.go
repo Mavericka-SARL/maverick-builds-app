@@ -578,7 +578,7 @@ Ask it how something works, too. It reads your model — formulas, grids, workfl
 
 The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from your working revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
 
-The draft is listed in **Developer › Developer Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which switches you to it (live only once you **Set active**), and **Discard**.
+The draft is listed in **Developer › Developer Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which asks for the revision's name (the session's title is offered) and switches you to it (live only once you **Set active**), and **Discard**. The pencil on any revision's row renames it later; the live revision's name is what the header shows everyone.
 
 Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and records posted into the model.
 

@@ -4665,6 +4665,67 @@ func (s GridDimensionTimeGranularity) Validate() error {
 	}
 }
 
+func (s *GridValuesConflict) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.Code.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "code",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.DimensionIds.Get(); ok {
+			if err := func() error {
+				if value == nil {
+					return errors.New("nil is invalid value")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_ids",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s GridValuesConflictCode) Validate() error {
+	switch s {
+	case "VALUES_NEED_MEMBER":
+		return nil
+	case "VALUES_CANNOT_COMBINE":
+		return nil
+	case "POSTINGS_DO_NOT_FIT":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s *HighlightRule) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer

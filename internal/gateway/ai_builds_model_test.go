@@ -310,7 +310,14 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 		}
 		proposals, err := pStore.ListProposals(ctx, sess.ID)
 		if err != nil || len(proposals) != round {
-			t.Fatalf("round %d: expected %d proposal(s), got %d (err %v)", round, round, len(proposals), err)
+			msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+			var tools []string
+			for _, m := range msgs {
+				if m.Role == "tool" {
+					tools = append(tools, m.Content)
+				}
+			}
+			t.Fatalf("round %d: expected %d proposal(s), got %d (err %v); tool results: %q", round, round, len(proposals), err, tools)
 		}
 		var pending *aiassistant.Proposal
 		for i := range proposals {

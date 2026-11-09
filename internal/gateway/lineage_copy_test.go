@@ -154,6 +154,24 @@ func TestModelExportImportLineage(t *testing.T) {
 		row["lineage_id"] = uuid.NewString()
 		want[key] = row["lineage_id"].(string)
 	})
+	// A lineage another TENANT of this database holds is kept too: had it
+	// been re-minted, the export would tell the importing tenant admin that
+	// some tenant holds it.
+	var otherTenantLineage string
+	for _, l := range want {
+		otherTenantLineage = l
+		break
+	}
+	if _, err := f.pool.Exec(context.Background(), `
+		WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('Other Co', 'commercial') RETURNING id),
+		     w AS (INSERT INTO core.workspace (customer_id, name) SELECT id, 'other' FROM c RETURNING id, customer_id),
+		     a AS (INSERT INTO core.application (workspace_id, customer_id, name, mode) SELECT id, customer_id, 'Other', 'planning' FROM w RETURNING id),
+		     m AS (INSERT INTO core.model (application_id, name) SELECT id, 'Other' FROM a RETURNING id),
+		     r AS (INSERT INTO model.revision (model_id, name) SELECT id, 'R' FROM m RETURNING id, model_id)
+		INSERT INTO model.metric_def (model_id, revision_id, name, is_input, lineage_id)
+		SELECT model_id, id, 'other_metric', true, $1::uuid FROM r`, otherTenantLineage); err != nil {
+		t.Fatal(err)
+	}
 	got := importAs("Foreign", foreign)
 	for k, l := range want {
 		if got[k] != l {

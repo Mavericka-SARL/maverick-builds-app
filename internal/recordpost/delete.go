@@ -27,6 +27,9 @@ type DeleteRef struct {
 	Field      string `json:"field"`
 	FieldLabel string `json:"field_label"`
 	Count      int    `json:"count"`
+
+	// ids are the records counted, for Restrict.
+	ids []string
 }
 
 // DeletePlan is what deleting a record does.
@@ -42,15 +45,57 @@ type DeletePlan struct {
 
 	deletes []plannedDelete
 	clears  []plannedClear
+	hidden  bool
 }
 
+// Restrict recounts the plan's linked records as one person sees them:
+// seen answers how many of a table's records ids that person sees. Each
+// count becomes the seen ones, a table with none seen leaves the lists, and
+// Hidden reports whether any linked record was not seen. The counts told a
+// deleter how many records they could not see a delete would take
+// (2026-10-17); a plan with hidden records is refused (HiddenRefusal).
+func (p *DeletePlan) Restrict(seen func(tableID string, ids []string) (int, error)) error {
+	for _, list := range []*[]DeleteRef{&p.Blocked, &p.Cascade, &p.Clear} {
+		kept := (*list)[:0]
+		for _, r := range *list {
+			n, err := seen(r.TableID, r.ids)
+			if err != nil {
+				return err
+			}
+			if n < r.Count {
+				p.hidden = true
+			}
+			r.Count = n
+			if n > 0 {
+				kept = append(kept, r)
+			}
+		}
+		*list = kept
+	}
+	return nil
+}
+
+// Hidden reports whether Restrict found linked records the person does not
+// see.
+func (p *DeletePlan) Hidden() bool { return p.hidden }
+
+// HiddenRefusal is the refusal of a plan that would delete, empty or be
+// blocked by records the deleter does not see (owner's decision,
+// 2026-11-08): it names no count of them.
+const HiddenRefusal = "records you cannot see are linked to it, so you cannot delete it; someone who sees them can"
+
 // CanDelete reports whether nothing blocks the plan.
-func (p *DeletePlan) CanDelete() bool { return len(p.Blocked) == 0 && len(p.Reasons) == 0 }
+func (p *DeletePlan) CanDelete() bool {
+	return !p.hidden && len(p.Blocked) == 0 && len(p.Reasons) == 0
+}
 
 // Refusal is the sentence a blocked plan answers with ("" when it is not).
 func (p *DeletePlan) Refusal(label string) string {
 	if p.CanDelete() {
 		return ""
+	}
+	if p.hidden {
+		return label + ": " + HiddenRefusal
 	}
 	msg := fmt.Sprintf("%s cannot be deleted", label)
 	if len(p.Blocked) > 0 {
@@ -183,15 +228,17 @@ func (ps *Poster) PlanDelete(ctx context.Context, form *crudapp.FormDef, rec *cr
 		}
 	}
 	// A record being deleted anyway neither blocks nor is cleared.
-	add := func(list []DeleteRef, ref Referrer, n int) []DeleteRef {
+	add := func(list []DeleteRef, ref Referrer, ids []string) []DeleteRef {
 		for i := range list {
 			if list[i].TableID == ref.Form.ID && list[i].Field == ref.Field.Name {
-				list[i].Count += n
+				list[i].Count += len(ids)
+				list[i].ids = append(list[i].ids, ids...)
 				return list
 			}
 		}
 		return append(list, DeleteRef{TableID: ref.Form.ID, TableLabel: firstNonEmpty(ref.Form.Label, ref.Form.Name),
-			Field: ref.Field.Name, FieldLabel: firstNonEmpty(ref.Field.Label, ref.Field.Name), Count: n})
+			Field: ref.Field.Name, FieldLabel: firstNonEmpty(ref.Field.Label, ref.Field.Name), Count: len(ids),
+			ids: append([]string(nil), ids...)})
 	}
 	for _, h := range hits {
 		var left []string
@@ -205,12 +252,12 @@ func (ps *Poster) PlanDelete(ctx context.Context, form *crudapp.FormDef, rec *cr
 		}
 		switch h.rule {
 		case crudapp.OnDeleteCascade:
-			plan.Cascade = add(plan.Cascade, h.ref, len(left))
+			plan.Cascade = add(plan.Cascade, h.ref, left)
 		case crudapp.OnDeleteClear:
-			plan.Clear = add(plan.Clear, h.ref, len(left))
+			plan.Clear = add(plan.Clear, h.ref, left)
 			plan.clears = append(plan.clears, plannedClear{form: h.ref.Form, field: h.ref.Field.Name, recordIDs: left})
 		default:
-			plan.Blocked = add(plan.Blocked, h.ref, len(left))
+			plan.Blocked = add(plan.Blocked, h.ref, left)
 		}
 	}
 	return plan, nil

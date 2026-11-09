@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
@@ -68,11 +69,91 @@ func TestCommitDimensionRecalculatesMetricsReadingIt(t *testing.T) {
 	c := &integration.DBCommitter{Pool: pool, Log: log}
 	def := &integration.Definition{ModelID: modelID, RevisionID: revID,
 		Config: &integration.Config{TargetType: integration.TargetDimension, TargetID: region}}
-	written, _, err := c.CommitPull(ctx, def, []string{"code", "property:factor"}, [][]string{{"EMEA", "7"}}, "", false, "dev-user")
+	out, err := c.CommitPull(ctx, def, []string{"code", "property:factor"}, [][]string{{"EMEA", "7"}}, integration.PullOptions{RunBy: "dev-user"})
+	written := out.Written
 	if err != nil || written != 1 {
 		t.Fatalf("commit pull: written=%d err=%v", written, err)
 	}
 	if got := valueAtEMEA(); got != 70 {
 		t.Errorf("after the pull set factor=7: factor_x10 at EMEA = %v, want 70", got)
+	}
+}
+
+// A connector column property:Factor fills the property the developer
+// declared as Factor: the connector lower-cased the header and declared
+// "factor" next to it, the value landed there, and region.Factor * 10 kept
+// reading the old value. A value its number property cannot read skips
+// the row; a column no property can be named after refuses the pull.
+func TestConnectorPropertyHeaderReusesTheDeclaration(t *testing.T) {
+	pool := testdb.New(t, migrationfs.FS, ".")
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+		return id
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+	}
+	custID := q(`INSERT INTO core.customer (name, plan) VALUES ('DimCo','enterprise') RETURNING id::text`)
+	wsID := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid,'ws') RETURNING id::text`, custID)
+	appID := q(`INSERT INTO core.application (workspace_id, customer_id, name, mode) VALUES ($1::uuid,$2::uuid,'App','planning') RETURNING id::text`, wsID, custID)
+	modelID := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid,'M') RETURNING id::text`, appID)
+	revID := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid,'Working') RETURNING id::text`, modelID)
+	region := q(`INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type) VALUES ($1::uuid,$2::uuid,'region','standard') RETURNING id::text`, modelID, revID)
+	exec(`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid,'Factor','number')`, region)
+	exec(`INSERT INTO model.dimension_member (dimension_id, code, label, properties) VALUES ($1::uuid,'EMEA','EMEA','{"Factor":"2"}')`, region)
+	metricID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, formula) VALUES ($1::uuid,$2::uuid,'factor_x10',false,'region.Factor * 10') RETURNING id::text`, modelID, revID)
+	gridID := q(`INSERT INTO model.grid_def (model_id, revision_id, name) VALUES ($1::uuid,$2::uuid,'G') RETURNING id::text`, modelID, revID)
+	exec(`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid)`, gridID, region)
+	exec(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid,$2::uuid)`, gridID, metricID)
+
+	log := logger.New("test")
+	c := &integration.DBCommitter{Pool: pool, Log: log}
+	def := &integration.Definition{ModelID: modelID, RevisionID: revID,
+		Config: &integration.Config{TargetType: integration.TargetDimension, TargetID: region}}
+	out, err := c.CommitPull(ctx, def, []string{"code", "property:Factor", "property:Sales Segment"},
+		[][]string{{"EMEA", "7", "SMB"}, {"US", "abc", "ENT"}}, integration.PullOptions{RunBy: "dev-user"})
+	written, skipped := out.Written, out.Skipped
+	if err != nil || written != 1 || skipped != 1 {
+		t.Fatalf("commit pull: written=%d skipped=%d err=%v; want 1 written, US skipped for factor abc", written, skipped, err)
+	}
+	var decls []string
+	rows, err := pool.Query(ctx, `SELECT name FROM model.dimension_property WHERE dimension_id=$1::uuid ORDER BY name`, region)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n string
+		_ = rows.Scan(&n)
+		decls = append(decls, n)
+	}
+	rows.Close()
+	if strings.Join(decls, ",") != "Factor,sales_segment" {
+		t.Errorf("declarations = %v, want [Factor sales_segment]", decls)
+	}
+	var props string
+	if err := pool.QueryRow(ctx, `SELECT properties::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='EMEA'`, region).Scan(&props); err != nil {
+		t.Fatal(err)
+	}
+	if props != `{"Factor": "7", "sales_segment": "SMB"}` {
+		t.Errorf("EMEA holds %s, want Factor 7 and sales_segment SMB", props)
+	}
+	var v float64
+	if err := pool.QueryRow(ctx, `
+		SELECT value FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND dim_members=jsonb_build_object($4::text,'EMEA')
+	`, modelID, revID, metricID, region).Scan(&v); err != nil || v != 70 {
+		t.Errorf("factor_x10 at EMEA = %v (%v), want 70", v, err)
+	}
+
+	if _, err := c.CommitPull(ctx, def, []string{"code", "property:%%"}, [][]string{{"EMEA", "x"}}, integration.PullOptions{RunBy: "dev-user"}); err == nil || !strings.Contains(err.Error(), "INVALID_PROPERTY_NAME") {
+		t.Errorf("a property:%%%% column: err %v, want INVALID_PROPERTY_NAME", err)
 	}
 }

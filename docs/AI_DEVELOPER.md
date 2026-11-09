@@ -111,13 +111,30 @@ deleted. The gateway endpoints and the assistant both call it.
 `update_dimension_member` names the member by its current `code` and changes
 what it carries: `new_code`, `label`, `parent_code` or `clear_parent`,
 `period_start` and `period_end` (a time member keeps its dates when they are
-left out), `properties` (merged). `create_grid`'s `metric_ids` and
+left out), `properties` (merged). A `new_code` is carried into every formula
+of the revision that names the old code (a LOOKUP member, a criterion,
+`"<>CODE"` included, a comparison, a SWITCH value, a TIMESUM bound on the
+time dimension) and into the data exports filtering by it
+(`metricformula.RenameMemberInFormulas`, from `modeledit.RekeyMemberCode`), as
+the developer's member edit does. `create_grid`'s `metric_ids` and
 `dimension_ids` go through `add_grid_metric` and `add_grid_dimension`, so they
-get the same model, revision and one-grid checks. A widget, folder, form or
+get the same model, revision and one-grid checks. Values already stored move
+with a grid change as they do in the console: `add_grid_dimension` takes
+`member` (the member of the new dimension the grid's values belong to,
+required while its metrics hold any), `add_grid_metric` and `create_grid` take
+`members` (`{dimension: member}` for each grid dimension the metric's values
+lack), and a metric moved onto a grid without a dimension its values carry has
+them combined along it by its own rule, or the step is refused when the rule
+cannot combine stored values. A widget, folder, form or
 integration id listed before the draft existed resolves to the draft's copy.
 
 `update_metric` changes only the fields the step carries (a field left out
 keeps its value, as the developer's `PATCH /api/developer/metrics/{id}`). A
+new `name` is carried into the highlight rules, closed rules and data exports
+of the revision that name the metric (`metricformula.RenameMetricInRules`).
+`delete_metric` is refused with `METRIC_IN_USE` while a formula, a Rate
+total, a highlight rule, a closed rule, a workflow condition or a data export
+of the revision names the metric; the message names each of them. A
 name the revision already uses is refused on `create_metric`,
 `update_metric`, `create_dimension` and `update_dimension` with `METRIC_NAME_TAKEN` /
 `DIMENSION_NAME_TAKEN`, and a code the dimension already has on
@@ -147,11 +164,20 @@ dimension regardless of case — so a formula can then read it as
 — its current name or id — and `name` and/or `data_type`) renames or retypes a
 declaration like the panel's edit: a field left out keeps its value, and a
 rename moves every member's value, any dimension grouped by the property and
-every formula that reads it to the new name. `delete_dimension_property`
-(`dimension_id`, `property`) removes the declaration; member values stay stored
-but no formula can read them. The delete is refused with `PROPERTY_IN_USE` while
-a formula still reads the property, and the error names the metrics to change
-first. Both act only on the assistant's draft revision
+every formula that reads it to the new name. A retype is refused with
+`INVALID_PROPERTY_VALUE` while a member holds a value the new type cannot read,
+and a member value a number or date property cannot read is refused on the
+member tools. `clear_values: true` removes the property's value from every
+member, like the panel's Clear values; the assistant sends it only when the
+developer asked. `delete_dimension_property` (`dimension_id`, `property`)
+removes the declaration; member values stay stored but no formula can read them
+until the name is declared again, in any case: `add_dimension_property` then
+says "N member(s) already hold values under … from before; formulas read them
+now", and the assistant asks the developer whether to clear them. The delete is
+refused with `PROPERTY_IN_USE` while a formula still reads the property, and
+the error names the metrics to change first. Two declarations differing only in
+case made at the same moment leave one; the other is refused with
+`PROPERTY_NAME_TAKEN` naming it. Both act only on the assistant's draft revision
 and refuse a property of another dimension or model. A property id from
 another revision (the active one, listed before a draft exists) is matched to
 the draft's same-named property only while the draft's declarations on that
@@ -159,7 +185,11 @@ dimension are still the copied ones, and keeps that match for the rest of the
 proposal; otherwise it is refused with a request for the current name. Promoting the draft
 recomputes every calculated metric of the revision. The assistant's formulas use the same validation as the
 console, including `dim.property`, `PARENT`, `LOOKUP`, the `SUMIFS` family and
-the time additions (see the [formulas manual](formulas-manual/)). Its system prompt's "Formula language"
+the time additions (see the [formulas manual](formulas-manual/)); so a formula
+reading a dimension its metric's grid does not carry is refused with
+`DIMENSION_NOT_ON_METRIC` when the assistant saves it on a placed metric, places
+the metric (`add_grid_metric`) or removes the dimension from the grid, and
+activating a revision that holds one is refused too. Its system prompt's "Formula language"
 section lists the functions from the engine's own registry (`formula.BuiltinNames`,
 held there by `TestPromptListsEveryFormulaFunction`), so the assistant is never
 told of a function the engine lacks, and names what does not exist (VLOOKUP,
@@ -187,7 +217,12 @@ detaches), `source_dimension_id` or `source_dimension_name` (null clears the
 grouping), `source_property`, and `derive_members: true` to add a member for
 every source value with none yet (also on its own, after new values appear).
 Neither it nor `create_dimension` takes an `agg_rule`: a dimension's is read by
-nothing — each metric's own `agg_rule` decides how it rolls up.
+nothing — each metric's own `agg_rule` decides how it rolls up. A new `name`
+is carried into every formula naming the dimension (bare, braced, as
+`dimension.property`, as a LOOKUP or criteria dimension, inside `PARENT()`),
+the highlight rules limited to its members and the data exports naming it
+(`metricformula.RenameDimensionInFormulas`), as the developer's rename does;
+the result says how many formulas changed.
 It shares the PATCH's rules (`metricformula.ValidateParentDimension`,
 `metricformula.PlanGroupingPatch`): `INVALID_PARENT_DIMENSION`,
 `INVALID_GROUPING`, `DIMENSION_IN_USE` when clearing or replacing a grouping's
@@ -212,7 +247,7 @@ Workflows and tables of records (added 2026-09-16, programme item 5; tables 2026
 | `create_automation_rule`, `update_automation_rule`, `delete_automation_rule` | the Triggers screen: every trigger type, sources, cron schedules |
 | `create_business_role`, `update_business_role`, `delete_business_role`, `set_role_dashboards` | the developer's Roles tab (the `baOrDev` guard); a rename or delete names the workflows whose steps still name the old role |
 | `create_form_def`, `update_form_def`, `delete_form_def` | the Records tab: every field type — autocode (`code_prefix`, `code_digits`), status, longtext and url included — every field option (default, required_with, hidden, core, history, on_delete, format, deadline), `own_records_only`, `edit_access`, and `keeps_dimension` (by name) with `member_label_field` and `member_root_label`; an update that adds or removes the status field re-posts the table (`Hooks.RepostTable`), as the tab's save does |
-| `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the record-to-metric posting screen (Integrations › Records) and its **Backfill**; an update re-posts, as the screen's does |
+| `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the record-to-metric posting screen (Integrations › Records) and its **Backfill**; an update re-posts, as the screen's does. Creating one, or pointing one at another metric, says how many typed values of the target it sets aside (a metric records feed shows its records only; `clear_input_values` removes them), as the screen does |
 
 ## A plan is checked before the developer sees it
 
@@ -304,6 +339,96 @@ and `output` tokens. Promoting a session's draft finishes it and every other
 session of the developer working in that draft: their next message is refused
 with 409 `SESSION_PROMOTED`, and a new session works on the developer's
 working revision — the promoted draft, which the console has switched to.
+
+**What keeps a large build moving** (found building the Creator & Agency
+workbook, 2026-11-08/09; `internal/gateway/ai_build_guards.go`, `ai_turn.go`):
+
+- *A plan that does not arrive* — cut off at the model's output limit
+  (`finish_reason` `length`) or arguments that are not a plan — goes back to
+  the model saying why and to propose in parts (`unreadablePlanResult`); the
+  third in a turn ends it with a message. An empty reply goes back once
+  (`emptyReplyNudge`). A reply announcing a proposal it did not make ("I'll
+  send the corrected proposal now") is told to propose (`announcesProposal`);
+  a reply offering the developer a choice is never sent back as a done claim.
+- *A new proposal withdraws the pending one* it replaces (marked rejected, so
+  it cannot be confirmed): the model's tool result and the chat both say so.
+- *One round per finding, not per kind of finding*: a failing plan's
+  rejection also lists the warnings of the steps that ran; a warning counts as
+  given once it was shown, alone or with others; a plan failing the same way
+  twice (step numbers and ids aside) is asked for the steps that pass, then to
+  stop (`planRetries.repeats`).
+- *Warnings for the build's silent mistakes*: a `write_input_values` step that
+  changes values an input already holds, unless the request names that input
+  (`inputOverwriteWarnings` — the model had moved two assumptions until a row
+  matched); an `update_metric` turning a calculated metric into an input
+  (`calcToInputWarnings` — it had proposed typing the workbook's values into
+  three calculated rows); a formula reading `dim.property` that no member has
+  a value for (`emptyPropertyWarnings`); a total by formula given a time
+  summary other than sum, which never applies.
+- *The coverage check* is told what the revision already has, that a heading
+  or a source named as input is not an item, and that "rows 6-39" is covered
+  row by row.
+- *The server checks values after each confirmed plan*: in a session with an
+  attached file, the next turn starts by comparing again every row the
+  session compared (`compare_with_sheet`), naming the rows that matched at
+  their last comparison and differ now, the rows that differ, and the metrics
+  the plan made or changed that nothing compared yet (`stageValueCheck`). The
+  note is shown in the chat and given to the model with the developer's
+  message.
+
+**Sessions carry the work on** (`aiCreateSession`, `ChatStore.OpenDraft`,
+`CarryTaskPlan`, `EarlierSessions`). A session ends at its call limit (200);
+a large build is several sessions, and each used to start without the task
+plan and the rows already checked — and one opened on the active revision
+worked in an older draft it had superseded. Now:
+
+- a new session continues the developer's open AI draft — the one the console
+  shows when it is open, else the newest — but never a draft older than the
+  model's active revision;
+- it takes over the task plan of the developer's previous session in the
+  model when that plan is unfinished and the session worked in the same draft
+  or was promoted (`carried_from`); a confirmed plan marks the current stage
+  in progress and counts its plans and steps (`RecordConfirmed`);
+- the value check reads the comparisons of the earlier sessions in the draft
+  (and of the sessions the plan came from), and a session's first turn opens
+  with a handover check of those rows;
+- from 70% of its calls the model is asked to end the part it is on and
+  suggest a new session (`sessionLengthNote`); at the limit, the message says
+  a new session continues the draft — no promote needed.
+
+**Modelling know-how in the tools** (2026-11-09):
+
+- `<created in step N>` placeholders that stand for a metric, grid, dimension or
+  page the plan creates become that object's name (`aiassistant.NamePlaceholders`)
+  — one pointing at a step that creates no such object reads as the object of
+  that kind the step's description names, or the metric an update / add /
+  write step works on — so a plan using positions is put in dependency order
+  and its carried-forward cycles are split (created with 0, formula set
+  later). A formula set by `update_metric` follows the steps placing its
+  metrics on their grids: a cycle broken by time needs its time grid first.
+- The refusal of a LOOKUP or a conditional aggregation inside such a cycle
+  says what to do: the call in a metric of its own, read here.
+- A formula that does not parse because it names a dimension or metric with
+  a space bare is told the name in braces (`bracesHint`); `create_dimension`
+  takes a `label`, and the prompt asks for identifier names with labels.
+- The prompt asks the developer for a missing record (business data) instead
+  of a stand-in table, and never asks whether to submit a plan on the card.
+- A property declared on a dimension a table keeps is filled from the table's
+  field of that name and kept up to date (`recordpost.KeepMember`,
+  `FillKeptProperties`).
+
+**Engine fixes found by the same build** (2026-11-09): a table loader's
+column map is checked against the table's fields when it is saved and when it
+runs, and "metric" is the grid import's long-file keyword only for a grid (a
+table field named Metric loads); a workflow condition waits for its revision's
+pending recalculation (up to 20 s, then held and decided when it finishes);
+`list_grids` marks a grid dimension with no members, and the plan check warns
+of a plan that puts one on a grid (`memberlessDimensionWarnings`).
+
+Renaming a metric — by the AI Developer or in the console — renames it in
+every formula and workflow condition of its revision that names it
+(`metricformula.RenameMetricInFormulas`); before, they stayed on the old name
+and went blank at the next draft copy.
 
 Confirming runs the steps in order and **stops at the first failure**: the
 steps after it are marked *not run*, because they are usually built on it.
@@ -419,7 +544,8 @@ a dashboard's Integration button downloads one for users.
   runs them, and fires manual triggers (since 2026-10-09: `create_api_integration`,
   `update_api_integration`, `create_connection`, `update_connection`,
   `run_integration`, `trigger_automation_rule`, and since 2026-10-15
-  `recalculate_revision` (Models › revision › Recalculate), `clear_input_values`
+  `recalculate_revision` (Models › revision › Recalculate), since 2026-11-08
+  `rename_draft` (the session's own draft; Models › revision › Rename), `clear_input_values`
   and `fill_sample_values` (Grids › Values; `as_file` attaches the rows as a CSV
   instead of writing them), and the immediate `create_csv_file` (a CSV it writes,
   attached to the chat and listed under Converted files); saves go through the

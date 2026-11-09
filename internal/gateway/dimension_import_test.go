@@ -51,7 +51,7 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		for i, c := range header {
 			colIdx[strings.ToLower(strings.TrimSpace(c))] = i
 		}
-		imported, errs, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
+		imported, errs, _, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
 		if fatal != nil {
 			t.Fatalf("import: %v", fatal)
 		}
@@ -170,7 +170,7 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 	for i, c := range header {
 		colIdx[c] = i
 	}
-	_, _, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
+	_, _, _, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
 	var fe *dimensionFileError
 	if !errors.As(fatal, &fe) || len(fe.rows) != 2 {
 		t.Fatalf("a file with failing rows: %v, want both rows refused", fatal)

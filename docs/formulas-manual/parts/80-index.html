@@ -93,6 +93,7 @@
 <tr><td><code>UNKNOWN_PROPERTY</code></td><td>dimension.property names a property that is not declared</td><td><a href="#members">11</a></td></tr>
 <tr><td><code>UNKNOWN_MEMBER</code></td><td>A literal LOOKUP member or TIMESUM period code does not exist (save, placement, activation)</td><td><a href="#lookup">12</a>, <a href="#time">14</a></td></tr>
 <tr><td><code>DIMENSION_NOT_ON_SOURCE</code></td><td>A LOOKUP or criteria dimension is neither the source's nor related to it</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
+<tr><td><code>DIMENSION_NOT_ON_METRIC</code></td><td>A dimension read at the cell (bare, <code>dim.property</code>, <code>PARENT</code>) is not on the metric's own grid, so it is blank at every cell</td><td><a href="#members">11</a></td></tr>
 <tr><td><code>CONFLICTING_DIMENSION_ARGUMENTS</code></td><td>Two dimension arguments relate to the same dimension of the source</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
 <tr><td><code>DIM_CONTEXT_REQUIRED</code></td><td>A dimensional function evaluated where there is no cell</td><td><a href="#validation">17</a></td></tr>
 <tr><td><code>TIME_CONTEXT_REQUIRED</code></td><td>A time function evaluated where there is no period</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>

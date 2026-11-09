@@ -533,6 +533,13 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 			jsonErr(w, fmt.Errorf("integration is disabled"), http.StatusBadRequest)
 			return
 		}
+		if ok, terr := h.intStore(ctx).TestedOrRemappedCopy(ctx, def); terr != nil {
+			jsonErr(w, terr, http.StatusInternalServerError)
+			return
+		} else if !ok {
+			jsonErr(w, integration.ErrUntested, http.StatusBadRequest)
+			return
+		}
 	}
 	runID, err := h.intStore(ctx).Enqueue(ctx, id, trigger, runBy, dryRun, nil)
 	if err != nil {

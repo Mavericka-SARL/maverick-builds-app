@@ -258,6 +258,19 @@ func encodeAddGridDimensionResponse(response AddGridDimensionRes, w http.Respons
 
 		return nil
 
+	case *GridValuesConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
@@ -278,7 +291,7 @@ func encodeAddGridMetricResponse(response AddGridMetricRes, w http.ResponseWrite
 
 		return nil
 
-	case *AddGridMetricBadRequest:
+	case *Error:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
 		span.SetStatus(codes.Error, http.StatusText(400))
@@ -291,7 +304,7 @@ func encodeAddGridMetricResponse(response AddGridMetricRes, w http.ResponseWrite
 
 		return nil
 
-	case *AddGridMetricConflict:
+	case *GridValuesConflict:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(409)
 		span.SetStatus(codes.Error, http.StatusText(409))
@@ -1463,10 +1476,23 @@ func encodeCreateDimensionPropertyResponse(response CreateDimensionPropertyRes, 
 
 		return nil
 
-	case *Error:
+	case *CreateDimensionPropertyBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
 		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateDimensionPropertyConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -5024,6 +5050,19 @@ func encodeImportFormRecordsResponse(response ImportFormRecordsRes, w http.Respo
 
 		return nil
 
+	case *ImportFormRecordsConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *ImportFormRecordsUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
@@ -7165,6 +7204,19 @@ func encodePromoteAiDraftResponse(response PromoteAiDraftRes, w http.ResponseWri
 
 		return nil
 
+	case *PromoteAiDraftConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
@@ -7648,6 +7700,65 @@ func encodeRenameAiSessionResponse(response RenameAiSessionRes, w http.ResponseW
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
 		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeRenameRevisionResponse(response RenameRevisionRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *RenameRevisionOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *RenameRevisionBadRequest:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *RenameRevisionNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *RenameRevisionConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -10372,6 +10483,19 @@ func encodeUpdateDimensionPropertyResponse(response UpdateDimensionPropertyRes, 
 
 		return nil
 
+	case *UpdateDimensionPropertyConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
@@ -10392,10 +10516,23 @@ func encodeUpdateFolderResponse(response UpdateFolderRes, w http.ResponseWriter,
 
 		return nil
 
-	case *Error:
+	case *UpdateFolderBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
 		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFolderNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)

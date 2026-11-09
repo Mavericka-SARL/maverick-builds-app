@@ -433,6 +433,18 @@ func (r *dimReads) context(combo map[string]string, useMemo bool) *formula.DimEv
 	d.Resolve = func(metric string, overrides map[string]string) (float64, bool, *formula.FormulaError) {
 		return r.resolve(combo, metric, overrides)
 	}
+	d.NoValue = func(metric string, overrides map[string]string) bool {
+		depID, srcDims, byID, ferr := r.target(combo, metric, overrides)
+		if ferr != nil {
+			return false
+		}
+		norm, ferr := r.normalize(combo, metric, srcDims, byID)
+		if ferr != nil {
+			return false
+		}
+		def := r.defs[depID]
+		return rollup.NoValueByRule(r.meta.dims, srcDims, rollup.AggRule(def.AggRule), rollup.TimeSummaryRule(def.TimeSummary), norm)
+	}
 	if useMemo {
 		d.Memo = r.memo
 	}
@@ -471,32 +483,10 @@ func (r *dimReads) relates(depID, dimID string) bool {
 // code) applied (contract C2): member check, NormalizeCombo, then
 // ResolveTime with the source's own rules.
 func (r *dimReads) resolve(combo map[string]string, metric string, overrides map[string]string) (float64, bool, *formula.FormulaError) {
-	depID, ferr := r.source(metric)
+	depID, srcDims, byID, ferr := r.target(combo, metric, overrides)
 	if ferr != nil {
 		return 0, false, ferr
 	}
-	byID := make(map[string]string, len(overrides))
-	for dim, code := range overrides {
-		id, ferr := r.meta.dimID(dim, combo)
-		if ferr != nil {
-			return 0, false, ferr
-		}
-		if code == "" {
-			return 0, false, formula.MemberNotAvailable(fmt.Sprintf("the %s member is blank", dim))
-		}
-		if r.meta.member(id, code) == nil {
-			return 0, false, formula.MemberNotAvailable(fmt.Sprintf("%s has no member %q", dim, code))
-		}
-		if !r.relates(depID, id) {
-			// NormalizeCombo would drop the override and answer the
-			// source's value everywhere — a LOOKUP ignoring its member, a
-			// SUMIFS multiplying one value by the member count.
-			return 0, false, &formula.FormulaError{Code: formula.CodeDimensionNotOnSource,
-				Message: fmt.Sprintf("%s is not dimensioned by %s or by a dimension related to it", metric, dim)}
-		}
-		byID[id] = code
-	}
-	srcDims := r.metricDims[depID]
 	// A read that pins every dimension of its source is the same from every
 	// cell (NormalizeCombo keeps nothing of combo then), so a pass makes it
 	// once: a SUMIFS reads its criteria metric so at each candidate member,
@@ -513,18 +503,17 @@ func (r *dimReads) resolve(combo map[string]string, metric string, overrides map
 			return p.v, p.found, nil
 		}
 	}
-	norm, err := rollup.NormalizeCombo(r.meta.dims, srcDims, combo, byID)
-	if err != nil {
-		if errors.Is(err, rollup.ErrConflictingOverrides) {
-			return 0, false, &formula.FormulaError{Code: formula.CodeConflictingDimensions,
-				Message: fmt.Sprintf("reading %s: two dimension arguments select members of the same dimension of %s, which one read cannot express", metric, metric)}
-		}
-		return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
+	norm, ferr := r.normalize(combo, metric, srcDims, byID)
+	if ferr != nil {
+		return 0, false, ferr
 	}
 	def := r.defs[depID]
 	v, found, handled, err := r.rows[depID].at(srcDims, norm)
 	if !handled {
-		v, found, err = rollup.ResolveTime(r.ctx, r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule),
+		// Recorded: a read across the source's own dimensions with nothing
+		// recorded beneath it is not found — blank to a criterion, never a
+		// value counted by AVERAGEIFS — as resolveDependency reads it.
+		v, found, err = rollup.ResolveTimeRecorded(r.ctx, r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule),
 			rollup.TimeSummaryRule(def.TimeSummary), norm, r.fetch[depID])
 	}
 	if err != nil {
@@ -537,6 +526,52 @@ func (r *dimReads) resolve(combo map[string]string, metric string, overrides map
 		r.data = true
 	}
 	return v, found, nil
+}
+
+// target maps a read of metric with overrides (dimension name -> member
+// code) onto the source: its dependency ID, its own dimensions and the
+// overrides by dimension ID, after the member checks (contract C2).
+func (r *dimReads) target(combo map[string]string, metric string, overrides map[string]string) (string, []string, map[string]string, *formula.FormulaError) {
+	depID, ferr := r.source(metric)
+	if ferr != nil {
+		return "", nil, nil, ferr
+	}
+	byID := make(map[string]string, len(overrides))
+	for dim, code := range overrides {
+		id, ferr := r.meta.dimID(dim, combo)
+		if ferr != nil {
+			return "", nil, nil, ferr
+		}
+		if code == "" {
+			return "", nil, nil, formula.MemberNotAvailable(fmt.Sprintf("the %s member is blank", dim))
+		}
+		if r.meta.member(id, code) == nil {
+			return "", nil, nil, formula.MemberNotAvailable(fmt.Sprintf("%s has no member %q", dim, code))
+		}
+		if !r.relates(depID, id) {
+			// NormalizeCombo would drop the override and answer the
+			// source's value everywhere — a LOOKUP ignoring its member, a
+			// SUMIFS multiplying one value by the member count.
+			return "", nil, nil, &formula.FormulaError{Code: formula.CodeDimensionNotOnSource,
+				Message: fmt.Sprintf("%s is not dimensioned by %s or by a dimension related to it", metric, dim)}
+		}
+		byID[id] = code
+	}
+	return depID, r.metricDims[depID], byID, nil
+}
+
+// normalize is the cell combo with the overrides applied, on the source's
+// own dimensions (rollup.NormalizeCombo).
+func (r *dimReads) normalize(combo map[string]string, metric string, srcDims []string, byID map[string]string) (map[string]string, *formula.FormulaError) {
+	norm, err := rollup.NormalizeCombo(r.meta.dims, srcDims, combo, byID)
+	if err != nil {
+		if errors.Is(err, rollup.ErrConflictingOverrides) {
+			return nil, &formula.FormulaError{Code: formula.CodeConflictingDimensions,
+				Message: fmt.Sprintf("reading %s: two dimension arguments select members of the same dimension of %s, which one read cannot express", metric, metric)}
+		}
+		return nil, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
+	}
+	return norm, nil
 }
 
 // pinnedKeyOf is the key of a read of depID that pins exactly its
@@ -608,18 +643,20 @@ func nonValueArg(fn string, i int) bool {
 
 // exactRows returns the persisted rows of dependency dep (valueMap, as
 // LoadCalcValueMap returns them) when they are the only true source of its
-// value above the leaves: a CALCULATED metric whose agg_rule is formula or
-// rate. Its value at a parent member, a one-dimension slice, an aggregate
-// period or the total is the formula re-evaluated there — which the
-// scheduler persisted when it computed dep — and never the average of its
-// children that rollup.Resolve falls back to for those rules. nil for any
-// other dependency: its rows above the leaves combine the leaves, which
-// rollup.ResolveTime reproduces.
-func exactRows(dep *MetricDef, valueMap map[string]float64) map[string]float64 {
+// value above the leaves: a CALCULATED metric that totals as formula or
+// rate — its agg_rule, or a pure ratio with agg_rule average
+// (EffectiveAggRule, the rule its own rows were written by). Its value at a
+// parent member, a one-dimension slice, an aggregate period or the total is
+// the formula re-evaluated there — which the scheduler persisted when it
+// computed dep — and never the average of its children that rollup.Resolve
+// falls back to for those rules. nil for any other dependency: its rows
+// above the leaves combine the leaves, which rollup.ResolveTime reproduces.
+func exactRows(dep *MetricDef, valueMap map[string]float64, dimIDToName map[string]string) map[string]float64 {
 	if dep == nil || dep.IsInput {
 		return nil
 	}
-	if dep.AggRule == string(rollup.AggFormula) || dep.AggRule == string(rollup.AggRate) {
+	rule := EffectiveAggRule(dep.AggRule, dep.Formula, dimIDToName)
+	if rule == string(rollup.AggFormula) || rule == string(rollup.AggRate) {
 		return valueMap
 	}
 	return nil
@@ -628,8 +665,11 @@ func exactRows(dep *MetricDef, valueMap map[string]float64) map[string]float64 {
 // resolveDependency reads dependency dep at the cell combo — the read of a
 // plain reference: a formula/rate calculated dependency through its
 // exactSource (its persisted row, else its formula evaluated there),
-// otherwise rollup.ResolveTime with dep's own rules over its prefetched
-// values.
+// otherwise rollup.ResolveTimeRecorded with dep's own rules over its
+// prefetched values. found is false where nothing was recorded beneath the
+// cell — a leaf nobody entered, and equally a total across a dimension (a
+// month with no postings on any account): the variable is then blank to
+// ISBLANK and comparisons with "", and 0 in arithmetic, as at a leaf.
 func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, dep *MetricDef, srcDims []string,
 	combo map[string]string, fetch rollup.RawValue, src *exactSource,
 ) (float64, bool, error) {
@@ -646,6 +686,6 @@ func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, d
 	if norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil); err == nil {
 		combo = norm
 	}
-	return rollup.ResolveTime(ctx, dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule),
+	return rollup.ResolveTimeRecorded(ctx, dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule),
 		rollup.TimeSummaryRule(dep.TimeSummary), combo, fetch)
 }

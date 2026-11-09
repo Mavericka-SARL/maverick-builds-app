@@ -61,15 +61,26 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		out.problems = append(out.problems, unorderedPagesProblems(ctx, tx, revID, resolved)...)
 		out.problems = append(out.problems, dashboardLayoutProblems(ctx, tx, revID, resolved, created)...)
 	}
-	if err == nil && len(out.problems) == 0 {
+	// The formula and value warnings come with the failures too, read on the
+	// steps that ran: a plan used to go back once per kind of finding — the
+	// failures, then the warnings, then the request's coverage — and a stage
+	// took four rounds where one would do (2026-11-08).
+	if err == nil {
 		out.warnings = planWarnings(ctx, tx, modelID, revID, steps)
 		resolved := make([]aiassistant.ProposalStep, len(steps))
 		for i, s := range steps {
 			s.Params = resolveParamRefs(storedParams(s.Params), created)
 			resolved[i] = s
 		}
-		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, currencyWarnings(ctx, tx, modelID, revID, resolved)...)
+	}
+	if err == nil && len(out.problems) == 0 {
+		resolved := make([]aiassistant.ProposalStep, len(steps))
+		for i, s := range steps {
+			s.Params = resolveParamRefs(storedParams(s.Params), created)
+			resolved[i] = s
+		}
+		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, dashboardLayoutWarnings(ctx, tx, revID, resolved, created)...)
 		out.warnings = append(out.warnings, otherDashboardsWarnings(ctx, tx, revID, resolved, created)...)
 		// Page mistakes (ai_page_warnings.go); a text's old content is read
@@ -271,11 +282,15 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, u
 		if err != nil {
 			return "", err
 		}
-		imported, _, _, err := h.importDimensionMembersOn(ctx, tx, req.TargetID, cr, colIdx)
+		imported, _, _, notices, err := h.importDimensionMembersOn(ctx, tx, req.TargetID, cr, colIdx)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%d member(s) from %s", imported, f.describe()), nil
+		msg := fmt.Sprintf("%d member(s) from %s", imported, f.describe())
+		for _, n := range notices {
+			msg += ". NOTE: " + aiPreexistingValuesOffer(n)
+		}
+		return msg, nil
 	}
 	var modelID string
 	if err := tx.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, req.RevisionID).Scan(&modelID); err != nil {
@@ -360,6 +375,12 @@ func (c proposalCheck) rejection(mode retryMode) string {
 	}
 	if len(c.unchecked) > 0 {
 		fmt.Fprintf(&sb, "(Steps %s could not be checked: they use the result of a step that failed.)\n", joinInts(c.unchecked))
+	}
+	if len(c.warnings) > 0 && mode == retryFix {
+		sb.WriteString("Also, in steps that run — fix these in the same plan, or keep one you mean and say why:\n")
+		for _, w := range c.warnings {
+			sb.WriteString("- " + w + "\n")
+		}
 	}
 	switch mode {
 	case retryPartial:

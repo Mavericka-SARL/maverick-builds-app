@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 	"github.com/rs/zerolog"
 )
 
@@ -984,6 +985,11 @@ func (s *Service) groups(w http.ResponseWriter, r *http.Request, id string) erro
 		if in.DisplayName == "" {
 			return bad("invalidValue", "displayName is required")
 		}
+		// A group named like a platform role would make a business role
+		// whose steps go to the platform's people (migration 164).
+		if err := assignee.CheckBusinessRoleName(in.DisplayName); err != nil {
+			return bad("invalidValue", err.Error())
+		}
 		var gid string
 		err = s.Pool.QueryRow(ctx, `
 			INSERT INTO identity.business_role (workspace_id, name, external_id) VALUES ($1::uuid, $2, NULLIF($3,''))
@@ -1022,6 +1028,9 @@ func (s *Service) groups(w http.ResponseWriter, r *http.Request, id string) erro
 		}
 		if in.DisplayName == "" {
 			in.DisplayName = g.Name
+		}
+		if err := assignee.CheckBusinessRoleName(in.DisplayName); err != nil {
+			return bad("invalidValue", err.Error())
 		}
 		if _, err := s.Pool.Exec(ctx, `UPDATE identity.business_role SET name = $2, external_id = NULLIF($3,'') WHERE id = $1::uuid`, g.ID, in.DisplayName, in.ExternalID); err != nil {
 			return internal(err)

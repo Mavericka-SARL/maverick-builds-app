@@ -705,6 +705,11 @@ const inputValueMapSQL = `
 				ORDER BY dim_members, entered_at DESC, id DESC
 			) direct
 			WHERE NOT EXISTS (SELECT 1 FROM covered c WHERE c.dim_members = direct.dim_members)
+			  -- A metric records feed reads its records only: its typed
+			  -- values are set aside (writeguard.FedMetricsCTE).
+			  AND NOT EXISTS (SELECT 1 FROM model.form_metric_mapping mm
+				WHERE mm.target_metric_id = $3::uuid AND mm.model_id = $1::uuid
+				  AND (mm.revision_id IS NULL OR mm.revision_id = $2::uuid))
 			UNION ALL
 			SELECT dim_members, value FROM runtime.fact_input
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid

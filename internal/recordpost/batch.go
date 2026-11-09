@@ -136,6 +136,17 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 				retract = append(retract, rec)
 				continue
 			}
+			// A record leaving a mapped field empty — saved before such a
+			// save was refused, or there when the mapping was made — has no
+			// full coordinate and posts nothing: it used to post at the
+			// dimensions it named, counted in the metric's grid total and
+			// in no cell or calculation. Its earlier posting is retracted.
+			if empty := m.emptyDims(rec.data); len(empty) > 0 {
+				ps.Log.Warn().Str("mapping_id", m.id).Str("record_id", rec.id).Strs("empty_dimensions", empty).
+					Msg("posting: a mapped field is empty — nothing posted")
+				retract = append(retract, rec)
+				continue
+			}
 			members := m.members(rec.data, tp.period)
 			g, decided := ps.guard(ctx, tp, i, firstNonEmpty(rec.creator, userID), members, rec.id)
 			switch {

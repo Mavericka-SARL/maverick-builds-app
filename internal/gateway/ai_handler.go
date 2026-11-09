@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -89,14 +90,27 @@ const (
 )
 
 // sessionCapMessage says what to do when a session has used its calls: the
-// confirmed work is in the session's AI draft, which a new session only
-// continues from once it is promoted.
+// confirmed work is in the session's AI draft, which a new session
+// continues (OpenDraft), with the task plan and the rows it checked.
 func sessionCapMessage(limit int, draftRevisionID string) string {
 	if draftRevisionID != "" {
 		return fmt.Sprintf("this session has reached its limit of %d LLM calls. Your confirmed changes are in its AI draft: "+
-			"make the draft your working revision (Use as working revision), then start a new session to continue from it", limit)
+			"start a new session — it continues that draft, with the task plan and the rows checked so far", limit)
 	}
 	return fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", limit)
+}
+
+// sessionLengthNote asks the model to suggest a new session once it has used
+// most of its calls, at the end of a stage rather than in the middle of one
+// (the guide: one task per session; the Creator & Agency build hit the cap
+// mid-stage, 2026-11-08). "" before that.
+func sessionLengthNote(used, limit int) string {
+	if limit <= 0 || used*10 < limit*7 {
+		return ""
+	}
+	return fmt.Sprintf("\n\n## Session length\nThis session has used %d of its %d model calls. Finish the part you are on; then, rather "+
+		"than starting the next stage here, tell the developer to start a new session for it: it continues this draft, and the task "+
+		"plan and the rows checked carry over.", used, limit)
 }
 
 // llmCallCaps returns the per-session and per-user-per-day caps.
@@ -236,7 +250,7 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 	// to start the next draft on its first confirmed proposal (owner
 	// decision, 2026-10-24: a new draft only when the developer asks).
 	if r.URL.Query().Get("new_draft") == "" {
-		draft, dErr := store.OpenDraft(ctx, modelID, a.UserID)
+		draft, dErr := store.OpenDraft(ctx, modelID, a.UserID, r.URL.Query().Get("revision_id"))
 		if dErr == nil && draft != "" {
 			dErr = store.SetDraftRevisionID(ctx, sess.ID, draft)
 		}
@@ -245,6 +259,10 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sess.DraftRevisionID = draft
+	}
+	// An unfinished task plan goes on in the session that follows it.
+	if _, err := store.CarryTaskPlan(ctx, sess.ID, modelID, a.UserID, sess.DraftRevisionID); err != nil {
+		log.Printf("AI session %s: carry the task plan: %v", sess.ID, err)
 	}
 	jsonOK(w, sess)
 }
@@ -504,6 +522,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
 	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
+	systemPrompt += sessionLengthNote(sessionCalls, maxLLMCallsPerSession)
 
 	// 4. Tool executors.
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
@@ -577,11 +596,58 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// harmless SUMIFS); the turn ends showing it with those warnings instead.
 	var warnedPlan []aiassistant.ProposalStep
 	var warnedWarnings []string
+	// After a confirmed plan, the turn starts with the server's own value
+	// check of it (ai_build_guards.go): shown to the developer, and given to
+	// the model with the developer's message.
+	if note := h.stageValueCheck(turnCtx, store, proposalStore, readExecutor, sessionID, revID, history, taskPlan,
+		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }); note != "" {
+		_, _ = store.SaveMessage(saveCtx, sessionID, "assistant", note, nil, "", "")
+		if n := len(provMessages); n > 0 && provMessages[n-1].Role == "user" {
+			provMessages[n-1].Content += "\n\n" + note
+		} else {
+			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
+		}
+	}
 	// sentBack: a plan of this turn went back to be fixed. A model that then
 	// ends the turn asking leave to propose ("confirm and I will post it" —
 	// gpt-5-mini did, stage after stage) is told once to propose instead.
 	sendSSE("tool_status", map[string]string{"tool": modeStatus(reqMode)})
 	sentBack, nudged := false, false
+	// emptyNudged: an empty reply went back once; unreadable: propose_actions
+	// calls whose arguments were not a plan, sent back to the model.
+	emptyNudged, unreadable := false, 0
+	// answerCalls saves msg and answers each of its tool calls: a write tool
+	// with writeResult, a read tool by running it (a follow-up turn with an
+	// unanswered call is refused by the provider).
+	answerCalls := func(msg providers.Message, writeResult string) {
+		_, _ = store.SaveMessage(ctx, sessionID, "assistant", msg.Content, msg.ToolCalls, "", "")
+		provMessages = append(provMessages, msg)
+		for _, call := range msg.ToolCalls {
+			result := writeResult
+			if !aiassistant.IsWriteTool(call.Name) {
+				var execErr error
+				if result, execErr = runTool(ctx, store, sessionID, readExecutor, call.Name, call.Arguments); execErr != nil {
+					result = fmt.Sprintf("error: %v", execErr)
+				}
+			}
+			_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, call.ID, call.Name)
+			provMessages = append(provMessages, providers.Message{Role: "tool", Content: result, ToolCallID: call.ID, ToolName: call.Name})
+		}
+	}
+	// unreadablePlan sends a plan that did not arrive back to the model, or
+	// ends the turn once that happened maxUnreadablePlans times.
+	unreadablePlan := func(msg providers.Message, result string) bool {
+		unreadable++
+		if unreadable > maxUnreadablePlans {
+			_, _ = store.SaveMessage(ctx, sessionID, "assistant", fmt.Sprintf(
+				"⚠️ Stopped: the plan did not arrive whole %d times in this turn. Ask for a smaller part of the work.", unreadable), nil, "", "")
+			sendSSE("error", map[string]string{"error": "propose_actions: the plan did not arrive whole — ask for a smaller part of the work"})
+			return false
+		}
+		answerCalls(msg, result)
+		sendSSE("tool_status", map[string]string{"tool": "propose_actions"})
+		return true
+	}
 	// coverageChecked: the turn's first plan that runs was checked against
 	// the request (ai_coverage.go); later ones are its corrections.
 	coverageChecked := false
@@ -661,7 +727,24 @@ turn:
 			}
 		}
 
+		// A reply cut off at the output limit while writing a tool call: its
+		// arguments are incomplete, so nothing in it can run.
+		if llmResp.FinishReason == "length" && len(llmResp.Message.ToolCalls) > 0 {
+			chars := 0
+			for _, tc := range llmResp.Message.ToolCalls {
+				chars += len(tc.Arguments)
+			}
+			if !unreadablePlan(llmResp.Message, unreadablePlanResult(chars, true, nil)) {
+				return
+			}
+			continue
+		}
 		if llmResp.FinishReason != "tool_calls" || len(llmResp.Message.ToolCalls) == 0 {
+			if !emptyNudged && strings.TrimSpace(llmResp.Message.Content) == "" {
+				emptyNudged = true
+				provMessages = append(provMessages, providers.Message{Role: "user", Content: emptyReplyNudge})
+				continue
+			}
 			// Asking leave to propose, or to confirm defaults it named, when
 			// the developer asked for a change: propose instead (ai_turn.go).
 			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksLeaveToPropose(llmResp.Message.Content) {
@@ -776,8 +859,10 @@ turn:
 				Steps []aiassistant.ProposalStep `json:"steps"`
 			}
 			if err := json.Unmarshal(tc.Arguments, &args); err != nil || len(args.Steps) == 0 {
-				sendSSE("error", map[string]string{"error": "propose_actions: invalid steps"})
-				return
+				if !unreadablePlan(llmResp.Message, unreadablePlanResult(len(tc.Arguments), false, err)) {
+					return
+				}
+				continue turn
 			}
 			// Each metric before what names it, so a plan written in reading
 			// order is checked, shown and run in an order that works.
@@ -791,6 +876,10 @@ turn:
 			if stopTurn() {
 				return
 			}
+			if cErr == nil {
+				check.warnings = append(check.warnings, inputOverwriteWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
+				check.warnings = append(check.warnings, calcToInputWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
+			}
 			// A plan that runs goes back once more when it leaves out part
 			// of a request naming several things (ai_coverage.go).
 			if cErr == nil && len(check.problems) == 0 && !coverageChecked {
@@ -800,7 +889,8 @@ turn:
 				if cur := plan.Current(); cur >= 0 && reqMode.Mode == aiassistant.ModeDelegated {
 					stageItems = plan.Stages[cur].Items
 				}
-				missing, extra, usage := planCoverage(turnCtx, llmProvider, llmModel, req.Content, stageItems, reqMode.Mode == aiassistant.ModeDirect, args.Steps)
+				missing, extra, usage := planCoverage(turnCtx, llmProvider, llmModel, req.Content, stageItems, reqMode.Mode == aiassistant.ModeDirect, args.Steps,
+					modelInventory(turnCtx, h.db.For(ctx), revID))
 				if usage.InputTokens+usage.CacheReadTokens > 0 {
 					_ = store.AddUsage(context.WithoutCancel(ctx), sessionID, usage)
 				}
@@ -824,6 +914,13 @@ turn:
 				sentBack = true
 				if len(check.problems) > 0 {
 					mode := retries.next(len(check.problems))
+					if retries.repeats(check.problems) && mode == retryFix {
+						mode = retries.escalate()
+					}
+					// Warnings given beside the failures count as given.
+					if mode == retryFix {
+						retries.warnedBefore(check.warnings)
+					}
 					if mode == retryPartial {
 						retries.leftOut, retries.partialOf = check.problems, args.Steps
 					}
@@ -860,6 +957,10 @@ turn:
 			if len(check.warnings) > 0 {
 				created += " Shown with the plan check's warnings: " + strings.Join(check.warnings, " | ")
 			}
+			_, replacedSteps, _ := proposalStore.WithdrawPending(ctx, sessionID, proposal.ID)
+			if replacedSteps > 0 {
+				created += replacedToolNote(replacedSteps)
+			}
 			_, _ = store.SaveMessage(ctx, sessionID, "tool", created, nil, tc.ID, tc.Name)
 			// Every sibling call in the same message needs a result too, or the
 			// next turn replays an unanswered tool call and the provider refuses
@@ -881,6 +982,9 @@ turn:
 				_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, other.ID, other.Name)
 			}
 
+			if replacedSteps > 0 {
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", replacedChatNote(replacedSteps), nil, "", "")
+			}
 			if len(retries.leftOut) > 0 {
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", leftOutNote(retries.leftOut, droppedSteps(retries.partialOf, args.Steps, retries.leftOut)), nil, "", "")
 			}
@@ -927,6 +1031,9 @@ turn:
 		if proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, warnedPlan, warnedWarnings); pErr == nil {
 			if strings.TrimSpace(finalReply) != "" {
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", finalReply, nil, "", "")
+			}
+			if _, n, _ := proposalStore.WithdrawPending(ctx, sessionID, proposal.ID); n > 0 {
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", replacedChatNote(n), nil, "", "")
 			}
 			_, _ = store.SaveMessage(ctx, sessionID, "assistant", fmt.Sprintf(
 				"The plan below runs (%d step(s)); it is shown with the plan check's warnings, which were not answered: %s",
@@ -1180,6 +1287,12 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		finalStatus = "partial"
 	}
 	_ = pStore.SetStatus(ctx, proposalID, finalStatus)
+	// The task plan's current stage records the confirmed plan.
+	if ran := countRan(steps); ran > 0 {
+		if plan, pErr := h.aiChatStore(ctx).TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.RecordConfirmed(ran) {
+			_ = h.aiChatStore(ctx).SetTaskPlan(ctx, sessionID, plan)
+		}
+	}
 	// Calculated metrics the plan created, changed or placed on a grid get
 	// their results now, as they do when a developer saves one: an AI-built
 	// P&L stayed blank until an input happened to change.
@@ -1360,6 +1473,24 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRow(ctx, `SELECT model_id::text, name FROM model.revision WHERE id=$1::uuid`, draftRevID).Scan(&modelID, &draftName); err != nil {
 		jsonErr(w, fmt.Errorf("draft revision not found"), http.StatusNotFound)
 		return
+	}
+	// A name given here is the revision's from now on: a promoted draft
+	// otherwise kept "AI Draft" and its time, which the header shows every
+	// business user once it goes live (2026-11-08). The body is optional.
+	var body struct {
+		Name string `json:"name"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+	}
+	if strings.TrimSpace(body.Name) != "" && strings.TrimSpace(body.Name) != draftName {
+		if draftName, err = h.renameRevision(ctx, draftRevID, body.Name, nil); err != nil {
+			jsonErr(w, err, renameRevisionStatus(err))
+			return
+		}
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAIDraftPromoted,

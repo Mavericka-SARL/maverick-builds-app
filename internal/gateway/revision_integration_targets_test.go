@@ -57,6 +57,12 @@ func TestDuplicateRevisionPointsConnectorsAtTheCopy(t *testing.T) {
 	add("Legacy", "csv_import", "dashboard", dashID, `{"dashboard_id":"`+dashID+`"}`)
 	add("Stale", "rest_api", "grid", f.gridStaffID, restConfig("grid", siblingGridID))
 	add("Elsewhere", "rest_api", "grid", "", restConfig("grid", outsideID))
+	// Another model's revision-less dimension: a planted or crafted target,
+	// cleared by the copy rather than carried into it (private
+	// observations, 2026-09-29).
+	foreignModel := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Other') RETURNING id::text`, f.appID)
+	foreignDim := q(`INSERT INTO model.dimension_def (model_id, name) VALUES ($1::uuid, 'accounts') RETURNING id::text`, foreignModel)
+	add("Planted", "rest_api", "dimension", foreignDim, restConfig("dimension", foreignDim))
 
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
@@ -101,6 +107,9 @@ func TestDuplicateRevisionPointsConnectorsAtTheCopy(t *testing.T) {
 	// in the config — the external system's request — is rewritten.
 	if got := q(`SELECT config->>'target_id' FROM model.integration_def WHERE revision_id=$1::uuid AND name='Elsewhere'`, copyRev); got != outsideID {
 		t.Errorf("Elsewhere: config target_id = %s, want %s kept", got, outsideID)
+	}
+	if got := q(`SELECT COALESCE(target_id::text, '-') || '|' || COALESCE(config->>'target_id', '-') FROM model.integration_def WHERE revision_id=$1::uuid AND name='Planted'`, copyRev); got != "-|-" {
+		t.Errorf("Planted: target column|config = %s, want both cleared (another model's dimension)", got)
 	}
 	if got := q(`SELECT config->'request'->>'body' FROM model.integration_def WHERE revision_id=$1::uuid AND name='Feed'`, copyRev); got != f.gridStaffID {
 		t.Errorf("Feed: request body = %s, want %s as written", got, f.gridStaffID)

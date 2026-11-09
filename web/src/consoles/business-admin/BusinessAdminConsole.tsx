@@ -29,6 +29,7 @@ import {
   type DesignTone,
   Txt,
 } from "../../ui";
+import { taskSearchText, matchesAllWords, TASK_SEARCH_PLACEHOLDER } from "../business/taskSearch";
 
 // ── Workflow Inbox ─────────────────────────────────────────────────────────────
 
@@ -51,22 +52,34 @@ export function WorkflowInbox() {
   });
 
   const [comment, setComment] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
 
   if (isLoading) return <LoadingState label="Loading tasks…" />;
+  const shown = tasks.filter((t: Task) => matchesAllWords(taskSearchText(t, (d) => momentDateTime(d, dateFormat)), query));
 
   // No Start section here — separation of duties (owner-decided,
   // 2026-08-30, reversing 08-29): business USERS submit approval requests,
   // business ADMINS decide them. The server enforces the same rule.
   return (
     <div className="mvx-admin-stack">
+      {tasks.length > 0 && (
+        <Toolbar>
+          <ToolbarGroup>
+            <SearchInput placeholder={TASK_SEARCH_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} width={340} aria-label="Search tasks" />
+            <span className="mvx-admin-muted">{shown.length} of {tasks.length}</span>
+          </ToolbarGroup>
+        </Toolbar>
+      )}
       {tasks.length === 0 && <EmptyState label="No pending approval tasks." />}
-      {tasks.map((t: Task) => (
+      {tasks.length > 0 && shown.length === 0 && <EmptyState label={`No task matches “${query.trim()}”.`} />}
+      {shown.map((t: Task) => (
         <div key={t.id} className="mvx-admin-object">
           <div className="mvx-admin-object__header">
             <div className="mvx-admin-object__title">
               <div className="mvx-admin-object__name">{t.workflow_name}</div>
               <div className="mvx-admin-object__meta">
                 Step: <strong>{t.step_name || t.step_def_id}</strong>
+                {t.model_name && <span> · <Txt>Model</Txt>: {t.model_name}</span>}
                 {t.context?.revision && <span> · {t.context.revision}</span>}
               </div>
             </div>
@@ -645,13 +658,30 @@ function MemberList({ role, onRemove }: { role: BARole; onRemove: (id: string) =
 
 // ── Access Rules Tab ────────────────────────────────────────────────────────────
 
-type AccessLevel = "write" | "read" | "hidden";
+// "only" / "only_read": the member is on the person's allow-list for its
+// dimension — every other member is hidden from them, members added later
+// included, while the allowed members' totals above and members below stay
+// (migration 168). The member itself is writable, or read-only.
+type AccessLevel = "write" | "read" | "hidden" | "only" | "only_read";
 
 const ACCESS_COLOR: Record<AccessLevel, string> = {
   write: "var(--color-success)",
   read: "var(--color-info)",
   hidden: "var(--color-text-muted)",
+  only: "var(--color-brand)",
+  only_read: "var(--color-brand)",
 };
+
+const ACCESS_LABEL: Record<AccessLevel, string> = {
+  write: "Write",
+  read: "Read",
+  hidden: "Hidden",
+  only: "Only these",
+  only_read: "Only these, read-only",
+};
+
+// How strict an access is, for a role's rule beside a person's.
+const accessRank = (a: AccessLevel) => (a === "hidden" ? 0 : a === "read" || a === "only_read" ? 1 : 2);
 
 export function AccessRulesTab() {
   const qc = useQueryClient();
@@ -721,8 +751,7 @@ export function AccessRulesTab() {
       const key = `${r.rule_type}:${r.ref_id}`;
       const cur = m[key];
       const access = r.access as AccessLevel;
-      const rank = (a: AccessLevel) => (a === "hidden" ? 0 : a === "read" ? 1 : 2);
-      m[key] = { access: !cur || rank(access) < rank(cur.access) ? access : cur.access, roles: [...(cur?.roles ?? []), r.role_name] };
+      m[key] = { access: !cur || accessRank(access) < accessRank(cur.access) ? access : cur.access, roles: [...(cur?.roles ?? []), r.role_name] };
     }
     return m;
   }, [roleRules, selectedRole]);
@@ -804,10 +833,12 @@ export function AccessRulesTab() {
           <option value="write">Write</option>
           <option value="read">Read</option>
           <option value="hidden">Hidden</option>
+          {type === "dimension_member" && <option value="only">Only these</option>}
+          {type === "dimension_member" && <option value="only_read">Only these, read-only</option>}
         </Select>
         {role && role.access !== "write" && (
           <span className="mvx-admin-muted" style={{ fontSize: 12 }} title="A role's rule applies too; the stricter wins">
-            {role.access === "hidden" ? "Hidden" : "Read"} by {role.roles.join(", ")}
+            {ACCESS_LABEL[role.access]} by {role.roles.join(", ")}
           </span>
         )}
       </span>
@@ -884,6 +915,7 @@ export function AccessRulesTab() {
               {groups.map(g => {
                 const open = !!query || groupsOpen.isExpanded(g.key);
                 const restricted = g.items.filter(m => getAccess(g.type, m.id) !== "write").length;
+                const onlyThese = g.items.some(m => getAccess(g.type, m.id).startsWith("only"));
                 return (
                   <React.Fragment key={g.key}>
                     <tr>
@@ -894,6 +926,11 @@ export function AccessRulesTab() {
                           <span className="mvx-admin-muted" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
                             {g.items.length}<Txt>{restricted > 0 ? ` · ${restricted} restricted` : ""}</Txt>
                           </span>
+                          {onlyThese && (
+                            <span className="mvx-admin-muted" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
+                              Only the members marked “Only these” are seen; the others are hidden, new ones too.
+                            </span>
+                          )}
                         </span>
                       </td>
                     </tr>

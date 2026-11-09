@@ -65,14 +65,17 @@ export function BasicsStep({
           </Select>
         </Field>
       </div>
+      {/* A grid's mode. Full reload clears the target grid — every metric
+          of it — not the revision: it used to clear every grid
+          (2026-11-09), while this said "the target". */}
       {config.direction === "pull" && (
         <Field label="Import mode" description={config.protocol === "model"
-          ? "A model link reads the source's whole values at each run: replace overwrites matched cells; full reload wipes the target first"
-          : "incremental adds to existing values; replace overwrites matched cells; full reload wipes the target first"}>
+          ? "A model link reads the source's whole values at each run: replace listed cells overwrites the cells a run brings; full reload first deletes every value of the target grid (other grids keep theirs)"
+          : "incremental adds to existing values; replace listed cells overwrites the cells a run brings; full reload first deletes every value of the target grid (other grids keep theirs)"}>
           <Select value={config.import_mode ?? "incremental"} aria-label="Import mode"
             onChange={e => onConfig({ import_mode: e.target.value as ApiIntegrationConfig["import_mode"] })}>
             <option value="incremental" disabled={config.protocol === "model"}>Incremental</option>
-            <option value="replace">Replace</option>
+            <option value="replace">Replace listed cells</option>
             <option value="full_reload">Full reload</option>
           </Select>
         </Field>

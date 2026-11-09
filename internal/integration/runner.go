@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,13 +47,35 @@ type Runner struct {
 // Committer is the write side of a pull (and the data source of a push).
 type Committer interface {
 	// CommitPull applies header+rows to the integration's target as the run's
-	// acting principal (runBy — the manual runner, or the developer who
-	// enabled the schedule). fileName is an SFTP source's file, for Recent
-	// Imports. Returns written/skipped counts. Dry runs must not write.
-	CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, dryRun bool, runBy string) (written, skipped int, err error)
+	// acting principal (opts.RunBy — the manual runner, or the developer who
+	// enabled the schedule). Dry runs must not write.
+	CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, opts PullOptions) (PullOutcome, error)
 	// LoadPushRows returns the source rows for a push, each keyed by the
 	// mapped Source field names.
 	LoadPushRows(ctx context.Context, def *Definition) ([]map[string]string, error)
+}
+
+// PullOptions is what a pull's commit is told beyond its rows.
+type PullOptions struct {
+	// FileName is an SFTP source's file, for Recent Imports.
+	FileName string
+	DryRun   bool
+	RunBy    string
+	// Reconcile: the run read its source whole — no record failed its
+	// mapping and max_records stopped nothing — so a model link's commit
+	// into a grid also clears the cells the link wrote before and the
+	// source no longer holds (importpkg.CommitOptions).
+	Reconcile bool
+}
+
+// PullOutcome is what a pull's commit did.
+type PullOutcome struct {
+	Written, Skipped int
+	// Cleared counts the cells a model link's run cleared; NotReconciled
+	// says why it cleared none although it might have ("" when it did not
+	// apply).
+	Cleared       int
+	NotReconciled string
 }
 
 // Error taxonomy.
@@ -193,6 +216,18 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 	if aerr := runAllowed(run, def); aerr != nil {
 		res.ErrorCode, res.Message = ErrCodeSwitchedOff, aerr.Error()
 		return res
+	}
+	// A run that writes runs on a passed test of this configuration.
+	if !run.DryRun && run.TriggerType != "test" {
+		ok, terr := rn.Store.TestedOrRemappedCopy(ctx, def)
+		if terr != nil {
+			res.ErrorCode, res.Message = ErrCodeInvalidData, terr.Error()
+			return res
+		}
+		if !ok {
+			res.ErrorCode, res.Message = ErrCodeSwitchedOff, ErrUntested.Error()
+			return res
+		}
 	}
 	if cfg.Protocol == ProtocolModel {
 		return rn.executeModelPull(ctx, run, def, res)
@@ -644,11 +679,31 @@ func (rn *Runner) finishPull(ctx context.Context, run *Run, def *Definition, hea
 		return res
 	}
 
-	written, skipped, cerr := rn.Committer.CommitPull(ctx, def, header, allRows, res.Meta["file"], run.DryRun, run.RunBy)
+	// A model link clears what its source emptied only when it read the
+	// whole source: a record missing for a failure or a limit is not an
+	// emptied value.
+	link := cfg.Protocol == ProtocolModel && cfg.TargetType == TargetGrid && !run.DryRun
+	opts := PullOptions{FileName: res.Meta["file"], DryRun: run.DryRun, RunBy: run.RunBy, Reconcile: link}
+	if link && len(recordErrs) > 0 {
+		opts.Reconcile = false
+		res.Meta["not_reconciled"] = fmt.Sprintf("%d record(s) failed their mapping: nothing the source emptied was cleared", len(recordErrs))
+	} else if link && res.Meta["stopped"] != "" {
+		opts.Reconcile = false
+		res.Meta["not_reconciled"] = "the run stopped at " + res.Meta["stopped"] + ": nothing the source emptied was cleared"
+	}
+	out, cerr := rn.Committer.CommitPull(ctx, def, header, allRows, opts)
 	if cerr != nil {
 		res.ErrorCode, res.Message = ErrCodeInvalidData, cerr.Error()
 		return res
 	}
+	if opts.Reconcile {
+		if out.NotReconciled != "" {
+			res.Meta["not_reconciled"] = out.NotReconciled
+		} else {
+			res.Meta["cells_cleared"] = strconv.Itoa(out.Cleared)
+		}
+	}
+	written, skipped := out.Written, out.Skipped
 	res.RecordsWritten = written
 	res.RecordsSkipped = skipped + len(recordErrs)
 	res.Status = "success"

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,8 +174,7 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 	exec(`INSERT INTO identity.business_role_member (role_id, user_id) VALUES ($1::uuid, $3::uuid), ($2::uuid, $3::uuid)`, f.roleID, role2, m)
 	exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES
 		($1::uuid, 'metric', $2, 'read'), ($1::uuid, 'metric', $3, 'read'),
-		($1::uuid, 'dimension_member', upper($4), 'hidden'), ($1::uuid, 'dimension_member', $5, 'hidden'),
-		($1::uuid, 'button', 'btn-1', 'hidden')`, m, f.metricA, f.metricD, f.memberA, f.memberD)
+		($1::uuid, 'dimension_member', upper($4), 'hidden'), ($1::uuid, 'dimension_member', $5, 'hidden')`, m, f.metricA, f.metricD, f.memberA, f.memberD)
 	before := f.accountRow(t, m)
 	// A request it started in each tenant.
 	startedIn := map[string]string{}
@@ -238,7 +238,7 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 		"model grants":   {`SELECT string_agg(model_id::text, ',') FROM identity.user_model_access WHERE user_id=$1::uuid`, f.modelD},
 		"business roles": {`SELECT string_agg(role_id::text, ',') FROM identity.business_role_member WHERE user_id=$1::uuid`, role2},
 		"access rules": {`SELECT string_agg(rule_type||':'||ref_id, ',' ORDER BY rule_type, ref_id) FROM identity.user_access_rule WHERE user_id=$1::uuid`,
-			"button:btn-1,dimension_member:" + f.memberD + ",metric:" + f.metricD},
+			"dimension_member:" + f.memberD + ",metric:" + f.metricD},
 	} {
 		if got := f.one(t, "SELECT COALESCE(("+c.sql+"), '')", m); got != c.want {
 			t.Errorf("%s after the removal: %q, want %q", what, got, c.want)
@@ -453,6 +453,30 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 	}
 	if !auditedFor(t, f, "mm-platform", pa) {
 		t.Errorf("the platform admin's audit log does not show the refusal")
+	}
+	// The tenant's list shows the refused address as it shows a new one: a
+	// pending person, here with nothing granted. Its absence told the
+	// tenant admin whose the address was (private observations,
+	// 2026-09-30). Deleting it removes it, as for anyone.
+	listed := f.listUsers(t, ta)
+	refusedID, _ := got["id"].(string)
+	freshID, _ := fresh["id"].(string)
+	if _, ok := listed[refusedID]; !ok {
+		t.Errorf("the refused address is missing from the tenant's list, where a new invitation %v is listed: %v", fresh, listed)
+	} else if _, ok := listed[freshID]; !ok {
+		t.Errorf("the new invitation is missing from the list")
+	} else if listed[refusedID].HomeTenant != listed[freshID].HomeTenant {
+		t.Errorf("the refused address is listed as %q, a new invitation as %q", listed[refusedID].HomeTenant, listed[freshID].HomeTenant)
+	}
+	if _, ok := f.listUsers(t, "mm-platform")[refusedID]; ok {
+		t.Error("the platform admin's list shows the refused invitation beside the account itself")
+	}
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+refusedID, "", nil, http.StatusOK)
+	if _, ok := f.listUsers(t, ta)[refusedID]; ok {
+		t.Error("the refused invitation is still listed after its delete")
+	}
+	if f.accountRow(t, pa) != paBefore {
+		t.Errorf("deleting the listed invitation changed the platform admin's account")
 	}
 }
 
@@ -816,5 +840,38 @@ func TestAdministratorDisablesAndEnablesAnAccount(t *testing.T) {
 	f.expect(t, "ab-suspended", "GET", "/api/me", "", nil, http.StatusOK)
 	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE resource_id=$1 AND event_type IN ('user.disabled','user.enabled')`, bu); n != "2" {
 		t.Errorf("%s disable/enable audit events, want 2", n)
+	}
+}
+
+// Two tenant admins acting against each other at once — B revoking A's
+// tenant_admin while A disables (or deletes) B — each passed, since each
+// read the other as remaining before either wrote, and left the tenant with
+// no enabled tenant admin (2026-10-30). Disable and delete now take the
+// revocation's lock and re-check inside it.
+func TestTenantAdminsActingAtOnceLeaveOne(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	for round := 0; round < 8; round++ {
+		cust := f.one(t, `INSERT INTO core.customer (name, plan) VALUES ('Race '||$1, 'commercial') RETURNING id::text`, fmt.Sprint(round))
+		ws := f.one(t, `INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'race') RETURNING id::text`, cust)
+		subA, subB := fmt.Sprintf("race-a-%d", round), fmt.Sprintf("race-b-%d", round)
+		a := f.gbUser(t, subA, cust, [2]string{"tenant_admin", ""}, [2]string{"business_user", ws})
+		b := f.gbUser(t, subB, cust, [2]string{"tenant_admin", ""}, [2]string{"business_user", ws})
+		action, path := "POST", "/api/admin/users/"+b+"/disable"
+		if round%2 == 1 {
+			action, path = "DELETE", "/api/admin/users/"+b
+		}
+		var wg sync.WaitGroup
+		codes := make([]int, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			codes[0], _ = f.do(t, "DELETE", "/api/admin/users/"+a+"/roles/tenant_admin", subB, "", "", nil)
+		}()
+		go func() { defer wg.Done(); codes[1], _ = f.do(t, action, path, subA, "", "", nil) }()
+		wg.Wait()
+		remaining := f.one(t, `SELECT count(*)::text FROM identity."user" o WHERE o.disabled_at IS NULL AND `+tenantAdminOfSQL("o.id", "$1::uuid"), cust)
+		if remaining == "0" {
+			t.Fatalf("round %d (%s): revoke %d, %s %d — the tenant was left with no enabled tenant admin", round, action, codes[0], action, codes[1])
+		}
 	}
 }

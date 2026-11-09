@@ -64,6 +64,11 @@ func TestPackagesImportWhole(t *testing.T) {
 	var models []imported
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		for _, pkg := range Packages() {
+			// A built-in package links everything it names: an import
+			// leaves nothing of it out.
+			if dropped := pkg.DroppedReferences(); len(dropped) > 0 {
+				t.Errorf("%q: the import leaves out %q", pkg.ModelName, dropped)
+			}
 			modelID, revID, err := modeltransfer.Import(ctx, tx, modeltransfer.ImportRequest{ApplicationID: app, Package: pkg}, user)
 			if err != nil {
 				return fmt.Errorf("%q: %w", pkg.ModelName, err)

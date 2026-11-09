@@ -32,3 +32,17 @@ func RecalcFinished(ctx context.Context, db dbx.DB, revisionID string, seq int64
 		WHERE revision_id = $1::uuid`, revisionID, seq)
 	return err
 }
+
+// recalcStaleAfter: a pending mark older than this is a pass that died with
+// its process, not one still running (as the gateway reads it).
+const recalcStaleAfter = "15 minutes"
+
+// RecalcPending reports whether revisionID has a recalculation still to
+// land: one requested and not finished, marked within recalcStaleAfter.
+func RecalcPending(ctx context.Context, db dbx.DB, revisionID string) bool {
+	var pending bool
+	_ = db.QueryRow(ctx, `
+		SELECT requested > done AND updated_at > now() - $2::interval
+		FROM runtime.revision_recalc_state WHERE revision_id = $1::uuid`, revisionID, recalcStaleAfter).Scan(&pending)
+	return pending
+}

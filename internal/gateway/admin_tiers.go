@@ -337,7 +337,7 @@ func (h *handler) revokeRole(ctx context.Context, userID, role, wsID, guardTenan
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if guardTenant != "" {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('tenant admins'), hashtext($1))`, guardTenant); err != nil {
+		if err := lockTenantAdmins(ctx, tx, guardTenant); err != nil {
 			return err
 		}
 	}
@@ -348,21 +348,104 @@ func (h *handler) revokeRole(ctx context.Context, userID, role, wsID, guardTenan
 		return err
 	}
 	if guardTenant != "" {
-		// Every administrator adminTiers counts: tenantAdminOfSQL's, and an
-		// account with no tenant holding tenant_admin without a workspace
-		// and any role in one of the tenant's.
-		var remains bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity."user" o
-			WHERE o.disabled_at IS NULL AND (`+tenantAdminOfSQL("o.id", "$1::uuid")+`
-			   OR (o.customer_id IS NULL
-			       AND EXISTS (SELECT 1 FROM identity.role_assignment cta
-			                   WHERE cta.user_id = o.id AND cta.role = 'tenant_admin' AND cta.workspace_id IS NULL)
-			       AND EXISTS (SELECT 1 FROM identity.role_assignment cwr JOIN core.workspace cw ON cw.id = cwr.workspace_id
-			                   WHERE cwr.user_id = o.id AND cw.customer_id = $1::uuid))))`, guardTenant).Scan(&remains); err != nil {
+		remains, err := enabledTenantAdminRemains(ctx, tx, guardTenant)
+		if err != nil {
 			return err
 		}
 		if !remains {
 			return errLastTenantAdmin
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// lockTenantAdmins serialises, per tenant, every change that can take a
+// tenant admin away: revoking tenant_admin (revokeRole), and disabling or
+// deleting an account (guardLastTenantAdmin).
+func lockTenantAdmins(ctx context.Context, tx pgx.Tx, tenant string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('tenant admins'), hashtext($1))`, tenant)
+	return err
+}
+
+// enabledTenantAdminRemains reports whether tenant has an enabled tenant
+// admin: every administrator adminTiers counts — tenantAdminOfSQL's, and an
+// account with no tenant holding tenant_admin without a workspace and any
+// role in one of the tenant's.
+func enabledTenantAdminRemains(ctx context.Context, tx pgx.Tx, tenant string) (bool, error) {
+	var remains bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity."user" o
+		WHERE o.disabled_at IS NULL AND (`+tenantAdminOfSQL("o.id", "$1::uuid")+`
+		   OR (o.customer_id IS NULL
+		       AND EXISTS (SELECT 1 FROM identity.role_assignment cta
+		                   WHERE cta.user_id = o.id AND cta.role = 'tenant_admin' AND cta.workspace_id IS NULL)
+		       AND EXISTS (SELECT 1 FROM identity.role_assignment cwr JOIN core.workspace cw ON cw.id = cwr.workspace_id
+		                   WHERE cwr.user_id = o.id AND cw.customer_id = $1::uuid))))`, tenant).Scan(&remains)
+	return remains, err
+}
+
+// guardNothing runs write and beforeCommit in one transaction, with no
+// tenant-admin check: guardLastTenantAdmin's shape for the callers that need
+// none.
+func (h *handler) guardNothing(ctx context.Context, write func(pgx.Tx) error, beforeCommit func() error) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := write(tx); err != nil {
+		return err
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// guardLastTenantAdmin runs write — a disable or a delete of userID — in a
+// transaction that holds the same per-tenant lock as revokeRole, and refuses
+// it (errLastTenantAdmin) when userID was a tenant admin of its tenant and no
+// enabled one remains after it. accountPermissionsFor refuses the last
+// tenant admin too, but read before the write and outside the lock: tenant
+// admins A and B, B revoking A's tenant_admin while A disabled B, each passed
+// and the tenant was left with none (2026-10-30). beforeCommit, when set,
+// runs after the check and before the commit (the identity provider's step),
+// so its failure leaves nothing written.
+func (h *handler) guardLastTenantAdmin(ctx context.Context, userID string, write func(pgx.Tx) error, beforeCommit func() error) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	var tenant *string
+	if err := tx.QueryRow(ctx, `SELECT customer_id::text FROM identity."user" WHERE id = $1::uuid`, userID).Scan(&tenant); err != nil {
+		return err
+	}
+	wasAdmin := false
+	if tenant != nil {
+		if err := lockTenantAdmins(ctx, tx, *tenant); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT `+tenantAdminOfSQL("$1::uuid", "$2::uuid"), userID, *tenant).Scan(&wasAdmin); err != nil {
+			return err
+		}
+	}
+	if err := write(tx); err != nil {
+		return err
+	}
+	if wasAdmin {
+		remains, err := enabledTenantAdminRemains(ctx, tx, *tenant)
+		if err != nil {
+			return err
+		}
+		if !remains {
+			return errLastTenantAdmin
+		}
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(); err != nil {
+			return err
 		}
 	}
 	return tx.Commit(ctx)

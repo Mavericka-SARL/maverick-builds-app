@@ -47,30 +47,33 @@ func importIdempotencyKey(w http.ResponseWriter, r *http.Request) (key string, o
 
 // replayKeyedImport answers an import userID already sent for modelID under
 // key and reports false; true when the request is to run. A committed
-// import's answer is given again (with "replayed": true) and nothing is
-// applied. One still running answers 409. One that never finished — cut off
-// before its commit, so nothing of it was saved — frees the key and runs.
-func (h *handler) replayKeyedImport(w http.ResponseWriter, ctx context.Context, store *importpkg.Store, modelID, userID, key string) bool {
+// import's answer is given again (answer, with "replayed": true) and nothing
+// is applied. One still running answers 409. One that never finished — cut
+// off before its commit, so nothing of it was saved — frees the key and
+// runs. targetType is what this request imports into ("grid", "table"): a
+// key another kind of import holds is refused (409) rather than answered
+// with that import's result.
+func (h *handler) replayKeyedImport(w http.ResponseWriter, ctx context.Context, store *importpkg.Store, modelID, userID, key, targetType string, answer func(prior *importpkg.KeyedJob) map[string]any) bool {
 	prior, err := store.JobByKey(ctx, modelID, userID, key)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("look up the idempotency key: %w", err), http.StatusInternalServerError)
 		return false
 	}
-	switch {
-	case prior == nil:
+	if prior == nil {
 		return true
-	case prior.Status == "committed":
-		jsonOK(w, map[string]any{
-			"job_id":      prior.ID,
-			"status":      "committed",
-			"total_rows":  prior.TotalRows,
-			"valid_rows":  prior.TotalRows,
-			"error_rows":  0,
-			"revision_id": prior.RevisionID,
-			"replayed":    true,
-		})
+	}
+	running := (prior.Status == "validating" || prior.Status == "staged") && time.Since(prior.CreatedAt) < importDeadline
+	if (prior.Status == "committed" || running) && !sameImportKind(prior.TargetType, targetType) {
+		jsonErr(w, fmt.Errorf("this Idempotency-Key was sent with another import (into a %s): send each file under a key of its own", kindOf(prior.TargetType)), http.StatusConflict)
 		return false
-	case (prior.Status == "validating" || prior.Status == "staged") && time.Since(prior.CreatedAt) < importDeadline:
+	}
+	switch {
+	case prior.Status == "committed":
+		out := answer(prior)
+		out["job_id"], out["replayed"] = prior.ID, true
+		jsonOK(w, out)
+		return false
+	case running:
 		jsonErr(w, importpkg.ErrImportKeyInUse, http.StatusConflict)
 		return false
 	}
@@ -79,4 +82,35 @@ func (h *handler) replayKeyedImport(w http.ResponseWriter, ctx context.Context, 
 		return false
 	}
 	return true
+}
+
+// sameImportKind says a job of kind prior ("" for a grid import from before
+// jobs said what they wrote into) is the kind of import want.
+func sameImportKind(prior, want string) bool {
+	return kindOf(prior) == want
+}
+
+func kindOf(targetType string) string {
+	if targetType == "" {
+		return "grid"
+	}
+	return targetType
+}
+
+// gridImportReplay is a committed grid import's answer, sent again.
+func gridImportReplay(prior *importpkg.KeyedJob) map[string]any {
+	return map[string]any{
+		"status":      "committed",
+		"total_rows":  prior.TotalRows,
+		"valid_rows":  prior.TotalRows,
+		"error_rows":  0,
+		"revision_id": prior.RevisionID,
+	}
+}
+
+// tableImportReplay is a committed records import's answer, sent again: the
+// records it created (the earlier records a replace_by load deleted are not
+// kept with its job).
+func tableImportReplay(prior *importpkg.KeyedJob) map[string]any {
+	return map[string]any{"status": "ok", "records_created": prior.TotalRows}
 }

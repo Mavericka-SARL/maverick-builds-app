@@ -4,17 +4,45 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type parser struct {
 	tokens []Token
 	pos    int
+	// src and lits, when lits is set, record where each string and number
+	// literal sits in the normalised source (parseLiterals).
+	src  []rune
+	lits map[Node]litSpan
 }
+
+// litSpan is a literal's place in the source: rune offsets, end exclusive,
+// quotes included.
+type litSpan struct{ start, end int }
 
 func parse(src string) (Node, error) {
 	src = normalise(src)
-	tokens := lex(src)
-	p := &parser{tokens: tokens}
+	p := &parser{tokens: lex(src)}
+	return p.parseAll()
+}
+
+// parseLiterals parses src as parse does and also returns where each string
+// and number literal node sits, in runes of src itself: lead is the number
+// of runes normalise trimmed off the front (spaces and a leading =). It is
+// how RenameMemberCode splices a member's new code into exactly the
+// literals that name it.
+func parseLiterals(src string) (node Node, lits map[Node]litSpan, lead int, err error) {
+	norm := normalise(src)
+	lead = len([]rune(src)) - len([]rune(strings.TrimLeftFunc(src, unicode.IsSpace)))
+	if strings.HasPrefix(strings.TrimSpace(src), "=") {
+		lead++
+	}
+	p := &parser{tokens: lex(norm), src: []rune(norm), lits: map[Node]litSpan{}}
+	node, err = p.parseAll()
+	return node, p.lits, lead, err
+}
+
+func (p *parser) parseAll() (Node, error) {
 	node, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -23,6 +51,32 @@ func parse(src string) (Node, error) {
 		return nil, fmt.Errorf("unexpected token %q at position %d", p.peek().Val, p.peek().Pos)
 	}
 	return node, nil
+}
+
+// literal records node's span when the parser keeps spans.
+func (p *parser) literal(node Node, t Token) Node {
+	if p.lits == nil {
+		return node
+	}
+	end := t.Pos + len([]rune(t.Val))
+	if t.Type == tokString {
+		// The token's value is the unescaped text: find the closing quote,
+		// stepping over doubled ones.
+		end = len(p.src)
+		for i := t.Pos + 1; i < len(p.src); i++ {
+			if p.src[i] != '"' {
+				continue
+			}
+			if i+1 < len(p.src) && p.src[i+1] == '"' {
+				i++
+				continue
+			}
+			end = i + 1
+			break
+		}
+	}
+	p.lits[node] = litSpan{start: t.Pos, end: end}
+	return node
 }
 
 // normalise strips a leading = and converts {name} → name (handled in lexer already).
@@ -200,11 +254,11 @@ func (p *parser) parsePrimary() (Node, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid number %q", t.Val)
 		}
-		return &NumberLit{Val: n}, nil
+		return p.literal(&NumberLit{Val: n}, t), nil
 
 	case tokString:
 		p.advance()
-		return &StringLit{Val: t.Val}, nil
+		return p.literal(&StringLit{Val: t.Val}, t), nil
 
 	case tokIdent:
 		upper := strings.ToUpper(t.Val)

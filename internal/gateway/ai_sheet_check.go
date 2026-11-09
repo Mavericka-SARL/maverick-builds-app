@@ -31,7 +31,11 @@ var compareLine = regexp.MustCompile(`against sheet "([^"]+)" row (\d+): (\d+) o
 // back with, or "" when it claims none or the session's comparisons show
 // every sheet it names matching.
 func (h *handler) sheetDoneNudge(ctx context.Context, store *aiassistant.ChatStore, sessionID, reply string) string {
-	if !doneClaim.MatchString(reply) {
+	// A reply asking the developer to choose (A or B) is a question, not a
+	// claim: "… so gross_agency_revenue matches the sheet" in option A of
+	// one was sent back as a done claim, and the model proposed without the
+	// answer (2026-11-09).
+	if !doneClaim.MatchString(reply) || presentsChoices(reply) {
 		return ""
 	}
 	sheets := h.attachedSheetNames(ctx, sessionID)

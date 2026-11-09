@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, type MutableRefObject } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt } from "../../ui";
@@ -21,6 +21,7 @@ import {
   describeReshape,
   cleanReshape,
   isEmptyReshape,
+  newImportKey,
 } from "../../api/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -107,6 +108,9 @@ interface CommitResult {
   errorRows: number;
   status: "success" | "error";
   message?: string;
+  // What the person should know although nothing failed: a property the
+  // file declared again whose name members already held values under.
+  notices?: string[];
   // A refused import's rows, as the server reported them.
   rowErrors?: Array<{ row: number; column: string; message: string; raw_value?: string }>;
 }
@@ -373,7 +377,8 @@ async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Pr
   const indexOf = new Map(lines.map((l, i) => [l, i]));
   let res: ImportCheck | undefined;
   try {
-    if (cfg.integrationId) res = await api.checkIntegrationRun(cfg.integrationId, csv, lines);
+    // The wizard's csv is mapped already: the saved map must not apply again.
+    if (cfg.integrationId) res = await api.checkIntegrationRun(cfg.integrationId, csv, lines, true);
     else if (cfg.targetType === "grid") res = await api.checkImport(csv, cfg.revisionId, lines);
     else res = await api.checkFormRecords(cfg.targetId, csv, lines, cfg.replaceBy);
   } catch (e) {
@@ -418,6 +423,11 @@ function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"
   if (cfg.targetType === "form") return cfg.replaceBy ? { replace_by: cfg.replaceBy } : {};
   return cfg.targetType === "grid" || cfg.source === "google_sheets" ? { import_mode: cfg.importMode } : {};
 }
+
+// What a full reload clears: the grid it imports into — every metric of it,
+// not only the file's cells. It used to clear the whole revision, every grid
+// (2026-11-09).
+const FULL_RELOAD_HINT = "Delete every value of this grid (all its metrics, not only the file's cells), then insert — other grids keep theirs";
 
 const MODE_LABEL: Record<string, string> = {
   incremental: "Incremental (adds to each cell)",
@@ -610,7 +620,7 @@ function UploadStep({
               {(fromSheet
                 ? [
                     { value: "replace", label: "Sync (replace listed cells)", hint: "The sheet is authoritative for the cells it contains — re-syncing converges instead of double-counting" },
-                    { value: "full_reload", label: "Full reload", hint: "Delete all data for this revision, then insert" },
+                    { value: "full_reload", label: "Full reload", hint: FULL_RELOAD_HINT },
                   ] as const
                 : [
                     // A file imported again — a corrected one, or the same
@@ -619,7 +629,7 @@ function UploadStep({
                     // hid that incremental adds.
                     { value: "incremental", label: "Incremental", hint: "Add each value to the cell's current value — importing the same file again adds it again" },
                     { value: "replace", label: "Replace listed cells", hint: "The file's cells take its values, other cells keep theirs — importing the same file again changes nothing" },
-                    { value: "full_reload", label: "Full reload", hint: "Delete all data for this revision, then insert" },
+                    { value: "full_reload", label: "Full reload", hint: FULL_RELOAD_HINT },
                   ] as const
               ).map(mode => (
                 <label key={mode.value} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
@@ -1132,6 +1142,7 @@ function CommitStep({
   resolveCtx,
   onBack,
   onDone,
+  importKeyRef,
 }: {
   config: WizardConfig;
   parsedFile: ParsedFile;
@@ -1141,6 +1152,7 @@ function CommitStep({
   resolveCtx: ResolveContext;
   onBack: () => void;
   onDone: () => void;
+  importKeyRef: MutableRefObject<{ content: string; key: string } | null>;
 }) {
   const qc = useQueryClient();
   const { confirm, confirmElement } = useConfirm();
@@ -1162,10 +1174,20 @@ function CommitStep({
   const commit = useMutation({
     mutationFn: async () => {
       const csv = resolveAndSerialize(parsedFile.headers, rowsToImport, mappings, resolveCtx);
-      let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number };
+      // One Idempotency-Key per import: the same rows committed again into
+      // the same target and mode — after a 502 or a closed connection, from
+      // Back and Commit — go under the key they were first sent with, so the
+      // server applies them once. A records import sent again created every
+      // record twice (2026-10-15).
+      const content = JSON.stringify([config.targetType, config.targetId, config.revisionId, config.importMode, config.replaceBy ?? "", csv]);
+      if (importKeyRef.current?.content !== content) importKeyRef.current = { content, key: newImportKey() };
+      const key = importKeyRef.current.key;
+      let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number; notices?: string[] };
       if (config.integrationId) {
-        const res = await api.runIntegration(config.integrationId, csv, rowLines, about);
-        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced };
+        // Mapped here, by the Map step the person may have edited: the run
+        // applies the saved column map no second time.
+        const res = await api.runIntegration(config.integrationId, csv, rowLines, about, true);
+        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced, notices: res.notices };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
@@ -1174,10 +1196,10 @@ function CommitStep({
       } else if (config.targetType === "form") {
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.
-        const res = await api.importFormRecords(config.targetId, csv, rowLines, about, config.replaceBy);
+        const res = await api.importFormRecords(config.targetId, csv, rowLines, about, config.replaceBy, key);
         out = { rows_imported: res.records_created, error_rows: 0, replaced: res.records_replaced };
       } else {
-        const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines, about);
+        const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines, about, key);
         out = { rows_imported: res.rows ?? res.valid_rows, error_rows: res.error_rows, values: res.values };
       }
       // Finishing the wizard from a resumed draft activates it, with the
@@ -1204,6 +1226,8 @@ function CommitStep({
       return out;
     },
     onSuccess: (data) => {
+      // Imported: the same file committed again from here is a new import.
+      importKeyRef.current = null;
       qc.invalidateQueries({ queryKey: ["import-jobs"] });
       qc.invalidateQueries({ queryKey: ["dev-integrations"] });
       // What the import changed, refetched: the console holds the
@@ -1217,7 +1241,7 @@ function CommitStep({
         if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
         void invalidateModelData(qc);
       }
-      setResult({ rowsImported: data.rows_imported, values: data.values, replaced: data.replaced, errorRows: data.error_rows, status: "success" });
+      setResult({ rowsImported: data.rows_imported, values: data.values, replaced: data.replaced, errorRows: data.error_rows, status: "success", notices: data.notices });
     },
     onError: (e) => {
       const rows = (e as ApiError).body?.errors;
@@ -1240,6 +1264,9 @@ function CommitStep({
               <Txt>{result.replaced ? `, ${result.replaced} earlier record${result.replaced === 1 ? "" : "s"} replaced` : ""}</Txt>
               <Txt>{result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}</Txt>
             </p>
+            {result.notices?.map((n, i) => (
+              <p key={i} role="status" className="mvx-admin-muted" style={{ margin: "0 auto 12px", fontSize: 13, maxWidth: 560 }}>{n}.</p>
+            ))}
           </>
         ) : (
           <>
@@ -1321,8 +1348,9 @@ function CommitStep({
       {config.targetType === "grid" && config.importMode === "full_reload" && (
         <div style={{ marginBottom: 20 }}>
           <InlineAlert tone="danger">
-            Full reload first deletes every value in <Txt>{config.revisionName ? <>revision <strong>{config.revisionName}</strong></> : "the revision"}</Txt> <Txt>—
-            not only the cells in this file — and then imports the file.</Txt>
+            Full reload first deletes every value of <Txt>{config.targetLabel ? <>grid <strong>{config.targetLabel}</strong></> : "this grid"}</Txt>{" "}
+            <Txt>in <Txt>{config.revisionName ? <>revision <strong>{config.revisionName}</strong></> : "the revision"}</Txt></Txt> <Txt>—
+            every metric of the grid, not only the cells in this file — and then imports the file. Other grids keep their values.</Txt>
           </InlineAlert>
         </div>
       )}
@@ -1344,8 +1372,8 @@ function CommitStep({
               });
             } else if (config.targetType === "grid" && config.importMode === "full_reload") {
               confirm({
-                title: "Delete all data in the revision first?",
-                body: `Every value in ${config.revisionName ? `revision ${config.revisionName}` : "the revision"} is deleted, then the file is imported.`,
+                title: "Delete the grid's values first?",
+                body: `Every value of ${config.targetLabel ? `grid ${config.targetLabel}` : "this grid"} in ${config.revisionName ? `revision ${config.revisionName}` : "the revision"} is deleted, then the file is imported. Other grids keep their values.`,
                 confirmLabel: "Delete and import",
                 destructive: true,
                 onConfirm: () => commit.mutate(),
@@ -1529,6 +1557,9 @@ function ImportWizard({
   const [errors, setErrors] = useState<ValError[]>([]);
   const [checking, setChecking] = useState(false);
   const checkRun = useRef(0); // the server check whose answer counts
+  // The Idempotency-Key of the import being committed, and what it names
+  // (CommitStep): kept across Back so a commit sent again reuses it.
+  const importKeyRef = useRef<{ content: string; key: string } | null>(null);
   const [importValidOnly, setImportValidOnly] = useState(false);
 
   // Targets, and the dimensions labels are resolved against, come from the
@@ -1746,6 +1777,7 @@ function ImportWizard({
           resolveCtx={resolveCtx}
           onBack={() => setStep("validate")}
           onDone={onClose}
+          importKeyRef={importKeyRef}
         />
       )}
     </div>

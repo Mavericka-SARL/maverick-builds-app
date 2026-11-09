@@ -649,6 +649,10 @@ type RenameAiSessionRes interface {
 	renameAiSessionRes()
 }
 
+type RenameRevisionRes interface {
+	renameRevisionRes()
+}
+
 type ReopenWorkflowInstanceRes interface {
 	reopenWorkflowInstanceRes()
 }

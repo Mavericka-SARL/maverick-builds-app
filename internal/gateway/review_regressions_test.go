@@ -43,9 +43,10 @@ func TestLegacyDimensionPropertyRenameSparesShadowingRevision(t *testing.T) {
 }
 
 // TestFormulaGuardsOnMembersDimensionsAndNames:
-//   - deleting a member a literal LOOKUP names is refused (MEMBER_IN_USE),
-//     and activation re-checks literal LOOKUP members (UNKNOWN_MEMBER) — a
-//     member renamed after the formula was saved;
+//   - deleting a member a literal LOOKUP names is refused (MEMBER_IN_USE);
+//     renaming it rewrites a written code ("US"), and activation re-checks
+//     literal LOOKUP members (UNKNOWN_MEMBER) — a code the formula computes
+//     ("U" & "S") is not rewritten;
 //   - a bare dimension name matches case-insensitively, as PARENT and
 //     dim.property do, and computes;
 //   - a dimension a formula names cannot be deleted (409 DIMENSION_IN_USE),
@@ -63,15 +64,24 @@ func TestFormulaGuardsOnMembersDimensionsAndNames(t *testing.T) {
 	f.await("upper", "EMEA", 100)
 	f.await("upper", "US", 0)
 
-	f.metric["lk"] = f.call("POST", "/api/developer/metrics", f.metricBody("lk", `LOOKUP(revenue, region, "US")`))
+	f.metric["lk"] = f.call("POST", "/api/developer/metrics", f.metricBody("lk", `LOOKUP(revenue, region, "U" & "S")`))
 	f.call("POST", "/api/developer/grids/"+f.gridID+"/metrics/"+f.metric["lk"], nil)
+	f.metric["lk_written"] = f.call("POST", "/api/developer/metrics", f.metricBody("lk_written", `LOOKUP(revenue, region, "US")`))
 	// The delete is refused while lk names US (MEMBER_IN_USE); a rename is
-	// not, and does not rewrite the formula, so activation still meets it.
+	// not. It rewrites the code lk_written writes, but not the one lk
+	// computes, so activation still meets that one.
 	if status, raw := f.req("DELETE", "/api/developer/dimensions/"+f.region+"/members/"+f.members["US"], nil); status != http.StatusConflict ||
 		!strings.Contains(string(raw), metricformula.CodeMemberInUse) {
 		t.Fatalf("delete member US while lk names it: %d %s; want 409 %s", status, raw, metricformula.CodeMemberInUse)
 	}
 	f.call("PATCH", "/api/developer/dimensions/"+f.region+"/members/"+f.members["US"], map[string]any{"code": "USA", "label": "USA"})
+	var written string
+	if err := f.pool.QueryRow(context.Background(), `SELECT formula FROM model.metric_def WHERE id=$1::uuid`, f.metric["lk_written"]).Scan(&written); err != nil {
+		t.Fatal(err)
+	}
+	if written != `LOOKUP(revenue, region, "USA")` {
+		t.Errorf("after renaming US to USA, lk_written reads %q", written)
+	}
 	status, raw := f.req("PUT", "/api/developer/revisions/"+f.revID+"/activate", nil)
 	if status != http.StatusBadRequest || !strings.Contains(string(raw), formula.CodeUnknownMember) || !strings.Contains(string(raw), "lk") {
 		t.Errorf("activating with a LOOKUP of a renamed-away member: %d %s; want 400 %s naming lk", status, raw, formula.CodeUnknownMember)

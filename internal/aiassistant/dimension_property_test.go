@@ -527,3 +527,67 @@ func TestMemberPropertyKeysMeetTheirDeclarations(t *testing.T) {
 		t.Errorf("MFG properties = %s, want p_and_l_line set under its declared spelling", stored)
 	}
 }
+
+// A property deleted and declared again through the AI Developer keeps its
+// values (the owner's decision, 2026-11-09): the declaration says how many
+// members hold values from before and offers to clear them, and
+// update_dimension_property clear_values clears them. A retype is refused
+// while a member's value would not read; a member value its number
+// property cannot read is refused.
+func TestRedeclaredPropertyOffersToClearItsValues(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	run := func(tool string, params map[string]any) (string, error) {
+		t.Helper()
+		res, _, err := exec.Execute(ctx, tool, mustJSON(t, params))
+		return res, err
+	}
+	if _, err := run("create_dimension", map[string]any{"name": "region", "members": []map[string]any{
+		{"code": "EMEA", "label": "EMEA"}, {"code": "US", "label": "US"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("add_dimension_property", map[string]any{"dimension_id": "region", "name": "factor", "data_type": "number"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("update_dimension_member", map[string]any{"dimension_id": "region", "code": "US", "properties": map[string]string{"factor": "abc"}}); err == nil || !strings.Contains(err.Error(), metricformula.CodeInvalidPropertyValue) {
+		t.Errorf("factor=abc on a number property: %v, want %s", err, metricformula.CodeInvalidPropertyValue)
+	}
+	if _, err := run("update_dimension_member", map[string]any{"dimension_id": "region", "code": "EMEA", "properties": map[string]string{"factor": "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("delete_dimension_property", map[string]any{"dimension_id": "region", "property": "factor"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := run("add_dimension_property", map[string]any{"dimension_id": "region", "name": "Factor", "data_type": "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res, `1 member(s) already hold values under "Factor" from before; formulas read them now`) || !strings.Contains(res, "clear_values") {
+		t.Errorf("declaring Factor again said %q; want the values from before counted and clearing offered", res)
+	}
+	if _, err := run("update_dimension_member", map[string]any{"dimension_id": "region", "code": "US", "properties": map[string]string{"Factor": "ENT"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("update_dimension_property", map[string]any{"dimension_id": "region", "property": "Factor", "data_type": "number"}); err == nil || !strings.Contains(err.Error(), metricformula.CodeInvalidPropertyValue) || !strings.Contains(err.Error(), "US") {
+		t.Errorf("retype Factor to number while US holds ENT: %v, want %s naming US", err, metricformula.CodeInvalidPropertyValue)
+	}
+	res, err = run("update_dimension_property", map[string]any{"dimension_id": "region", "property": "Factor", "clear_values": true, "data_type": "number"})
+	if err != nil {
+		t.Fatalf("clear Factor's values and retype: %v", err)
+	}
+	if !strings.Contains(res, "values cleared from 2 member(s)") {
+		t.Errorf("clear_values said %q; want 2 members cleared", res)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id
+		WHERE d.revision_id=$1::uuid AND d.name='region' AND EXISTS (SELECT 1 FROM jsonb_object_keys(m.properties) k WHERE lower(k)='factor')`, revID).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Errorf("%d members still hold a factor value after clear_values", left)
+	}
+}

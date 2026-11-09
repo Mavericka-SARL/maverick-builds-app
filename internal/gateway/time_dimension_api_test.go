@@ -359,10 +359,27 @@ func TestTimeDimensionPackageRoundTrip(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("create sales: %d %s", status, out)
 	}
+	_ = json.Unmarshal([]byte(out), &created)
+	salesID := created["id"].(string)
 	status, out = doAs(t, f.rollupFixture, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{
 		"name": "trailing", "is_input": false, "formula": "MOVINGSUM(sales, -1, 0) + LAG(sales, 2, 0)", "revision_id": f.workingRevID, "time_summary": "average"})
 	if status != http.StatusOK {
 		t.Fatalf("create trailing: %d %s", status, out)
+	}
+	_ = json.Unmarshal([]byte(out), &created)
+	trailingID := created["id"].(string)
+	// On a grid over the month, as a time-series metric must be to publish:
+	// an import makes its revision live, so it passes publishing's checks.
+	status, out = doAs(t, f.rollupFixture, "POST", "/api/developer/grids", dev, f.appID, map[string]any{"name": "Trailing", "revision_id": f.workingRevID})
+	if status != http.StatusOK {
+		t.Fatalf("create grid: %d %s", status, out)
+	}
+	_ = json.Unmarshal([]byte(out), &created)
+	gridID := created["id"].(string)
+	for _, p := range []string{"/dimensions/" + monthID, "/metrics/" + salesID, "/metrics/" + trailingID} {
+		if status, out := doAs(t, f.rollupFixture, "POST", "/api/developer/grids/"+gridID+p, dev, f.appID, nil); status != http.StatusOK {
+			t.Fatalf("grid %s: %d %s", p, status, out)
+		}
 	}
 
 	status, pkg := f.do(t, "GET", fmt.Sprintf("/api/admin/models/%s/export?revision_id=%s", f.modelID, f.workingRevID), f.taPersona, nil)

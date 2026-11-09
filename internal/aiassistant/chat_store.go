@@ -133,17 +133,46 @@ func (s *ChatStore) MarkPromoted(ctx context.Context, sessionID string) (time.Ti
 // session used to copy the working revision again (a tester's three
 // sessions left three drafts, the third without the second's clearing,
 // 2026-10-24).
-func (s *ChatStore) OpenDraft(ctx context.Context, modelID, userID string) (string, error) {
+//
+// A draft older than the model's active revision is not open: the revision
+// activated since supersedes it. A session of the Creator & Agency build
+// opened on the active revision — the last AI draft, activated — and worked
+// in the draft before it, whose numbers were a stage behind (2026-11-09).
+// preferred, a draft the console shows, wins when it is one of the open ones.
+func (s *ChatStore) OpenDraft(ctx context.Context, modelID, userID, preferred string) (string, error) {
 	var id string
 	err := s.pool.QueryRow(ctx, `
 		SELECT r.id::text FROM ai_assistant.session s JOIN model.revision r ON r.id = s.draft_revision_id
 		WHERE s.model_id = $1::uuid AND s.user_id = $2::uuid AND s.promoted_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM core.model m WHERE m.active_revision_id = r.id)
-		ORDER BY r.created_at DESC, r.id LIMIT 1`, modelID, userID).Scan(&id)
+		  AND NOT EXISTS (SELECT 1 FROM core.model m JOIN model.revision a ON a.id = m.active_revision_id
+		                  WHERE m.id = $1::uuid AND a.created_at > r.created_at)
+		ORDER BY (r.id::text = $3) DESC, r.created_at DESC, r.id LIMIT 1`, modelID, userID, preferred).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	return id, err
+}
+
+// EarlierSessions are the sessions whose work sessionID goes on with, oldest
+// first: the developer's earlier sessions of the model in the same draft, and
+// the sessions its task plan was carried from (carriedFrom, and theirs).
+func (s *ChatStore) EarlierSessions(ctx context.Context, sessionID, carriedFrom string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		WITH RECURSIVE chain(id) AS (
+			SELECT NULLIF($2, '')::uuid
+			UNION
+			SELECT NULLIF(o.task_plan->>'carried_from', '')::uuid FROM ai_assistant.session o JOIN chain c ON o.id = c.id
+		)
+		SELECT o.id::text FROM ai_assistant.session o JOIN ai_assistant.session s ON s.id = $1::uuid
+		WHERE o.id <> s.id AND o.model_id = s.model_id AND o.user_id = s.user_id AND o.created_at < s.created_at
+		  AND ((s.draft_revision_id IS NOT NULL AND o.draft_revision_id = s.draft_revision_id)
+		       OR o.id IN (SELECT id FROM chain WHERE id IS NOT NULL))
+		ORDER BY o.created_at`, sessionID, carriedFrom)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // FinishDraftSessions finishes userID's other sessions working in

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -65,6 +66,46 @@ func statusOf(t *testing.T, pool *pgxpool.Pool, id string) (status, lastErr stri
 		t.Fatal(err)
 	}
 	return
+}
+
+// makeDue puts every pending outbound row's next attempt a minute in the
+// past. A pass takes rows whose next_attempt_at <= now(), and both times are
+// the database's clock: a full suite on a busy machine once saw a pass find
+// nothing just after Notify ("delivered 0, want 2", 2026-11-08), which only
+// a clock that stepped back between the two statements explains. Tests that
+// expect a delivery seed their rows as due whatever the clock does.
+func makeDue(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE notification.notification SET next_attempt_at = now() - interval '1 minute'
+		WHERE status = 'pending' AND channel <> 'in_app'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// outboundRows describes every outbound row for a failure message: its
+// status, attempts and last error, and how far its next attempt is from the
+// database's clock — what a pass that delivered too few saw.
+func outboundRows(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT channel::text, status::text, attempts, last_error,
+		       round(extract(epoch FROM next_attempt_at - clock_timestamp())::numeric, 3)::text
+		FROM notification.notification WHERE channel <> 'in_app' ORDER BY channel`)
+	if err != nil {
+		return err.Error()
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var channel, status, lastErr, dueIn string
+		var attempts int
+		if err := rows.Scan(&channel, &status, &attempts, &lastErr, &dueIn); err != nil {
+			return err.Error()
+		}
+		out = append(out, channel+" "+status+" attempts="+strconv.Itoa(attempts)+" due_in="+dueIn+"s last_error="+strconv.Quote(lastErr))
+	}
+	return strings.Join(out, "; ")
 }
 
 // Turning a channel on is what makes a notification leave the platform; with
@@ -155,12 +196,13 @@ func TestDispatcherDeliversEmailAndWebhook(t *testing.T) {
 
 	mailer := &fakeMailer{}
 	d := &Dispatcher{Store: store, Mailer: mailer, Log: logger.New("test")}
+	makeDue(t, pool)
 	delivered, err := d.RunOnce(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if delivered != 2 {
-		t.Fatalf("delivered %d, want 2", delivered)
+		t.Fatalf("delivered %d, want 2; the outbound rows: %s", delivered, outboundRows(t, pool))
 	}
 
 	sent := mailer.all()
@@ -214,6 +256,7 @@ func TestDeliveryRetriesThenFails(t *testing.T) {
 	}
 
 	d := &Dispatcher{Store: store, Mailer: &fakeMailer{fail: errRelayDown}, Log: logger.New("test")}
+	makeDue(t, pool)
 	for i := 1; i <= MaxAttempts; i++ {
 		if _, err := d.RunOnce(ctx); err != nil {
 			t.Fatal(err)
@@ -232,7 +275,7 @@ func TestDeliveryRetriesThenFails(t *testing.T) {
 			// The backoff pushed the next attempt into the future; bring it
 			// back so the next pass picks the row up again.
 			if _, err := pool.Exec(ctx,
-				`UPDATE notification.notification SET next_attempt_at = now() WHERE id=$1::uuid`, id); err != nil {
+				`UPDATE notification.notification SET next_attempt_at = now() - interval '1 minute' WHERE id=$1::uuid`, id); err != nil {
 				t.Fatal(err)
 			}
 			continue

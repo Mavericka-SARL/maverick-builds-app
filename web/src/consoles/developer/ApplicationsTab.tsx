@@ -81,6 +81,18 @@ function DevModelRevisions({
       if (revisionId === id) onSelect("", "");
     },
   });
+  // A revision is renamed in its row — the live one too, whose name the
+  // header shows every business user (an AI draft came in named by its
+  // time, 2026-11-08).
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const rename = useMutation({
+    mutationFn: (v: { id: string; name: string }) => at(() => api.renameDevRevision(v.id, v.name.trim())),
+    onSuccess: (data) => {
+      inv();
+      setRenaming(null);
+      if (revisionId === data.id) onSelect(data.id, data.name);
+    },
+  });
   const { confirm, confirmElement } = useConfirm();
 
   return (
@@ -106,15 +118,44 @@ function DevModelRevisions({
               onClick={() => { if (isDeleting) return; localStorage.setItem("selected_app_id", appId); onSelect(s.id, s.name); }}
             >
               <div className="mvx-admin-revision__info">
-                <div className="mvx-admin-revision__name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {s.name}
-                </div>
+                {renaming?.id === s.id ? (
+                  <div className="mvx-admin-inline-form" onClick={(e) => e.stopPropagation()}>
+                    <TextInput
+                      aria-label={`New name of revision ${s.name}`}
+                      value={renaming.name}
+                      onChange={(e) => setRenaming({ id: s.id, name: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && renaming.name.trim()) rename.mutate(renaming);
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      autoFocus
+                      style={{ width: 200 }}
+                    />
+                    <Button size="sm" variant="primary" disabled={!renaming.name.trim()} loading={rename.isPending} loadingLabel="Saving…" onClick={() => rename.mutate(renaming)}>
+                      Save
+                    </Button>
+                    <Button size="sm" onClick={() => setRenaming(null)}>Cancel</Button>
+                  </div>
+                ) : (
+                  <div className="mvx-admin-revision__name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {s.name}
+                  </div>
+                )}
                 <div className="mvx-admin-revision__meta">
                   {isDeleting ? "Deleting…" : <>{s.id.slice(0, 8)} · <Txt>{s.created_at ? s.created_at.slice(0, 10) : ""}</Txt></>}
                 </div>
               </div>
               {s.name === model.active_revision && <RevisionBadge status="live" />}
               {isWorking && <StatusBadge tone="brand">Working</StatusBadge>}
+              <IconButton
+                aria-label={`Rename revision ${s.name}`}
+                title="Rename revision"
+                size={26}
+                disabled={isDeleting || rename.isPending}
+                onClick={(e) => { e.stopPropagation(); rename.reset(); setRenaming({ id: s.id, name: s.name }); }}
+              >
+                <Pencil size={13} />
+              </IconButton>
               <IconButton
                 aria-label={`Recalculate revision ${s.name}`}
                 title="Recalculate every calculated metric of this revision"
@@ -157,6 +198,7 @@ function DevModelRevisions({
           );
         })}
       </div>
+      {rename.isError && <p className="mvx-admin-error" role="alert">Not renamed: {(rename.error as Error).message}</p>}
       {del.isError && <p className="mvx-admin-error" role="alert">Not deleted: {(del.error as Error).message}</p>}
       {activate.isError && <p className="mvx-admin-error" role="alert">Not activated: {(activate.error as Error).message}</p>}
       {recalc.isError && <p className="mvx-admin-error" role="alert">Not recalculated: {(recalc.error as Error).message}</p>}

@@ -76,7 +76,9 @@ func TestCellWriteCoordinates(t *testing.T) {
 	if status, raw := write(f.quotaMetricID, map[string]string{f.deptsDimID: "DEPT_A"}); status != http.StatusOK {
 		t.Errorf("write at a department with staff: %d %s, want 200", status, raw)
 	}
-	if status, raw := write(f.amountMetricID, map[string]string{f.staffDimID: "STAFF_A1", f.regionsDimID: "WEST"}); status != http.StatusOK {
+	// amount is on the Staff grid: its coordinate is a staff member alone
+	// (a regions member too is refused, NOT_METRIC_DIMENSION).
+	if status, raw := write(f.amountMetricID, map[string]string{f.staffDimID: "STAFF_A1"}); status != http.StatusOK {
 		t.Errorf("write at a leaf: %d %s, want 200", status, raw)
 	}
 

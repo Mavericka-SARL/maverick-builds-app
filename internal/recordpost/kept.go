@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -38,9 +40,21 @@ func keptWrite(ctx context.Context, db dbx.DB, op func() error) error {
 
 // KeepMember makes the member a record of form holding data is: added when
 // the dimension has no member of its code, relabelled when its label
-// changed. db is the record's transaction. It reports whether it added the
-// member. A table keeping no dimension changes nothing.
-func KeepMember(ctx context.Context, db dbx.DB, form *crudapp.FormDef, data map[string]any) (added bool, err error) {
+// changed, and its declared properties that a field of the table fills set
+// from the record (KeptProperties). db is the record's transaction. It
+// reports whether the dimension changed — a member added or a property
+// value — so what reads it is recalculated. A table keeping no dimension
+// changes nothing.
+func KeepMember(ctx context.Context, db dbx.DB, form *crudapp.FormDef, data map[string]any) (changed bool, err error) {
+	added, err := keepMember(ctx, db, form, data)
+	if err != nil || !form.KeepsDimension() {
+		return added, err
+	}
+	props, err := keepProperties(ctx, db, form, form.MemberCode(data), data)
+	return added || props, err
+}
+
+func keepMember(ctx context.Context, db dbx.DB, form *crudapp.FormDef, data map[string]any) (added bool, err error) {
 	if !form.KeepsDimension() {
 		return false, nil
 	}
@@ -93,6 +107,158 @@ func DropKeptMember(ctx context.Context, tx pgx.Tx, form *crudapp.FormDef, code 
 		return err
 	}
 	return keptWrite(ctx, tx, func() error { return modeledit.DeleteMember(ctx, tx, form.KeepsDimensionID, memberID) })
+}
+
+// A dimension a table keeps takes its declared properties from the table's
+// fields: a property whose name is a field's name — compared without case,
+// spaces and punctuation read as underscores ("Reporting line" fills
+// reporting_line) — holds that field's value for every member. The AI
+// Developer's Actual P&L read {GL Account}.reporting_line, declared on the
+// dimension, while the reporting line of each account was a field of the GL
+// Mapping table keeping it; no member had a value and every closed month
+// read 0 (2026-11-08). A developer reaches for the same.
+
+// propertyFields maps each declared property of the dimension form keeps
+// that a field of form fills to that field's name.
+func propertyFields(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (map[string]string, error) {
+	rows, err := db.Query(ctx, `SELECT name FROM model.dimension_property WHERE dimension_id = $1::uuid`, form.KeepsDimensionID)
+	if err != nil {
+		return nil, err
+	}
+	props, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, p := range props {
+		for _, f := range form.Fields {
+			if f.Type != "autocode" && f.Type != "status" && identKey(f.Name) == identKey(p) {
+				out[p] = f.Name
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// identKey is a name as a property compares it: lower case, every run of
+// other characters than letters and digits one underscore.
+func identKey(s string) string {
+	var b strings.Builder
+	under := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r > 127 {
+			b.WriteRune(r)
+			under = false
+		} else if !under && b.Len() > 0 {
+			b.WriteByte('_')
+			under = true
+		}
+	}
+	return strings.TrimSuffix(b.String(), "_")
+}
+
+// propertyValue is a record value as a member property holds it: text, a
+// number without trailing zeros; "" for none.
+func propertyValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case json.Number:
+		return x.String()
+	case bool:
+		return strconv.FormatBool(x)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	return string(b)
+}
+
+// keepProperties sets the properties of member code that fields of form
+// fill from data, emptying those the record leaves empty. It reports
+// whether a value changed.
+func keepProperties(ctx context.Context, db dbx.DB, form *crudapp.FormDef, code string, data map[string]any) (bool, error) {
+	fields, err := propertyFields(ctx, db, form)
+	if err != nil || len(fields) == 0 || code == "" {
+		return false, err
+	}
+	set := map[string]string{}
+	drop := []string{}
+	for prop, field := range fields {
+		if v := propertyValue(data[field]); v != "" {
+			set[prop] = v
+		} else {
+			drop = append(drop, prop)
+		}
+	}
+	b, _ := json.Marshal(set)
+	tag, err := db.Exec(ctx, `
+		UPDATE model.dimension_member
+		SET properties = (COALESCE(properties, '{}'::jsonb) - $3::text[]) || $4::jsonb
+		WHERE dimension_id = $1::uuid AND code = $2
+		  AND COALESCE(properties, '{}'::jsonb) IS DISTINCT FROM (COALESCE(properties, '{}'::jsonb) - $3::text[]) || $4::jsonb`,
+		form.KeepsDimensionID, code, drop, string(b))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// FillKeptProperties sets, for every record of the table keeping
+// dimensionID, the member properties its fields fill: run when the table
+// starts keeping the dimension and when a property is declared on it. It
+// returns how many members changed; a dimension no table keeps changes
+// nothing.
+func FillKeptProperties(ctx context.Context, db dbx.DB, dimensionID string) (int, error) {
+	var formID string
+	err := db.QueryRow(ctx, `SELECT id::text FROM model.form_def WHERE keeps_dimension_id = $1::uuid`, dimensionID).Scan(&formID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	form, err := crudapp.NewStoreOn(db).GetForm(ctx, formID)
+	if err != nil || !form.KeepsDimension() {
+		return 0, err
+	}
+	rows, err := db.Query(ctx, `SELECT data FROM runtime.form_record WHERE form_id = $1::uuid`, formID)
+	if err != nil {
+		return 0, err
+	}
+	var all []map[string]any
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		var data map[string]any
+		if json.Unmarshal(raw, &data) == nil {
+			all = append(all, data)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, data := range all {
+		changed, err := keepProperties(ctx, db, form, form.MemberCode(data), data)
+		if err != nil {
+			return n, err
+		}
+		if changed {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // SyncKeptMembers makes the dimension form keeps hold exactly the members
@@ -172,6 +338,11 @@ func SyncKeptMembers(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (add
 		}
 		return nil
 	})
+	if err != nil {
+		return added, err
+	}
+	// The properties its fields fill, for every record.
+	_, err = FillKeptProperties(ctx, db, form.KeepsDimensionID)
 	return added, err
 }
 
@@ -389,4 +560,48 @@ func cleanRoleNames(names []string) []string {
 		out = append(out, n)
 	}
 	return out
+}
+
+// CheckColumnMapFields refuses a column map for the table formID that maps a
+// column to a name that is none of the table's fields (by name or label,
+// without case) nor its status: such a column used to be read past, as an
+// export's own id column is, and the loader reported success while a field
+// stayed empty in every record (2026-11-08). A column the map does not name
+// is still read past. "ignore", "" and the "*" entry are not targets.
+func CheckColumnMapFields(ctx context.Context, db dbx.DB, formID string, columnMap map[string]string) error {
+	if len(columnMap) == 0 {
+		return nil
+	}
+	form, err := crudapp.NewStoreOn(db).GetForm(ctx, formID)
+	if err != nil {
+		return err
+	}
+	known := map[string]bool{}
+	var names []string
+	for _, f := range form.Fields {
+		known[strings.ToLower(strings.TrimSpace(f.Name))] = true
+		known[strings.ToLower(strings.TrimSpace(f.Label))] = true
+		names = append(names, f.Name)
+	}
+	if form.HasStatus() {
+		known["status"] = true
+	}
+	var bad []string
+	for col, target := range columnMap {
+		t := strings.ToLower(strings.TrimSpace(target))
+		if col == "*" || t == "" || t == "ignore" || known[t] {
+			continue
+		}
+		bad = append(bad, fmt.Sprintf("%q to %q", col, target))
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	table := form.Label
+	if strings.TrimSpace(table) == "" {
+		table = form.Name
+	}
+	return fmt.Errorf("column_map maps %s, which is no field of table %q — its fields are: %s; map each column to a field, or to \"ignore\"",
+		strings.Join(bad, ", "), table, strings.Join(names, ", "))
 }

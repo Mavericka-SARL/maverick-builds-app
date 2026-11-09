@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
@@ -32,23 +34,28 @@ type DBCommitter struct {
 	Log  zerolog.Logger
 }
 
-func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, dryRun bool, runBy string) (written, skipped int, err error) {
-	if len(rows) == 0 {
-		return 0, 0, nil
+func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []string, rows [][]string, opts PullOptions) (PullOutcome, error) {
+	fileName, dryRun, runBy := opts.FileName, opts.DryRun, opts.RunBy
+	// A model link whose source holds no value at all still commits: it
+	// clears what the link wrote before.
+	if len(rows) == 0 && (!opts.Reconcile || def.Config.TargetType != TargetGrid) {
+		return PullOutcome{}, nil
 	}
+	var written, skipped int
+	var err error
 	started := time.Now()
 	if runBy == "" && !dryRun {
 		// Every write needs a real principal: manual runs carry the caller,
 		// scheduled runs the developer who enabled the schedule.
-		return 0, 0, fmt.Errorf("run has no acting principal")
+		return PullOutcome{}, fmt.Errorf("run has no acting principal")
 	}
 	// The last line before a write: never write into another model's row.
 	if err := checkDefinitionOwnership(ctx, c.Pool, def); err != nil {
-		return 0, 0, err
+		return PullOutcome{}, err
 	}
 	switch def.Config.TargetType {
 	case TargetGrid:
-		return c.commitGrid(ctx, def, header, rows, fileName, started, dryRun, runBy)
+		return c.commitGrid(ctx, def, header, rows, fileName, started, opts)
 	case TargetDimension:
 		written, skipped, err = c.commitDimension(ctx, def, header, rows, dryRun)
 		if !dryRun {
@@ -65,15 +72,15 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 				c.Log.Warn().Err(rerr).Msg("recalc after connector dimension import")
 			}
 		}
-		return written, skipped, err
+		return PullOutcome{Written: written, Skipped: skipped}, err
 	case TargetForm:
 		written, skipped, err = c.commitForm(ctx, def, header, rows, dryRun, runBy)
 		if !dryRun {
 			c.recordJob(ctx, def, "table", fileName, runBy, started, written, skipped, err)
 		}
-		return written, skipped, err
+		return PullOutcome{Written: written, Skipped: skipped}, err
 	}
-	return 0, 0, fmt.Errorf("unknown target type")
+	return PullOutcome{}, fmt.Errorf("unknown target type")
 }
 
 // jobSource is how Recent Imports names a connector's run.
@@ -114,7 +121,8 @@ func (c *DBCommitter) recordJob(ctx context.Context, def *Definition, targetType
 	}
 }
 
-func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, started time.Time, dryRun bool, runBy string) (int, int, error) {
+func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []string, rows [][]string, fileName string, started time.Time, opts PullOptions) (PullOutcome, error) {
+	dryRun, runBy := opts.DryRun, opts.RunBy
 	raw := make([]importpkg.RawRow, 0, len(rows))
 	for i, r := range rows {
 		cells := make(map[string]string, len(header))
@@ -125,9 +133,29 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 		}
 		raw = append(raw, importpkg.RawRow{RowNumber: i + 1, Cells: cells})
 	}
-	staged, importErrs, err := importpkg.ResolveRows(ctx, c.Pool, def.ModelID, def.RevisionID, header, raw)
-	if err != nil {
-		return 0, 0, err
+	var staged []importpkg.StagingRow
+	var importErrs []*importpkgv1.ImportError
+	if len(raw) > 0 {
+		// Every dimension of the grid mapped, and no other, as a file run must
+		// (integration_file_run.go): a pull naming fewer stored values keyed
+		// without a grid dimension, read by no cell and no formula, and the run
+		// reported success.
+		if err := importpkg.CheckGridColumns(ctx, c.Pool, def.Config.TargetID, header); err != nil {
+			return PullOutcome{}, err
+		}
+		var err error
+		if staged, importErrs, err = importpkg.ResolveRows(ctx, c.Pool, def.ModelID, def.RevisionID, header, raw); err != nil {
+			return PullOutcome{}, err
+		}
+	}
+	out := PullOutcome{}
+	// A model link's run clears what its source emptied (importpkg
+	// CommitOptions) unless a record failed to resolve: then a missing cell
+	// may be that failure, not an emptied value.
+	reconcile := opts.Reconcile && def.Config.Protocol == ProtocolModel
+	if reconcile && len(importErrs) > 0 {
+		reconcile = false
+		out.NotReconciled = fmt.Sprintf("%d record(s) failed: nothing the source emptied was cleared", len(importErrs))
 	}
 	if len(importErrs) > 0 {
 		// Connector semantics differ from file upload: skip bad records and
@@ -145,16 +173,18 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 		}
 		staged = kept
 	}
+	out.Skipped = len(importErrs)
 	if dryRun {
-		return len(staged), len(importErrs), nil
+		out.Written = len(staged)
+		return out, nil
 	}
-	if len(staged) == 0 {
-		return 0, len(importErrs), nil
+	if len(staged) == 0 && !reconcile {
+		return out, nil
 	}
 	store := importpkg.NewStore(c.Pool)
 	job, err := store.CreateImportJob(ctx, def.ModelID, def.RevisionID, jobSource(def), runBy, nil)
 	if err != nil {
-		return 0, 0, err
+		return PullOutcome{}, err
 	}
 	// Its line in Recent Imports names the grid, the mode and an SFTP
 	// source's file.
@@ -166,12 +196,22 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 	}); err != nil {
 		c.Log.Warn().Err(err).Msg("describe a connector's import job")
 	}
-	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
-		return 0, 0, err
+	if len(staged) == 0 {
+		err = store.StageNothing(ctx, job.Id)
+	} else {
+		err = store.StageRows(ctx, job.Id, staged, nil)
 	}
-	metricIDs, err := store.CommitImport(ctx, job.Id, def.ModelID, def.RevisionID, runBy, importpkg.ImportMode(def.Config.ImportMode))
 	if err != nil {
-		return 0, 0, err
+		return PullOutcome{}, err
+	}
+	commitOpts := importpkg.CommitOptions{Reconcile: reconcile}
+	if def.Config.Protocol == ProtocolModel {
+		// The rows a link writes name it, in every revision of the model.
+		commitOpts.LinkRef = def.LinkID
+	}
+	metricIDs, cleared, err := store.CommitImportWith(ctx, job.Id, def.ModelID, def.RevisionID, runBy, importpkg.ImportMode(def.Config.ImportMode), commitOpts)
+	if err != nil {
+		return PullOutcome{}, err
 	}
 	if len(metricIDs) > 0 {
 		sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool))
@@ -179,7 +219,8 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 			c.Log.Warn().Err(rerr).Msg("recalc after connector import")
 		}
 	}
-	return len(staged), len(importErrs), nil
+	out.Written, out.Cleared = len(staged), cleared
+	return out, nil
 }
 
 // commitDimension upserts members: code (required), label, parent_code,
@@ -203,12 +244,64 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 	if cfg.Type == timedim.TypeTime {
 		return c.commitTimeDimension(ctx, dimID, cfg, col, codeIdx, rows, dryRun)
 	}
+	// Each property:<name> column fills the property declared under that
+	// name whatever its case, or under its identifier; any other column is
+	// declared as its identifier, as text — the normalisation the CSV member
+	// import shares (metricformula.DeclareImportedProperties). The header is
+	// lower-cased above, and used to be declared as written: "factor" next
+	// to the developer's "Factor", holding the pulled values where no
+	// formula read them.
+	var headers []string
+	headerIdx := map[string]int{}
+	for name, idx := range col {
+		if p, isProp := strings.CutPrefix(name, "property:"); isProp && strings.TrimSpace(p) != "" {
+			headers = append(headers, strings.TrimSpace(p))
+			headerIdx[strings.TrimSpace(p)] = idx
+		}
+	}
+	slices.Sort(headers)
+	var names map[string]string
+	var declared []string
+	if dryRun {
+		names, _, err = metricformula.ImportedPropertyNames(ctx, c.Pool, dimID, headers)
+	} else {
+		names, declared, err = metricformula.DeclareImportedProperties(ctx, c.Pool, dimID, headers)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	types, err := metricformula.DeclaredPropertyTypes(ctx, c.Pool, dimID)
+	if err != nil {
+		return 0, 0, err
+	}
+	// The members this pull gives a value under each property it declared:
+	// the others holding one are values from before, which formulas read
+	// again now.
+	wroteValue := map[string][]string{}
 	written, skipped := 0, 0
+rowLoop:
 	for _, r := range rows {
 		code := strings.TrimSpace(r[codeIdx])
 		if code == "" {
 			skipped++
 			continue
+		}
+		props := map[string]string{}
+		replaced := []string{}
+		for _, header := range headers {
+			idx := headerIdx[header]
+			if idx >= len(r) || r[idx] == "" {
+				continue
+			}
+			name := names[header]
+			// A value its number or date property cannot read skips the
+			// row, as the connector's other bad rows are skipped.
+			if metricformula.PropertyValueError(name, types[name], r[idx]) != nil {
+				skipped++
+				continue rowLoop
+			}
+			props[name] = r[idx]
+			replaced = append(replaced, strings.ToLower(name))
 		}
 		if dryRun {
 			written++
@@ -227,16 +320,6 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 				parentID = &pid
 			}
 		}
-		props := map[string]string{}
-		for name, idx := range col {
-			if p, isProp := strings.CutPrefix(name, "property:"); isProp && idx < len(r) && r[idx] != "" {
-				props[p] = r[idx]
-				_, _ = c.Pool.Exec(ctx, `
-					INSERT INTO model.dimension_property (dimension_id, name, data_type)
-					VALUES ($1::uuid, $2, 'text') ON CONFLICT (dimension_id, name) DO NOTHING
-				`, dimID, p)
-			}
-		}
 		propJSON, _ := json.Marshal(props)
 		if _, err := c.Pool.Exec(ctx, `
 			INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order, properties)
@@ -244,12 +327,29 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 			ON CONFLICT (dimension_id, code) DO UPDATE SET
 			    label=EXCLUDED.label,
 			    parent_member_id=COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
-			    properties=model.dimension_member.properties || EXCLUDED.properties
-		`, dimID, code, label, parentID, string(propJSON)); err != nil {
+			    properties=`+metricformula.MergeImportedPropertiesSQL("$6")+`
+		`, dimID, code, label, parentID, string(propJSON), replaced); err != nil {
+			c.Log.Warn().Err(err).Str("dimension_id", dimID).Str("code", code).Msg("connector dimension pull: member skipped")
 			skipped++
 			continue
 		}
+		for name := range props {
+			wroteValue[name] = append(wroteValue[name], code)
+		}
 		written++
+	}
+	// A property the pull declared again brings back the values members
+	// held under its name; nothing clears them unless the developer asks
+	// (the property's Clear values), so the run's log says how many.
+	for _, name := range declared {
+		n, err := metricformula.ValuesFromBefore(ctx, c.Pool, dimID, name, wroteValue[name])
+		if err != nil {
+			return written, skipped, err
+		}
+		if note := metricformula.PreexistingValuesNote(name, n); note != "" {
+			c.Log.Warn().Str("dimension_id", dimID).Str("property", name).Int("members", n).
+				Msg("connector dimension pull: " + note + " — clear them with Clear values on the property if they are stale")
+		}
 	}
 	return written, skipped, nil
 }

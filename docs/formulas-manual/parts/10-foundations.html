@@ -49,7 +49,7 @@
   <li><b>Formula</b> re-evaluates the formula on the totalled inputs. Right for ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales, never a sum or mean of percentages.</li>
   <li><b>Rate</b> divides the total of one metric by the total of another. Right for a price or any blended rate.</li>
 </ul>
-<p>At a total, a dimension that is not pinned has no single member, so a bare dimension name and <code>dimension.property</code> read <b>blank</b> there: <code>IF(region = "EMEA", sales, 0)</code> is 0 at the grand total.</p>
+<p>At a total, a dimension that is not pinned has no single member, so a bare dimension name and <code>dimension.property</code> read <b>blank</b> there: <code>IF(region = "EMEA", sales, 0)</code> is 0 at the grand total. A dimension the metric's grid does not have is never pinned, so a formula reading one at the cell is refused (<code>DIMENSION_NOT_ON_METRIC</code>, chapter 11).</p>
 
 <h3>Reading a metric from another grid</h3>
 <p>A plain reference to a metric on another grid reads it at the members the two share. On a dimension the source has but the cell does not, it reads the source's total over that dimension (by the source's aggregation rule); a dimension of the cell that the source lacks is ignored. So from a <i>[region, period]</i> cell, <code>fx_rate</code> on <i>FX [currency]</i> is the total over all currencies, which is rarely what you want. To choose a member, use LOOKUP: <code>LOOKUP(fx_rate, currency, region.currency)</code> reads the rate of the region's own currency.</p>
@@ -100,7 +100,7 @@
 <tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
 <tr><td>Text</td><td>Quoted literals, a bare dimension (the member code), text properties, text functions</td><td><code>#VALUE!</code> (<code>1 + "a"</code>)</td></tr>
 <tr><td>TRUE / FALSE</td><td>Comparisons, <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>IF</code> with no else</td><td>1 / 0 (<code>TRUE + TRUE</code> = 2)</td></tr>
-<tr><td>Blank</td><td>An input cell nobody entered (read as 0 in arithmetic, blank in a comparison and in <code>ISBLANK</code>); a property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none</td><td>0</td></tr>
+<tr><td>Blank</td><td>An input cell nobody entered (read as 0 in arithmetic, blank in a comparison and in <code>ISBLANK</code>); likewise a metric read across a dimension where nothing was entered under the cell (from a <i>[month]</i> grid, an <i>[account, month]</i> actual in a month with nothing posted on any account — a recorded 0 is not blank); a property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none, and LOOKUP of one at an aggregate period</td><td>0</td></tr>
 <tr><td>Error</td><td>A failed operation (chapter 5)</td><td>The error travels on</td></tr>
 </table>
 

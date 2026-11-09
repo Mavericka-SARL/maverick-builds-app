@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -534,5 +535,74 @@ func TestFormRecordConditionalWrite(t *testing.T) {
 	}
 	if err := store.UpdateRecordFrom(ctx, rec, "submitted", "approved", map[string]any{"amount": 2}); err != nil {
 		t.Errorf("UpdateRecordFrom from the current status: %v", err)
+	}
+}
+
+// The forms list shows a table only where its records answer: a person
+// whose model grants leave out the table's model saw it listed (a records
+// widget with no records and no actions), while the records routes
+// answered 404 (decided 2026-10-06).
+func TestFormsListShowsOnlyReachedTables(t *testing.T) {
+	f := setupRecordFixture(t)
+	ctx := context.Background()
+	var other string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Other') RETURNING id::text`, f.appID).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_model_access (user_id, model_id) VALUES ($1::uuid, $2::uuid)`, f.userID[prOwner], other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE core.application SET default_model_id = $1::uuid WHERE id = $2::uuid`, f.modelID, f.appID); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(persona string) []string {
+		t.Helper()
+		status, body := f.do(http.MethodGet, "/api/forms", persona, nil)
+		if status != http.StatusOK {
+			return nil
+		}
+		var forms []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(body, &forms); err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, x := range forms {
+			ids = append(ids, x.ID)
+		}
+		return ids
+	}
+	for _, id := range listed(prOwner) {
+		if status, body := f.do(http.MethodGet, "/api/forms/"+id+"/records", prOwner, nil); status != http.StatusOK {
+			t.Errorf("listed table %s answers its records with %d %s", id, status, body)
+		}
+	}
+	if ids := listed(prBA); !slices.Contains(ids, f.formID) {
+		t.Errorf("the business admin's list %v lacks the table whose records it reaches", ids)
+	}
+}
+
+// A business role named like a platform role assigned its steps to the
+// platform's people and never to its own members (owner's decision,
+// 2026-10-06: reserved). Business Admin › Roles refuses the names on create
+// and rename, and the database refuses them on any path (migration 164).
+func TestBusinessRolesCannotTakePlatformRoleNames(t *testing.T) {
+	f := setupRecordFixture(t)
+	for _, name := range []string{"developer", " Tenant_Admin ", "BUSINESS_USER"} {
+		if status, body := f.do(http.MethodPost, "/api/business-admin/roles", prBA, map[string]string{"name": name}); status != http.StatusBadRequest {
+			t.Errorf("create %q: %d %s, want 400", name, status, body)
+		}
+	}
+	status, body := f.do(http.MethodPost, "/api/business-admin/roles", prBA, map[string]string{"name": "Approvers"})
+	if status != http.StatusOK {
+		t.Fatalf("create Approvers: %d %s", status, body)
+	}
+	id, _ := decodeObj(t, body)["id"].(string)
+	if status, body := f.do(http.MethodPatch, "/api/business-admin/roles/"+id, prBA, map[string]string{"name": "platform_admin"}); status != http.StatusBadRequest {
+		t.Errorf("rename to platform_admin: %d %s, want 400", status, body)
+	}
+	if _, err := f.pool.Exec(context.Background(), `UPDATE identity.business_role SET name = 'developer' WHERE id = $1::uuid`, id); err == nil {
+		t.Error("the database took a business role named developer")
 	}
 }

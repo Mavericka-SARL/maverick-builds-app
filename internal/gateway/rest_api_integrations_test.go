@@ -150,6 +150,13 @@ func TestRestAPIIntegrationEndpoints(t *testing.T) {
 	if created.Status != "draft" || created.Tested || created.Config == nil {
 		t.Fatalf("created shape: %s", raw)
 	}
+	// Created active, it would skip the test activation needs (2026-10-09).
+	status, raw = do(devSub, "POST", "/api/developer/integrations", map[string]any{
+		"type": "rest_api", "name": "Billing pull active", "config": cfg, "connection_id": conn.ID, "status": "active",
+	})
+	if status == 200 || !strings.Contains(string(raw), "created as a draft") {
+		t.Fatalf("created active without a test: %d %s", status, raw)
+	}
 
 	// GET by id returns the typed document + schedule.
 	status, raw = do(devSub, "GET", "/api/developer/integrations/"+created.ID, nil)
@@ -204,6 +211,36 @@ func TestRestAPIIntegrationEndpoints(t *testing.T) {
 	status, raw = do(devSub, "POST", "/api/integrations/"+created.ID+"/run", map[string]any{})
 	if status != http.StatusAccepted {
 		t.Fatalf("run enqueue: %d %s", status, raw)
+	}
+
+	// ── A revision copy: its connector's target is remapped, so its test
+	// hash no longer matches; a copy whose only change is the target keeps
+	// the source's test and runs. Any other change needs a new test, and a
+	// run refuses it (owner's decision, 2026-10-06).
+	status, raw = do(devSub, "POST", "/api/developer/revisions?model_id="+modelID, map[string]any{"name": "Copy", "source_revision_id": revID})
+	if status != 200 {
+		t.Fatalf("copy revision: %d %s", status, raw)
+	}
+	var copyRev struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &copyRev)
+	copied := q(`SELECT id::text FROM model.integration_def WHERE revision_id = $1::uuid AND name = 'Billing pull'`, copyRev.ID)
+	copiedDef, err := st.GetDefinition(ctx, modelID, copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copiedDef.Status != "active" || !copiedDef.Tested() || copiedDef.Config.TargetID == gridID {
+		t.Fatalf("copied connector: status %s, tested %v, target %s (source grid %s)", copiedDef.Status, copiedDef.Tested(), copiedDef.Config.TargetID, gridID)
+	}
+	if status, raw = do(devSub, "POST", "/api/integrations/"+copied+"/run", map[string]any{}); status != http.StatusAccepted {
+		t.Fatalf("run of the copy: %d %s", status, raw)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE model.integration_def SET config = jsonb_set(config, '{request,url}', '"https://api.example.com/v2/items"') WHERE id = $1::uuid`, copied); err != nil {
+		t.Fatal(err)
+	}
+	if status, raw = do(devSub, "POST", "/api/integrations/"+copied+"/run", map[string]any{}); status != http.StatusBadRequest || !strings.Contains(string(raw), "since its last successful test") {
+		t.Fatalf("run of a copy changed beyond its target: %d %s", status, raw)
 	}
 
 	// Runs listing carries the extended shape.

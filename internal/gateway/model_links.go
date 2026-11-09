@@ -359,7 +359,16 @@ func (ml *ModelLinks) ReadModelSource(ctx context.Context, def *integration.Defi
 	if display == "" {
 		display = "code"
 	}
-	t, err := dataexport.Render(dataexport.Spec{Metrics: src.Metrics, Filters: src.Filters, MemberDisplay: display}, snap)
+	spec := dataexport.Spec{Metrics: src.Metrics, Filters: src.Filters, MemberDisplay: display}
+	// A metric or filter member the grid no longer shows — renamed or
+	// deleted in the source model, whose working revision cannot rewrite
+	// this link, or hidden from the owner the link reads as — fails the run
+	// with the names, as a grid renamed away does. Rendered leniently, the
+	// run succeeded with the column or the rows silently missing.
+	if problems := dataexport.Validate(spec, snap.Grid); len(problems) > 0 {
+		return refuse(integration.ErrCodeInvalidData, "grid %q of model %q: %s", src.Grid, lm.SourceName, strings.Join(problems, "; "))
+	}
+	t, err := dataexport.Render(spec, snap)
 	if err != nil {
 		return refuse(integration.ErrCodeInvalidData, "grid %q: %v", src.Grid, err)
 	}

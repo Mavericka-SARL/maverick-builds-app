@@ -47,7 +47,14 @@ const maxRunBodyBytes = 24 << 20
 // (2026-10-28). Workbook cells are read as stored,
 // so a formatted "1,234.50" arrives as 1234.5. fileName is the person's
 // file as the request names it ("file_name"), for Recent Imports.
-func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, err error) {
+//
+// mapped ("mapped": true) says the csv is already shaped and mapped — the
+// Import Wizard's Run Import sends the file its own Shape and Map steps
+// wrote, its columns under the model's names — so neither the saved reshape
+// nor (the caller's part) the saved column map applies again: applied twice,
+// the map read the model's names as source columns and dropped a renamed
+// one (2026-10-19). Only csv can be mapped; a workbook is the person's file.
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, mapped bool, err error) {
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
@@ -57,28 +64,35 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		// every answer about a row names that line (importpkg.RenumberRows).
 		RowLines []int  `json:"row_lines"`
 		FileName string `json:"file_name"`
+		Mapped   bool   `json:"mapped"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBodyBytes)).Decode(&body); err != nil {
-		return nil, nil, "", fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
+		return nil, nil, "", false, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
 	}
 	switch {
 	case body.XLSXBase64 != "":
+		if body.Mapped {
+			return nil, nil, "", false, fmt.Errorf("\"mapped\" applies to csv the Import Wizard wrote, not to a workbook: send the workbook without it, and the integration's saved mapping applies")
+		}
 		raw, err := base64.StdEncoding.DecodeString(body.XLSXBase64)
 		if err != nil {
-			return nil, nil, "", fmt.Errorf("xlsx_base64: %w", err)
+			return nil, nil, "", false, fmt.Errorf("xlsx_base64: %w", err)
 		}
 		sheet := body.Sheet
 		if sheet == "" {
 			sheet = savedSheet
 		}
 		header, rows, err = importpkg.ReadShaped("run.xlsx", raw, sheet, reshape)
-		return header, rows, body.FileName, err
+		return header, rows, body.FileName, false, err
 	case body.CSV != "":
+		if body.Mapped {
+			reshape = nil
+		}
 		header, rows, err = importpkg.ShapeCSV([]byte(body.CSV), reshape)
 		importpkg.RenumberRows(rows, body.RowLines)
-		return header, rows, body.FileName, err
+		return header, rows, body.FileName, body.Mapped, err
 	}
-	return nil, nil, "", fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)")
+	return nil, nil, "", false, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)")
 }
 
 // rowsCSV re-serializes mapped rows for the form and dimension importers,

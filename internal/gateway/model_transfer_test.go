@@ -7,8 +7,10 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -460,5 +462,92 @@ func TestModelExportImportRejectsCrossTenantAccess(t *testing.T) {
 		map[string]any{"application_id": otherAppID, "package": pkg},
 	); status != http.StatusOK {
 		t.Errorf("other tenant's admin importing into their OWN app status = %d, want 200, body = %v", status, body)
+	}
+}
+
+// importAdmin adds a tenant admin of the fixture's tenant, as persona.
+func importAdmin(t *testing.T, f *rollupFixture, persona string) {
+	t.Helper()
+	ctx := context.Background()
+	var custID, wsID, userID string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT c.id::text, w.id::text FROM core.customer c JOIN core.workspace w ON w.customer_id=c.id LIMIT 1
+	`).Scan(&custID, &wsID); err != nil {
+		t.Fatalf("find customer/workspace: %v", err)
+	}
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1, $1 || '@t.com', 'TA', $2::uuid) RETURNING id::text`,
+		persona, custID).Scan(&userID); err != nil {
+		t.Fatalf("tenant admin: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'tenant_admin', $2::uuid)`, userID, wsID); err != nil {
+		t.Fatalf("tenant admin role: %v", err)
+	}
+	devPersonas[persona] = persona
+	t.Cleanup(func() { delete(devPersonas, persona) })
+}
+
+// The import answers with what it left out of a package — here a grid's
+// metric and a dashboard's folder that the package does not hold, and a
+// member's parent in an unrelated dimension — and refuses a package whose
+// formula a save would refuse, naming the metric.
+func TestAdminModelImportNamesWhatItLeavesOut(t *testing.T) {
+	f := setupRollupFixture(t)
+	importAdmin(t, f, "import-notes-ta")
+	pkg := map[string]any{
+		"format": "mavericks-model-export", "version": 2, "model_name": "Hand-made",
+		"dimensions": []any{
+			map[string]any{"id": "dim-region", "name": "Region", "members": []any{map[string]any{"id": "mem-all", "code": "ALL", "label": "All"}}},
+			map[string]any{"id": "dim-product", "name": "Product", "members": []any{
+				map[string]any{"id": "mem-p1", "code": "P1", "label": "P1", "parent_member_id": "mem-all"}}},
+		},
+		"metrics": []any{map[string]any{"id": "met-rev", "name": "Revenue", "is_input": true}},
+		"grids": []any{map[string]any{"id": "grid-plan", "name": "Plan",
+			"metrics":    []any{map[string]any{"metric_id": "met-rev"}, map[string]any{"metric_id": "met-revv"}},
+			"dimensions": []any{map[string]any{"dimension_id": "dim-region"}}}},
+		"dashboards": []any{map[string]any{"id": "dash", "name": "Overview", "folder_id": "fold-typo", "widgets": []any{}}},
+	}
+	status, res := f.do(t, "POST", "/api/admin/models/import", "import-notes-ta", map[string]any{"application_id": f.appID, "package": pkg})
+	if status != http.StatusOK {
+		t.Fatalf("import: %d %v", status, res)
+	}
+	notes, _ := json.Marshal(res["notes"])
+	for _, want := range []string{
+		`grid \"Plan\": metric \"met-revv\" is not in the package`,
+		`dashboard \"Overview\": folder \"fold-typo\" is not in the package`,
+		`member \"P1\": its parent \"ALL\" is a member of \"Region\"`,
+	} {
+		if !strings.Contains(string(notes), want) {
+			t.Errorf("the import's notes %s do not say %s", notes, want)
+		}
+	}
+
+	pkg["metrics"] = append(pkg["metrics"].([]any), map[string]any{"id": "met-c", "name": "Doubled", "formula": `LOOKUP(Revenue, Region, "NOPE")`})
+	status, res = f.do(t, "POST", "/api/admin/models/import", "import-notes-ta", map[string]any{"application_id": f.appID, "model_name": "Bad formula", "package": pkg})
+	if msg, _ := json.Marshal(res); status != http.StatusBadRequest || !strings.Contains(string(msg), `metric \"Doubled\"`) || !strings.Contains(string(msg), "UNKNOWN_MEMBER") {
+		t.Errorf("a package with an unknown literal member: %d %s, want 400 naming Doubled and UNKNOWN_MEMBER", status, msg)
+	}
+}
+
+// The route refuses a file that is not a model package, and a package of a
+// format number this engine does not read (it has since 00f0bc0b).
+func TestAdminModelImportRefusesUnknownFormatAndVersion(t *testing.T) {
+	f := setupRollupFixture(t)
+	importAdmin(t, f, "import-format-ta")
+	for _, c := range []struct {
+		name    string
+		format  string
+		version int
+		want    string
+	}{
+		{"unknown format", "x", 2, `unrecognized package format`},
+		{"newer version", "mavericks-model-export", 99, `unsupported package version 99`},
+		{"no version", "mavericks-model-export", 0, `unsupported package version 0`},
+	} {
+		status, res := f.do(t, "POST", "/api/admin/models/import", "import-format-ta", map[string]any{"application_id": f.appID,
+			"package": map[string]any{"format": c.format, "version": c.version, "model_name": "M"}})
+		if msg, _ := json.Marshal(res); status != http.StatusBadRequest || !strings.Contains(string(msg), c.want) {
+			t.Errorf("%s: %d %s, want 400 %q", c.name, status, msg, c.want)
+		}
 	}
 }

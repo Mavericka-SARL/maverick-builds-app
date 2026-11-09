@@ -223,9 +223,21 @@ func TestBusinessRoles_CreateAndList(t *testing.T) {
 	if err != nil || again != roleID {
 		t.Errorf("second create: %v id=%s want %s", err, again, roleID)
 	}
+	// A role of another workspace of the same tenant assigns this
+	// application's steps to no one, and the role tools cannot change it:
+	// it is not listed.
+	if _, err := pool.Exec(ctx, `
+		WITH w AS (INSERT INTO core.workspace (customer_id, name)
+		           SELECT customer_id, 'Second' FROM core.workspace WHERE id = $1::uuid RETURNING id)
+		INSERT INTO identity.business_role (workspace_id, name) SELECT id, 'Elsewhere Role' FROM w`, appWS); err != nil {
+		t.Fatal(err)
+	}
 	out, _ = reader.Execute(ctx, "list_workflow_roles", nil)
 	if !strings.Contains(out, "Finance Review (id:"+roleID+", 0 member(s);") {
 		t.Errorf("listing after create: %s", out)
+	}
+	if strings.Contains(out, "Elsewhere Role") {
+		t.Errorf("listing shows another workspace's role: %s", out)
 	}
 }
 

@@ -246,8 +246,8 @@ func TestFormBuilderRoutesStayInScope(t *testing.T) {
 	fields := []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}}
 
 	// requireResourceAccess: 403 for a form that exists outside the scope.
-	f.expect(http.StatusForbidden, http.MethodPatch, formPath, prForeignDev, map[string]any{"name": "taken", "label": "Taken", "fields": fields})
-	f.expect(http.StatusForbidden, http.MethodDelete, formPath, prForeignDev, nil)
+	f.expect(http.StatusNotFound, http.MethodPatch, formPath, prForeignDev, map[string]any{"name": "taken", "label": "Taken", "fields": fields})
+	f.expect(http.StatusNotFound, http.MethodDelete, formPath, prForeignDev, nil)
 
 	ctx := context.Background()
 	var name string

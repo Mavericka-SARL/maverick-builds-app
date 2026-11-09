@@ -97,33 +97,127 @@ func (h *handler) cellRevisionWritable(ctx context.Context, revisionID string) *
 	return nil
 }
 
+// cellMetricInfo is what a cell write needs to know of its metric: its
+// format, the name a refusal shows, and its own dimensions — those of the
+// grid it is on, the coordinate every reader keys its values by.
+type cellMetricInfo struct {
+	format, label, gridName string
+	dims                    map[string]string // own dimension id → name
+}
+
 // cellMetric checks that metricID is an input metric of modelID the caller
-// may write, and answers its format.
-func (h *handler) cellMetric(ctx context.Context, a *actor, modelID, metricID string) (string, *cellRefusal) {
+// may write, and answers its format and dimensions.
+func (h *handler) cellMetric(ctx context.Context, a *actor, modelID, metricID string) (cellMetricInfo, *cellRefusal) {
 	// The model_id predicate matters: without it, an is_input metric from a
 	// completely different tenant's model would otherwise pass.
 	var isInput bool
-	var format, label string
+	var info cellMetricInfo
 	if err := h.db.QueryRow(ctx,
 		`SELECT is_input, COALESCE(format,''), COALESCE(NULLIF(label,''), name) FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, metricID, modelID,
-	).Scan(&isInput, &format, &label); err != nil {
-		return "", refuseCell(http.StatusForbidden, "metric is not writable")
+	).Scan(&isInput, &info.format, &info.label); err != nil {
+		return info, refuseCell(http.StatusForbidden, "metric is not writable")
 	}
 	// The caller must not be restricted to read-only or hidden access for it.
 	// The refusal names a metric the caller may see, and never a hidden one.
 	access, err := writeguard.MetricAccess(ctx, h.db.For(ctx), a.UserID, metricID)
 	if err != nil {
-		return "", refuseCell(http.StatusInternalServerError, "check metric access: %v", err)
+		return info, refuseCell(http.StatusInternalServerError, "check metric access: %v", err)
 	}
 	switch {
 	case access == "hidden":
-		return "", refuseCell(http.StatusForbidden, "access denied: this metric is hidden from you (an access rule)")
+		return info, refuseCell(http.StatusForbidden, "access denied: this metric is hidden from you (an access rule)")
 	case !isInput:
-		return "", refuseCell(http.StatusForbidden, "metric is not writable: %s is calculated, its cells take no input", label)
+		return info, refuseCell(http.StatusForbidden, "metric is not writable: %s is calculated, its cells take no input", info.label)
 	case access == "read":
-		return "", refuseCell(http.StatusForbidden, "access denied: %s is read-only for you (an access rule), so its cells take no input from you", label)
+		return info, refuseCell(http.StatusForbidden, "access denied: %s is read-only for you (an access rule), so its cells take no input from you", info.label)
 	}
-	return format, nil
+	if info.gridName, info.dims, err = h.metricOwnDimensions(ctx, metricID); err != nil {
+		return info, refuseCell(http.StatusInternalServerError, "load the metric's dimensions: %v", err)
+	}
+	return info, nil
+}
+
+// metricOwnDimensions answers the grid a metric is on and that grid's
+// dimensions (id → name): the coordinate the grid, the calculation
+// (calculation.LoadMetricDimensionIDs) and every other reader key its values
+// by. A metric on no grid has none.
+func (h *handler) metricOwnDimensions(ctx context.Context, metricID string) (string, map[string]string, error) {
+	rows, err := h.db.Query(ctx, `
+		SELECT g.name, COALESCE(gd.dimension_id::text,''), COALESCE(d.name,'')
+		FROM model.grid_metric gm
+		JOIN model.grid_def g ON g.id = gm.grid_id
+		LEFT JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+		LEFT JOIN model.dimension_def d ON d.id = gd.dimension_id
+		WHERE gm.metric_id = $1::uuid`, metricID)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	grid, dims := "", map[string]string{}
+	for rows.Next() {
+		var dimID, name string
+		if err := rows.Scan(&grid, &dimID, &name); err != nil {
+			return "", nil, err
+		}
+		if dimID != "" {
+			dims[dimID] = name
+		}
+	}
+	return grid, dims, rows.Err()
+}
+
+// checkCellDimensions refuses a coordinate that is not one member of each
+// of the metric's own dimensions: a value stored with another dimension
+// replaced the real cell in the grid and was counted in its total twice, and
+// one missing a dimension counted in the total and showed in no cell.
+func checkCellDimensions(info cellMetricInfo, dimCodes map[string]string, dimName func(string) string) *cellRefusal {
+	where := "its grid " + info.gridName
+	if info.gridName == "" {
+		where = "it is on no grid, so its value takes no dimension"
+	}
+	extra := make([]string, 0)
+	for dimID := range dimCodes {
+		if _, ok := info.dims[dimID]; !ok {
+			extra = append(extra, dimName(dimID))
+		}
+	}
+	if len(extra) > 0 {
+		slices.Sort(extra)
+		return &cellRefusal{status: http.StatusBadRequest, code: codeNotMetricDimension, message: fmt.Sprintf(
+			"dim_codes names %s, which %s does not have: %s; its dimensions are %s",
+			strings.Join(extra, ", "), info.label, where, ownDimensionList(info))}
+	}
+	missing := make([]string, 0)
+	for dimID, name := range info.dims {
+		if _, ok := dimCodes[dimID]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return &cellRefusal{status: http.StatusBadRequest, code: codeMissingDimension, message: fmt.Sprintf(
+			"%s takes a value at one member of each dimension of its grid %s: %s missing (send dim_codes {dimension_id: code} for %s)",
+			info.label, info.gridName, strings.Join(missing, ", "), ownDimensionList(info))}
+	}
+	return nil
+}
+
+// The codes of a coordinate that is not the metric's own.
+const (
+	codeNotMetricDimension = "NOT_METRIC_DIMENSION"
+	codeMissingDimension   = "MISSING_DIMENSION"
+)
+
+func ownDimensionList(info cellMetricInfo) string {
+	if len(info.dims) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(info.dims))
+	for _, n := range info.dims {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
 }
 
 // preparedCell is one checked cell, ready to store.
@@ -162,7 +256,8 @@ func recalcWrittenCells(ctx context.Context, scheduler *calculation.Scheduler, m
 
 // prepareCell checks one cell of a metric already checked (cellMetric):
 // its members, the write guard, and the value it holds.
-func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, req writebackReq, format string) (preparedCell, *cellRefusal) {
+func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, req writebackReq, info cellMetricInfo) (preparedCell, *cellRefusal) {
+	format := info.format
 	// A code no member of this revision's dimension has, a parent member and
 	// a calculated one are refused: a value stored there is never read by a
 	// grid (found live: "Snacks" for the member SNACKS).
@@ -194,6 +289,18 @@ func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, 
 	// A cell a table of records posts into takes its value from the records;
 	// clearing one removes only a typed value.
 	clears := req.Clear || (req.Text != nil && *req.Text == "") || (req.Member != nil && *req.Member == "")
+	// A value goes to one member of each of the metric's own dimensions. A
+	// clear is not checked, so a coordinate stored before this check can
+	// still be removed by naming it exactly.
+	if !clears {
+		if ref := checkCellDimensions(info, req.DimCodes, func(dimID string) string {
+			name := dimID
+			_ = h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&name)
+			return name
+		}); ref != nil {
+			return preparedCell{}, ref
+		}
+	}
 	if !clears {
 		if reason, err := writeguard.PostedReason(ctx, h.db.For(ctx), revisionID, []writeguard.Cell{{MetricID: req.MetricID, DimCodes: req.DimCodes}}); err != nil {
 			return preparedCell{}, refuseCell(http.StatusInternalServerError, "write guard: %v", err)
@@ -334,7 +441,7 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	formats := map[string]string{}
+	formats := map[string]cellMetricInfo{}
 	metricRefusals := map[string]*cellRefusal{}
 	cells := make([]preparedCell, 0, len(req.Cells))
 	var refused []cellBatchRefusal
@@ -347,23 +454,23 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 			refuse(refuseCell(http.StatusBadRequest, "metric_id is required"))
 			continue
 		}
-		format, known := formats[c.MetricID]
+		info, known := formats[c.MetricID]
 		if !known {
 			if mref, done := metricRefusals[c.MetricID]; done {
 				refuse(mref)
 				continue
 			}
 			var mref *cellRefusal
-			if format, mref = h.cellMetric(ctx, a, req.ModelID, c.MetricID); mref != nil {
+			if info, mref = h.cellMetric(ctx, a, req.ModelID, c.MetricID); mref != nil {
 				metricRefusals[c.MetricID] = mref
 				refuse(mref)
 				continue
 			}
-			formats[c.MetricID] = format
+			formats[c.MetricID] = info
 		}
 		one := writebackReq{ModelID: req.ModelID, RevisionID: revisionID, MetricID: c.MetricID, DimCodes: c.DimCodes,
 			Value: c.Value, Member: c.Member, Text: c.Text, Clear: c.Clear}
-		p, cref := h.prepareCell(ctx, a, revisionID, one, format)
+		p, cref := h.prepareCell(ctx, a, revisionID, one, info)
 		if cref != nil {
 			refuse(cref)
 			continue

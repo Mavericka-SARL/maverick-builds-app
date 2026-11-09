@@ -9,7 +9,7 @@ import { useDemo } from "../../api/useDemo";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { DashboardContextSyncContext, DashboardSlotContext, useFollowsBar, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
-import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
+import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, FIT_HEIGHT_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormPanel } from "./FormPanel";
@@ -135,7 +135,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                   // eliminated"); its frame below scrolls a taller one.
                   ...(widget.widget_type === "metric_kpi"
                     ? { minHeight: widget.size_h || undefined, alignSelf: "stretch" as const }
-                    : widget.size_h && widget.widget_type === "grid"
+                    : widget.size_h && FIT_HEIGHT_WIDGET_TYPES.has(widget.widget_type)
                     ? { alignSelf: "start" as const }
                     : widget.size_h && BUTTON_WIDGET_TYPES.has(widget.widget_type)
                     ? { height: widget.size_h + (buttonTitleBand(widget) ? BUTTON_TITLE_BAND_PX : 0), alignSelf: "start" as const }
@@ -162,7 +162,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                       // body and the grid shrink into, so the grid's own
                       // table area scrolls a taller grid under a header that
                       // stays in view.
-                      ...(widget.size_h && widget.widget_type === "grid" ? { display: "flex", flexDirection: "column" as const, maxHeight: widget.size_h } : {}),
+                      ...(widget.size_h && FIT_HEIGHT_WIDGET_TYPES.has(widget.widget_type) ? { display: "flex", flexDirection: "column" as const, maxHeight: widget.size_h } : {}),
                     }}
                     role={full?.id === widget.id ? "dialog" : undefined} aria-modal={full?.id === widget.id || undefined}
                     aria-label={full?.id === widget.id ? (widget.title || widget.widget_type) : undefined}>
@@ -176,8 +176,9 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
                         </button>
                       </div>
                     )}
-                    <div key="body" className={full?.id === widget.id ? "mvx-dash-full__body" : "mvx-dash-cell__body"}
-                      style={full?.id !== widget.id && widget.size_h && widget.widget_type === "grid" ? { height: "auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
+                    <div key="body" className={full?.id === widget.id ? "mvx-dash-full__body"
+                        : widget.size_h && FIT_HEIGHT_WIDGET_TYPES.has(widget.widget_type) ? "mvx-dash-cell__body mvx-dash-cell__body--fit" : "mvx-dash-cell__body"}
+                      style={full?.id !== widget.id && widget.size_h && FIT_HEIGHT_WIDGET_TYPES.has(widget.widget_type) ? { height: "auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
                       <WidgetRenderer widget={widget} ctx={ctx} onOpenInstance={onOpenInstance} />
                     </div>
                   </div>
@@ -328,8 +329,10 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "automation_button" && widget.ref_id) {
     inner = <AutomationButtonWidget ruleId={widget.ref_id} label={buttonLabel(widget, "Trigger")} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
   } else if (widget.widget_type === "form" && widget.ref_id) {
+    // mvx-records-box fills the widget's box, or, in a box at most as tall
+    // as designed (mvx-dash-cell__body--fit), takes the records' height.
     inner = (
-      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
+      <div className="mvx-panel mvx-records-box" style={{ padding: 0, overflow: "hidden" }}>
         <FormWidgetPanel formId={widget.ref_id} ctx={ctx} title={widget.show_title && widget.title ? widget.title : undefined} newRecordButton={!!widget.widget_props?.new_record_button}
           fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort} />
       </div>

@@ -91,6 +91,11 @@ func TestRunner_ForeignTargetFailsTheRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create def: %v", err)
 		}
+		// A run writes only on a passed test of its configuration (runner):
+		// these runs stand for an activated, tested connector.
+		if err := st.MarkTested(context.Background(), def.ID, integration.ConfigHash(def.Config)); err != nil {
+			t.Fatal(err)
+		}
 		return def
 	}
 	memberCount := func(dimID, code string) int {
@@ -133,6 +138,11 @@ func TestRunner_ForeignTargetFailsTheRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create def: %v", err)
 		}
+		// A run writes only on a passed test of its configuration (runner):
+		// these runs stand for an activated, tested connector.
+		if err := st.MarkTested(context.Background(), def.ID, integration.ConfigHash(def.Config)); err != nil {
+			t.Fatal(err)
+		}
 		run := claimAndRun(t, rn, st, def.ID, "manual", false)
 		if run.Status != "failed" || run.ErrorCode != integration.ErrCodeInvalidData {
 			t.Fatalf("run = %s/%s %q, want failed/invalid_data", run.Status, run.ErrorCode, run.Message)
@@ -167,7 +177,8 @@ func TestDBCommitter_RefusesForeignTarget(t *testing.T) {
 
 	dimDef := &integration.Definition{ModelID: modelID, RevisionID: revID,
 		Config: &integration.Config{TargetType: integration.TargetDimension, TargetID: foreignDim}}
-	written, _, err := c.CommitPull(ctx, dimDef, []string{"code", "label"}, [][]string{{"PWNED", "planted"}}, "", false, "dev-user")
+	out, err := c.CommitPull(ctx, dimDef, []string{"code", "label"}, [][]string{{"PWNED", "planted"}}, integration.PullOptions{RunBy: "dev-user"})
+	written := out.Written
 	if err == nil || written != 0 {
 		t.Fatalf("CommitPull into a foreign dimension: written=%d err=%v", written, err)
 	}

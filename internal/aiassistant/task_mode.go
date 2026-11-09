@@ -126,7 +126,8 @@ func TurnBrief(m RequestMode, plan *TaskPlan) string {
 		if plan.Current() >= 0 {
 			b.WriteString("Work on the CURRENT stage: one proposal for it (or for its next part), then check it and mark it with update_task_plan. A message that changes the goal: re-plan with plan_task.\n")
 		} else {
-			b.WriteString("Every stage is done or skipped: report what was built and checked, and what the developer has to do (a business admin's access rules, values to type).\n")
+			b.WriteString("Every stage is done or skipped: report what was built and checked, and what the developer has to do (a business admin's access rules, values to type); " +
+				"for another goal, suggest a new session.\n")
 		}
 	}
 	return b.String()
@@ -173,7 +174,8 @@ var playbooks = map[string]string{
 2. Read the differing rows' workbook formulas (read_attached_sheet) and the model's; find the root cause, which is
    often one shared input or test feeding many rows: fix it there, once.
 3. Copy the workbook's own logic (its closed-month test, its guards); never type a workbook value into a
-   calculated metric, never "if the actual is 0, use the plan".
+   calculated metric, never "if the actual is 0, use the plan", and never move an input (an assumption, a driver)
+   until a row matches: inputs change only where they differ from their own row in the workbook.
 4. Compare again after the fix; report rows matching before and after.
 `,
 	"pages": `### Playbook: pages

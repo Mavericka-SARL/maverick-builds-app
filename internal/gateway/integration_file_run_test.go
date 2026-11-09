@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -153,6 +154,95 @@ func TestBusinessUserRunsANameMappedFileIntegration(t *testing.T) {
 	// A run without a file says what it needs.
 	if status, _, raw := run(map[string]any{}); status != http.StatusBadRequest || !strings.Contains(raw, "xlsx_base64") {
 		t.Errorf("empty run: %d %s", status, raw)
+	}
+}
+
+// The Import Wizard's Run Import maps the file in the browser (its Map step,
+// which the person may edit) and sends the columns under the model's names
+// with "mapped": true, so the run applies the saved column map no second
+// time. It used to: the wizard's "revenue" column then met the saved map's
+// own "revenue" source column, mapped to "ignore", and the revenue was
+// dropped while the run answered 200 — and with a "*": "ignore" map, as the
+// AI Developer saves, every column the map renamed was dropped
+// (2026-10-19). A file sent without the flag (a dashboard's button, Run
+// with a reshape) is still mapped by the server, once.
+func TestWizardRunOfASavedIntegrationIsMappedOnce(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, nil)
+	value := func(metric string) (float64, bool) {
+		t.Helper()
+		var v float64
+		err := f.pool.QueryRow(f.ctx, `
+			SELECT fi.value::float8 FROM runtime.fact_input fi
+			JOIN model.metric_def m ON m.id = fi.metric_id
+			JOIN model.dimension_def g ON g.revision_id = fi.revision_id AND g.name = 'geography'
+			JOIN model.dimension_def p ON p.revision_id = fi.revision_id AND p.name = 'period'
+			WHERE fi.revision_id=$1::uuid AND m.name=$2 AND fi.dim_members->>g.id::text = 'CA' AND fi.dim_members->>p.id::text = 'Q1'
+			ORDER BY fi.entered_at DESC, fi.id DESC LIMIT 1`, f.revID, metric).Scan(&v)
+		return v, err == nil
+	}
+	saved := func(name string, columnMap map[string]string) string {
+		t.Helper()
+		status, body := do(f.devSub, "POST", "/api/developer/integrations?revision_id="+f.revID, map[string]any{
+			"name": name, "type": "csv_import", "target_type": "grid", "target_id": f.grid,
+		})
+		if status != http.StatusOK {
+			t.Fatalf("create: %d %s", status, body)
+		}
+		var created struct{ ID string }
+		_ = json.Unmarshal(body, &created)
+		if status, body := do(f.devSub, "PATCH", "/api/developer/integrations/"+created.ID+"/config", map[string]any{"config": map[string]any{
+			"column_map": columnMap, "import_mode": "replace",
+		}}); status != http.StatusOK {
+			t.Fatalf("config: %d %s", status, body)
+		}
+		return created.ID
+	}
+	type runResult struct {
+		Values         int `json:"values"`
+		ValuesImported int `json:"values_imported"`
+	}
+	run := func(id, query string, payload map[string]any) (int, runResult, string) {
+		t.Helper()
+		status, body := do(f.devSub, "POST", "/api/integrations/"+id+"/run"+query, payload)
+		var res runResult
+		_ = json.Unmarshal(body, &res)
+		return status, res, string(body)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		columnMap map[string]string
+		revenue   float64
+	}{
+		{"a map ignoring a source column named like a target", map[string]string{"Country": "geography", "Quarter": "period", "rev_amt": "revenue", "revenue": "ignore", "cost": "cost"}, 100},
+		{"a map with \"*\": \"ignore\"", map[string]string{"geography": "geography", "period": "period", "Rev": "revenue", "cost": "cost", "*": "ignore"}, 110},
+	} {
+		id := saved(tc.name, tc.columnMap)
+		wizardFile := map[string]any{"csv": "geography,period,revenue,cost\nCA,Q1," + strconv.FormatFloat(tc.revenue, 'f', -1, 64) + ",20\n", "mapped": true}
+		if status, res, raw := run(id, "?dry_run=true", wizardFile); status != http.StatusOK || res.Values != 2 {
+			t.Errorf("%s: the wizard's Validate: %d %s, want 2 values", tc.name, status, raw)
+		}
+		if status, res, raw := run(id, "", wizardFile); status != http.StatusOK || res.ValuesImported != 2 {
+			t.Errorf("%s: the wizard's run: %d %s, want 2 values imported", tc.name, status, raw)
+		}
+		if v, ok := value("revenue"); !ok || v != tc.revenue {
+			t.Errorf("%s: CA Q1 revenue = %v (found %v), want %v", tc.name, v, ok, tc.revenue)
+		}
+	}
+
+	// The person's own file, sent without the flag, is mapped by the
+	// server: rev_amt is the revenue, the file's "revenue" column ignored.
+	id := saved("raw file", map[string]string{"Country": "geography", "Quarter": "period", "rev_amt": "revenue", "revenue": "ignore", "cost": "cost"})
+	if status, res, raw := run(id, "", map[string]any{"csv": "Country,Quarter,rev_amt,revenue,cost\nCA,Q1,321,999,20\n"}); status != http.StatusOK || res.ValuesImported != 2 {
+		t.Fatalf("raw file run: %d %s", status, raw)
+	}
+	if v, _ := value("revenue"); v != 321 {
+		t.Errorf("CA Q1 revenue = %v, want 321 (rev_amt, the map applied once)", v)
+	}
+	// A workbook is the person's file: it cannot be "mapped".
+	if status, _, raw := run(id, "", map[string]any{"xlsx_base64": "UEs=", "mapped": true}); status != http.StatusBadRequest || !strings.Contains(raw, "mapped") {
+		t.Errorf("a mapped workbook: %d %s, want 400", status, raw)
 	}
 }
 

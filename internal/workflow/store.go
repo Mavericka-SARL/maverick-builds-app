@@ -990,10 +990,14 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 			// cannot be evaluated is left for a person, saying why.
 			var why string
 			if result, evaluated, why = s.evalConditionFormula(ctx, instanceID, text); !evaluated {
+				comment := "The condition could not be evaluated: " + why
+				if why == conditionHeldReason {
+					comment = heldConditionComment // decided when the recalculation finishes
+				}
 				_, _ = s.db.Exec(ctx, `
 					UPDATE workflow.workflow_step SET comment = $3
 					WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
-				`, instanceID, def.ID, "The condition could not be evaluated: "+why)
+				`, instanceID, def.ID, comment)
 				return
 			}
 		} else {

@@ -25,8 +25,9 @@ import (
 //	chart.actual_metric_id    the flag metric marking a chart's actual periods
 //
 // plus chart.context_defaults, whose KEYS are dimension IDs (its values are
-// member codes, which copy verbatim and need no remap), and a grid widget's
-// saved layout:
+// member codes, which copy verbatim and need no remap), chart.series_names,
+// whose KEYS are metric IDs (its values are legend names), and a grid
+// widget's saved layout:
 //
 //	default_view.rows[]       ordered axis entries: "__metrics__" or a dimension ID
 //	default_view.cols[]       same
@@ -80,8 +81,8 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 	}
 
 	// remapKeys rewrites the KEYS of an object keyed by dimension ID
-	// (chart.context_defaults, default_view.filter_sel); the values are member
-	// codes and copy verbatim. It rebuilds the object rather than mutating in
+	// (chart.context_defaults, default_view.filter_sel) or metric ID
+	// (chart.series_names); the values are data and copy verbatim. It rebuilds the object rather than mutating in
 	// place so a remapped key can't collide with one not yet visited.
 	remapKeys := func(m map[string]string, container map[string]any, key string) {
 		byID, ok := container[key].(map[string]any)
@@ -119,6 +120,7 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 		}
 
 		remapKeys(dimMap, chart, "context_defaults")
+		remapKeys(metricMap, chart, "series_names")
 	}
 
 	if ids, ok := root["metric_ids"].([]any); ok {

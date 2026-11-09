@@ -212,6 +212,14 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		}
 		return "", "", fmt.Errorf("update dimension: %w", err)
 	}
+	// A rename carries into the formulas, highlight rules and data exports
+	// naming the dimension, as the developer's rename does.
+	var renamedIn []string
+	if name != "" && name != curName {
+		if renamedIn, err = metricformula.RenameDimensionInFormulas(ctx, e.pool, dimID, curName, name); err != nil {
+			return "", "", fmt.Errorf("rename %s in the formulas that name it: %w", curName, err)
+		}
+	}
 
 	if p.Label != nil {
 		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET label=NULLIF($2,'') WHERE id=$1::uuid`, dimID, strings.TrimSpace(*p.Label)); err != nil {
@@ -263,6 +271,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	}
 	if name != "" && name != curName {
 		changes = append(changes, fmt.Sprintf("renamed from '%s'", curName))
+		if len(renamedIn) > 0 {
+			changes = append(changes, fmt.Sprintf("%d formula(s) naming it now use the new name", len(renamedIn)))
+		}
 	}
 	if p.Label != nil {
 		if l := strings.TrimSpace(*p.Label); l != "" {

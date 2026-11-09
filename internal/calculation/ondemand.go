@@ -148,7 +148,7 @@ func newEvalEnv(s *Scheduler, modelID, revisionID string, allDims map[string]*ro
 // rows above the leaves combine the leaves, which rollup.ResolveTime
 // reproduces).
 func (env *evalEnv) exactSource(ctx context.Context, dep *MetricDef, valueMap map[string]float64) *exactSource {
-	if exactRows(dep, valueMap) == nil {
+	if exactRows(dep, valueMap, env.dimIDToName) == nil {
 		return nil
 	}
 	if src, ok := env.sources[dep.ID]; ok {

@@ -208,6 +208,10 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
   const [addModel, setAddModel] = useState(false);
   const [modelName, setModelName] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  // What the last import left out of its package (a link to a row the
+  // package does not hold, a key the console does not read …), as the
+  // server names it.
+  const [importNotes, setImportNotes] = useState<string[]>([]);
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const inv = () => invalidateTenancy(qc);
@@ -235,8 +239,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
       if (pkg.format !== "mavericks-model-export") throw new Error("Not a Mavericks model export file");
       return withTenant(tenantId, () => api.importModel({ application_id: app.id, package: pkg }));
     },
-    onSuccess: () => { setImportError(null); inv(); },
-    onError: (e) => setImportError((e as Error).message),
+    onSuccess: (res) => { setImportError(null); setImportNotes(res.notes ?? []); inv(); },
+    onError: (e) => { setImportNotes([]); setImportError((e as Error).message); },
   });
   const { confirm, confirmElement } = useConfirm();
   const { isCollapsed, toggle } = useCollapsed();
@@ -327,6 +331,13 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           </div>
         )}
         {importError && <p className="mvx-admin-muted" role="alert">Import failed: {importError}</p>}
+        {importNotes.length > 0 && (
+          <div className="mvx-admin-muted" role="status" aria-label="What the import left out">
+            <p>Imported. Left out of the package:</p>
+            <ul>{importNotes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+            <Button size="sm" variant="ghost" onClick={() => setImportNotes([])}>Dismiss</Button>
+          </div>
+        )}
         {app.models.length === 0 && <p className="mvx-admin-muted">No models yet.</p>}
         {app.models.filter(m => !matches || matches.has(`model:${m.id}`)).map(m => {
           const modelOpen = !!matches?.has(`open:model:${m.id}`) || !isCollapsed(`model:${m.id}`);

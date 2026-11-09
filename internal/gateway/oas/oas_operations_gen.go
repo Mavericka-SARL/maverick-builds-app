@@ -223,6 +223,7 @@ const (
 	RemoveGridMetricOperation                OperationName = "RemoveGridMetric"
 	RemoveSsoOperation                       OperationName = "RemoveSso"
 	RenameAiSessionOperation                 OperationName = "RenameAiSession"
+	RenameRevisionOperation                  OperationName = "RenameRevision"
 	ReopenWorkflowInstanceOperation          OperationName = "ReopenWorkflowInstance"
 	ReorderDashboardsOperation               OperationName = "ReorderDashboards"
 	ReorderDimensionMembersOperation         OperationName = "ReorderDimensionMembers"

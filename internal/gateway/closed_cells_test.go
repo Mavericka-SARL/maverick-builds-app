@@ -41,12 +41,20 @@ func TestClosedCells_Route(t *testing.T) {
 	actualMonth := metric("actual_month", false, "1")
 	other := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, formula) VALUES ($1::uuid, $2::uuid, 'elsewhere', false, '1') RETURNING id::text`, f.modelA, f.revA)
 	// actual_month's stored values: M01 and M02 are actual, M03 is not (a
-	// blank counts as 0).
-	for _, c := range []string{"M01", "M02"} {
-		q(`INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, jsonb_build_object($4::text, $5::text), 1) RETURNING id::text`,
-			f.modelA, f.revA, actualMonth, month, c)
+	// blank counts as 0). Set after the PATCH below: editing a metric
+	// recalculates its revision, which computes the formula "1" everywhere.
+	storeActuals := func() {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `DELETE FROM runtime.calc_result WHERE metric_id=$1::uuid`, actualMonth); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []string{"M01", "M02"} {
+			q(`INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value)
+				VALUES ($1::uuid, $2::uuid, $3::uuid, jsonb_build_object($4::text, $5::text), 1) RETURNING id::text`,
+				f.modelA, f.revA, actualMonth, month, c)
+		}
 	}
+	storeActuals()
 	_ = other
 
 	patch := func(body any) (int, string) {
@@ -67,6 +75,7 @@ func TestClosedCells_Route(t *testing.T) {
 	if code, raw := patch(map[string]any{"name": "plan_pct", "formula": "", "closed_when": []map[string]any{{"metric": "Actual_Month", "op": "=", "value": 1}}}); code != http.StatusOK {
 		t.Fatalf("set closed_when: %d %s", code, raw)
 	}
+	storeActuals()
 	if got := q(`SELECT closed_when::text FROM model.metric_def WHERE id=$1::uuid`, plan); !strings.Contains(got, `"metric": "actual_month"`) {
 		t.Errorf("stored rules %s (the name as the revision spells it)", got)
 	}

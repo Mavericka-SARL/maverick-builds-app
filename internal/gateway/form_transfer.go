@@ -8,16 +8,21 @@ package gateway
 // importpkg.ResolveRows already established for grid data.
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -120,9 +125,19 @@ func formCellString(v any) string {
 // {csv | xlsx_base64} JSON envelope as /api/import/upload. Like that
 // endpoint, validation is whole-file atomic: any row failing validation
 // rejects the entire file before anything is created.
+//
+// Sent again under the same Idempotency-Key, a file is answered from the
+// first and creates nothing: the key is kept on the import's Recent Imports
+// line, written in the transaction that creates the records. Without one, a
+// client sending a file again after a 502 created every record twice
+// (2026-10-15).
 func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID string) {
 	extendImportDeadlines(w)
 	started := time.Now()
+	key, ok := importIdempotencyKey(w, r)
+	if !ok {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB limit
 	ctx := r.Context()
 	store := crudapp.NewStore(h.db.For(ctx))
@@ -171,6 +186,10 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		jsonErr(w, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)"), http.StatusBadRequest)
 		return
 	}
+	jobs := importpkg.NewStore(h.db.For(ctx))
+	if key != "" && !body.DryRun && !h.replayKeyedImport(w, ctx, jobs, form.ModelID, act.UserID, key, "table", tableImportReplay) {
+		return
+	}
 
 	var header []string
 	var rawRows []importpkg.RawRow
@@ -194,19 +213,45 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
-	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun, body.ReplaceBy)
+	tableJob := func(created int, errs []formRowError, fatal error) importpkg.FinishedJob {
+		job := h.tableImportJob(ctx, formID, "upload", act.UserID, body.FileName, started, created, errs, fatal)
+		if body.ReplaceBy != "" {
+			job.Details.Mode = string(importpkg.ModeReplace)
+		}
+		return job
+	}
+	// The import's Recent Imports line, with its key, commits with the
+	// records it created — or, the key taken by another request sent at the
+	// same time, nothing of the file does (importpkg.ErrImportKeyInUse).
+	var jobID, revisionID string
+	var recordJob func(context.Context, pgx.Tx, recordpost.ImportResult) error
+	if !body.DryRun {
+		recordJob = func(ctx context.Context, tx pgx.Tx, res recordpost.ImportResult) error {
+			job := tableJob(res.Created, nil, nil)
+			if job.ModelID == "" || res.Created == 0 {
+				return nil
+			}
+			id, err := importpkg.RecordJobTx(ctx, tx, job, key)
+			jobID, revisionID = id, job.RevisionID
+			return err
+		}
+	}
+	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun, body.ReplaceBy, recordJob)
 	created, errs := res.Created, res.Errors
 	if body.DryRun && err == nil {
 		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "rows_replaced": res.Replaced, "error_rows": len(errs), "errors": errs})
 		return
 	}
-	job := importpkg.FinishedJob{}
-	if !body.DryRun && (err != nil || len(errs) > 0 || created > 0) {
-		job = h.tableImportJob(ctx, formID, "upload", act.UserID, body.FileName, started, created, errs, err)
-		if body.ReplaceBy != "" {
-			job.Details.Mode = string(importpkg.ModeReplace)
+	if errors.Is(err, importpkg.ErrImportKeyInUse) {
+		// Sent twice at once: the other send created the records.
+		if h.replayKeyedImport(w, ctx, jobs, form.ModelID, act.UserID, key, "table", tableImportReplay) {
+			jsonErr(w, err, http.StatusConflict)
 		}
-		h.recordImportJob(ctx, job)
+		return
+	}
+	if !body.DryRun && (err != nil || len(errs) > 0) {
+		// A refused file's line holds no key: its correction goes under it.
+		h.recordImportJob(ctx, tableJob(created, errs, err))
 	}
 	if err != nil {
 		h.jsonImportErr(w, err)
@@ -224,10 +269,14 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID, RevisionID: job.RevisionID,
+		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID, RevisionID: revisionID,
 		Metadata: map[string]string{"records_created": strconv.Itoa(created), "records_replaced": strconv.Itoa(res.Replaced)},
 	})
-	jsonOK(w, map[string]any{"status": "ok", "records_created": created, "records_replaced": res.Replaced})
+	out := map[string]any{"status": "ok", "records_created": created, "records_replaced": res.Replaced}
+	if jobID != "" {
+		out["job_id"] = jobID
+	}
+	jsonOK(w, out)
 }
 
 // jsonFormRowErrs answers a refused form import: 422, nothing created. When

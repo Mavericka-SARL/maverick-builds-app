@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type GridDef, type DevDimension } from "../../api/client";
 import { GridValuesDialog } from "./GridValuesDialog";
-import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm, UnsavedChangesBar, useUnsavedGuard } from "../../ui";
+import { ValuesMemberDialog, type ValuesMemberNeed } from "./ValuesMemberDialog";
+import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm, UnsavedChangesBar, useUnsavedGuard, InlineAlert } from "../../ui";
 
 /** What the open grid's picker will save: its metrics in order, its dimensions and their levels. */
 interface GridDraft {
@@ -28,21 +29,53 @@ function draftChanged(g: GridDef, d: GridDraft): boolean {
     || d.rollup_source !== (g.rollup_source_grid_id ?? "");
 }
 
-/** Writes d over g: dimensions out and in, their levels, metrics out and in, then the metric order. */
-async function saveDraft(g: GridDef, d: GridDraft) {
+type AskMembers = (need: ValuesMemberNeed) => Promise<Record<string, string> | null>;
+
+/**
+ * Runs a grid change that moves stored values; when they need a member
+ * (409 VALUES_NEED_MEMBER) asks which one and runs it again with it.
+ */
+async function withMembers<T>(call: (members?: Record<string, string>) => Promise<T>, what: string, ask: AskMembers): Promise<T> {
+  try {
+    return await call();
+  } catch (e) {
+    const body = (e as { body?: { code?: string; dimension_ids?: string[]; count?: number } }).body;
+    if (body?.code !== "VALUES_NEED_MEMBER" || !body.dimension_ids?.length) throw e;
+    const members = await ask({ what, dimension_ids: body.dimension_ids, count: body.count ?? 0 });
+    if (!members) throw e;
+    return call(members);
+  }
+}
+
+/**
+ * Writes d over g: dimensions out and in, their levels, metrics out and in,
+ * then the metric order. Answers what happened to values already stored.
+ */
+async function saveDraft(g: GridDef, d: GridDraft, ask: AskMembers, names: Map<string, string>): Promise<string[]> {
+  const notes: string[] = [];
   if (d.rollup_source !== (g.rollup_source_grid_id ?? "")) await api.updateGrid(g.id, { rollup_source_grid_id: d.rollup_source });
   for (const id of g.dimension_ids) if (!d.dimension_ids.includes(id)) await api.removeGridDimension(g.id, id);
-  for (const id of d.dimension_ids) if (!g.dimension_ids.includes(id)) await api.addGridDimension(g.id, id);
+  for (const id of d.dimension_ids) {
+    if (g.dimension_ids.includes(id)) continue;
+    const r = await withMembers(m => api.addGridDimension(g.id, id, m?.[id]), `adding ${names.get(id) ?? "the dimension"}`, ask);
+    if (r.moved) notes.push(`${r.moved} stored value${r.moved === 1 ? "" : "s"} filed under the member chosen for ${names.get(id) ?? "the new dimension"}.`);
+  }
   for (const id of d.dimension_ids) {
     const want = d.levels[id] ?? null;
     const had = g.dimension_ids.includes(id) ? (g.dimension_levels?.[id] ?? null) : null;
     if (want !== had) await api.setGridDimLevel(g.id, id, want);
   }
   for (const id of g.metric_ids) if (!d.metric_ids.includes(id)) await api.removeGridMetric(g.id, id);
-  for (const id of d.metric_ids) if (!g.metric_ids.includes(id)) await api.addGridMetric(g.id, id);
+  for (const id of d.metric_ids) {
+    if (g.metric_ids.includes(id)) continue;
+    const r = await withMembers(m => api.addGridMetric(g.id, id, m), `moving ${names.get(id) ?? "the metric"} onto this grid`, ask);
+    if (r.moved) notes.push(`${names.get(id) ?? "A metric"}: ${r.moved} stored value${r.moved === 1 ? "" : "s"} filed under the member chosen.`);
+    if (r.combined) notes.push(`${names.get(id) ?? "A metric"}: ${r.combined} stored value${r.combined === 1 ? " was" : "s were"} combined by its own rule along the dimensions this grid has not got.`);
+  }
   // Added metrics land at the end; the order is sent when it is not that.
   const afterAdds = [...g.metric_ids.filter(id => d.metric_ids.includes(id)), ...d.metric_ids.filter(id => !g.metric_ids.includes(id))];
   if (afterAdds.join() !== d.metric_ids.join()) await api.reorderGridMetrics(g.id, d.metric_ids);
+  return notes;
 }
 
 /**
@@ -108,6 +141,11 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   // dropped by Cancel, as the dashboard designer's changes are.
   const [draft, setDraft] = useState<GridDraft | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // What the last save did to values already stored, and the open question
+  // of which member they belong to.
+  const [saveNotes, setSaveNotes] = useState<string[]>([]);
+  const [memberAsk, setMemberAsk] = useState<{ need: ValuesMemberNeed; resolve: (m: Record<string, string> | null) => void } | null>(null);
+  const askMembers: AskMembers = (need) => new Promise(resolve => setMemberAsk({ need, resolve }));
 
   const { data: model } = useQuery({ queryKey: ["dev-model", revisionId], queryFn: () => api.getDevModel(revisionId) });
   const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
@@ -123,12 +161,17 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
     setExpandedGrid(g?.id ?? null);
     setDraft(g ? draftOf(g) : null);
     setSaveError(null);
+    setSaveNotes([]);
     setMetricFilter("");
     setDimFilter("");
   });
   const save = useMutation({
-    mutationFn: ({ g, d }: { g: GridDef; d: GridDraft }) => saveDraft(g, d),
-    onMutate: () => setSaveError(null),
+    mutationFn: ({ g, d }: { g: GridDef; d: GridDraft }) => saveDraft(g, d, askMembers, new Map([
+      ...(model?.metrics ?? []).map(m => [m.id, m.label || m.name] as [string, string]),
+      ...(dims as DevDimension[]).map(x => [x.id, x.label || x.name] as [string, string]),
+    ])),
+    onMutate: () => { setSaveError(null); setSaveNotes([]); },
+    onSuccess: (notes) => setSaveNotes(notes),
     onError: (e: Error) => setSaveError(`Not everything was saved — ${e.message}`),
     onSettled: inv,
   });
@@ -444,6 +487,15 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
       )}
       {confirmElement}
       {guardElement}
+      {memberAsk && (
+        <ValuesMemberDialog need={memberAsk.need} dims={dims as DevDimension[]}
+          onDone={(m) => { memberAsk.resolve(m); setMemberAsk(null); }} />
+      )}
+      {saveNotes.length > 0 && (
+        <InlineAlert tone="info">
+          {saveNotes.map(n => <div key={n}>{n}</div>)}
+        </InlineAlert>
+      )}
       {valuesGrid && model && (() => {
         const g = grids.find(x => x.id === valuesGrid);
         return g ? <GridValuesDialog grid={g} metrics={model.metrics} dims={dims} open onClose={() => setValuesGrid(null)} /> : null;

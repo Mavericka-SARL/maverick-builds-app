@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 )
 
@@ -37,6 +38,7 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 	out = append(out, recurringMistakeWarnings(ctx, tx, modelID, revID, steps)...)
 	out = append(out, hiddenDecimalWarnings(ctx, tx, modelID, revID, steps)...)
 	out = append(out, emptyInputWarnings(ctx, tx, modelID, revID, steps)...)
+	out = append(out, memberlessDimensionWarnings(ctx, tx, revID, steps)...)
 	for i, step := range steps {
 		if step.Tool != "create_metric" && step.Tool != "update_metric" {
 			continue
@@ -69,6 +71,48 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 			if w := selfSumWarning(ctx, tx, modelID, revID, metricID, sum); w != "" {
 				out = append(out, at+": "+w)
 			}
+		}
+		out = append(out, emptyPropertyWarnings(ctx, tx, revID, at, p.Formula)...)
+	}
+	return out
+}
+
+// emptyPropertyWarnings names each dim.property the formula reads that no
+// member of the dimension holds a value for, as the plan leaves it: the
+// formula reads nothing in every cell. The AI build's 19 Actual P&L lines
+// summed SUMIFS(…, {GL Account}.reporting_line, "Sponsorships"): the
+// property was declared, every account came from a table keeping the
+// dimension, none had a value, and every closed month read 0 with no
+// warning (2026-11-08).
+func emptyPropertyWarnings(ctx context.Context, tx pgx.Tx, revID, at, text string) []string {
+	an, err := formula.Analyze(text)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, ref := range an.PropertyRefs {
+		key := strings.ToLower(ref.Dim + "." + ref.Property)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var dimName, prop string
+		var members, filled int
+		if tx.QueryRow(ctx, `
+			SELECT d.name, p.name,
+			       (SELECT count(*) FROM model.dimension_member m WHERE m.dimension_id = d.id),
+			       (SELECT count(*) FROM model.dimension_member m WHERE m.dimension_id = d.id
+			         AND COALESCE(btrim(m.properties->>p.name), '') <> '')
+			FROM model.dimension_def d JOIN model.dimension_property p ON p.dimension_id = d.id
+			WHERE d.revision_id = $1::uuid AND lower(d.name) = lower($2) AND lower(p.name) = lower($3)`,
+			revID, ref.Dim, ref.Property).Scan(&dimName, &prop, &members, &filled) != nil {
+			continue
+		}
+		if members > 0 && filled == 0 {
+			out = append(out, fmt.Sprintf("%s: the formula reads %s.%s, which none of %s's %d members has a value for, so it reads nothing in every cell — "+
+				"give the members their values first (update_dimension_member, or the dimension's import), or read the mapping from where it is kept",
+				at, ref.Dim, prop, dimName, members))
 		}
 	}
 	return out
@@ -294,17 +338,26 @@ func recurringMistakeWarnings(ctx context.Context, tx pgx.Tx, modelID, revID str
 		}
 	}
 	for ref := range levels {
-		var name, label, timeSummary, format string
+		var name, label, timeSummary, format, aggRule string
 		var onTimeGrid bool
 		if tx.QueryRow(ctx, `
-			SELECT m.name, COALESCE(m.label,''), COALESCE(m.time_summary,'sum'), COALESCE(m.format,'number'),
+			SELECT m.name, COALESCE(m.label,''), COALESCE(m.time_summary,'sum'), COALESCE(m.format,'number'), COALESCE(m.agg_rule,'sum'),
 			       EXISTS (SELECT 1 FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
 			               JOIN model.dimension_def d ON d.id = gd.dimension_id
 			               WHERE gm.metric_id = m.id AND d.dimension_type = 'time')
 			FROM model.metric_def m
 			WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid AND (m.id::text=$3 OR lower(m.name)=$3)`,
-			modelID, revID, ref).Scan(&name, &label, &timeSummary, &format, &onTimeGrid) != nil {
+			modelID, revID, ref).Scan(&name, &label, &timeSummary, &format, &aggRule, &onTimeGrid) != nil {
 			continue
+		}
+		// A total by formula is the formula on the totals, over time too: a
+		// time summary other than sum never applies. "Peak capacity usage"
+		// (max) read 80% for FY 2026, the year's utilisation, not July's 100%
+		// (2026-11-08).
+		if onTimeGrid && aggRule == "formula" && timeSummary != "sum" && timeSummary != "none" {
+			out = append(out, fmt.Sprintf("%s totals by its formula (agg_rule \"formula\"), so its time_summary %q never applies: a year shows the formula on the year's totals, not the months' %s — "+
+				"for the %s of the months set agg_rule \"none\" (its other totals then stay empty), or drop the time summary",
+				name, timeSummary, timeSummary, timeSummary))
 		}
 		if onTimeGrid && timeSummary == "sum" && format != "percentage" && looksLikeLevel(name, label) {
 			out = append(out, fmt.Sprintf("%s looks like a level (a headcount or a balance) and is summed over the months of its time grid: its FY is the months added up — set time_summary \"last\" (closing), \"first\" (opening) or \"average\"", name))
@@ -992,4 +1045,56 @@ func emptyInputWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, s
 	return []string{fmt.Sprintf("this plan builds pages, but %d input metric(s) hold no value and nothing loads them (%s%s): every calculation reading them reads 0. "+
 		"Load them from the attached sheet (import_file_data) or a saved loader, and check a row with compare_with_sheet",
 		len(empty), strings.Join(shown, ", "), more)}
+}
+
+// memberlessDimensionWarnings names each dimension a plan places on a grid
+// (create_grid's dimensions, add_grid_dimension) that has no member as the
+// plan leaves it: the grid shows no rows along it until members are added,
+// and nothing said so (2026-11-08). A dimension a table keeps is left out —
+// its members are the records that table gets.
+func memberlessDimensionWarnings(ctx context.Context, tx pgx.Tx, revID string, steps []aiassistant.ProposalStep) []string {
+	var out []string
+	seen := map[string]bool{}
+	for i, step := range steps {
+		var p struct {
+			GridID      string   `json:"grid_id"`
+			Name        string   `json:"name"`
+			Dimensions  []string `json:"dimensions"`
+			DimensionID string   `json:"dimension_id"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil {
+			continue
+		}
+		var dims []string
+		grid := p.Name
+		switch step.Tool {
+		case "create_grid":
+			dims = p.Dimensions
+		case "add_grid_dimension":
+			dims, grid = []string{p.DimensionID}, p.GridID
+		default:
+			continue
+		}
+		for _, ref := range dims {
+			ref = strings.TrimSpace(ref)
+			if ref == "" || seen[strings.ToLower(ref)] {
+				continue
+			}
+			var name string
+			var members int
+			var kept bool
+			if tx.QueryRow(ctx, `
+				SELECT d.name, (SELECT count(*) FROM model.dimension_member m WHERE m.dimension_id = d.id),
+				       EXISTS (SELECT 1 FROM model.form_def f WHERE f.keeps_dimension_id = d.id)
+				FROM model.dimension_def d
+				WHERE d.revision_id = $1::uuid AND (d.id::text = $2 OR lower(d.name) = lower($2))`,
+				revID, ref).Scan(&name, &members, &kept) != nil || members > 0 || kept {
+				continue
+			}
+			seen[strings.ToLower(ref)] = true
+			out = append(out, fmt.Sprintf("step %d (%s %s): dimension %s has no members as this plan leaves it — add its members first (in this plan, or by importing them): the grid shows no rows along it until it has some",
+				i+1, step.Tool, grid, name))
+		}
+	}
+	return out
 }

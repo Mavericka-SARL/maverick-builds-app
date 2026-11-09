@@ -127,11 +127,11 @@ func TestLegacyDimCodeAndGridOrderIgnoreDimensionNames(t *testing.T) {
 			{"ACC1", 12, accountID, "account"},
 			{"D1", 13, deptID, "department"},
 		} {
-			if status, body := legacyWrite(c.code, c.value); status != http.StatusOK {
-				t.Fatalf("dim_code %s: %d %s", c.code, status, body)
-			}
-			if got := storedDims(c.value); len(got) != 1 || got[c.dimID] != c.code {
-				t.Errorf("dim_code %s stored as %v, want {%s (%s): %s}", c.code, got, c.dimID, c.dim, c.code)
+			// spend is on no grid, so it takes a value at no dimension: the
+			// write is refused naming the dimension the code picked.
+			if status, body := legacyWrite(c.code, c.value); status != http.StatusBadRequest ||
+				!strings.Contains(body, "NOT_METRIC_DIMENSION") || !strings.Contains(body, "names "+c.dim+",") {
+				t.Errorf("dim_code %s: %d %s, want 400 NOT_METRIC_DIMENSION naming %s", c.code, status, body, c.dim)
 			}
 		}
 	})
@@ -156,14 +156,13 @@ func TestLegacyDimCodeAndGridOrderIgnoreDimensionNames(t *testing.T) {
 			t.Errorf("%d refused writes were stored", n)
 		}
 		// Naming the dimension resolves the same code.
+		// (spend is on no grid, so the dimension named is refused as not
+		// spend's, rather than the code as ambiguous.)
 		if status, body := do(http.MethodPost, "/api/cells", map[string]any{
 			"model_id": modelID, "revision_id": revID, "metric_id": metricID,
 			"dim_codes": map[string]string{accountID: "SHARED"}, "value": 14,
-		}); status != http.StatusOK {
-			t.Fatalf("dim_codes SHARED: %d %s", status, body)
-		}
-		if got := storedDims(14); got[accountID] != "SHARED" {
-			t.Errorf("dim_codes SHARED stored as %v", got)
+		}); status != http.StatusBadRequest || !strings.Contains(string(body), "names account,") {
+			t.Fatalf("dim_codes SHARED: %d %s, want 400 naming account", status, body)
 		}
 	})
 

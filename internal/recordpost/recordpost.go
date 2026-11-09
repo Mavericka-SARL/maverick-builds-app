@@ -57,6 +57,9 @@ type Poster struct {
 	// members to it (an import of its records), after they are saved: what
 	// reads the dimension's members is recalculated.
 	MembersChanged func(ctx context.Context, form *crudapp.FormDef)
+	// RecalcDone, when set, is told a revision's posting recalculation
+	// finished: workflow conditions held for it are decided then.
+	RecalcDone func(ctx context.Context, revisionID string)
 }
 
 // OnPool is a Poster on one pool.
@@ -137,6 +140,9 @@ func (ps *Poster) pending(ctx context.Context, formID string) func() {
 		for rev, seq := range seqs {
 			if err := calculation.RecalcFinished(context.WithoutCancel(ctx), ps.db(ctx), rev, seq); err != nil {
 				ps.Log.Warn().Err(err).Str("revision", rev).Msg("record a finished recalculation")
+			}
+			if ps.RecalcDone != nil {
+				ps.RecalcDone(context.WithoutCancel(ctx), rev)
 			}
 		}
 	}
@@ -848,6 +854,20 @@ func (m formMapping) members(data map[string]any, period periodOf) map[string]st
 	return out
 }
 
+// emptyDims are the dimensions m maps whose field data leaves empty
+// (absent, null or blank), sorted: a record holding a value has no full
+// coordinate without them.
+func (m formMapping) emptyDims(data map[string]any) []string {
+	var out []string
+	for dimID, fieldName := range m.dimMappings {
+		if !hasValue(data[fieldName]) {
+			out = append(out, dimID)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // periodOf names the period of time dimension dimID that holds a date
 // value, false when value is not a date or the dimension has no period
 // holding it (a dimension that is not a time dimension has none).
@@ -1008,6 +1028,14 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 			return 0, "", err
 		}
 	}
+	if to != nil {
+		// Checked before what the record posts already: a record that
+		// posted at a partial coordinate before the rule is not saved again
+		// as it is.
+		if field, msg := tp.emptyMappedField(recordID, to); field != "" {
+			return http.StatusBadRequest, msg, nil
+		}
+	}
 	hasStatus := tp.form.HasStatus()
 	for i, m := range tp.mappings {
 		before := posted[m.id]
@@ -1036,6 +1064,58 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 	return 0, "", nil
 }
 
+// emptyMappedField is the first field, in the table's order, that a mapping
+// posting the record's value takes a member from and that `to` leaves
+// empty, with the refusal saying so; "" when there is none. Such a record
+// has no full coordinate: it used to post at the dimensions it named,
+// counted in the metric's grid total and in no cell or calculation
+// (2026-10-17). It is checked in whichever status its mappings post in, as
+// PostingRefusal checks a draft. A new record of a table that keeps the
+// dimension, mapped by its code field, has no code before the save gives
+// it one (withoutOwnMember).
+func (tp *tablePosting) emptyMappedField(recordID string, to *RecordState) (field, msg string) {
+	hasStatus := tp.form.HasStatus()
+	needs := map[string]formMapping{} // field name → a mapping that needs it
+	for _, m := range tp.mappings {
+		if m.planned(hasStatus, to.Status, to.Data, true, nil) == nil {
+			continue
+		}
+		for _, dimID := range m.emptyDims(to.Data) {
+			name := m.dimMappings[dimID]
+			if recordID == "" && tp.form.KeepsDimension() && dimID == tp.form.KeepsDimensionID && name == tp.form.CodeField().Name {
+				continue
+			}
+			if _, seen := needs[name]; !seen {
+				needs[name] = m
+			}
+		}
+	}
+	if len(needs) == 0 {
+		return "", ""
+	}
+	names := slices.Sorted(maps.Keys(needs))
+	field = names[0]
+	for _, f := range tp.form.Fields {
+		if _, ok := needs[f.Name]; ok {
+			field = f.Name
+			break
+		}
+	}
+	label := field
+	if f := tp.form.Field(field); f != nil {
+		label = firstNonEmpty(f.Label, f.Name)
+	}
+	m := needs[field]
+	if m.aggregation == "count" {
+		return field, fmt.Sprintf("%s is empty: this record is counted by it, so it needs one", label)
+	}
+	source := m.sourceField
+	if f := tp.form.Field(source); f != nil {
+		source = firstNonEmpty(f.Label, f.Name)
+	}
+	return field, fmt.Sprintf("%s is empty: this record posts its %s by it, so it needs one", label, source)
+}
+
 // withoutOwnMember is p without the member of a new record of a table that
 // keeps a dimension: saving the record makes that member, so it cannot be
 // looked up yet. A record with a typed code knows its member before the save
@@ -1061,7 +1141,7 @@ func (ps *Poster) postingCellRefusal(ctx context.Context, tp *tablePosting, i in
 	if r, ok := tp.refusals[key]; ok {
 		return r.code, r.msg, nil
 	}
-	code, msg, err := ps.cellRefusal(writeguard.WithMemo(ctx, tp.memo), userID, forYou, tp.form, tp.mappings[i], tp.revisions[i], p)
+	code, msg, err := ps.cellRefusal(writeguard.WithMemo(ctx, tp.memo), userID, forYou, tp.mappings[i], tp.revisions[i], p)
 	if err == nil {
 		tp.refusals[key] = cellRefusal{code: code, msg: msg}
 	}
@@ -1070,7 +1150,7 @@ func (ps *Poster) postingCellRefusal(ctx context.Context, tp *tablePosting, i in
 
 // cellRefusal is postingCellRefusal's check of a cell of mapping m, which
 // posts into revisionID.
-func (ps *Poster) cellRefusal(ctx context.Context, userID string, forYou bool, form *crudapp.FormDef, m formMapping, revisionID string, p *plannedPosting) (int, string, error) {
+func (ps *Poster) cellRefusal(ctx context.Context, userID string, forYou bool, m formMapping, revisionID string, p *plannedPosting) (int, string, error) {
 	pool := ps.db(ctx)
 	whose, readOnly := "your", "read-only for you, and this record posts into it"
 	if !forYou {
@@ -1091,7 +1171,24 @@ func (ps *Poster) cellRefusal(ctx context.Context, userID string, forYou bool, f
 	}
 	memberIDs, err := writeguard.ResolveWriteMembers(ctx, pool, m.modelID, revisionID, p.members)
 	if writeguard.IsMemberError(err) {
-		return http.StatusBadRequest, fmt.Sprintf("this record posts into %s, which cannot hold it: %v", form.Label, err), nil
+		// Named by what it posts into — the metric, and the grid showing it
+		// (a mapping's grid_id may be empty: a metric is on one grid) — not
+		// by the table the record is in (2026-11-07). The metric is one
+		// the person sees: a hidden one was refused above.
+		var metric, grid string
+		if qErr := pool.QueryRow(ctx, `
+			SELECT COALESCE(NULLIF(md.label,''), md.name), COALESCE(g.name, '')
+			FROM model.metric_def md
+			LEFT JOIN model.grid_metric gm ON gm.metric_id = md.id
+			LEFT JOIN model.grid_def g ON g.id = gm.grid_id
+			WHERE md.id = $1::uuid LIMIT 1`, m.targetMetricID).Scan(&metric, &grid); qErr != nil {
+			return 0, "", qErr
+		}
+		into := metric
+		if grid != "" {
+			into = fmt.Sprintf("%s on the grid %s", metric, grid)
+		}
+		return http.StatusBadRequest, fmt.Sprintf("this record posts into %s, which cannot hold it: %v", into, err), nil
 	}
 	if err != nil {
 		return 0, "", err

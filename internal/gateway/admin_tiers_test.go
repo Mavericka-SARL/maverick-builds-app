@@ -124,8 +124,8 @@ func TestCustomerlessAdminGrantIsReachNotAdministration(t *testing.T) {
 		return map[string]string{"name": f.one(t, `SELECT name FROM core.application WHERE id=$1::uuid`, app)}
 	}
 	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.app1, "", name(f.app1), http.StatusOK)
-	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.app2, "", name(f.app2), http.StatusForbidden)
-	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.appT, "", name(f.appT), http.StatusForbidden)
+	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.app2, "", name(f.app2), http.StatusNotFound)
+	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.appT, "", name(f.appT), http.StatusNotFound)
 	for _, path := range []string{"/api/admin/applications", "/api/apps"} {
 		got := listedIDs(t, f.expect(t, sub, "GET", path, "", nil, http.StatusOK))
 		if !slices.Contains(got, f.app1) || slices.Contains(got, f.app2) || slices.Contains(got, f.appT) || slices.Contains(got, f.app3) {
@@ -165,7 +165,7 @@ func TestRolesCountPerTenant(t *testing.T) {
 	}
 
 	// In tenant 1 it is a developer.
-	f.expect(t, cross, "PATCH", "/api/admin/applications/"+f.app1, "", appName(f.app1), http.StatusForbidden)
+	f.expect(t, cross, "PATCH", "/api/admin/applications/"+f.app1, "", appName(f.app1), http.StatusNotFound)
 	f.expect(t, cross, "POST", "/api/admin/users/"+bu1+"/access/apps/"+f.app1, "", nil, http.StatusForbidden)
 	f.expect(t, cross, "POST", "/api/admin/users/"+bu1+"/access/models/"+f.modelA, "", nil, http.StatusForbidden)
 	f.expect(t, cross, "POST", "/api/admin/users/"+bu1+"/roles", "", map[string]string{"role": "developer", "workspace_id": f.ws1b}, http.StatusForbidden)
@@ -210,7 +210,7 @@ func TestRolesCountPerTenant(t *testing.T) {
 	f.expect(t, ta, "POST", "/api/admin/users/"+bu2b+"/access/apps/"+f.app3, "", nil, http.StatusForbidden)
 	f.expect(t, ta, "POST", "/api/admin/users/"+bu2b+"/roles", "", map[string]string{"role": "developer", "workspace_id": f.ws2}, http.StatusForbidden)
 	f.expect(t, ta, "PATCH", "/api/admin/users/"+dev2, "", map[string]string{"display_name": "Renamed"}, http.StatusForbidden)
-	f.expect(t, ta, "PATCH", "/api/admin/applications/"+f.app3, "", appName(f.app3), http.StatusForbidden)
+	f.expect(t, ta, "PATCH", "/api/admin/applications/"+f.app3, "", appName(f.app3), http.StatusNotFound)
 	if code := f.settingsStatus(t, ta, f.cust2); code != http.StatusForbidden {
 		t.Errorf("tenant 2's notification settings as tenant 1's admin and tenant 2's developer: %d", code)
 	}
@@ -350,9 +350,9 @@ func TestWorkspaceTenantAdminGrantIsNoAdministration(t *testing.T) {
 	f.expect(t, "mm-tenant-admin", "POST", "/api/admin/users/"+id+"/access/apps/"+f.app1, "", nil, http.StatusOK)
 
 	appName := f.one(t, `SELECT name FROM core.application WHERE id=$1::uuid`, f.app1)
-	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.app1, "", map[string]string{"name": "Renamed from tenant 2"}, http.StatusForbidden)
+	f.expect(t, sub, "PATCH", "/api/admin/applications/"+f.app1, "", map[string]string{"name": "Renamed from tenant 2"}, http.StatusNotFound)
 	f.expect(t, sub, "GET", "/api/admin/models/"+f.modelA+"/export", "", nil, http.StatusForbidden)
-	f.expect(t, sub, "DELETE", "/api/admin/applications/"+f.app1, "", nil, http.StatusForbidden)
+	f.expect(t, sub, "DELETE", "/api/admin/applications/"+f.app1, "", nil, http.StatusNotFound)
 	if got := f.one(t, `SELECT COALESCE((SELECT name FROM core.application WHERE id=$1::uuid), '-')`, f.app1); got != appName {
 		t.Errorf("app1 is now %q, want %q", got, appName)
 	}

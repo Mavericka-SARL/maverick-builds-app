@@ -10,9 +10,14 @@ function json(body: unknown) {
   return { status: 200, contentType: "application/json", body: JSON.stringify(body) };
 }
 
+// The Business Admin group's screen: "Workflow History" is also the User
+// group's name for the person's own runs.
 async function open(page: Page, tab: string) {
   await loadAs(page, "finance");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: tab, exact: true }).click();
+  const group = page.getByRole("navigation", { name: "Primary" }).locator(".mvx-sidebar-nav__group", {
+    has: page.getByRole("button", { name: "Business Admin", exact: true }),
+  });
+  await group.getByRole("button", { name: tab, exact: true }).click();
 }
 
 test("an approved run is reopened with a reason, not by a status change", async ({ page }) => {

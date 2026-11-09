@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 )
@@ -23,8 +25,16 @@ import (
 const coverageSystemPrompt = `You check a plan against the request it answers. List each distinct thing the request asks to be
 created, changed or removed — a row, a metric, a grid, a page, a posting, a role — as the request names it. For
 each, decide whether some step of the plan does it. Reply with JSON only: {"missing": ["<item, as the request names
-it>", …]}, [] when every item has a step. Something the request only mentions as context, says to leave alone, or
-leaves for a later step is not an item. Do not judge whether the steps are right, only whether each item has one.`
+it>", …]}, [] when every item has a step. Do not judge whether the steps are right, only whether each item has one.
+These are not items:
+- something the request only mentions as context, says to leave alone, or leaves for a later step;
+- something it names as an input or a source to read from ("using X", "from X", "reads X", "based on X") without
+  asking to create or change it;
+- a heading, a section title or a blank row of a sheet: it holds no values of its own;
+- something listed under "Already in the model", unless the request asks to change it;
+- a check — compare, verify, reconcile, review: it is done by reading, never by a step of a plan.
+A range ("rows 6-39", "every row of the sheet") is covered row by row: a step creating or changing the metric of a
+row covers that row, whatever the step calls it.`
 
 // manyItems: the request enumerates — numbered points, a list, or names
 // several rows, grids or pages — and is long enough for a plan to drop part.
@@ -38,7 +48,7 @@ func requestNamesSeveral(request string) bool {
 // current stage, when it has one — no step does, and, for a direct order,
 // which steps do something the order did not ask for (nil when the request
 // names one thing and is no order, or the check cannot be made).
-func planCoverage(ctx context.Context, p providers.Provider, model, request string, stageItems []string, direct bool, steps []aiassistant.ProposalStep) (missing, extra []string, usage providers.Usage) {
+func planCoverage(ctx context.Context, p providers.Provider, model, request string, stageItems []string, direct bool, steps []aiassistant.ProposalStep, built string) (missing, extra []string, usage providers.Usage) {
 	if p == nil || (!direct && len(stageItems) == 0 && !requestNamesSeveral(request)) {
 		return nil, nil, providers.Usage{}
 	}
@@ -53,6 +63,9 @@ func planCoverage(ctx context.Context, p providers.Provider, model, request stri
 	content := "Request:\n" + request
 	if len(stageItems) > 0 {
 		content += "\n\nItems of the stage this plan is for:\n- " + strings.Join(stageItems, "\n- ")
+	}
+	if built != "" {
+		content += "\n\nAlready in the model:\n" + built
 	}
 	content += "\n\nPlan:\n" + plan.String()
 	system := coverageSystemPrompt
@@ -79,8 +92,10 @@ func planCoverage(ctx context.Context, p providers.Provider, model, request stri
 // directExtraPrompt adds, for a direct order, the steps it did not ask for.
 const directExtraPrompt = `
 The request is a direct order: the developer decided what to make or change. Also list, as "extra", each step
-that does something the order did not ask for and does not need (a step it needs to work — a grid for a metric
-it orders, an ordering step — is not extra): {"missing": […], "extra": ["step N: what it does", …]}.`
+that does something the order did not ask for and does not need: {"missing": […], "extra": ["step N: what it does", …]}.
+Not extra: a step the order needs to work (a grid for a metric it orders, placing such a metric on its grid, a
+helper metric its formula reads, an ordering step), and a step for a row or item inside a range or group the order
+names ("rows 6-39", "the P&L lines").`
 
 // extraWarning is the plan's send-back for steps a direct order did not ask for.
 func extraWarning(extra []string) string {
@@ -123,4 +138,48 @@ func nonBlank(list []string) []string {
 // coverageWarning is the plan's send-back for missing items.
 func coverageWarning(missing []string) string {
 	return fmt.Sprintf("the plan has no step for: %s — add them, or say in your reply which you leave out and why", strings.Join(missing, "; "))
+}
+
+// modelInventory lists what the revision already has, by kind, for the
+// coverage check: items built by earlier stages were reported missing again
+// ("the plan has no step for: Calendar…" two proposals after it was built,
+// 2026-11-08). At most maxInventory characters.
+func modelInventory(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, revID string) string {
+	const maxInventory = 6000
+	rows, err := q.Query(ctx, `
+		SELECT 'Dimensions', name FROM model.dimension_def WHERE revision_id = $1::uuid
+		UNION ALL SELECT 'Grids', name FROM model.grid_def WHERE revision_id = $1::uuid
+		UNION ALL SELECT 'Tables', COALESCE(NULLIF(label,''), name) FROM model.form_def WHERE revision_id = $1::uuid
+		UNION ALL SELECT 'Pages', name FROM model.dashboard_def WHERE revision_id = $1::uuid
+		UNION ALL SELECT 'Workflows', name FROM workflow.workflow_def WHERE revision_id = $1::uuid
+		UNION ALL SELECT 'Metrics', name || COALESCE(' ("' || NULLIF(label,'') || '")', '') FROM model.metric_def WHERE revision_id = $1::uuid`, revID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	kinds := []string{"Dimensions", "Grids", "Tables", "Pages", "Workflows", "Metrics"}
+	byKind := map[string][]string{}
+	for rows.Next() {
+		var kind, name string
+		if rows.Scan(&kind, &name) == nil {
+			byKind[kind] = append(byKind[kind], name)
+		}
+	}
+	var b strings.Builder
+	for _, k := range kinds {
+		if len(byKind[k]) == 0 {
+			continue
+		}
+		line := k + ": " + strings.Join(byKind[k], ", ") + "\n"
+		if b.Len()+len(line) > maxInventory {
+			line = line[:max(0, maxInventory-b.Len())] + "…\n"
+		}
+		b.WriteString(line)
+		if b.Len() >= maxInventory {
+			break
+		}
+	}
+	return b.String()
 }

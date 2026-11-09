@@ -2,6 +2,7 @@ package writeguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -263,6 +264,47 @@ type Execer interface {
 }
 
 // RuleInput is one rule as an admin sets it.
+// ErrRuleType refuses an access rule of a type nothing enforces: a rule is
+// a dimension member's or a metric's. 'button' rules were accepted until
+// 2026-11-08 and restricted nothing (migration 163 retired them).
+var ErrRuleType = errors.New("an access rule's rule_type is dimension_member or metric")
+
+// CheckRuleType is ErrRuleType for one rule type.
+func CheckRuleType(ruleType string) error {
+	if ruleType == "dimension_member" || ruleType == "metric" {
+		return nil
+	}
+	return fmt.Errorf("%w (got %q)", ErrRuleType, ruleType)
+}
+
+// AccessOnly and AccessOnlyRead put a member on its person's allow-list for
+// the member's dimension (migration 168): every other member of that
+// dimension is hidden from them, members added later included, except the
+// allowed members' ancestors and descendants. The member itself stays
+// writable (AccessOnly) or read-only (AccessOnlyRead).
+const (
+	AccessOnly     = "only"
+	AccessOnlyRead = "only_read"
+)
+
+// ErrRuleAccess refuses an access a rule cannot have.
+var ErrRuleAccess = errors.New("an access rule's access is write, read, hidden, only or only_read")
+
+// CheckRuleAccess refuses an access a rule of ruleType cannot have:
+// write, read and hidden for any rule; only and only_read for a member's.
+func CheckRuleAccess(ruleType, access string) error {
+	switch access {
+	case "write", "read", "hidden":
+		return nil
+	case AccessOnly, AccessOnlyRead:
+		if ruleType == "dimension_member" {
+			return nil
+		}
+		return fmt.Errorf("%w: %q is a member rule's (only these members), not a %s rule's", ErrRuleAccess, access, ruleType)
+	}
+	return fmt.Errorf("%w (got %q)", ErrRuleAccess, access)
+}
+
 type RuleInput struct {
 	Type   string
 	RefID  string
@@ -391,6 +433,12 @@ func replaceRulesIn(ctx context.Context, tx Execer, t ruleTable, ownerID string,
 	types := make([]string, len(rules))
 	refs := make([]string, len(rules))
 	for i, r := range rules {
+		if err := CheckRuleType(r.Type); err != nil {
+			return err
+		}
+		if err := CheckRuleAccess(r.Type, r.Access); err != nil {
+			return err
+		}
 		types[i], refs[i] = r.Type, r.RefID
 	}
 	args := append([]any{userID, types, refs}, scopeArgs...)

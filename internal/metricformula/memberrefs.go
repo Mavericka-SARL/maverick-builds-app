@@ -15,121 +15,15 @@ const CodeMemberInUse = "MEMBER_IN_USE"
 
 // FormulaNamesMember reports whether a formula names member code of
 // dimension dim, so that deleting the member would leave the formula
-// reading something that no longer exists:
-//   - a literal LOOKUP member for dim (any level of the hierarchy), matched
-//     exactly, as LOOKUP resolves a member;
-//   - when timeCodes is set (dim is the time dimension of the metric's
-//     grid), a literal TIMESUM start or end code, matched exactly;
-//   - an *IFS/*IF criterion on dim's code range that is an equality with
-//     the code — no ordering, "<>" or wildcard, which can match other
-//     members too (formula.CriterionEqualsCode, case-insensitive);
-//   - a comparison (=, <>) between the bare dimension or PARENT(dim) and a
-//     literal equal to the code, case-insensitively as formulas compare
-//     text;
-//   - a SWITCH on the bare dimension or PARENT(dim) with a literal match
-//     value equal to the code (SWITCH compares as "=" does; the trailing
-//     default is a result, not a match value).
-//
-// Dimension names match case-insensitively. A formula that does not parse
-// names nothing. A criterion on a dim.property range, or a code computed at
-// runtime, names no member.
+// reading something that no longer exists: a literal LOOKUP member, a
+// TIMESUM bound on the time dimension (timeCodes), an equality criterion on
+// the dimension's code range, a comparison with the bare dimension or
+// PARENT(dim), or a SWITCH match value (formula.NamesMember lists them).
+// A member-code rename rewrites exactly these literals
+// (RenameMemberInFormulas), from the same list. A formula that does not
+// parse names nothing.
 func FormulaNamesMember(formulaText, dim, code string, timeCodes bool) bool {
-	if strings.TrimSpace(formulaText) == "" || dim == "" || code == "" {
-		return false
-	}
-	an, err := formula.Analyze(formulaText)
-	if err != nil {
-		return false
-	}
-	for _, call := range an.DimensionalCalls {
-		for _, m := range call.Members {
-			if strings.EqualFold(m.Dim, dim) {
-				if c, ok := m.LiteralCode(); ok && c == code {
-					return true
-				}
-			}
-		}
-		for _, c := range call.Criteria {
-			if strings.EqualFold(c.Dim, dim) && c.Property == "" && c.Kind == formula.ArgLiteral &&
-				formula.CriterionEqualsCode(c.Value, code) {
-				return true
-			}
-		}
-	}
-	if timeCodes {
-		for _, ts := range an.TimeSums {
-			if !ts.Ranged {
-				continue
-			}
-			for _, a := range []formula.DimensionalArg{ts.Start, ts.End} {
-				if c, ok := a.LiteralCode(); ok && c == code {
-					return true
-				}
-			}
-		}
-	}
-	node, err := formula.Parse(formulaText)
-	if err != nil {
-		return false
-	}
-	return comparesMemberCode(node, dim, code)
-}
-
-// comparesMemberCode walks the AST for dim = "code" / dim <> "code" (either
-// side, bare dimension or PARENT(dim)).
-func comparesMemberCode(node formula.Node, dim, code string) bool {
-	switch n := node.(type) {
-	case *formula.BinaryExpr:
-		if n.Op == "=" || n.Op == "<>" {
-			if namesDimCode(n.Left, n.Right, dim, code) || namesDimCode(n.Right, n.Left, dim, code) {
-				return true
-			}
-		}
-		return comparesMemberCode(n.Left, dim, code) || comparesMemberCode(n.Right, dim, code)
-	case *formula.UnaryExpr:
-		return comparesMemberCode(n.Expr, dim, code)
-	case *formula.CallExpr:
-		// SWITCH(dim, "A", x, "B", y[, default]) compares its first argument
-		// with each match value exactly as dim = "A" does (compareValues).
-		if strings.EqualFold(n.Name, "SWITCH") && len(n.Args) >= 3 && isDimOrParent(n.Args[0], dim) {
-			for i := 1; i+1 < len(n.Args); i += 2 {
-				if text, ok := formula.LiteralText(n.Args[i]); ok && strings.EqualFold(text, code) {
-					return true
-				}
-			}
-		}
-		for _, a := range n.Args {
-			if comparesMemberCode(a, dim, code) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// namesDimCode reports whether side is dim (bare or PARENT(dim)) and other
-// a literal whose text equals code.
-func namesDimCode(side, other formula.Node, dim, code string) bool {
-	if !isDimOrParent(side, dim) {
-		return false
-	}
-	text, ok := formula.LiteralText(other)
-	return ok && strings.EqualFold(text, code)
-}
-
-// isDimOrParent reports whether node is the bare dimension dim or PARENT(dim).
-func isDimOrParent(node formula.Node, dim string) bool {
-	switch s := node.(type) {
-	case *formula.Ident:
-		return strings.EqualFold(s.Name, dim)
-	case *formula.CallExpr:
-		if strings.EqualFold(s.Name, "PARENT") && len(s.Args) == 1 {
-			if id, ok := s.Args[0].(*formula.Ident); ok {
-				return strings.EqualFold(id.Name, dim)
-			}
-		}
-	}
-	return false
+	return formula.NamesMember(formulaText, dim, code, timeCodes)
 }
 
 // CheckMemberNotInUse refuses deleting member memberID of dimension

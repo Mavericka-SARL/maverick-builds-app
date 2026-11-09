@@ -42,6 +42,14 @@ type PropertyRef struct {
 	Property string
 }
 
+// CellDimRead is a dimension read at the cell's own member — a dim.property
+// value or PARENT(dim) — and how it is written. Such a read has a value only
+// where the cell pins the dimension.
+type CellDimRead struct {
+	Dim  string
+	Text string
+}
+
 // ArgKind classifies a member, criterion or period-code argument for the
 // static read set (contract C7).
 type ArgKind int
@@ -137,6 +145,12 @@ type Analysis struct {
 	DimensionalCalls []DimensionalCall
 	// TimeSums are the TIMESUM calls in source order (outer first).
 	TimeSums []TimeSumCall
+	// CellDims are the dimensions read at the cell's own member through
+	// dim.property (a value, never a criteria range) or PARENT, in source
+	// order, de-duplicated case-insensitively by dimension. A bare
+	// dimension name read at the cell stays a Reference: Analyze cannot
+	// tell it from a metric.
+	CellDims []CellDimRead
 	// RangeNames are the criteria ranges written as a bare name, which are
 	// also DimensionArgs, de-duplicated case-insensitively. Analyze cannot
 	// tell a dimension from a metric: one that names a metric (and no
@@ -191,6 +205,7 @@ type analyzer struct {
 	dimCalls       []DimensionalCall
 	timeSums       []TimeSumCall
 	rangeNames     []string
+	cellDims       []CellDimRead
 }
 
 // Analyze parses and analyzes a formula.
@@ -217,6 +232,7 @@ func AnalyzeNode(node Node) (*Analysis, error) {
 		DimensionalCalls: a.dimCalls,
 		TimeSums:         a.timeSums,
 		RangeNames:       a.rangeNames,
+		CellDims:         a.cellDims,
 	}
 	for _, key := range a.order {
 		out.References = append(out.References, *a.refs[key])
@@ -260,6 +276,7 @@ func (a *analyzer) walk(node Node, w window) error {
 		return nil
 	case *DimProperty:
 		a.propertyRef(n.Dim, n.Property)
+		a.cellDim(n.Dim, n.Dim+"."+n.Property)
 		return nil
 	case *UnaryExpr:
 		return a.walk(n.Expr, w)
@@ -461,6 +478,15 @@ func (a *analyzer) propertyRef(dim, prop string) {
 	a.propRefs = append(a.propRefs, PropertyRef{Dim: dim, Property: prop})
 }
 
+func (a *analyzer) cellDim(dim, text string) {
+	for _, c := range a.cellDims {
+		if strings.EqualFold(c.Dim, dim) {
+			return
+		}
+	}
+	a.cellDims = append(a.cellDims, CellDimRead{Dim: dim, Text: text})
+}
+
 func (a *analyzer) dimensionArg(dim string) {
 	if !containsFold(a.dimArgs, dim) {
 		a.dimArgs = append(a.dimArgs, dim)
@@ -525,6 +551,7 @@ func (a *analyzer) walkDimCall(n *CallExpr, w window) error {
 			return toAnalysisError(ferr)
 		}
 		a.dimensionArg(dim)
+		a.cellDim(dim, "PARENT("+dim+")")
 		return nil
 	case dimensionalFuncLookup:
 		if len(n.Args) < 3 || len(n.Args)%2 == 0 {

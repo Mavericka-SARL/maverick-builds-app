@@ -17,6 +17,7 @@
 <tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
+<tr><td><code>IF(product = "P1", 1, 0)</code> in a metric on a <i>[region, month]</i> grid</td><td>DIMENSION_NOT_ON_METRIC: … reads product at the cell (product), but product is not one of its grid's dimensions (month, region), so it is blank at every cell</td><td>Put product on the grid, or read it through a dimension the grid has (<code>region.segment</code> for a grouping of region)</td></tr>
 <tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell</td><td>Compare it: <code>IF(act_comment = "", 0, 1)</code> counts the commented rows, <code>IF(chk_status = "OK", 1, 0)</code> the accepted months (not beside a time function)</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
@@ -29,6 +30,7 @@
 <p>Some rules depend on where a metric sits. They are checked again when a metric is <b>placed on a grid</b>, when a dimension is removed from a grid, and when a revision is <b>activated</b>:</p>
 <ul>
   <li>a LOOKUP or SUMIFS source whose dimensions do not include the argument dimension (<code>DIMENSION_NOT_ON_SOURCE</code>), when the source was not yet on a grid at save;</li>
+  <li>a dimension read at the cell — bare, <code>dimension.property</code> or <code>PARENT</code> — that is not on the metric's own grid (<code>DIMENSION_NOT_ON_METRIC</code>): a new metric is checked when it is placed, a placed one at every save. A revision saved before this check that holds such a formula is not activated until it is fixed;</li>
   <li>a literal <code>TIMESUM</code> period code that is not a period of the grid's time dimension (<code>UNKNOWN_MEMBER</code>), and a literal LOOKUP code renamed since;</li>
   <li>a time function on a grid without exactly one time dimension (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
 </ul>
@@ -38,7 +40,7 @@
   <li><b>Renaming a property</b> rewrites every formula that reads it (<code>region.old</code> becomes <code>region.new</code>).</li>
   <li><b>Deleting</b> a property, a dimension or a member that a formula names is refused (<code>PROPERTY_IN_USE</code>, <code>DIMENSION_IN_USE</code>, <code>MEMBER_IN_USE</code>), and the message lists the metrics to change first.</li>
   <li><b>Renaming a member</b> does not rewrite formulas: a literal naming the old code then fails with <code>#N/A</code>, and activation refuses the revision until the formula is changed.</li>
-  <li><b>Deleting a metric</b> that another metric reads — in its formula, or as the numerator or denominator of its Rate total — is refused with <code>METRIC_IN_USE</code> (HTTP 409), and the message lists those metrics: "units is read by arg_aggs, logic_mix, price; change those metrics first, then delete it". The <b>Used by</b> column shows the formula readers in advance, and the confirmation names them. A metric reading only itself (<code>PREVIOUS(x)</code> in <code>x</code>) does not block its own delete.</li>
+  <li><b>Deleting a metric</b> that another metric reads — in its formula, or as the numerator or denominator of its Rate total — or that a highlight rule, a closed rule, a workflow condition or a data export of the revision names, is refused with <code>METRIC_IN_USE</code> (HTTP 409), and the message lists them: "units is read by arg_aggs, logic_mix, price (its highlight rules); change those first, then delete it". Renaming a metric, a dimension or a member's code rewrites the formulas that name it instead. The <b>Used by</b> column shows the formula readers in advance, and the confirmation names them. A metric reading only itself (<code>PREVIOUS(x)</code> in <code>x</code>) does not block its own delete.</li>
 </ul>
 
 <h3>Troubleshooting</h3>

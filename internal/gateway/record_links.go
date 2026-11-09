@@ -34,16 +34,53 @@ const keptMemberCode = "MV409"
 // recordSavedHook is what runs in the transaction saving a record of form
 // that held before and now holds after: the member it is, relabelled, and
 // its history fields' changes. Nil when the table has neither.
-func recordSavedHook(form *crudapp.FormDef, recordID string, before, after map[string]any, userID string) func(ctx context.Context, tx dbx.DB) error {
+func recordSavedHook(form *crudapp.FormDef, recordID string, before, after map[string]any, userID string, changed *bool) func(ctx context.Context, tx dbx.DB) error {
 	if !form.KeepsDimension() && len(form.HistoryFields()) == 0 {
 		return nil
 	}
 	return func(ctx context.Context, tx dbx.DB) error {
-		if _, err := recordpost.KeepMember(ctx, tx, form, after); err != nil {
+		c, err := recordpost.KeepMember(ctx, tx, form, after)
+		if err != nil {
 			return err
+		}
+		if c && changed != nil {
+			*changed = true
 		}
 		return crudapp.LogFieldChanges(ctx, tx, form, recordID, before, after, userID)
 	}
+}
+
+// restrictDeletePlan recounts plan's linked records as act sees them
+// (recordpost.DeletePlan.Restrict): a table it does not reach counts none,
+// one it reaches counts the records its visibility keeps. A plan with
+// records act does not see is refused, and names no count of them.
+func (h *handler) restrictDeletePlan(ctx context.Context, act *actor, plan *recordpost.DeletePlan) error {
+	store := crudapp.NewStore(h.db.For(ctx))
+	return plan.Restrict(func(tableID string, ids []string) (int, error) {
+		if len(ids) == 0 {
+			return 0, nil
+		}
+		rs, err := h.resolveFormRecordScope(ctx, act, tableID)
+		if err != nil || !rs.reach {
+			return 0, err
+		}
+		vis, err := h.recordVisibility(ctx, rs)
+		if err != nil {
+			return 0, err
+		}
+		vals := make([]any, len(ids))
+		for i, id := range ids {
+			vals[i] = id
+		}
+		res, err := store.QueryRecords(ctx, rs.form, vis, act.UserID, crudapp.Query{
+			Filters: []crudapp.Filter{{Field: "id", Op: "in", Values: vals}},
+			Limit:   1,
+		})
+		if err != nil {
+			return 0, err
+		}
+		return res.Total, nil
+	})
 }
 
 // deleteKeptRecord deletes rec, a record of a table keeping a dimension,
@@ -56,6 +93,10 @@ func (h *handler) deleteKeptRecord(w http.ResponseWriter, r *http.Request, act *
 	ps := h.records()
 	plan, err := ps.PlanDelete(ctx, scope.form, rec)
 	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if err := h.restrictDeletePlan(ctx, act, plan); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -177,6 +218,10 @@ func (h *handler) recordDeletePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := h.records().PlanDelete(ctx, scope.form, rec)
 	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if err := h.restrictDeletePlan(ctx, act, plan); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}

@@ -259,7 +259,7 @@
   <li><b>Formula</b> re-evaluates the formula on the totalled inputs. Right for ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales, never a sum or mean of percentages.</li>
   <li><b>Rate</b> divides the total of one metric by the total of another. Right for a price or any blended rate.</li>
 </ul>
-<p>At a total, a dimension that is not pinned has no single member, so a bare dimension name and <code>dimension.property</code> read <b>blank</b> there: <code>IF(region = "EMEA", sales, 0)</code> is 0 at the grand total.</p>
+<p>At a total, a dimension that is not pinned has no single member, so a bare dimension name and <code>dimension.property</code> read <b>blank</b> there: <code>IF(region = "EMEA", sales, 0)</code> is 0 at the grand total. A dimension the metric's grid does not have is never pinned, so a formula reading one at the cell is refused (<code>DIMENSION_NOT_ON_METRIC</code>, chapter 11).</p>
 
 <h3>Reading a metric from another grid</h3>
 <p>A plain reference to a metric on another grid reads it at the members the two share. On a dimension the source has but the cell does not, it reads the source's total over that dimension (by the source's aggregation rule); a dimension of the cell that the source lacks is ignored. So from a <i>[region, period]</i> cell, <code>fx_rate</code> on <i>FX [currency]</i> is the total over all currencies, which is rarely what you want. To choose a member, use LOOKUP: <code>LOOKUP(fx_rate, currency, region.currency)</code> reads the rate of the region's own currency.</p>
@@ -310,7 +310,7 @@
 <tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
 <tr><td>Text</td><td>Quoted literals, a bare dimension (the member code), text properties, text functions</td><td><code>#VALUE!</code> (<code>1 + "a"</code>)</td></tr>
 <tr><td>TRUE / FALSE</td><td>Comparisons, <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>IF</code> with no else</td><td>1 / 0 (<code>TRUE + TRUE</code> = 2)</td></tr>
-<tr><td>Blank</td><td>An input cell nobody entered (read as 0 in arithmetic, blank in a comparison and in <code>ISBLANK</code>); a property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none</td><td>0</td></tr>
+<tr><td>Blank</td><td>An input cell nobody entered (read as 0 in arithmetic, blank in a comparison and in <code>ISBLANK</code>); likewise a metric read across a dimension where nothing was entered under the cell (from a <i>[month]</i> grid, an <i>[account, month]</i> actual in a month with nothing posted on any account — a recorded 0 is not blank); a property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none, and LOOKUP of one at an aggregate period</td><td>0</td></tr>
 <tr><td>Error</td><td>A failed operation (chapter 5)</td><td>The error travels on</td></tr>
 </table>
 
@@ -486,6 +486,7 @@
 <ul>
   <li>Dimension and property names ignore case; so does comparing a member code with <code>=</code>. LOOKUP and TIMESUM match member codes <b>exactly</b>.</li>
   <li>These references read only the cell's own member, so they are allowed anywhere, including in an opening/closing recurrence, and they are recomputed normally for users who cannot see every member.</li>
+  <li><b>The dimension must be on the metric's own grid.</b> A cell has a member only of its grid's dimensions, so <code>region</code>, <code>region.segment</code> or <code>PARENT(region)</code> in a metric on a grid without region would be blank at every cell. Such a formula is refused (<code>DIMENSION_NOT_ON_METRIC</code>) when it is saved on a placed metric, when the metric is placed on a grid, when its grid loses the dimension and when the revision is activated; the message names the metric. A dimension <i>related</i> to a grid dimension is no exception: for a Segment dimension that groups regions by their <code>segment</code> property, write <code>region.segment</code>; for a parent dimension of a grid dimension, write <code>PARENT(</code>the grid dimension<code>)</code>. A criteria range (<code>SUMIFS(sales, product, "P*")</code>) and a LOOKUP dimension are not cell reads and are checked against the source instead.</li>
   <li>If a metric and a dimension share a name, the name means the dimension where the cell pins it, and the metric elsewhere. Avoid the clash.</li>
 </ul>
 
@@ -507,7 +508,8 @@
   <li><b>A parent member</b> (EMEA, World, Q1, FY26) returns its leaf members combined by the source's own aggregation rule, and an aggregate period by the source's time summary. A ratio source (rule Formula or Rate) at a parent returns the ratio computed there, never a mean of its children.</li>
   <li><b>Other dimensions</b>: those the cell and the source share stay at the cell's members; a dimension of the source the cell does not have is totalled; a dimension of the cell the source does not have is ignored.</li>
   <li>Each dimension must be one of the source's, or related to one (a parent/child dimension chain, or a property grouping), else <code>DIMENSION_NOT_ON_SOURCE</code>. Two dimensions that both relate to the same dimension of the source conflict: <code>CONFLICTING_DIMENSION_ARGUMENTS</code>.</li>
-  <li>With nothing recorded at the target, LOOKUP reads 0, as a plain reference does.</li>
+  <li>With nothing recorded at the target, LOOKUP reads 0.</li>
+  <li><b>No value by the source's own rules</b>: a source with time summary <b>None</b> has no value at an aggregate period (Q1, FY26) or over all periods, and one with aggregation <b>None</b> has none above its leaf members. LOOKUP there is <b>blank</b>, as <code>YEARVALUE</code> is: <code>ISBLANK</code> is TRUE and the cell stores no value (it is left out of totals), never a 0.</li>
   <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
 </ul>
 
@@ -751,6 +753,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
+<tr><td><code>IF(product = "P1", 1, 0)</code> in a metric on a <i>[region, month]</i> grid</td><td>DIMENSION_NOT_ON_METRIC: … reads product at the cell (product), but product is not one of its grid's dimensions (month, region), so it is blank at every cell</td><td>Put product on the grid, or read it through a dimension the grid has (<code>region.segment</code> for a grouping of region)</td></tr>
 <tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell</td><td>Compare it: <code>IF(act_comment = "", 0, 1)</code> counts the commented rows, <code>IF(chk_status = "OK", 1, 0)</code> the accepted months (not beside a time function)</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
@@ -763,6 +766,7 @@ closing = opening + flow           time summary: last</pre>
 <p>Some rules depend on where a metric sits. They are checked again when a metric is <b>placed on a grid</b>, when a dimension is removed from a grid, and when a revision is <b>activated</b>:</p>
 <ul>
   <li>a LOOKUP or SUMIFS source whose dimensions do not include the argument dimension (<code>DIMENSION_NOT_ON_SOURCE</code>), when the source was not yet on a grid at save;</li>
+  <li>a dimension read at the cell — bare, <code>dimension.property</code> or <code>PARENT</code> — that is not on the metric's own grid (<code>DIMENSION_NOT_ON_METRIC</code>): a new metric is checked when it is placed, a placed one at every save. A revision saved before this check that holds such a formula is not activated until it is fixed;</li>
   <li>a literal <code>TIMESUM</code> period code that is not a period of the grid's time dimension (<code>UNKNOWN_MEMBER</code>), and a literal LOOKUP code renamed since;</li>
   <li>a time function on a grid without exactly one time dimension (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
 </ul>
@@ -772,7 +776,7 @@ closing = opening + flow           time summary: last</pre>
   <li><b>Renaming a property</b> rewrites every formula that reads it (<code>region.old</code> becomes <code>region.new</code>).</li>
   <li><b>Deleting</b> a property, a dimension or a member that a formula names is refused (<code>PROPERTY_IN_USE</code>, <code>DIMENSION_IN_USE</code>, <code>MEMBER_IN_USE</code>), and the message lists the metrics to change first.</li>
   <li><b>Renaming a member</b> does not rewrite formulas: a literal naming the old code then fails with <code>#N/A</code>, and activation refuses the revision until the formula is changed.</li>
-  <li><b>Deleting a metric</b> that another metric reads — in its formula, or as the numerator or denominator of its Rate total — is refused with <code>METRIC_IN_USE</code> (HTTP 409), and the message lists those metrics: "units is read by arg_aggs, logic_mix, price; change those metrics first, then delete it". The <b>Used by</b> column shows the formula readers in advance, and the confirmation names them. A metric reading only itself (<code>PREVIOUS(x)</code> in <code>x</code>) does not block its own delete.</li>
+  <li><b>Deleting a metric</b> that another metric reads — in its formula, or as the numerator or denominator of its Rate total — or that a highlight rule, a closed rule, a workflow condition or a data export of the revision names, is refused with <code>METRIC_IN_USE</code> (HTTP 409), and the message lists them: "units is read by arg_aggs, logic_mix, price (its highlight rules); change those first, then delete it". Renaming a metric, a dimension or a member's code rewrites the formulas that name it instead. The <b>Used by</b> column shows the formula readers in advance, and the confirmation names them. A metric reading only itself (<code>PREVIOUS(x)</code> in <code>x</code>) does not block its own delete.</li>
 </ul>
 
 <h3>Troubleshooting</h3>
@@ -904,6 +908,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>UNKNOWN_PROPERTY</code></td><td>dimension.property names a property that is not declared</td><td><a href="#members">11</a></td></tr>
 <tr><td><code>UNKNOWN_MEMBER</code></td><td>A literal LOOKUP member or TIMESUM period code does not exist (save, placement, activation)</td><td><a href="#lookup">12</a>, <a href="#time">14</a></td></tr>
 <tr><td><code>DIMENSION_NOT_ON_SOURCE</code></td><td>A LOOKUP or criteria dimension is neither the source's nor related to it</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
+<tr><td><code>DIMENSION_NOT_ON_METRIC</code></td><td>A dimension read at the cell (bare, <code>dim.property</code>, <code>PARENT</code>) is not on the metric's own grid, so it is blank at every cell</td><td><a href="#members">11</a></td></tr>
 <tr><td><code>CONFLICTING_DIMENSION_ARGUMENTS</code></td><td>Two dimension arguments relate to the same dimension of the source</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
 <tr><td><code>DIM_CONTEXT_REQUIRED</code></td><td>A dimensional function evaluated where there is no cell</td><td><a href="#validation">17</a></td></tr>
 <tr><td><code>TIME_CONTEXT_REQUIRED</code></td><td>A time function evaluated where there is no period</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>

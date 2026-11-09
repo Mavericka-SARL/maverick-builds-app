@@ -301,6 +301,17 @@ func TestFullReloadOnlyDeletesWhatTheActorMayWrite(t *testing.T) {
 		dimID).Scan(&hiddenMemberID); err != nil {
 		t.Fatalf("insert hidden member: %v", err)
 	}
+	// Both metrics on one grid: a full reload clears the grids its file
+	// writes into, so the read-only metric is in the reload's reach.
+	var gridID string
+	if err := store.Pool().QueryRow(ctx, `INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid, 'Plan') RETURNING id::text`, modelID).Scan(&gridID); err != nil {
+		t.Fatalf("insert grid: %v", err)
+	}
+	for _, m := range []string{metricID, otherMetricID} {
+		if _, err := store.Pool().Exec(ctx, `INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid, $2::uuid)`, gridID, m); err != nil {
+			t.Fatalf("insert grid metric: %v", err)
+		}
+	}
 	for _, rule := range []struct{ ruleType, refID, access string }{
 		{"metric", otherMetricID, "read"},
 		{"dimension_member", hiddenMemberID, "hidden"},
@@ -382,6 +393,94 @@ func TestFullReloadOnlyDeletesWhatTheActorMayWrite(t *testing.T) {
 	rows.Close()
 	if len(values) != 1 || values[0] != 99 {
 		t.Errorf("writable cell after full_reload = %v, want exactly [99]", values)
+	}
+}
+
+// TestFullReloadClearsOnlyTheGridsItWrites: a full reload clears the grids
+// its file writes into — every input metric of each, the file's own and the
+// ones it leaves out — and no other grid's values. It used to delete every
+// typed value of the revision: a file of one grid's revenue emptied the HR
+// grid's headcount (2026-11-09). The metrics it cleared are returned with
+// the staged ones, so their calculated dependents are recalculated.
+func TestFullReloadClearsOnlyTheGridsItWrites(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, modelID, revenue := insertFixtures(t, store)
+
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := store.Pool().QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	cost := q(`INSERT INTO model.metric_def (model_id, name, is_input) VALUES ($1::uuid, 'cost', true) RETURNING id::text`, modelID)
+	headcount := q(`INSERT INTO model.metric_def (model_id, name, is_input) VALUES ($1::uuid, 'headcount', true) RETURNING id::text`, modelID)
+	loose := q(`INSERT INTO model.metric_def (model_id, name, is_input) VALUES ($1::uuid, 'loose', true) RETURNING id::text`, modelID)
+	dimID := q(`INSERT INTO model.dimension_def (model_id, name) VALUES ($1::uuid, 'region') RETURNING id::text`, modelID)
+	q(`INSERT INTO model.dimension_member (dimension_id, code) VALUES ($1::uuid, 'EMEA') RETURNING id::text`, dimID)
+	q(`INSERT INTO model.dimension_member (dimension_id, code) VALUES ($1::uuid, 'APAC') RETURNING id::text`, dimID)
+	sales := q(`INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid, 'Sales') RETURNING id::text`, modelID)
+	hr := q(`INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid, 'HR') RETURNING id::text`, modelID)
+	for _, gm := range [][2]string{{sales, revenue}, {sales, cost}, {hr, headcount}} {
+		q(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid, $2::uuid) RETURNING id::text`, gm[0], gm[1])
+	}
+	seed := func(metric, code string, value float64) {
+		t.Helper()
+		if _, err := store.Pool().Exec(ctx, `
+			INSERT INTO runtime.fact_input (model_id, metric_id, dim_members, value, entered_by)
+			VALUES ($1::uuid, $2::uuid, jsonb_build_object($3::text, $4::text), $5, $6::uuid)`,
+			modelID, metric, dimID, code, value, userID); err != nil {
+			t.Fatalf("seed fact: %v", err)
+		}
+	}
+	seed(revenue, "APAC", 10)  // the file's metric, a cell it lacks → cleared
+	seed(cost, "EMEA", 20)     // the same grid's other metric → cleared
+	seed(headcount, "EMEA", 5) // another grid → kept
+	seed(loose, "EMEA", 7)     // on no grid, not in the file → kept
+
+	job, err := store.CreateImportJob(ctx, modelID, "", "file://reload.csv", userID, nil)
+	if err != nil {
+		t.Fatalf("CreateImportJob: %v", err)
+	}
+	if err := store.StageRows(ctx, job.Id, []importpkg.StagingRow{
+		{MetricID: revenue, DimMembers: map[string]string{dimID: "EMEA"}, Value: 99, RowNumber: 1},
+	}, nil); err != nil {
+		t.Fatalf("StageRows: %v", err)
+	}
+	metricIDs, err := store.CommitImport(ctx, job.Id, modelID, "", userID, importpkg.ModeFullReload)
+	if err != nil {
+		t.Fatalf("CommitImport(full_reload): %v", err)
+	}
+
+	count := func(metric string) int {
+		t.Helper()
+		var n int
+		if err := store.Pool().QueryRow(ctx, `SELECT count(*) FROM runtime.fact_input WHERE model_id=$1::uuid AND metric_id=$2::uuid`, modelID, metric).Scan(&n); err != nil {
+			t.Fatalf("count facts: %v", err)
+		}
+		return n
+	}
+	if n := count(revenue); n != 1 {
+		t.Errorf("revenue holds %d values, want 1 (the file's EMEA; APAC cleared)", n)
+	}
+	if n := count(cost); n != 0 {
+		t.Errorf("cost, on the file's grid, holds %d values, want 0 (cleared)", n)
+	}
+	if n := count(headcount); n != 1 {
+		t.Errorf("headcount, on another grid, holds %d values, want 1 (kept)", n)
+	}
+	if n := count(loose); n != 1 {
+		t.Errorf("a metric on no grid, not in the file, holds %d values, want 1 (kept)", n)
+	}
+	got := map[string]bool{}
+	for _, id := range metricIDs {
+		got[id] = true
+	}
+	if len(metricIDs) != 2 || !got[revenue] || !got[cost] {
+		t.Errorf("returned metrics = %v, want revenue and cost (staged and cleared), for their recalculation", metricIDs)
 	}
 }
 

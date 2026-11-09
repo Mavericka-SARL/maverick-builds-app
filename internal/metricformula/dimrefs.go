@@ -274,6 +274,10 @@ const (
 	CodeInvalidPropertyName = "INVALID_PROPERTY_NAME"
 	CodePropertyNameTaken   = "PROPERTY_NAME_TAKEN"
 	CodeInvalidPropertyType = "INVALID_PROPERTY_TYPE"
+	// CodeInvalidPropertyValue refuses a member value its number or date
+	// property cannot read (PropertyValueError), and a type change while
+	// stored values would not read (CheckPropertyValues).
+	CodeInvalidPropertyValue = "INVALID_PROPERTY_VALUE"
 	// CodePropertyInUse refuses a delete while formulas read the property
 	// (CheckPropertyNotInUse); the gateway answers it with 409.
 	CodePropertyInUse = "PROPERTY_IN_USE"

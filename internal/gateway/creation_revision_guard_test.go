@@ -87,8 +87,8 @@ func TestCreationRefusesARevisionOfAnotherModel(t *testing.T) {
 	// and did not check it: another tenant's workflows were listed, and one
 	// could be created there.
 	q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, status) VALUES ($1::uuid, 'theirs', 'manual', '[]'::jsonb, 'draft') RETURNING id::text`, otherApp)
-	expect("list another tenant's workflows", http.StatusForbidden, "GET", "/api/developer/workflows?application_id="+otherApp, nil)
-	expect("create in another tenant's app", http.StatusForbidden, "POST", "/api/developer/workflows?application_id="+otherApp,
+	expect("list another tenant's workflows", http.StatusNotFound, "GET", "/api/developer/workflows?application_id="+otherApp, nil)
+	expect("create in another tenant's app", http.StatusNotFound, "POST", "/api/developer/workflows?application_id="+otherApp,
 		map[string]any{"name": "planted", "trigger_event": "manual"})
 	if n := count("workflow.workflow_def", "planted"); n != 0 {
 		t.Errorf("a workflow was created in another tenant's application")

@@ -8,6 +8,8 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
 // The write tools that bring the AI Developer level with the developer role
@@ -409,6 +411,9 @@ func (e *WriteExecutor) createBusinessRole(ctx context.Context, raw json.RawMess
 		return "", "", fmt.Errorf("name is required")
 	}
 	name := strings.TrimSpace(p.Name)
+	if err := assignee.CheckBusinessRoleName(name); err != nil {
+		return "", "", err
+	}
 	wsID, err := e.workspaceID(ctx)
 	if err != nil {
 		return "", "", err
@@ -549,8 +554,23 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 	if len(filter) > 0 {
 		only = fmt.Sprintf(", only records meeting %d condition(s)", len(filter))
 	}
-	return fmt.Sprintf("Form integration '%s' created (id: %s): field '%s' posts to metric '%s' (%s) for records with status %s, %d dimension mapping(s)%s",
-		p.Name, id, p.SourceField, metricName, p.Aggregation, strings.Join(p.PostingStatuses, "/"), len(p.DimensionMappings), only), id, nil
+	note, err := e.typedSetAsideNote(ctx, metricID, metricName)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("Form integration '%s' created (id: %s): field '%s' posts to metric '%s' (%s) for records with status %s, %d dimension mapping(s)%s%s",
+		p.Name, id, p.SourceField, metricName, p.Aggregation, strings.Join(p.PostingStatuses, "/"), len(p.DimensionMappings), only, note), id, nil
+}
+
+// typedSetAsideNote says how many typed values of metricID a mapping
+// feeding it sets aside ("" for none): a metric records feed shows its
+// records only (writeguard.FedMetricsCTE).
+func (e *WriteExecutor) typedSetAsideNote(ctx context.Context, metricID, metricName string) (string, error) {
+	n, err := writeguard.TypedSetAside(ctx, e.pool, e.revID, metricID)
+	if err != nil || n == 0 {
+		return "", err
+	}
+	return fmt.Sprintf(". %d typed value(s) of '%s' are set aside: it now shows its records only; Metrics > Clear values removes them", n, metricName), nil
 }
 
 // loadIntegration checks *id names a form integration of this model's
@@ -667,6 +687,15 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	msg := fmt.Sprintf("Form integration '%s' updated", p.Name)
 	if p.Name != curName {
 		msg += fmt.Sprintf(" (renamed from '%s')", curName)
+	}
+	if p.TargetMetricID != cur.TargetMetricID {
+		var metricName string
+		_ = e.pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, p.TargetMetricID).Scan(&metricName)
+		note, err := e.typedSetAsideNote(ctx, p.TargetMetricID, metricName)
+		if err != nil {
+			return "", "", err
+		}
+		msg += note
 	}
 	// The developer's update re-posts the form's records at once, so a
 	// changed aggregation or status rule takes effect on what is already

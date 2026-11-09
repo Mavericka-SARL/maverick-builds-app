@@ -48,6 +48,11 @@ func TestCellHistory(t *testing.T) {
 	salesID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'SALES', 'Sales') RETURNING id::text`, dimID)
 	opsID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'OPS', 'Ops') RETURNING id::text`, dimID)
 	exec(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid, 'OPS_EU', 'Ops EU', $2::uuid)`, dimID, opsID)
+	// spend is on a grid by department: a cell write names one member of
+	// each dimension of the metric's grid.
+	gridID := q(`INSERT INTO model.grid_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'Spend') RETURNING id::text`, modelID, revID)
+	exec(`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid, $2::uuid)`, gridID, dimID)
+	exec(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid, $2::uuid)`, gridID, metricID)
 
 	user := func(sub, email string) string {
 		id := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1,$2,$3,$4::uuid) RETURNING id::text`, sub, email, strings.Split(email, "@")[0], custID)

@@ -84,11 +84,12 @@ func TestRenameAndDescribeApplicationsAndModels(t *testing.T) {
 	if status, _ := f.do(t, "PATCH", modelPath, "rollup-test-approver", map[string]string{"name": "Mine"}); status != http.StatusForbidden {
 		t.Errorf("developer rename: status %d, want 403", status)
 	}
-	if status, _ := f.do(t, "PATCH", "/api/admin/models/"+ft.modelID, ta, map[string]string{"name": "Mine"}); status != http.StatusForbidden {
-		t.Errorf("foreign model rename: status %d, want 403", status)
+	// Another tenant's row answers as one that does not exist.
+	if status, _ := f.do(t, "PATCH", "/api/admin/models/"+ft.modelID, ta, map[string]string{"name": "Mine"}); status != http.StatusNotFound {
+		t.Errorf("foreign model rename: status %d, want 404", status)
 	}
-	if status, _ := f.do(t, "PATCH", "/api/admin/applications/"+ft.appID, ta, map[string]string{"name": "Mine"}); status != http.StatusForbidden {
-		t.Errorf("foreign application rename: status %d, want 403", status)
+	if status, _ := f.do(t, "PATCH", "/api/admin/applications/"+ft.appID, ta, map[string]string{"name": "Mine"}); status != http.StatusNotFound {
+		t.Errorf("foreign application rename: status %d, want 404", status)
 	}
 
 	// The business user's list carries both descriptions.

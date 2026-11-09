@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQueries, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Eraser, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
 import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm, CollapseToggle, useExpanded, Txt } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
@@ -1176,9 +1176,21 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
     queryFn: () => api.listDimProperties(dimId),
   });
 
+  // A declaration made again brings back the values members kept under the
+  // name: the server says how many, and the panel offers to clear them —
+  // values are never cleared unless the developer asks.
+  const [kept, setKept] = useState<{ propId: string; name: string; notice: string } | null>(null);
+  const [cleared, setCleared] = useState<string | null>(null);
+  const { confirm, confirmElement } = useConfirm();
+
   const add = useMutation({
     mutationFn: () => api.addDimProperty(dimId, { name: addName, data_type: addType }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dim-props", dimId] }); setAddName(""); },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["dim-props", dimId] });
+      setKept(res.notice ? { propId: res.id, name: addName.trim(), notice: res.notice } : null);
+      setCleared(null);
+      setAddName("");
+    },
   });
   const update = useMutation({
     mutationFn: () => api.updateDimProperty(dimId, editId!, { name: editName, data_type: editType }),
@@ -1187,6 +1199,20 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
   const del = useMutation({
     mutationFn: (propId: string) => api.deleteDimProperty(dimId, propId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dim-props", dimId] }),
+  });
+  const clear = useMutation({
+    mutationFn: (p: { propId: string; name: string }) => api.updateDimProperty(dimId, p.propId, { clear_values: true }),
+    onSuccess: (res, p) => {
+      void refreshMembers(qc);
+      setKept(null);
+      setCleared(`Cleared ${p.name} on ${res.values_cleared ?? 0} member${res.values_cleared === 1 ? "" : "s"}.`);
+    },
+  });
+  const askClear = (p: { propId: string; name: string }) => confirm({
+    title: `Clear ${p.name}?`,
+    body: `This removes the value of ${p.name} from every member of the dimension. Formulas reading it see blanks until values are set again.`,
+    confirmLabel: "Clear values",
+    onConfirm: () => clear.mutate(p),
   });
 
   const startEdit = (p: DimProperty) => { setEditId(p.id); setEditName(p.name); setEditType(p.data_type); };
@@ -1220,11 +1246,26 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
           <IconButton aria-label={`Edit property ${p.name}`} title="Edit" size={26} onClick={() => startEdit(p)}>
             <Pencil size={13} />
           </IconButton>
-          <IconButton aria-label={`Delete property ${p.name}`} title="Delete" danger size={26} onClick={() => del.mutate(p.id)}>
+          <IconButton aria-label={`Clear values of property ${p.name}`} title="Clear values on every member" size={26}
+            onClick={() => askClear({ propId: p.id, name: p.name })}>
+            <Eraser size={13} />
+          </IconButton>
+          <IconButton aria-label={`Delete property ${p.name}`} title="Delete (members keep their values)" danger size={26} onClick={() => del.mutate(p.id)}>
             <Trash2 size={13} />
           </IconButton>
         </div>
       ))}
+
+      {kept && (
+        <div role="status" className="mvx-admin-inline-form" style={{ margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12 }}>{kept.notice}.</span>
+          <Button size="sm" variant="danger" loading={clear.isPending} onClick={() => clear.mutate({ propId: kept.propId, name: kept.name })}>
+            Clear values
+          </Button>
+          <Button size="sm" onClick={() => setKept(null)}>Keep them</Button>
+        </div>
+      )}
+      {cleared && <p role="status" className="mvx-admin-muted" style={{ margin: "6px 0" }}>{cleared}</p>}
 
       <div className="mvx-admin-inline-form" style={{ marginTop: 8 }}>
         <TextInput value={addName} onChange={(e) => setAddName(e.target.value)}
@@ -1241,11 +1282,12 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
       {/* The server refuses names that cannot be written as dim.property
           (letters, digits and _, not starting with a digit) and unknown
           types; show why instead of failing silently. */}
-      {(add.error ?? update.error ?? del.error) && (
+      {(add.error ?? update.error ?? del.error ?? clear.error) && (
         <p className="mvx-admin-error" style={{ marginTop: 6 }}>
-          {((add.error ?? update.error ?? del.error) as Error).message}
+          {((add.error ?? update.error ?? del.error ?? clear.error) as Error).message}
         </p>
       )}
+      {confirmElement}
     </div>
   );
 }

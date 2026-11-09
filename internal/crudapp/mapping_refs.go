@@ -306,3 +306,94 @@ const RemoveGridDimensionSQL = `
 		  AND EXISTS (SELECT 1 FROM on_grid)
 	)
 	DELETE FROM model.grid_dimension WHERE grid_id = $1::uuid AND dimension_id = $2::uuid`
+
+// GridDimensionAddRefusal says why dimID may not join grid gridID ("" when
+// it may): a posting into one of the grid's metrics maps no dimension of
+// dimID's family, so once the grid has it the posting's values would land in
+// no cell (its records name no member of it). A posting cannot be changed to
+// map it first — checkMappedDimensionsPlaced refuses a dimension the grid
+// lacks — so it is deleted, the dimension added, and the posting created
+// again mapping a field to it; its records then post again.
+func GridDimensionAddRefusal(ctx context.Context, db dbx.DB, gridID, dimID string) (string, error) {
+	rows, err := db.Query(ctx, `
+		SELECT COALESCE(NULLIF(fm.name,''), fm.id::text), md.id::text, md.name,
+		       ARRAY(SELECT jsonb_object_keys(fm.dimension_mappings))
+		FROM model.form_metric_mapping fm
+		JOIN model.grid_metric gm ON gm.metric_id = fm.target_metric_id AND gm.grid_id = $1::uuid
+		JOIN model.metric_def md ON md.id = fm.target_metric_id
+		WHERE NOT EXISTS (SELECT 1 FROM model.grid_dimension gd WHERE gd.grid_id = $1::uuid AND gd.dimension_id = $2::uuid)
+		ORDER BY 1`, gridID, dimID)
+	if err != nil {
+		return "", err
+	}
+	type posting struct {
+		name, metricID, metric string
+		dims                   []string
+	}
+	var postings []posting
+	for rows.Next() {
+		var p posting
+		if err := rows.Scan(&p.name, &p.metricID, &p.metric, &p.dims); err != nil {
+			rows.Close()
+			return "", err
+		}
+		postings = append(postings, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(postings) == 0 {
+		return "", err
+	}
+	family, dimNames, err := dimensionFamilies(ctx, db, postings[0].metricID)
+	if err != nil {
+		return "", err
+	}
+	same := func(a, b string) bool { return a == b || (family[a] != "" && family[a] == family[b]) }
+	var names []string
+	for _, p := range postings {
+		if !slices.ContainsFunc(p.dims, func(d string) bool { return same(d, dimID) }) {
+			names = append(names, fmt.Sprintf("%q (into %s)", p.name, p.metric))
+		}
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	dimName := dimNames[dimID]
+	return fmt.Sprintf("%s map no %s: once the grid has %s their values would land in no cell — delete those postings, add %s, then create them again mapping a field to %s (their records post again)",
+		strings.Join(names, ", "), dimName, dimName, dimName, dimName), nil
+}
+
+// CheckMetricPostingsPlaced holds every posting into metricID to the grid
+// the metric is on now, as saving a posting does (checkMappedDimensionsPlaced):
+// a metric attached to a grid whose dimensions its postings do not map would
+// keep values no cell reads.
+func CheckMetricPostingsPlaced(ctx context.Context, db dbx.DB, metricID string) error {
+	rows, err := db.Query(ctx, `
+		SELECT COALESCE(NULLIF(name,''), id::text), ARRAY(SELECT jsonb_object_keys(dimension_mappings))
+		FROM model.form_metric_mapping WHERE target_metric_id = $1::uuid ORDER BY 1`, metricID)
+	if err != nil {
+		return err
+	}
+	type posting struct {
+		name string
+		dims []string
+	}
+	var postings []posting
+	for rows.Next() {
+		var p posting
+		if err := rows.Scan(&p.name, &p.dims); err != nil {
+			rows.Close()
+			return err
+		}
+		postings = append(postings, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, p := range postings {
+		if err := checkMappedDimensionsPlaced(ctx, db, MappingRefs{TargetMetricID: metricID}, p.dims); err != nil {
+			return refErr("the posting %q does not fit this grid: %v", p.name, err)
+		}
+	}
+	return nil
+}

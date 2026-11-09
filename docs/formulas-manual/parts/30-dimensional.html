@@ -31,6 +31,7 @@
 <ul>
   <li>Dimension and property names ignore case; so does comparing a member code with <code>=</code>. LOOKUP and TIMESUM match member codes <b>exactly</b>.</li>
   <li>These references read only the cell's own member, so they are allowed anywhere, including in an opening/closing recurrence, and they are recomputed normally for users who cannot see every member.</li>
+  <li><b>The dimension must be on the metric's own grid.</b> A cell has a member only of its grid's dimensions, so <code>region</code>, <code>region.segment</code> or <code>PARENT(region)</code> in a metric on a grid without region would be blank at every cell. Such a formula is refused (<code>DIMENSION_NOT_ON_METRIC</code>) when it is saved on a placed metric, when the metric is placed on a grid, when its grid loses the dimension and when the revision is activated; the message names the metric. A dimension <i>related</i> to a grid dimension is no exception: for a Segment dimension that groups regions by their <code>segment</code> property, write <code>region.segment</code>; for a parent dimension of a grid dimension, write <code>PARENT(</code>the grid dimension<code>)</code>. A criteria range (<code>SUMIFS(sales, product, "P*")</code>) and a LOOKUP dimension are not cell reads and are checked against the source instead.</li>
   <li>If a metric and a dimension share a name, the name means the dimension where the cell pins it, and the metric elsewhere. Avoid the clash.</li>
 </ul>
 
@@ -52,7 +53,8 @@
   <li><b>A parent member</b> (EMEA, World, Q1, FY26) returns its leaf members combined by the source's own aggregation rule, and an aggregate period by the source's time summary. A ratio source (rule Formula or Rate) at a parent returns the ratio computed there, never a mean of its children.</li>
   <li><b>Other dimensions</b>: those the cell and the source share stay at the cell's members; a dimension of the source the cell does not have is totalled; a dimension of the cell the source does not have is ignored.</li>
   <li>Each dimension must be one of the source's, or related to one (a parent/child dimension chain, or a property grouping), else <code>DIMENSION_NOT_ON_SOURCE</code>. Two dimensions that both relate to the same dimension of the source conflict: <code>CONFLICTING_DIMENSION_ARGUMENTS</code>.</li>
-  <li>With nothing recorded at the target, LOOKUP reads 0, as a plain reference does.</li>
+  <li>With nothing recorded at the target, LOOKUP reads 0.</li>
+  <li><b>No value by the source's own rules</b>: a source with time summary <b>None</b> has no value at an aggregate period (Q1, FY26) or over all periods, and one with aggregation <b>None</b> has none above its leaf members. LOOKUP there is <b>blank</b>, as <code>YEARVALUE</code> is: <code>ISBLANK</code> is TRUE and the cell stores no value (it is left out of totals), never a 0.</li>
   <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
 </ul>
 

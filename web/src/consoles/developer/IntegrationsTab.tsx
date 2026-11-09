@@ -4,7 +4,7 @@ import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
 import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting, type RowCondition } from "../../api/client";
-import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm, Txt } from "../../ui";
+import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, InlineAlert, useConfirm, Txt } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
 import { ExportSection } from "./ExportSection";
 
@@ -381,14 +381,26 @@ function FormRecordsSection() {
   const inv = () => qc.invalidateQueries({ queryKey: ["form-mappings"] });
   const { confirm, confirmElement } = useConfirm();
 
+  // A metric records feed shows its records only: the values typed into it
+  // before are set aside, and the answer says how many.
+  const [setAside, setSetAside] = useState<string | null>(null);
+  const noteSetAside = (m: Omit<FormMetricMapping, "id">, n?: number) => {
+    if (!n) return;
+    const metric = metrics.find(x => x.id === m.target_metric_id);
+    const name = metric?.label || metric?.name || "the metric";
+    setSetAside(`${n} typed value${n === 1 ? "" : "s"} of ${name} ${n === 1 ? "is" : "are"} set aside: it now shows its records only. Metrics › Clear values removes them.`);
+  };
+
   const doCreate = async (m: Omit<FormMetricMapping, "id">) => {
-    await api.createFormMapping(m);
+    const res = await api.createFormMapping(m);
     setShowNew(false);
+    noteSetAside(m, res.typed_set_aside);
     inv();
   };
 
   const doUpdate = async (id: string, m: Omit<FormMetricMapping, "id">) => {
-    await api.updateFormMapping(id, m);
+    const res = await api.updateFormMapping(id, m);
+    noteSetAside(m, res.typed_set_aside);
     inv();
   };
 
@@ -412,6 +424,12 @@ function FormRecordsSection() {
           </Button>
         }
       />
+
+      {setAside && (
+        <div style={{ marginBottom: 16 }} data-testid="typed-set-aside">
+          <InlineAlert tone="info">{setAside}</InlineAlert>
+        </div>
+      )}
 
       {showNew && (
         <div style={{ marginBottom: 16 }}>

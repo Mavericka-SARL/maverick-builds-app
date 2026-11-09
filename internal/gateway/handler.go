@@ -43,6 +43,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/query"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
@@ -407,6 +408,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/grids/{id}/clear-values", "developer", dev(h.clearGridValues))
 	register("POST", "/api/developer/grids/{id}/sample-values", "developer", dev(h.fillSampleValues))
 	register("POST", "/api/developer/metrics/{id}/clear-values", "developer", dev(h.clearMetricValues))
+	register("PATCH", "/api/developer/revisions/{id}", "developer", dev(h.developerRevisionAction))
 	register("DELETE", "/api/developer/revisions/{id}", "developer", dev(h.developerRevisionAction))
 	register("GET", "/api/developer/model", "developer", dev(h.developerModel))
 	register("POST", "/api/developer/metrics", "developer", dev(h.developerMetrics))
@@ -1326,7 +1328,10 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 
 // platformWideBuilderSQL is isGlobalBuilder as a SQL predicate over the
 // account whose id is userExpr: no tenant of its own, an unscoped developer
-// grant, and no identity.user_app_access or user_model_access row. An
+// grant, the platform_wide marker (migration 167: set by that grant to an
+// account with no grants, cleared by any grant, so a removed grant narrows
+// instead of widening), and no identity.user_app_access or user_model_access
+// row. An
 // account narrowed by such grants is not platform-wide: its explicit grants
 // are its scope (customerlessGrantTenantSQL),
 // as a platform admin who narrows a developer to some applications means.
@@ -1337,9 +1342,23 @@ func platformWideBuilderSQL(userExpr string) string {
 		    SELECT 1 FROM identity."user" pwb_u
 		    JOIN identity.role_assignment pwb_ra ON pwb_ra.user_id = pwb_u.id
 		         AND pwb_ra.role = 'developer' AND pwb_ra.workspace_id IS NULL
-		    WHERE pwb_u.id = %[1]s AND pwb_u.customer_id IS NULL
+		    WHERE pwb_u.id = %[1]s AND pwb_u.customer_id IS NULL AND pwb_u.platform_wide
 		) AND NOT EXISTS (SELECT 1 FROM identity.user_app_access pwb_ua WHERE pwb_ua.user_id = %[1]s)
 		  AND NOT EXISTS (SELECT 1 FROM identity.user_model_access pwb_um WHERE pwb_um.user_id = %[1]s))`, userExpr)
+}
+
+// unnarrowedDeveloperSQL is platformWideBuilderSQL without the marker: an
+// account with no tenant, an unscoped developer grant and no application or
+// model grant. revokeUnnarrowed uses it to take away the developer grant of
+// an account whose last grant went.
+func unnarrowedDeveloperSQL(userExpr string) string {
+	return fmt.Sprintf(`(EXISTS (
+		    SELECT 1 FROM identity."user" und_u
+		    JOIN identity.role_assignment und_ra ON und_ra.user_id = und_u.id
+		         AND und_ra.role = 'developer' AND und_ra.workspace_id IS NULL
+		    WHERE und_u.id = %[1]s AND und_u.customer_id IS NULL
+		) AND NOT EXISTS (SELECT 1 FROM identity.user_app_access und_ua WHERE und_ua.user_id = %[1]s)
+		  AND NOT EXISTS (SELECT 1 FROM identity.user_model_access und_um WHERE und_um.user_id = %[1]s))`, userExpr)
 }
 
 // customerlessGrantTenantSQL is a SQL predicate, true when the account whose
@@ -1631,6 +1650,44 @@ var modelScopedResourceSQL = map[string]string{
 	"model":               `SELECT id::text FROM core.model WHERE id=$1::uuid`,
 }
 
+// revisionOfResourceSQL resolves a definition's id to the revision it
+// belongs to (” for a revision-less one), for the system-managed refusal
+// (refuseSystemManaged).
+var revisionOfResourceSQL = map[string]string{
+	"dashboard":           `SELECT COALESCE(revision_id::text, '') FROM model.dashboard_def WHERE id=$1::uuid`,
+	"dashboard_widget":    `SELECT COALESCE(d.revision_id::text, '') FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id WHERE w.id=$1::uuid`,
+	"dashboard_folder":    `SELECT COALESCE(revision_id::text, '') FROM model.dashboard_folder WHERE id=$1::uuid`,
+	"grid":                `SELECT COALESCE(revision_id::text, '') FROM model.grid_def WHERE id=$1::uuid`,
+	"metric":              `SELECT COALESCE(revision_id::text, '') FROM model.metric_def WHERE id=$1::uuid`,
+	"dimension":           `SELECT COALESCE(revision_id::text, '') FROM model.dimension_def WHERE id=$1::uuid`,
+	"dimension_member":    `SELECT COALESCE(d.revision_id::text, '') FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id WHERE m.id=$1::uuid`,
+	"form":                `SELECT COALESCE(revision_id::text, '') FROM model.form_def WHERE id=$1::uuid`,
+	"integration":         `SELECT COALESCE(revision_id::text, '') FROM model.integration_def WHERE id=$1::uuid`,
+	"form_metric_mapping": `SELECT COALESCE(revision_id::text, '') FROM model.form_metric_mapping WHERE id=$1::uuid`,
+}
+
+// refuseSystemManaged answers 403 to a change (any method but GET or HEAD)
+// to a definition of a system-managed revision, and reports whether the
+// request may go on. Such a revision holds an approval's copy
+// (writeguard.SystemManaged): cell writes and imports already refused it,
+// while Build changed its members and definitions — and a member delete or
+// first child moves or removes its facts (2026-09-29).
+func (h *handler) refuseSystemManaged(w http.ResponseWriter, r *http.Request, revisionID string) bool {
+	if revisionID == "" || r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	sm, err := writeguard.SystemManaged(r.Context(), h.db.For(r.Context()), revisionID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	if sm {
+		jsonErr(w, fmt.Errorf("this revision is system-managed and read-only"), http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // appScopedResourceSQL resolves a resource ID to the application that owns
 // it. Workflow definitions and automation rules are application-scoped rather
 // than model-scoped, so they can't go through the model map — an application
@@ -1642,10 +1699,11 @@ var appScopedResourceSQL = map[string]string{
 }
 
 // requireResourceAccess reports whether the caller may act on the named
-// resource, writing the HTTP error itself when they may not: 404 when the row
-// doesn't exist (so a probe can't use this endpoint to test ID existence
-// across tenants), 403 when it exists but sits outside the caller's scope —
-// matching the wording developerRevisions and baRoleAction already use.
+// resource, writing the HTTP error itself when they may not: 404 "<kind> not
+// found" both when the row doesn't exist and when it sits outside the
+// caller's scope. A 403 for the second told a probe that an id it held
+// exists in some other tenant (private observations, 2026-09-29), which is
+// what the 404 is for; the record routes already answer so.
 // Callers use it as a guard: `if !h.requireResourceAccess(w, r, "grid", id) { return }`.
 func (h *handler) requireResourceAccess(w http.ResponseWriter, r *http.Request, kind, id string) bool {
 	ctx := withBuilderRoute(r.Context())
@@ -1671,8 +1729,16 @@ func (h *handler) requireResourceAccess(w http.ResponseWriter, r *http.Request, 
 			return false
 		}
 		if !allowed {
-			jsonErr(w, fmt.Errorf("forbidden: %s is outside your access scope", strings.ReplaceAll(kind, "_", " ")), http.StatusForbidden)
+			jsonErr(w, fmt.Errorf("%s not found", strings.ReplaceAll(kind, "_", " ")), http.StatusNotFound)
 			return false
+		}
+		if revQuery, ok := revisionOfResourceSQL[kind]; ok && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			var revID string
+			if err := h.db.QueryRow(ctx, revQuery, id).Scan(&revID); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return false
+			}
+			return h.refuseSystemManaged(w, r, revID)
 		}
 		return true
 	}
@@ -1689,7 +1755,7 @@ func (h *handler) requireResourceAccess(w http.ResponseWriter, r *http.Request, 
 			return false
 		}
 		if !allowed {
-			jsonErr(w, fmt.Errorf("forbidden: %s is outside your access scope", strings.ReplaceAll(kind, "_", " ")), http.StatusForbidden)
+			jsonErr(w, fmt.Errorf("%s not found", strings.ReplaceAll(kind, "_", " ")), http.StatusNotFound)
 			return false
 		}
 		return true
@@ -1784,7 +1850,7 @@ func (h *handler) requireRevisionInModel(w http.ResponseWriter, r *http.Request,
 		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return false
 	}
-	return true
+	return h.refuseSystemManaged(w, r, revisionID)
 }
 
 // resolveRevisionCtx returns (revisionID, scenarioName) for the given revisionID,
@@ -2182,7 +2248,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.RevisionID = revisionID
-	metricFormat, ref := h.cellMetric(ctx, a, req.ModelID, req.MetricID)
+	metricInfo, ref := h.cellMetric(ctx, a, req.ModelID, req.MetricID)
 	if ref != nil {
 		ref.respond(w)
 		return
@@ -2206,7 +2272,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		ref.respond(w)
 		return
 	}
-	cell, ref := h.prepareCell(ctx, a, req.RevisionID, req, metricFormat)
+	cell, ref := h.prepareCell(ctx, a, req.RevisionID, req, metricInfo)
 	if ref != nil {
 		ref.respond(w)
 		return
@@ -2583,6 +2649,13 @@ type taskRow struct {
 	// spans every database that holds them (homesOf); completing the task
 	// addresses this tenant (X-Tenant-Id), which routes to its database.
 	TenantID string `json:"tenant_id"`
+	// The model the task's run works on — the revision its context names,
+	// else its workflow's revision, else its application's first model — and
+	// that application: the Inbox lists every application's tasks, and a card
+	// said nothing of which model it was about (owner, 2026-11-09).
+	ModelID       string `json:"model_id,omitempty"`
+	ModelName     string `json:"model_name,omitempty"`
+	ApplicationID string `json:"application_id,omitempty"`
 }
 
 // taskAssigneeSQL is true when user $1 is an assignee of the workflow step
@@ -2655,7 +2728,8 @@ func (h *handler) tasksIn(ctx context.Context, a *actor) ([]taskRow, error) {
 		       COALESCE(NULLIF(u.display_name, ''), u.email, ''),
 		       step_def.elem->'condition',
 		       ws.rework_count, CASE WHEN ws.rework_count > 0 THEN COALESCE(ws.comment, '') ELSE '' END,
-		       COALESCE(app.customer_id, appws.customer_id)::text
+		       COALESCE(app.customer_id, appws.customer_id)::text,
+		       COALESCE(run_model.id::text, ''), COALESCE(run_model.name, ''), app.id::text
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -2668,6 +2742,14 @@ func (h *handler) tasksIn(ctx context.Context, a *actor) ([]taskRow, error) {
 			WHERE elem->>'id' = ws.step_def_id
 			LIMIT 1
 		) step_def
+		LEFT JOIN LATERAL (
+			SELECT m.id, m.name FROM core.model m
+			WHERE m.application_id = app.id
+			ORDER BY (m.id = (SELECT r.model_id FROM model.revision r WHERE r.id::text = wi.context->>'revision_id')) DESC NULLS LAST,
+			         (m.id = (SELECT r.model_id FROM model.revision r WHERE r.id = wd.revision_id)) DESC NULLS LAST,
+			         m.created_at
+			LIMIT 1
+		) run_model ON true
 		WHERE ws.status = 'in_progress'
 		  -- A developer's test run is a dry run: its human steps must not
 		  -- land in anyone's real inbox (found live 2026-09-13: a business
@@ -2687,7 +2769,8 @@ func (h *handler) tasksIn(ctx context.Context, a *actor) ([]taskRow, error) {
 		var ctxJSON, schemaJSON []byte
 		var conditionJSON []byte
 		if err := rows.Scan(&t.ID, &t.StepDefID, &t.Status, &t.WFName, &t.InstanceID, &ctxJSON, &t.CreatedAt,
-			&t.StepName, &t.StepType, &t.Instructions, &t.SLAHours, &t.RequiredComment, &t.CompletionLabel, &t.DueAt, &schemaJSON, &t.RequestedBy, &conditionJSON, &t.ReworkCount, &t.ReworkNote, &t.TenantID); err != nil {
+			&t.StepName, &t.StepType, &t.Instructions, &t.SLAHours, &t.RequiredComment, &t.CompletionLabel, &t.DueAt, &schemaJSON, &t.RequestedBy, &conditionJSON, &t.ReworkCount, &t.ReworkNote, &t.TenantID,
+			&t.ModelID, &t.ModelName, &t.ApplicationID); err != nil {
 			return nil, err
 		}
 		if t.StepType == "condition" && len(conditionJSON) > 0 {
@@ -3213,6 +3296,57 @@ type gridResponse struct {
 	// recalculated and that pass has not landed — the calculated cells are
 	// about to change (recalc_state.go).
 	RecalcPending bool `json:"recalc_pending,omitempty"`
+	// DimensionsWithoutMembers are the grid's dimensions that have no member
+	// yet, which Dimensions leaves out: the grid shows no rows along them
+	// until members are added, and says so. No member is made for them. A
+	// review of the AI build read a grid of three dimensions as one of one
+	// (2026-11-08). Omitted when every dimension has members.
+	DimensionsWithoutMembers []emptyGridDimension `json:"dimensions_without_members,omitempty"`
+}
+
+// emptyGridDimension is a grid dimension with no member: its name, display
+// name, and the table whose records are its members, when one keeps it.
+type emptyGridDimension struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Label    string `json:"label,omitempty"`
+	KeptBy   string `json:"kept_by,omitempty"`
+	Guidance string `json:"guidance"`
+}
+
+// gridDimensionsWithoutMembers lists gridDefID's dimensions that have no
+// member, with what to do about each.
+func gridDimensionsWithoutMembers(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, gridDefID string) []emptyGridDimension {
+	rows, err := q.Query(ctx, `
+		SELECT d.id::text, d.name, COALESCE(d.label, ''),
+		       COALESCE((SELECT COALESCE(NULLIF(btrim(f.label), ''), f.name) FROM model.form_def f WHERE f.keeps_dimension_id = d.id LIMIT 1), '')
+		FROM model.grid_dimension gd JOIN model.dimension_def d ON d.id = gd.dimension_id
+		WHERE gd.grid_id = $1::uuid
+		  AND NOT EXISTS (SELECT 1 FROM model.dimension_member m WHERE m.dimension_id = d.id)
+		ORDER BY d.name`, gridDefID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []emptyGridDimension
+	for rows.Next() {
+		var e emptyGridDimension
+		if rows.Scan(&e.ID, &e.Name, &e.Label, &e.KeptBy) != nil {
+			continue
+		}
+		shown := e.Label
+		if shown == "" {
+			shown = e.Name
+		}
+		e.Guidance = shown + " has no members yet: add members first — the grid shows no rows along it until it has some"
+		if e.KeptBy != "" {
+			e.Guidance = shown + " has no members yet: its members are the records of the table " + e.KeptBy + " — they appear as records are added"
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
@@ -3991,7 +4125,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
 				WHERE fi.model_id = $1::uuid AND fi.revision_id = $2::uuid
 				  AND fmm.aggregation IN ('replace', 'last')
-			)
+			), `+writeguard.FedMetricsCTE+`
 			SELECT metric_id::text, SUM(v)::float8 FROM (
 				SELECT metric_id, dim_members, SUM(value)::float8 AS v
 				FROM (
@@ -4006,6 +4140,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 						SELECT 1 FROM covered c
 						WHERE c.metric_id = direct.metric_id AND c.dim_members = direct.dim_members
 					)
+					  -- A metric records feed shows its records only.
+					  AND NOT EXISTS (SELECT 1 FROM fed f WHERE f.metric_id = direct.metric_id)
 					UNION ALL
 					SELECT metric_id, dim_members, value
 					FROM runtime.fact_input
@@ -4055,7 +4191,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
 				WHERE fi.model_id = $1::uuid AND fi.revision_id = $2::uuid
 				  AND fmm.aggregation IN ('replace', 'last')
-			)
+			), `+writeguard.FedMetricsCTE+`
 			SELECT metric_id::text, dim_members::text, SUM(value)::float8
 			FROM (
 				SELECT direct.metric_id, direct.dim_members, direct.value FROM (
@@ -4070,6 +4206,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					WHERE c.metric_id = direct.metric_id
 					  AND c.dim_members = direct.dim_members
 				)
+				  -- A metric records feed shows its records only.
+				  AND NOT EXISTS (SELECT 1 FROM fed f WHERE f.metric_id = direct.metric_id)
 				UNION ALL
 				SELECT metric_id, dim_members, value
 				FROM runtime.fact_input
@@ -4407,6 +4545,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		WorkflowLocks:      workflowLocks,
 		RollupSourceGridID: rollupSourceGridID,
 		RecalcPending:      h.recalcPending(ctx, revisionID),
+		DimensionsWithoutMembers: func() []emptyGridDimension {
+			if gridDefID == "" {
+				return nil
+			}
+			return gridDimensionsWithoutMembers(ctx, h.db.For(ctx), gridDefID)
+		}(),
 	})
 }
 
@@ -4952,7 +5096,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// by name (FactsPolicy) and avoids it.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO runtime.fact_input
-		  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value)
+		  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value, link_ref)
 		SELECT
 			fi.model_id, fi.revision_name,
 			new_m.id,
@@ -4964,7 +5108,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			                               AND new_d.revision_id = $2::uuid),
 			fi.value, fi.entered_by,
 			$2::uuid,
-			fi.source_ref, fi.entered_at, fi.text_value
+			-- link_ref names a model link by its link_id, the same in
+			-- every revision (migration 169): copied as it is.
+			fi.source_ref, fi.entered_at, fi.text_value, fi.link_ref
 		FROM runtime.fact_input fi
 		JOIN model.metric_def old_m ON old_m.id = fi.metric_id
 		JOIN model.metric_def new_m ON new_m.model_id = old_m.model_id
@@ -5234,7 +5380,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 			COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
 			          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1),
-			         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text")+` THEN i.target_id END),
+			         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text", "i.model_id")+` THEN i.target_id END),
 			CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
 				SELECT jsonb_object_agg(e.key, COALESCE((
 					SELECT to_jsonb(m.new_id::text) FROM idmap m
@@ -5245,7 +5391,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 					                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
 					 LIMIT 1),
 				CASE WHEN e.key = 'target_id' AND jsonb_typeof(e.value) = 'string'
-				          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')")+`
+				          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')", "i.model_id")+`
 				     THEN 'null'::jsonb ELSE e.value END))
 				FROM jsonb_each(i.config) e), i.config)
 			ELSE i.config END,
@@ -5259,6 +5405,11 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	}
 	if _, err := tx.Exec(ctx, integration.CopySchedulesSQL, srcArgs...); err != nil {
 		return "", fmt.Errorf("revision connector schedule copy failed: %w", err)
+	}
+	// A copy whose only change is its remapped target keeps its source's
+	// test (TestedOrRemappedCopy): the target is in the test's hash.
+	if err := integration.NewStoreOn(tx).CarryRemappedTests(ctx, modelID, newID); err != nil {
+		return "", fmt.Errorf("revision connector tests: %w", err)
 	}
 
 	// Step H: copy workflow definitions and automation rules (application-
@@ -5568,6 +5719,25 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	return modelID, nil
 }
 
+// renameRevision is modeledit.RenameRevision on the request's database.
+func (h *handler) renameRevision(ctx context.Context, id, name string, description *string) (string, error) {
+	return modeledit.RenameRevision(ctx, h.db.For(ctx), "", id, name, description)
+}
+
+// renameRevisionStatus is the status of each of modeledit.RenameRevision's
+// refusals.
+func renameRevisionStatus(err error) int {
+	switch {
+	case errors.Is(err, modeledit.ErrRevisionNameTaken):
+		return http.StatusConflict
+	case errors.Is(err, modeledit.ErrRevisionNameEmpty):
+		return http.StatusBadRequest
+	case errors.Is(err, modeledit.ErrRevisionNotFound):
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
 // remapAccessRulesToRevision is writeguard.RemapRulesToRevision on the
 // request's database.
 func (h *handler) remapAccessRulesToRevision(ctx context.Context, modelID, revisionID string) error {
@@ -5611,6 +5781,32 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 			ResourceType: "revision", ResourceID: id, RevisionID: id,
 		})
 		jsonOK(w, map[string]string{"status": "activated"})
+		return
+	}
+
+	if subPath == "" && r.Method == http.MethodPatch {
+		var body struct {
+			Name        string  `json:"name"`
+			Description *string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		name, err := h.renameRevision(ctx, id, body.Name, body.Description)
+		if err != nil {
+			jsonErr(w, err, renameRevisionStatus(err))
+			return
+		}
+		if a, e := h.resolveActor(ctx, r); e == nil {
+			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+				Category: auditlog.CategoryModelChange, EventType: auditlog.EventRevisionUpdated,
+				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+				ResourceType: "revision", ResourceID: id, RevisionID: id,
+				Metadata: map[string]string{"name": name},
+			})
+		}
+		jsonOK(w, map[string]string{"id": id, "name": name})
 		return
 	}
 
@@ -6129,7 +6325,10 @@ type historyInstance struct {
 	Context     map[string]any `json:"context"`
 	StartedAt   string         `json:"started_at"`
 	CompletedAt *string        `json:"completed_at,omitempty"`
-	Steps       []historyStep  `json:"steps"`
+	// ApplicationID is the application the run belongs to: the console
+	// switches to it to show a run another application's notification names.
+	ApplicationID string        `json:"application_id,omitempty"`
+	Steps         []historyStep `json:"steps"`
 	// Reopenable: finished and approved, so only the reopen route may take it
 	// out of completed.
 	Reopenable bool `json:"reopenable,omitempty"`
@@ -6382,6 +6581,13 @@ var myHistoryReachSQL = "(" + assignee.SQL("wd.application_id", "NULL::jsonb", "
 	assignee.SQL("wd.application_id", `(SELECT jsonb_agg(mh_br.name) FROM identity.business_role_member mh_brm
 		JOIN identity.business_role mh_br ON mh_br.id = mh_brm.role_id WHERE mh_brm.user_id = $1::uuid)`, "$1::uuid") + ")"
 
+// workflowMyHistory is the person's own runs — started, worked, or notified
+// of — in the selected application (X-App-Id), as the business admin's
+// history is the application's: with one model chosen both pages answer for
+// it. The person's list used to span every application they reach, and showed
+// another application's closes beside an admin list of none (owner, 2026-11-09).
+// ?instance_id= is one run of theirs in any application, with its
+// application_id, so a notification about it can switch there.
 func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
@@ -6389,15 +6595,23 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
+	appID, _ := ctx.Value(appIDCtxKey).(string)
+	instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
+	if instanceID != "" {
+		appID = "" // the run's own application, whichever it is
+	}
 
 	rows, err := h.db.Query(ctx, `
 		SELECT wi.id::text, wd.name, wi.status::text, wi.context,
 		       wi.started_at::text,
 		       CASE WHEN wi.completed_at IS NOT NULL THEN wi.completed_at::text END,
-		       COALESCE(wi.context_schema_snapshot, wd.context_schema)
+		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
+		       wd.application_id::text
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		WHERE `+myHistoryReachSQL+`
+		  AND ($2 = '' OR wd.application_id::text = $2)
+		  AND ($3 = '' OR wi.id::text = $3)
 		  AND (wi.started_by = $1::uuid
 		   OR EXISTS (
 		       SELECT 1 FROM workflow.workflow_step ws
@@ -6415,7 +6629,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		   ))
 		ORDER BY wi.started_at DESC
 		LIMIT 50
-	`, a.UserID)
+	`, a.UserID, appID, instanceID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -6426,7 +6640,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inst historyInstance
 		var ctxJSON, schemaJSON []byte
-		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.ApplicationID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -7771,7 +7985,50 @@ func (h *handler) usersIn(ctx context.Context, act *actor) ([]adminUserItem, err
 	if err := h.withUserPermissions(ctx, act, tiers, users); err != nil {
 		return nil, err
 	}
+	if !all {
+		refused, err := h.refusedInvitations(ctx, act, tiers, users)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, refused...)
+	}
 	return users, nil
+}
+
+// refusedInvitations lists the caller's tenants' refused invitations
+// (identity.refused_invitation) as pending people with nothing granted, as
+// a person of the tenant with no roles is listed — leaving out an address a
+// listed account already has. A platform admin sees the accounts
+// themselves, so they are listed to tenant callers only.
+func (h *handler) refusedInvitations(ctx context.Context, act *actor, tiers adminTiers, listed []adminUserItem) ([]adminUserItem, error) {
+	known := map[string]bool{}
+	for _, u := range listed {
+		known[strings.ToLower(strings.TrimSpace(u.Email))] = true
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT id::text, customer_id::text, email, display_name, created_at::text
+		FROM identity.refused_invitation WHERE customer_id::text = ANY($1) ORDER BY created_at`, tiers.ids())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []adminUserItem
+	for rows.Next() {
+		var u adminUserItem
+		var tenant string
+		if err := rows.Scan(&u.ID, &tenant, &u.Email, &u.DisplayName, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		if known[strings.ToLower(strings.TrimSpace(u.Email))] {
+			continue
+		}
+		f := accountFacts{ID: u.ID, CustomerID: tenant}
+		u.Assignments, u.AppIDs, u.ModelIDs = []userAssignment{}, []string{}, []string{}
+		u.HomeTenant, u.Permissions = accountPermissionsFor(act, tiers, f)
+		u.GrantableRoles = unscopedGrantableRoles(ctx, act, tiers, tenant)
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 type auditEventItem struct {
@@ -8133,7 +8390,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := act.UserID
 	store := importpkg.NewStore(h.db.For(ctx))
-	if key != "" && !body.DryRun && !h.replayKeyedImport(w, ctx, store, modelID, userID, key) {
+	if key != "" && !body.DryRun && !h.replayKeyedImport(w, ctx, store, modelID, userID, key, "grid", gridImportReplay) {
 		return
 	}
 
@@ -8229,13 +8486,25 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.describeImportJob(ctx, store, job.Id, details)
+	// An import refused before its commit saved nothing: its key is freed
+	// (the job aborted), so sent again it runs — and is refused again —
+	// instead of being answered "still running" for ten minutes.
+	releaseKey := func() {
+		if key != "" {
+			if err := store.ReleaseKey(context.WithoutCancel(ctx), job.Id); err != nil {
+				h.log.Warn().Err(err).Str("job_id", job.Id).Msg("release the idempotency key of a refused import")
+			}
+		}
+	}
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
+		releaseKey()
 		jsonErr(w, fmt.Errorf("stage: %w", err), http.StatusInternalServerError)
 		return
 	}
 
 	metricIDs, err := store.CommitImport(ctx, job.Id, modelID, revisionID, userID, mode)
 	if err != nil {
+		releaseKey()
 		if errors.Is(err, importpkg.ErrWriteDenied) {
 			jsonErr(w, err, http.StatusForbidden)
 			return
@@ -8319,7 +8588,14 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 	// business user's Import widget lists every import of the model, and the
 	// grid or table it went into, its file and a value its first problem
 	// quotes may be ones that user does not reach.
-	builder := act.hasRole("platform_admin") || act.hasRole("tenant_admin")
+	// A tenant admin builds the models of the tenants it administers only:
+	// tenant_admin held anywhere counted for every model, so tenant 1's
+	// administrator who was a user of tenant 2 read others' imports there
+	// (the 2026-09-29 audit of tenant_admin branches).
+	builder := act.hasRole("platform_admin")
+	if !builder && act.hasRole("tenant_admin") {
+		builder, _ = h.actorCanAccessModel(withBuilderRoute(ctx), act, modelID)
+	}
 	if !builder {
 		builder, _ = h.buildsModel(ctx, act, modelID)
 	}
@@ -8342,7 +8618,8 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !builder && createdBy != act.UserID {
-				v.Error, v.TargetName, v.FileName, v.By = "", "", "", ""
+				// The source (the stored file's address) names the file too.
+				v.Error, v.TargetName, v.FileName, v.By, v.Source = "", "", "", "", ""
 			}
 			if j := byID[id]; j != nil {
 				v.ImportJob = j.ImportJob
@@ -8814,7 +9091,7 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
-	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
+	imported, errs, notices, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
 	if fe := (*dimensionFileError)(nil); errors.As(importErr, &fe) {
 		for _, e := range fe.rows {
 			if k := int(e.RowNumber) - 2; k >= 0 && k < len(body.RowLines) && body.RowLines[k] > 0 {
@@ -8846,17 +9123,41 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		ApplicationID: appID, ResourceType: "dimension", ResourceID: body.DimensionID, RevisionID: job.RevisionID,
 		Metadata: map[string]string{"rows_imported": fmt.Sprintf("%d", imported), "error_rows": fmt.Sprintf("%d", errs)},
 	})
-	jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
+	jsonOK(w, dimensionImportAnswer(imported, errs, notices))
 }
 
-func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, fatal error) {
+// consoleClearValuesOffer follows a metricformula.PreexistingValuesNote in
+// a console's answer: the property editor clears a property's values
+// (PATCH …/properties/{propId} with clear_values).
+const consoleClearValuesOffer = " — if they are stale, clear them with Clear values on the property (Dimensions › Properties)"
+
+// dimensionImportAnswer is a dimension file import's answer, with the
+// notices of a property the file declared again, each offering to clear
+// the values from before.
+func dimensionImportAnswer(imported, errs int, notices []string) map[string]any {
+	resp := map[string]any{"rows_imported": imported, "error_rows": errs}
+	if len(notices) > 0 {
+		offered := make([]string, len(notices))
+		for i, n := range notices {
+			offered[i] = n + consoleClearValuesOffer
+		}
+		resp["notices"] = offered
+	}
+	return resp
+}
+
+// importDimensionMembersCSV imports a dimension file and recalculates what
+// reads the dimension. notices are what the person should know although
+// nothing failed: a property the file declared whose name members already
+// held values under (metricformula.PreexistingValuesNote).
+func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, notices []string, fatal error) {
 	cr, err := h.checkMemberImport(ctx, dimensionID, cr, colIdx)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
-	imported, errs, isTime, fatal := h.importDimensionMembersOn(ctx, h.db.For(ctx), dimensionID, cr, colIdx)
+	imported, errs, isTime, notices, fatal := h.importDimensionMembersOn(ctx, h.db.For(ctx), dimensionID, cr, colIdx)
 	if fatal != nil || imported == 0 {
-		return imported, errs, fatal
+		return imported, errs, notices, fatal
 	}
 	if isTime {
 		var modelID string
@@ -8864,12 +9165,12 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 		if modelID != "" {
 			go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
 		}
-	} else {
-		// Imported codes, parents and properties are what LOOKUP, PARENT
-		// and dim.property read (contract C8).
-		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimensionID) //nolint:contextcheck
 	}
-	return imported, errs, nil
+	// Imported codes, parents and properties are what LOOKUP, PARENT and
+	// dim.property read (contract C8); imported periods are what a metric
+	// reading the period set counts, in a revision without typed values too.
+	go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimensionID) //nolint:contextcheck
+	return imported, errs, notices, nil
 }
 
 // checkMemberImport holds a dimension file to the plan's member limit, as
@@ -8945,7 +9246,7 @@ func (h *handler) checkMemberImport(ctx context.Context, dimensionID string, cr 
 // pool, or the AI Developer's proposal check's transaction — and reports
 // whether the dimension is a time dimension. It recalculates nothing: that
 // is importDimensionMembersCSV's, after a real import.
-func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, isTime bool, fatal error) {
+func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, isTime bool, notices []string, fatal error) {
 	codeCol, hasCode := colIdx["code"]
 	labelCol, hasLabel := colIdx["label"]
 	parentCol, hasParent := colIdx["parent_code"]
@@ -8957,14 +9258,14 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	endCol, hasEnd := colIdx["period_end"]
 	timeCfg, cfgErr := timedim.LoadConfig(ctx, db, dimensionID)
 	if cfgErr != nil {
-		return 0, 0, isTime, fmt.Errorf("dimension not found")
+		return 0, 0, isTime, nil, fmt.Errorf("dimension not found")
 	}
 	isTime = timeCfg.Type == timedim.TypeTime
 	if isTime && (!hasStart || !hasEnd) {
-		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
+		return 0, 0, isTime, nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
 	}
 	if !isTime && (hasStart || hasEnd) {
-		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
+		return 0, 0, isTime, nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
 	}
 	// One transaction for the file, imported whole or not at all, as grid
 	// and table files are (the owner's decision, 2026-10-26): a time
@@ -8978,42 +9279,48 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	// even counted.
 	tx, err := db.Begin(ctx)
 	if err != nil {
-		return 0, 0, isTime, err
+		return 0, 0, isTime, nil, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 	type propCol struct {
-		name string
-		idx  int
+		header, name, dataType string
+		idx                    int
 	}
-	var propCols []propCol
+	var headers []string
+	headerIdx := map[string]int{}
 	for field, idx := range colIdx {
 		if name, ok := strings.CutPrefix(field, "property:"); ok && strings.TrimSpace(name) != "" {
-			propCols = append(propCols, propCol{name: strings.TrimSpace(name), idx: idx})
+			headers = append(headers, strings.TrimSpace(name))
+			headerIdx[strings.TrimSpace(name)] = idx
 		}
 	}
-	// Register each mapped property as a declared dimension_property, not just
-	// a value on members. Without this a property:X import wrote values that
+	sort.Strings(headers)
+	// Every mapped property is a declared dimension_property, not just a
+	// value on members: without that a property:X import wrote values that
 	// showed as a column but were absent from the dimension's property
-	// definitions — unmanageable and confusing ("category — what is it, I
-	// can't find it in the properties"). Idempotent via the (dimension_id,
-	// name) unique constraint; default type "text".
-	for _, pc := range propCols {
-		sp, err := tx.Begin(ctx)
-		if err != nil {
-			return 0, 0, isTime, err
-		}
-		if _, err := sp.Exec(ctx,
-			`INSERT INTO model.dimension_property (dimension_id, name, data_type)
-			 VALUES ($1::uuid, $2, 'text') ON CONFLICT (dimension_id, name) DO NOTHING`,
-			dimensionID, pc.name); err != nil {
-			_ = sp.Rollback(ctx)
-			h.log.Warn().Err(err).Str("property", pc.name).Msg("declare imported dimension property")
-			continue
-		}
-		if err := sp.Commit(ctx); err != nil {
-			return 0, 0, isTime, err
-		}
+	// definitions ("category — what is it, I can't find it in the
+	// properties"). A header fills the property declared under its name
+	// whatever its case, or under its identifier, and any other header is
+	// declared as its identifier, as text — the one normalisation the REST
+	// connector shares (metricformula.DeclareImportedProperties). Headers
+	// are lower-cased here, and used to be declared as written: "segment"
+	// next to the developer's "Segment", holding values no formula read.
+	names, declaredNow, err := metricformula.DeclareImportedProperties(ctx, tx, dimensionID, headers)
+	if err != nil {
+		return 0, 0, isTime, nil, err
 	}
+	types, err := metricformula.DeclaredPropertyTypes(ctx, tx, dimensionID)
+	if err != nil {
+		return 0, 0, isTime, nil, err
+	}
+	var propCols []propCol
+	for _, header := range headers {
+		propCols = append(propCols, propCol{header: header, name: names[header], dataType: types[names[header]], idx: headerIdx[header]})
+	}
+	// The members this file gives a value under each property: the others
+	// holding one are values from before, which a declaration made again
+	// lets formulas read — the answer says so (notices).
+	wroteValue := map[string][]string{}
 
 	cell := func(record []string, idx int) string {
 		if idx < 0 || idx >= len(record) {
@@ -9028,7 +9335,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	// file quadratic.
 	var lastSort int
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM model.dimension_member WHERE dimension_id = $1::uuid`, dimensionID).Scan(&lastSort); err != nil {
-		return 0, 0, isTime, err
+		return 0, 0, isTime, nil, err
 	}
 	var rowErrs []*importpkgv1.ImportError
 	rowErr := func(line int, column, code, message, raw string) {
@@ -9084,12 +9391,30 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 			}
 		}
 		props := map[string]string{}
+		var replaced []string
+		badValue := false
 		for _, pc := range propCols {
 			if v := cell(record, pc.idx); v != "" {
+				// A value its number or date property cannot read refuses
+				// the file, as a member edit refuses it.
+				if err := metricformula.PropertyValueError(pc.name, pc.dataType, v); err != nil {
+					rowErr(line, "property:"+pc.header, metricformula.CodeInvalidPropertyValue, err.Error(), v)
+					badValue = true
+					continue
+				}
 				props[pc.name] = v
+				// The value replaces the member's value under the name in
+				// any other case.
+				replaced = append(replaced, strings.ToLower(pc.name))
 			}
 		}
+		if badValue {
+			continue
+		}
 		propsJSON, _ := json.Marshal(props)
+		if replaced == nil {
+			replaced = []string{}
+		}
 		if isTime {
 			var start, end *time.Time
 			var idx *int
@@ -9097,7 +9422,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 				ps, perr := timedim.ParseDate(cell(record, startCol))
 				pe, perr2 := timedim.ParseDate(cell(record, endCol))
 				if perr != nil || perr2 != nil {
-					return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
+					return 0, 0, isTime, nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
 				}
 				start, end = &ps, &pe
 				zero := 0
@@ -9110,7 +9435,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 					if err := tx.QueryRow(ctx,
 						`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 						dimensionID, parentCode).Scan(&pid); err != nil {
-						return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", code, parentCode)}
+						return 0, 0, isTime, nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", code, parentCode)}
 					}
 					parentID = &pid
 				}
@@ -9122,16 +9447,19 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 				   label = EXCLUDED.label,
 				   period_start = EXCLUDED.period_start, period_end = EXCLUDED.period_end, time_index = EXCLUDED.time_index,
 				   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
-				   properties = model.dimension_member.properties || EXCLUDED.properties`,
-				dimensionID, code, label, string(propsJSON), start, end, idx, parentID); err != nil {
-				return 0, 0, isTime, fmt.Errorf("member %q: %w", code, err)
+				   properties = `+metricformula.MergeImportedPropertiesSQL("$9"),
+				dimensionID, code, label, string(propsJSON), start, end, idx, parentID, replaced); err != nil {
+				return 0, 0, isTime, nil, fmt.Errorf("member %q: %w", code, err)
+			}
+			for name := range props {
+				wroteValue[name] = append(wroteValue[name], code)
 			}
 			imported++
 			continue
 		}
 		row, err := tx.Begin(ctx)
 		if err != nil {
-			return 0, 0, isTime, err
+			return 0, 0, isTime, nil, err
 		}
 		// A new member is appended; a re-imported one keeps its place.
 		var inserted bool
@@ -9141,22 +9469,25 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 			 ON CONFLICT (dimension_id, code) DO UPDATE SET
 			   label = EXCLUDED.label,
 			   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
-			   properties = model.dimension_member.properties || EXCLUDED.properties
+			   properties = `+metricformula.MergeImportedPropertiesSQL("$7")+`
 			 RETURNING xmax = 0`,
-			dimensionID, code, label, deref(parentID), string(propsJSON), lastSort+1).Scan(&inserted)
+			dimensionID, code, label, deref(parentID), string(propsJSON), lastSort+1, replaced).Scan(&inserted)
 		if err == nil && inserted {
 			lastSort++
 		}
 		if err != nil {
 			_ = row.Rollback(ctx)
 			if isStorageRefusal(err) {
-				return 0, 0, isTime, err
+				return 0, 0, isTime, nil, err
 			}
 			rowErr(line, "code", "INVALID_MEMBER", fmt.Sprintf("member %q could not be saved: %v", code, err), code)
 			continue
 		}
 		if err := row.Commit(ctx); err != nil {
-			return 0, 0, isTime, err
+			return 0, 0, isTime, nil, err
+		}
+		for name := range props {
+			wroteValue[name] = append(wroteValue[name], code)
 		}
 		imported++
 	}
@@ -9171,7 +9502,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 			WHERE m.dimension_id = $1::uuid AND m.code = $2 AND p.dimension_id = $1::uuid AND p.code = $3`,
 			dimensionID, p.code, p.parent)
 		if err != nil {
-			return 0, 0, isTime, err
+			return 0, 0, isTime, nil, err
 		}
 		if tag.RowsAffected() == 0 {
 			rowErr(p.line, "parent_code", "UNKNOWN_PARENT", fmt.Sprintf("parent %q is not a member of this dimension, nor a row of the file", p.parent), p.parent)
@@ -9179,17 +9510,26 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	}
 	if len(rowErrs) > 0 {
 		sort.SliceStable(rowErrs, func(i, j int) bool { return rowErrs[i].RowNumber < rowErrs[j].RowNumber })
-		return 0, len(rowErrs), isTime, &dimensionFileError{rows: rowErrs}
+		return 0, len(rowErrs), isTime, nil, &dimensionFileError{rows: rowErrs}
 	}
 	if isTime {
 		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
-			return 0, 0, isTime, err
+			return 0, 0, isTime, nil, err
+		}
+	}
+	for _, name := range declaredNow {
+		n, err := metricformula.ValuesFromBefore(ctx, tx, dimensionID, name, wroteValue[name])
+		if err != nil {
+			return 0, 0, isTime, nil, err
+		}
+		if note := metricformula.PreexistingValuesNote(name, n); note != "" {
+			notices = append(notices, note)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, isTime, err
+		return 0, 0, isTime, nil, err
 	}
-	return imported, errs, isTime, nil
+	return imported, errs, isTime, notices, nil
 }
 
 // dimensionFileError refuses a dimension file whole: every row with a
@@ -9526,6 +9866,21 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
+		// A table loader's column map names its fields: a column mapped to
+		// no field is refused here, not dropped at every run.
+		var cm struct {
+			ColumnMap map[string]string `json:"column_map"`
+		}
+		if json.Unmarshal(body.Config, &cm) == nil && len(cm.ColumnMap) > 0 {
+			var targetType, targetID string
+			_ = h.db.QueryRow(ctx, `SELECT target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&targetType, &targetID)
+			if targetType == "form" && targetID != "" {
+				if err := recordpost.CheckColumnMapFields(ctx, h.db.For(ctx), targetID, cm.ColumnMap); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+			}
+		}
 		if _, err := h.db.Exec(ctx,
 			`UPDATE model.integration_def SET config=$2 WHERE id=$1::uuid`,
 			intID, body.Config,
@@ -9796,6 +10151,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	var header []string
 	var rows []importpkg.RawRow
 	var fileName string // the person's file, for Recent Imports; a sheet has none
+	var mapped bool     // the Import Wizard mapped the file already
 	if intg.Type == "google_sheets" {
 		if strings.TrimSpace(cfg.SheetURL) == "" {
 			jsonErr(w, fmt.Errorf("integration has no sheet_url configured"), http.StatusBadRequest)
@@ -9813,7 +10169,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		header, rows, err = importpkg.ShapeCSV(data, cfg.Reshape)
 	} else {
-		header, rows, fileName, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
+		header, rows, fileName, mapped, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
 	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
@@ -9822,9 +10178,20 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// The saved column map, in the Import Wizard's vocabulary: a source
 	// column renamed to a metric, dimension or field name ("metric" and
 	// "value" for a long file), "ignore" dropped, any other kept as is.
-	if header, err = importpkg.ApplyColumnMap(header, rows, cfg.ColumnMap); err != nil {
-		jsonErr(w, fmt.Errorf("column map: %w", err), http.StatusBadRequest)
-		return
+	// Not on a file the Import Wizard mapped already (its Run Import): its
+	// columns are the model's names, which the map would read as source
+	// columns.
+	if !mapped {
+		if intg.TargetType == "form" {
+			if err := recordpost.CheckColumnMapFields(ctx, h.db.For(ctx), intg.TargetID, cfg.ColumnMap); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
+		if header, err = importpkg.ApplyColumnMapTo(header, rows, cfg.ColumnMap, intg.TargetType); err != nil {
+			jsonErr(w, fmt.Errorf("column map: %w", err), http.StatusBadRequest)
+			return
+		}
 	}
 
 	if !dryRun {
@@ -9866,7 +10233,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, errors.New(msg), http.StatusBadRequest)
 			return
 		}
-		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy)
+		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy, nil)
 		imported, rowErrs := res.Created, res.Errors
 		if dryRun && iErr == nil {
 			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
@@ -9906,7 +10273,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, cErr, http.StatusBadRequest)
 			return
 		}
-		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
+		imported, errs, notices, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
 		if importErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, errs, "error", importErr.Error())
 			h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, 0, errs, importErr))
@@ -9921,9 +10288,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, importErr, http.StatusBadRequest)
 			return
 		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, imported, errs, "success", "")
+		h.recordIntegrationRun(ctx, intID, act.UserID, imported, errs, "success", strings.Join(notices, "; "))
 		h.recordImportJob(ctx, h.dimensionImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, errs, nil))
-		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
+		jsonOK(w, dimensionImportAnswer(imported, errs, notices))
 
 	default: // "grid"
 		// A sheet is re-synced against the same living sheet, so its default
@@ -10062,7 +10429,15 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 				Metadata: map[string]string{"name": body.Name, "form_id": body.FormID},
 			})
 		}
-		jsonOK(w, map[string]string{"id": newID, "status": "created"})
+		// The metric now shows its records only: the values typed into it
+		// are set aside, and the answer says how many (the developer
+		// console shows it; Metrics > Clear values removes them).
+		setAside, err := writeguard.TypedSetAside(ctx, h.db.For(ctx), revisionID, body.TargetMetricID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]any{"id": newID, "status": "created", "typed_set_aside": setAside})
 		return
 	}
 
@@ -10185,6 +10560,7 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		_ = json.Unmarshal(dimRaw, &body.DimensionMappings)
 		_ = json.Unmarshal(filterRaw, &body.RowFilter)
 		body.LivePosting = &live
+		oldTarget := body.TargetMetricID
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
@@ -10255,7 +10631,17 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 				Metadata: map[string]string{"name": body.Name},
 			})
 		}
-		jsonOK(w, map[string]string{"status": "ok"})
+		resp := map[string]any{"status": "ok"}
+		if body.TargetMetricID != oldTarget {
+			// A new target sets its typed values aside, as creating does.
+			setAside, err := writeguard.TypedSetAside(ctx, h.db.For(ctx), mapRevision, body.TargetMetricID)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			resp["typed_set_aside"] = setAside
+		}
+		jsonOK(w, resp)
 	case http.MethodDelete:
 		revisionID, appID := h.formIntegrationScope(ctx, mappingID)
 		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappings(ctx, []string{mappingID})
@@ -11460,7 +11846,8 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, errors.New(msg), code)
 			return
 		}
-		if err := store.UpdateRecordThen(ctx, recordID, oldStatus, newStatus, data, recordSavedHook(scope.form, recordID, rec.Data, data, act.UserID)); errors.Is(err, crudapp.ErrRecordChanged) {
+		keptChanged := false
+		if err := store.UpdateRecordThen(ctx, recordID, oldStatus, newStatus, data, recordSavedHook(scope.form, recordID, rec.Data, data, act.UserID, &keptChanged)); errors.Is(err, crudapp.ErrRecordChanged) {
 			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
 			return
 		} else if err != nil {
@@ -11470,6 +11857,11 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		userID := act.UserID
 		appID, revisionID := scope.appID, scope.revisionID
 		bgCtx := context.WithoutCancel(ctx)
+		// A member property the record's fields fill changed: what reads it
+		// is recalculated.
+		if keptChanged {
+			go h.recalcDimensionDependents(bgCtx, scope.form.KeepsDimensionID) //nolint:contextcheck
+		}
 		go func() { _ = h.applyFormMappings(bgCtx, recordID, formID, newStatus, data, userID) }()
 		statusChanged := newStatus != oldStatus
 		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": newStatus}
@@ -12143,8 +12535,24 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		// A rename carries into the highlight rules, closed rules and data
+		// exports naming the metric, in the same transaction.
+		if body.Name != storedName {
+			if _, err := metricformula.RenameMetricInRules(ctx, tx, metricID, storedName, body.Name); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
 		if formulaSent {
 			if err := metricformula.WriteDependencies(ctx, tx, metricID, formulaEdges); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		// A rename carries into the formulas and workflow conditions naming
+		// the metric, in the same transaction.
+		if body.Name != storedName {
+			if _, err := metricformula.RenameMetricInFormulas(ctx, tx, metricID, storedName, body.Name); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12154,10 +12562,15 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Trigger recalculation for every scenario/version that has data in this model.
-		// Collect all input metric IDs so we re-derive every calc metric.
+		// Recalculate the metric's own revision: a metric belongs to one
+		// revision, so the edit cannot change another one, and recalculating
+		// every revision with data touched approved revisions and answered an
+		// entry per revision (2026-11-09). A legacy metric with no revision
+		// keeps the model-wide pass. Every input of that scope is a seed so
+		// each calculated metric is derived again.
 		inputRows, _ := h.db.Query(ctx,
-			`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND is_input=true`, modelID)
+			`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND is_input=true
+			   AND ($2 = '' OR revision_id = NULLIF($2,'')::uuid OR revision_id IS NULL)`, modelID, metricRevisionID)
 		var inputIDs []string
 		for inputRows.Next() {
 			var id string
@@ -12166,16 +12579,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		inputRows.Close()
 
-		// Distinct revisions that have written data for this model
-		revRows, _ := h.db.Query(ctx,
-			`SELECT DISTINCT revision_id::text FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id IS NOT NULL`, modelID)
-		var revIDs []string
-		for revRows.Next() {
-			var rid string
-			_ = revRows.Scan(&rid)
-			revIDs = append(revIDs, rid)
-		}
-		revRows.Close()
+		revIDs := h.metricRecalcRevisions(ctx, modelID, metricRevisionID)
 		// A change that moves no value — tags, the label, highlight rules,
 		// the row style — saves without recalculating the model: each tag a
 		// developer gave a metric recalculated all of it (2026-11-08).
@@ -12194,6 +12598,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			Value      *float64 `json:"value"`
 		}
 		var results []recalcResult
+		var mName string
+		_ = h.db.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&mName)
 		for _, rid := range revIDs {
 			if len(inputIDs) > 0 {
 				_ = sched.RecalcAffected(ctx, modelID, rid, inputIDs)
@@ -12206,8 +12612,6 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				  AND dim_members='{}'
 				ORDER BY calc_at DESC LIMIT 1
 			`, modelID, rid, metricID).Scan(&val)
-			var mName string
-			_ = h.db.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&mName)
 			results = append(results, recalcResult{
 				RevisionID: rid,
 				Metric:     mName,
@@ -12278,15 +12682,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if modelID != "" && len(dependentIDs) > 0 {
-			revRows, _ := h.db.Query(ctx,
-				`SELECT DISTINCT revision_id::text FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id IS NOT NULL`, modelID)
-			var revIDs []string
-			for revRows.Next() {
-				var rid string
-				_ = revRows.Scan(&rid)
-				revIDs = append(revIDs, rid)
-			}
-			revRows.Close()
+			revIDs := h.metricRecalcRevisions(ctx, modelID, metricRevisionID)
 			calcStore := calculation.NewStore(h.db.For(ctx))
 			sched := calculation.NewScheduler(h.log, calcStore)
 			for _, rid := range revIDs {
@@ -12429,6 +12825,14 @@ func (h *handler) reorderDimensionMembers(w http.ResponseWriter, r *http.Request
 	}
 	if !allowed {
 		jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+		return
+	}
+	var dimRevision string
+	if err := h.db.QueryRow(ctx, revisionOfResourceSQL["dimension"], dimID).Scan(&dimRevision); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !h.refuseSystemManaged(w, r, dimRevision) {
 		return
 	}
 
@@ -12590,10 +12994,24 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					return
 				}
 			}
+			// A rename carries into the formulas, highlight rules and data
+			// exports naming the dimension, in the rename's transaction
+			// (metricformula.RenameDimensionInFormulas).
+			var storedName string
+			if err := h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&storedName); err != nil {
+				jsonErr(w, fmt.Errorf("load dimension: %w", err), http.StatusInternalServerError)
+				return
+			}
+			tx, err := h.db.Begin(ctx)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 			// dimension_type / time_granularity / fiscal_year_start_month are
 			// deliberately not updatable: they are immutable after creation
 			// (a DB trigger enforces it too).
-			if _, err := h.db.Exec(ctx, `
+			if _, err := tx.Exec(ctx, `
 				UPDATE model.dimension_def
 				SET name=COALESCE(NULLIF($2,''), name), agg_rule=COALESCE(NULLIF($3,''), agg_rule),
 				    parent_dimension_id=CASE WHEN $5::boolean THEN $4::uuid ELSE parent_dimension_id END,
@@ -12607,6 +13025,16 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					jsonErr(w, metricformula.DimensionNameTaken(err, body.Name), http.StatusConflict)
 					return
 				}
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			if body.Name != "" && body.Name != storedName {
+				if _, err := metricformula.RenameDimensionInFormulas(ctx, tx, dimID, storedName, body.Name); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
+			if err := tx.Commit(ctx); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12826,11 +13254,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					}
 				}
 			}
-			if !isTime {
-				// A new member changes what LOOKUP, the conditional
-				// aggregations and PARENT see (contract C8).
-				go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
-			}
+			// A new member changes what LOOKUP, the conditional aggregations
+			// and PARENT see (contract C8) — and a new period what a metric
+			// reading the period set counts, in a revision with no typed
+			// value too, which the pass above never visits.
+			go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 			h.auditDimensionUpdated(ctx, r, dimID, "member_added", map[string]string{"member_id": newID, "code": body.Code})
 			jsonOK(w, map[string]string{"id": newID})
 
@@ -12964,10 +13392,12 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				if modelID != "" {
 					go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
 				}
-			} else if body.Code != oldCode || !sameOptionalID(prevParentID, body.ParentMemberID) || body.Properties != nil {
+			}
+			if isTime || body.Code != oldCode || !sameOptionalID(prevParentID, body.ParentMemberID) || body.Properties != nil {
 				// Formulas read a member's code (bare dimension, LOOKUP),
 				// parent (PARENT) and properties (dim.property, criteria):
-				// recompute the metrics that do (contract C8).
+				// recompute the metrics that do (contract C8). A period's
+				// change reaches a revision without typed values only here.
 				go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 			}
 			h.auditDimensionUpdated(ctx, r, dimID, "member_updated", map[string]string{"member_id": subID, "code": body.Code})
@@ -13073,12 +13503,26 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				VALUES ($1, $2, $3) RETURNING id::text
 			`, dimID, body.Name, body.DataType).Scan(&newID)
 			if err != nil {
+				// Another change declared the name, in some case, at the
+				// same moment: the unique index (migration 170) refused
+				// this one.
+				if err := metricformula.PropertyNameConflict(ctx, h.db.For(ctx), dimID, body.Name, err); metricformula.IsPropertyNameConflict(err) {
+					jsonErr(w, err, http.StatusConflict)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			// Values stored under the name in another case move under the
 			// declared spelling, as the AI Developer's declare does.
-			if _, _, err := metricformula.AdoptPropertyValues(ctx, h.db.For(ctx), dimID, body.Name); err != nil {
+			withValue, _, err := metricformula.AdoptPropertyValues(ctx, h.db.For(ctx), dimID, body.Name)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			// A table keeping the dimension fills it from its field of that
+			// name, and keeps it up to date (recordpost.KeepMember).
+			if _, err := recordpost.FillKeptProperties(ctx, h.db.For(ctx), dimID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -13086,12 +13530,24 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			// now (contract C8).
 			go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 			h.auditDimensionUpdated(ctx, r, dimID, "property_added", map[string]string{"property_id": newID, "name": body.Name})
-			jsonOK(w, map[string]string{"id": newID})
+			// Values members already held under the name — kept from a
+			// declaration deleted before, or set before it was declared —
+			// are read by formulas now: the answer says how many, and the
+			// console offers to clear them (PATCH clear_values).
+			resp := map[string]any{"id": newID, "existing_values": withValue}
+			if withValue > 0 {
+				resp["notice"] = metricformula.PreexistingValuesNote(body.Name, withValue) + consoleClearValuesOffer
+			}
+			jsonOK(w, resp)
 
 		case r.Method == http.MethodPatch && propID != "":
 			var body struct {
 				Name     string `json:"name"`
 				DataType string `json:"data_type"`
+				// ClearValues removes the property's value from every
+				// member of the dimension — what a developer asks for
+				// when a declaration made again brought back stale values.
+				ClearValues bool `json:"clear_values"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -13106,10 +13562,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			body.Name = strings.TrimSpace(body.Name)
-			if body.Name == "" {
+			nameGiven, typeGiven := body.Name != "", body.DataType != ""
+			if !nameGiven {
 				body.Name = oldName
 			}
-			if body.DataType == "" {
+			if !typeGiven {
 				body.DataType = oldType
 			}
 			if err := metricformula.ValidatePropertyDeclaration(ctx, h.db.For(ctx), dimID, propID, body.Name, body.DataType); err != nil {
@@ -13129,8 +13586,46 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+			// The declaration is read again under a row lock: a rename sent
+			// at the same moment may have renamed it, and renaming the
+			// values from the name read before would leave them under the
+			// other request's name while the declaration took this one's.
+			if err := tx.QueryRow(ctx,
+				`SELECT name, data_type FROM model.dimension_property WHERE id=$1::uuid AND dimension_id=$2::uuid FOR UPDATE`,
+				propID, dimID).Scan(&oldName, &oldType); err != nil {
+				jsonErr(w, fmt.Errorf("property not found"), http.StatusNotFound)
+				return
+			}
+			if !nameGiven {
+				body.Name = oldName
+			}
+			if !typeGiven {
+				body.DataType = oldType
+			}
+			var cleared int64
+			if body.ClearValues {
+				if cleared, err = metricformula.ClearPropertyValues(ctx, tx, dimID, oldName); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
+			// A new type must read every value the members hold.
+			if body.DataType != oldType {
+				if err := metricformula.CheckPropertyValues(ctx, tx, dimID, oldName, body.DataType); err != nil {
+					if metricformula.IsValidationError(err) {
+						jsonErr(w, err, http.StatusBadRequest)
+						return
+					}
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
 			if _, err := tx.Exec(ctx, `UPDATE model.dimension_property SET name=$2, data_type=$3 WHERE id=$1::uuid`,
 				propID, body.Name, body.DataType); err != nil {
+				if err := metricformula.PropertyNameConflict(ctx, h.db.For(ctx), dimID, body.Name, err); metricformula.IsPropertyNameConflict(err) {
+					jsonErr(w, err, http.StatusConflict)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -13149,11 +13644,17 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
-			if body.Name != oldName || body.DataType != oldType {
+			if body.Name != oldName || body.DataType != oldType || cleared > 0 {
 				go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 			}
-			h.auditDimensionUpdated(ctx, r, dimID, "property_updated", map[string]string{"property_id": propID, "name": body.Name})
-			jsonOK(w, map[string]string{"status": "ok"})
+			meta := map[string]string{"property_id": propID, "name": body.Name}
+			resp := map[string]any{"status": "ok"}
+			if body.ClearValues {
+				meta["values_cleared"] = strconv.FormatInt(cleared, 10)
+				resp["values_cleared"] = cleared
+			}
+			h.auditDimensionUpdated(ctx, r, dimID, "property_updated", meta)
+			jsonOK(w, resp)
 
 		case r.Method == http.MethodDelete && propID != "":
 			// Scoped to {dimId} like the PATCH above: requireResourceAccess
@@ -13223,10 +13724,34 @@ func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub str
 	if _, err := h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID); err != nil {
 		return err
 	}
-	if h.kc != nil && keycloakSub != "" && h.identityHeldElsewhere(ctx, keycloakSub) {
-		h.log.Info().Str("user_id", userID).
-			Msg("application user deleted; the identity provider account stays, another tenant database still holds it")
-		return nil
+	h.removeIdentityAccount(ctx, userID, keycloakSub)
+	return nil
+}
+
+// removeIdentityAccount deletes keycloakSub's identity-provider account
+// once its application row is gone, unless another tenant database still
+// holds the identity.
+//
+// A failed lookup keeps the identity-provider account, as before, but says
+// so: it used to count as held and log that another tenant database held
+// the identity, though none might (2026-09-30). It is tried twice.
+func (h *handler) removeIdentityAccount(ctx context.Context, userID, keycloakSub string) {
+	if h.kc != nil && keycloakSub != "" {
+		held, _, err := h.identityHeldIn(ctx, "", keycloakSub)
+		if err != nil {
+			held, _, err = h.identityHeldIn(ctx, "", keycloakSub)
+		}
+		if err != nil {
+			h.log.Error().Err(err).Str("user_id", userID).Str("keycloak_sub", keycloakSub).
+				Msg("application user deleted, but whether another tenant database holds the identity could not be read; " +
+					"the identity provider account stays: delete it by hand if no database holds it")
+			return
+		}
+		if held != heldNowhere {
+			h.log.Info().Str("user_id", userID).
+				Msg("application user deleted; the identity provider account stays, another tenant database still holds it")
+			return
+		}
 	}
 	if h.kc != nil && keycloakSub != "" && !strings.HasPrefix(keycloakSub, "admin-created-") {
 		if err := h.kc.DeleteUser(ctx, keycloakSub); err != nil {
@@ -13234,7 +13759,6 @@ func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub str
 				Msg("application user deleted but the identity provider account remains; remove it by hand")
 		}
 	}
-	return nil
 }
 
 // identityHeldElsewhere reports whether a database other than the one ctx
@@ -13934,17 +14458,18 @@ func (h *handler) adminRevisionAction(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]string{"status": "deleted"})
 	case http.MethodPatch:
 		var body struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
+			Name        string  `json:"name"`
+			Description *string `json:"description"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
-		if _, err := h.db.Exec(ctx,
-			`UPDATE model.revision SET name=$2, description=$3 WHERE id=$1::uuid`,
-			id, body.Name, body.Description); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+		// The developer's rename: the live revision's name kept on the
+		// model follows, and a name another revision has is a 409, not a
+		// constraint's 500.
+		if _, err := h.renameRevision(ctx, id, body.Name, body.Description); err != nil {
+			jsonErr(w, err, renameRevisionStatus(err))
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -14349,6 +14874,8 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		if body.DisplayName == "" {
 			body.DisplayName = firstName + " " + lastName
 		}
+		// A refused invitation is listed under the name it was given.
+		ctx = context.WithValue(ctx, inviteNameKey{}, strings.TrimSpace(body.DisplayName))
 		// The tenant's plan may cap its users. The tenant is the admin's
 		// own scope, the routed one, or the workspace the role goes into;
 		// a platform-level creation with none of those is not capped. Only
@@ -14636,6 +15163,21 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 	if h.isStandIn(ctx, userID) {
 		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 		return
+	}
+	// A refused invitation the tenant's list shows as a pending person
+	// (refusedInvitations) is deleted as that person would be, by an
+	// administrator of its tenant.
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		if tag, err := h.db.Exec(ctx, `
+			DELETE FROM identity.refused_invitation
+			WHERE id = CASE WHEN $1 ~* `+writeguard.UUIDPatternSQL+` THEN $1::uuid END AND customer_id::text = ANY($2)`,
+			userID, tiers.ids()); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if tag.RowsAffected() > 0 {
+			jsonOK(w, map[string]string{"status": "deleted"})
+			return
+		}
 	}
 	canTouchUser, err := h.userInTiers(ctx, tiers, userID)
 	if err != nil {
@@ -15158,10 +15700,29 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// silently adopts the old account instead of provisioning a new one.
 		var delSub string
 		_ = h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity.user WHERE id=$1::uuid`, userID).Scan(&delSub)
-		if err := h.removeUserAccount(ctx, userID, delSub); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+		// A tenant admin's delete is serialised with tenant_admin
+		// revocations and re-checks that an enabled one remains
+		// (guardLastTenantAdmin); a platform admin may delete the last.
+		h.forgetUser(ctx, delSub)
+		del := func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID)
+			return err
+		}
+		var delErr error
+		if tiers.platform {
+			delErr = h.guardNothing(ctx, del, nil)
+		} else {
+			delErr = h.guardLastTenantAdmin(ctx, userID, del, nil)
+		}
+		if errors.Is(delErr, errLastTenantAdmin) {
+			jsonErr(w, fmt.Errorf("forbidden: this account is its tenant's last tenant admin; make someone else tenant admin before you delete it"), http.StatusForbidden)
 			return
 		}
+		if delErr != nil {
+			jsonErr(w, delErr, deleteStatus(delErr))
+			return
+		}
+		h.removeIdentityAccount(ctx, userID, delSub)
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserDeleted,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -15624,24 +16185,34 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("metric is already in grid %q — a metric can only belong to one grid; remove it there first", existingGridName), http.StatusConflict)
 				return
 			}
-			if err := h.gridMembershipTx(ctx, gridID,
-				// Appended after the grid's metrics, as the AI's add does: the
-				// order a grid shows its metrics in, set again with
-				// PUT …/metrics/order. 0 for every add showed them by name.
-				`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order)
-				 VALUES ($1::uuid,$2::uuid,(SELECT COALESCE(MAX(sort_order),0)+1 FROM model.grid_metric WHERE grid_id=$1::uuid))
-				 ON CONFLICT DO NOTHING`,
-				gridID, subID); err != nil {
-				if metricformula.IsValidationError(err) {
-					jsonErr(w, err, http.StatusBadRequest)
-					return
-				}
-				jsonErr(w, err, http.StatusInternalServerError)
+			// Optional {"members": {dimension id: member}}: the member of
+			// each grid dimension the metric's values lack that they belong
+			// to (modeledit.AttachGridMetric moves them, and combines values
+			// kept along a dimension the grid has not got by the metric's own
+			// rule). Appended after the grid's metrics, as the AI's add does.
+			var body struct {
+				Members map[string]string `json:"members"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+				jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
 				return
 			}
-			h.auditGridUpdated(ctx, r, gridID, "metric_attached", map[string]string{"metric_id": subID})
+			var actorID string
+			if a, e := h.resolveActor(ctx, r); e == nil {
+				actorID = a.UserID
+			}
+			var res modeledit.GridValuesResult
+			if err := h.gridValuesTx(ctx, func(tx pgx.Tx) (err error) {
+				res, err = modeledit.AttachGridMetric(ctx, tx, gridID, subID, body.Members, actorID)
+				return err
+			}); err != nil {
+				gridValuesErr(w, err)
+				return
+			}
+			h.auditGridUpdated(ctx, r, gridID, "metric_attached", map[string]string{"metric_id": subID,
+				"moved": strconv.FormatInt(res.Moved, 10), "combined": strconv.Itoa(res.Combined)})
 			h.recalcGridMetrics(ctx, gridID)
-			jsonOK(w, map[string]string{"status": "ok"})
+			jsonOK(w, map[string]any{"status": "ok", "moved": res.Moved, "combined": res.Combined})
 		case r.Method == http.MethodDelete && subID != "":
 			if _, err := h.db.Exec(ctx,
 				`DELETE FROM model.grid_metric WHERE grid_id=$1::uuid AND metric_id=$2::uuid`,
@@ -15671,19 +16242,32 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("dimension does not belong to the same revision as the grid"), http.StatusBadRequest)
 				return
 			}
-			if err := h.gridMembershipTx(ctx, gridID,
-				`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`,
-				gridID, subID); err != nil {
-				if metricformula.IsValidationError(err) {
-					jsonErr(w, err, http.StatusBadRequest)
-					return
-				}
-				jsonErr(w, err, http.StatusInternalServerError)
+			// Optional {"member": code or id}: the member of the dimension
+			// the grid's metrics' values belong to. Required while they hold
+			// any (modeledit.AddGridDimension): without one they stayed keyed
+			// without the dimension, and the grid and every formula found none.
+			var body struct {
+				Member string `json:"member"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+				jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
 				return
 			}
-			h.auditGridUpdated(ctx, r, gridID, "dimension_attached", map[string]string{"dimension_id": subID})
+			var res modeledit.GridValuesResult
+			if err := h.gridValuesTx(ctx, func(tx pgx.Tx) (err error) {
+				res, err = modeledit.AddGridDimension(ctx, tx, gridID, subID, body.Member)
+				return err
+			}); err != nil {
+				gridValuesErr(w, err)
+				return
+			}
+			meta := map[string]string{"dimension_id": subID}
+			if res.Moved > 0 {
+				meta["member"], meta["moved"] = body.Member, strconv.FormatInt(res.Moved, 10)
+			}
+			h.auditGridUpdated(ctx, r, gridID, "dimension_attached", meta)
 			h.recalcGridMetrics(ctx, gridID)
-			jsonOK(w, map[string]string{"status": "ok"})
+			jsonOK(w, map[string]any{"status": "ok", "moved": res.Moved})
 		case r.Method == http.MethodPatch && subID != "":
 			// Update display_level for this grid-dimension pair.
 			// Body: {"display_level": null | 0 | -1 | n}
@@ -15785,8 +16369,12 @@ func (h *handler) developerFolders(w http.ResponseWriter, r *http.Request) {
 			Name     string `json:"name"`
 			ParentID string `json:"parent_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+			return
+		}
+		if err := h.validateFolderParent(ctx, modelID, revisionID, "", body.ParentID); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		var newID string
@@ -15832,27 +16420,71 @@ func (h *handler) developerFolderAction(w http.ResponseWriter, r *http.Request) 
 	}
 	switch r.Method {
 	case http.MethodPatch:
+		// Partial, like the dashboard PATCH: an omitted field keeps what the
+		// folder has, so a rename no longer moves it to the top level.
+		// parent_id is RawMessage so absent, null and "" can be told apart:
+		// absent leaves the folder where it is, null or "" moves it to the
+		// top level, an id files it under that folder.
 		var body struct {
-			Name     string `json:"name"`
-			ParentID string `json:"parent_id"`
+			Name     *string         `json:"name"`
+			ParentID json.RawMessage `json:"parent_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid JSON body"), http.StatusBadRequest)
 			return
 		}
+		if body.Name == nil && len(body.ParentID) == 0 {
+			jsonErr(w, fmt.Errorf("nothing to change: send name and/or parent_id"), http.StatusBadRequest)
+			return
+		}
+		if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+			jsonErr(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest)
+			return
+		}
+		move, parentTarget := false, ""
+		if len(body.ParentID) > 0 {
+			move = true
+			if string(body.ParentID) != "null" {
+				if err := json.Unmarshal(body.ParentID, &parentTarget); err != nil {
+					jsonErr(w, fmt.Errorf("parent_id must be a folder id, an empty string, or null"), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		var folderModelID, folderRevisionID string
+		if err := h.db.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.dashboard_folder WHERE id=$1::uuid`,
+			folderID).Scan(&folderModelID, &folderRevisionID); err != nil {
+			jsonErr(w, fmt.Errorf("folder not found"), http.StatusNotFound)
+			return
+		}
+		if move {
+			if err := h.validateFolderParent(ctx, folderModelID, folderRevisionID, folderID, parentTarget); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
 		if _, err := h.db.Exec(ctx,
-			`UPDATE model.dashboard_folder SET name=$2, parent_id=NULLIF($3,'')::uuid WHERE id=$1::uuid`,
-			folderID, body.Name, body.ParentID); err != nil {
+			`UPDATE model.dashboard_folder SET name=COALESCE($2,name),
+			        parent_id = CASE WHEN $3::boolean THEN NULLIF($4,'')::uuid ELSE parent_id END
+			 WHERE id=$1::uuid`,
+			folderID, body.Name, move, parentTarget); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			revisionID, appID := h.folderScope(ctx, folderID)
+			meta := map[string]string{}
+			if body.Name != nil {
+				meta["name"] = *body.Name
+			}
+			if move {
+				meta["parent_id"] = parentTarget
+			}
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryModelChange, EventType: auditlog.EventFolderUpdated,
 				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 				ApplicationID: appID, ResourceType: "dashboard_folder", ResourceID: folderID, RevisionID: revisionID,
-				Metadata: map[string]string{"name": body.Name},
+				Metadata: meta,
 			})
 		}
 		jsonOK(w, map[string]string{"status": "ok"})
@@ -16085,7 +16717,7 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		if body.RevisionID == "" {
 			body.RevisionID, _, _ = h.resolveRevisionCtx(ctx, "", modelID)
 		}
-		if err := h.validateDashboardFolder(ctx, modelID, body.FolderID); err != nil {
+		if err := h.validateDashboardFolder(ctx, modelID, body.RevisionID, body.FolderID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -16212,18 +16844,56 @@ func (h *handler) validateWidgetRef(ctx context.Context, dashID, widgetType stri
 // same-model constraint, so without this a dashboard could be filed under
 // another model's — or another tenant's — folder and then vanish from its own
 // tree.
-func (h *handler) validateDashboardFolder(ctx context.Context, modelID, folderID string) error {
+//
+// Folders are per revision too (the folder list shows a revision's own and
+// those with no revision), so a folder of another revision of the same model
+// is refused as well: it would not show in the dashboard's revision.
+func (h *handler) validateDashboardFolder(ctx context.Context, modelID, revisionID, folderID string) error {
 	if folderID == "" {
 		return nil
 	}
 	var ok bool
 	if err := h.db.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM model.dashboard_folder WHERE id=$1::uuid AND model_id=$2::uuid)`,
-		folderID, modelID).Scan(&ok); err != nil {
+		`SELECT EXISTS (SELECT 1 FROM model.dashboard_folder WHERE id=$1::uuid AND model_id=$2::uuid
+		   AND (revision_id IS NULL OR revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid))`,
+		folderID, modelID, revisionID).Scan(&ok); err != nil {
 		return fmt.Errorf("folder not found")
 	}
 	if !ok {
-		return fmt.Errorf("folder does not belong to this model")
+		return fmt.Errorf("folder does not belong to this model's revision")
+	}
+	return nil
+}
+
+// validateFolderParent rejects a parent_id for folderID ("" for a new
+// folder) that is not a folder of the same model and revision, or that is the
+// folder itself or one of its descendants (which would cut the subtree off
+// the tree). "" means the top level and is always legal.
+func (h *handler) validateFolderParent(ctx context.Context, modelID, revisionID, folderID, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if err := h.validateDashboardFolder(ctx, modelID, revisionID, parentID); err != nil {
+		return err
+	}
+	if folderID == "" {
+		return nil
+	}
+	if parentID == folderID {
+		return fmt.Errorf("a folder cannot be moved inside itself")
+	}
+	var inside bool
+	if err := h.db.QueryRow(ctx, `
+		WITH RECURSIVE sub AS (
+			SELECT id FROM model.dashboard_folder WHERE id=$1::uuid
+			UNION
+			SELECT f.id FROM model.dashboard_folder f JOIN sub ON f.parent_id = sub.id
+		)
+		SELECT EXISTS (SELECT 1 FROM sub WHERE id=$2::uuid)`, folderID, parentID).Scan(&inside); err != nil {
+		return fmt.Errorf("check folder parent: %w", err)
+	}
+	if inside {
+		return fmt.Errorf("a folder cannot be moved inside itself or one of its own folders")
 	}
 	return nil
 }
@@ -16323,7 +16993,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			if moveFolder {
-				if err := h.validateDashboardFolder(ctx, dashModelID, folderTarget); err != nil {
+				if err := h.validateDashboardFolder(ctx, dashModelID, dashRevisionID, folderTarget); err != nil {
 					jsonErr(w, err, http.StatusBadRequest)
 					return
 				}
@@ -17038,12 +17708,40 @@ func (h *handler) applyInputAggregation(
 	return nil
 }
 
-// gridMembershipTx applies one grid_metric / grid_dimension change and
-// re-runs the revision's time validation (spec §4.4) in the same
-// transaction, so a grid never ends up with two time dimensions or a
-// time-series metric off its axis — the change rolls back with the reason.
-func (h *handler) gridMembershipTx(ctx context.Context, gridID, sql string, args ...any) error {
-	return h.gridChangeTx(ctx, gridID, metricformula.ValidateGridTime, sql, args...)
+// gridValuesTx runs one grid change that moves stored values
+// (modeledit.AddGridDimension, modeledit.AttachGridMetric) in a transaction.
+func (h *handler) gridValuesTx(ctx context.Context, change func(pgx.Tx) error) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if err := change(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// gridValuesErr answers a refused grid change: 409 with its code when the
+// values or postings refuse it (with the dimensions and count a client asks
+// the member for), 400 for a member that cannot hold values or a time rule.
+func gridValuesErr(w http.ResponseWriter, err error) {
+	if ge, ok := modeledit.IsGridValuesError(err); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": ge.Message, "code": ge.Code,
+			"dimension_ids": ge.DimensionIDs, "count": ge.Count})
+		return
+	}
+	if me := (*writeguard.MemberError)(nil); errors.As(err, &me) {
+		jsonCodeErr(w, http.StatusBadRequest, me.Code, me.Message)
+		return
+	}
+	if metricformula.IsValidationError(err) {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	jsonErr(w, err, http.StatusInternalServerError)
 }
 
 // gridChangeTx applies one grid membership change and runs validate on the
@@ -17161,6 +17859,9 @@ func (h *handler) generateTimeMembers(w http.ResponseWriter, r *http.Request, di
 	_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
 	if modelID != "" && created > 0 {
 		go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+		// The pass above visits revisions holding typed values; a metric
+		// reading the period set in a revision without any moves here.
+		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 	}
 	h.auditDimensionUpdated(ctx, r, dimID, "members_generated", map[string]string{"count": strconv.Itoa(created), "start": body.Start, "end": body.End})
 	jsonOK(w, map[string]any{"created": created})
@@ -17296,6 +17997,30 @@ func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID st
 				Msg("recalc all inputs failed")
 		}
 	}
+}
+
+// metricRecalcRevisions is the revisions an edit or delete of a metric
+// recalculates: the metric's own revision, data or not, since metric_def rows
+// are per revision. A legacy metric with no revision recalculates every
+// revision of the model that holds data, as all of them read it.
+func (h *handler) metricRecalcRevisions(ctx context.Context, modelID, metricRevisionID string) []string {
+	if metricRevisionID != "" {
+		return []string{metricRevisionID}
+	}
+	revRows, err := h.db.Query(ctx,
+		`SELECT DISTINCT revision_id::text FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id IS NOT NULL`, modelID)
+	if err != nil {
+		return nil
+	}
+	defer revRows.Close()
+	var revIDs []string
+	for revRows.Next() {
+		var rid string
+		if revRows.Scan(&rid) == nil {
+			revIDs = append(revIDs, rid)
+		}
+	}
+	return revIDs
 }
 
 // splitParentFactData: see modeledit.SplitParentFacts.
@@ -17451,9 +18176,33 @@ func (h *handler) canAdministerWorkspace(ctx context.Context, act *actor, wsID s
 	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
 		return true, nil
 	}
+	// A tenant admin administers every workspace of its tenant here only
+	// when it also holds, in that tenant, a role that opens these routes:
+	// business_admin, or developer on the routes a developer shares. A
+	// developer of tenant A who was tenant admin of B reached B's roles
+	// through the guard A's role passed and the arm B's grant opened —
+	// neither grant allowed it alone (decided 2026-11-08).
 	if act.hasRole("tenant_admin") {
-		if ok, err := h.adminCanAccessWorkspace(ctx, act, wsID); err != nil || ok {
-			return ok, err
+		var opensHere bool
+		if err := h.db.QueryRow(ctx, `
+			SELECT EXISTS (
+			    SELECT 1 FROM identity.role_assignment ra
+			    JOIN core.workspace rw ON rw.id = ra.workspace_id
+			    JOIN core.workspace tw ON tw.id = $2::uuid
+			    WHERE ra.user_id = $1::uuid AND rw.customer_id = tw.customer_id
+			      AND (ra.role = 'business_admin' OR ($3::bool AND ra.role = 'developer'))
+			) OR ($3::bool AND EXISTS (
+			    SELECT 1 FROM identity."user" u
+			    JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer' AND dra.workspace_id IS NULL
+			    JOIN core.workspace tw ON tw.id = $2::uuid
+			    WHERE u.id = $1::uuid AND u.customer_id = tw.customer_id))`,
+			act.UserID, wsID, allowDeveloper).Scan(&opensHere); err != nil {
+			return false, err
+		}
+		if opensHere {
+			if ok, err := h.adminCanAccessWorkspace(ctx, act, wsID); err != nil || ok {
+				return ok, err
+			}
 		}
 	}
 	var ok bool
@@ -17713,6 +18462,10 @@ func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
 			return
 		}
+		if err := assignee.CheckBusinessRoleName(body.Name); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		var newID string
 		err := h.db.QueryRow(ctx,
 			`INSERT INTO identity.business_role (workspace_id, name) VALUES ($1::uuid, $2) RETURNING id::text`,
@@ -17791,6 +18544,10 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 				jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+				return
+			}
+			if err := assignee.CheckBusinessRoleName(body.Name); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
 			if _, err := h.db.Exec(ctx,
@@ -18221,7 +18978,11 @@ func (h *handler) baUserAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := writeguard.ReplaceUserRules(ctx, tx, userID, inputs); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			if errors.Is(err, writeguard.ErrRuleType) || errors.Is(err, writeguard.ErrRuleAccess) {
+				status = http.StatusBadRequest
+			}
+			jsonErr(w, err, status)
 			return
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -19106,11 +19867,16 @@ func (h *handler) developerWorkflowRoles(w http.ResponseWriter, r *http.Request)
 		Name string `json:"name"`
 	}
 
+	// The roles a step of this application can be assigned to
+	// (internal/workflow/assignee): those of its workspace, or of any
+	// workspace of its tenant for a tenant-level application. Listing every
+	// workspace of the tenant offered roles that assign a step to no one.
 	rows, err := h.db.Query(ctx, `
 		SELECT br.id::text, br.name
 		FROM identity.business_role br
 		JOIN core.workspace ws ON ws.id = br.workspace_id
-		JOIN core.application app ON (app.workspace_id = ws.id OR app.customer_id = ws.customer_id)
+		JOIN core.application app ON (app.workspace_id = ws.id
+		     OR (app.workspace_id IS NULL AND app.customer_id = ws.customer_id))
 		WHERE app.id = $1::uuid
 		ORDER BY br.name
 	`, appID)

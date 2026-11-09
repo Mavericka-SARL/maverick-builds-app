@@ -195,6 +195,9 @@ func TestRunner_SFTPPull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create def: %v", err)
 	}
+	if err := st.MarkTested(ctx, def.ID, integration.ConfigHash(def.Config)); err != nil {
+		t.Fatal(err)
+	}
 	update := func(mutate func(*integration.Config), connID string) {
 		t.Helper()
 		c := *def.Config
@@ -210,6 +213,11 @@ func TestRunner_SFTPPull(t *testing.T) {
 			t.Fatalf("update def: %v", uerr)
 		}
 		def = d
+		// The runs below stand for a connector tested in this
+		// configuration: a run writes only on a passed test of it.
+		if err := st.MarkTested(ctx, def.ID, integration.ConfigHash(def.Config)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	factCount := func() int {
 		var n int

@@ -1142,6 +1142,37 @@ func resolveTime(
 	return CombineTimeOver(vals, len(periods), timeSummary), true, nil
 }
 
+// NoValueByRule reports whether a metric has no value at combo by its own
+// rules — as opposed to nothing recorded there: aggregation none above its
+// members (a combo that is not one leaf intersection of its non-time
+// dimensions), or time summary none with its time dimension unpinned or at
+// an aggregate period (FY26, Q1). These are ResolveTime's no-value exits.
+// formula and rate never: they are evaluated at the combo or read from its
+// persisted rows.
+func NoValueByRule(dims map[string]*Dimension, metricDimIDs []string, aggRule AggRule, timeSummary TimeSummaryRule, combo map[string]string) bool {
+	if aggRule == AggFormula || aggRule == AggRate {
+		return false
+	}
+	if aggRule == AggNone && !leafCombo(dims, metricDimIDs, combo) {
+		return true
+	}
+	if timeSummary != "none" {
+		return false
+	}
+	for _, id := range metricDimIDs {
+		d := dims[id]
+		if d == nil || !d.IsTime {
+			continue
+		}
+		code, pinned := combo[id]
+		if !pinned {
+			return true
+		}
+		return findMember(d, code) != nil && len(childrenOf(d, code)) > 0
+	}
+	return false
+}
+
 // CombineTimeOver is CombineTime over a reduction of `periods` periods, of
 // which vals are those with a value. An average counts every period, one
 // with no value as 0: FY averaged is the sum of its months over twelve, as a

@@ -1053,16 +1053,18 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 	// interaction rather than the chain this case is about.
 	t.Run("an approved record posts into the mapped metric", func(t *testing.T) {
 		fileAdjustment("UK", "MONITOR", "Q3", 50_000, true)
-		// Revenue was 1.9m across the seeded cells; the adjustment adds 50k.
-		d.awaitCalc("margin", map[string]string{}, 810_000)
+		// The mapping feeds revenue, so the 1.9m typed into it is set aside
+		// (writeguard.FedMetricsCTE): revenue is the 50k adjustment, against
+		// 1.14m of costs.
+		d.awaitCalc("margin", map[string]string{}, -1_090_000)
 	})
 
 	t.Run("two records against one cell sum rather than overwrite", func(t *testing.T) {
 		fileAdjustment("UK", "MONITOR", "Q3", 25_000, true)
 		// A mapping set to "sum" that let the newer record win would leave the
-		// margin at 810k rather than 835k — the difference between adding an
+		// margin at -1.09m rather than -1.065m — the difference between adding an
 		// adjustment and replacing every earlier one.
-		d.awaitCalc("margin", map[string]string{}, 835_000)
+		d.awaitCalc("margin", map[string]string{}, -1_065_000)
 	})
 
 	t.Run("an unapproved record posts nothing", func(t *testing.T) {
@@ -1070,7 +1072,7 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 		// posting_statuses is ["approved"], so a draft must stay out of the
 		// numbers entirely — a plan that counts drafts is worse than one that
 		// counts nothing.
-		d.awaitCalc("margin", map[string]string{}, 835_000)
+		d.awaitCalc("margin", map[string]string{}, -1_065_000)
 	})
 
 	// A real .xlsx, not a CSV standing in for one: the endpoint takes
@@ -1107,7 +1109,7 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 		// mapping's posting_statuses of ["approved"] correctly ignores them.
 		// A spreadsheet that posted on upload would be a way to write numbers
 		// into the plan without anyone approving them.
-		d.awaitCalc("margin", map[string]string{}, 835_000)
+		d.awaitCalc("margin", map[string]string{}, -1_065_000)
 	})
 
 	t.Run("approving the imported records posts them", func(t *testing.T) {
@@ -1144,7 +1146,7 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 		if approved != 2 {
 			t.Fatalf("approved %d imported records, want 2", approved)
 		}
-		// 835k plus the two adjustments now that they are approved.
-		d.awaitCalc("margin", map[string]string{}, 850_000)
+		// -1.065m plus the two adjustments now that they are approved.
+		d.awaitCalc("margin", map[string]string{}, -1_050_000)
 	})
 }

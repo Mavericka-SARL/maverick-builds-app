@@ -27,6 +27,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 )
 
 type writeTool func(context.Context, json.RawMessage) (string, string, error)
@@ -61,7 +62,33 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"delete_business_role":      e.deleteBusinessRole,
 		"set_role_dashboards":       e.setRoleDashboards,
 		"backfill_form_integration": e.backfillFormIntegration,
+		"rename_draft":              e.renameDraft,
 	}
+}
+
+// renameDraft is PATCH /api/developer/revisions/{id} on the session's own
+// draft, the one revision the assistant writes into: a promoted draft
+// otherwise kept "AI Draft" and its time for a name, which the header shows
+// every business user once the revision goes live (2026-11-08).
+func (e *WriteExecutor) renameDraft(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || strings.TrimSpace(p.Name) == "" {
+		return "", "", fmt.Errorf("name is required")
+	}
+	if e.revID == "" {
+		return "", "", fmt.Errorf("there is no AI draft to rename yet: the first confirmed proposal makes it")
+	}
+	name, err := modeledit.RenameRevision(ctx, e.pool, e.modelID, e.revID, p.Name, nil)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("The draft is now named %q", name), e.revID, nil
 }
 
 // present reports which top-level keys a step's params carry, so a tool can
@@ -1289,6 +1316,9 @@ func (e *WriteExecutor) updateBusinessRole(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	name := strings.TrimSpace(p.Name)
+	if err := assignee.CheckBusinessRoleName(name); err != nil {
+		return "", "", err
+	}
 	if _, err := e.pool.Exec(ctx, `UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, id, name); err != nil {
 		if metricformula.IsUniqueViolation(err) {
 			return "", "", fmt.Errorf("a business role named '%s' already exists", name)

@@ -735,8 +735,11 @@ func (e *tsEvaluator) finish(res *tsResults) {
 
 	// Rollup combos (formula/rate): at least one non-leaf member pinned.
 	// Time has no hierarchy in Phase 1, so the time member is always a leaf
-	// there and the formula evaluates directly.
-	if e.def.AggRule == string(rollup.AggFormula) || e.def.AggRule == string(rollup.AggRate) {
+	// there and the formula evaluates directly. The effective rule decides,
+	// as for the leaves above: a pure ratio with agg_rule average writes
+	// these rows too, so a reader above its leaves reads them
+	// (exactRows) instead of evaluating a time-series formula on demand.
+	if useEval {
 		const rollupComboCap = 20000
 		for _, combo := range rollup.RollupCombos(e.allDims, dimIDs, rollupComboCap) {
 			if v, _, err := e.evalCombo(combo); err == nil {
@@ -749,9 +752,8 @@ func (e *tsEvaluator) finish(res *tsResults) {
 	// are what the grid reads for those rows; with more dimensions they are
 	// among the slice rows below.
 	if len(dimIDs) == 1 {
-		formulaRule := e.def.AggRule == string(rollup.AggFormula) || e.def.AggRule == string(rollup.AggRate)
 		for _, m := range e.axis.dim.Members {
-			if m.IsLeafPeriod() || formulaRule { // formula/rate: written by the RollupCombos pass above
+			if m.IsLeafPeriod() || useEval { // formula/rate: written by the RollupCombos pass above
 				continue
 			}
 			if v, ok := overTime(map[string]string{}, e.axis.leafPositions(m.Code)); ok {

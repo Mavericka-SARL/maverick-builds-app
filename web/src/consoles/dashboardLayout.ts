@@ -23,6 +23,13 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
   "workflow_status",
 ]);
 
+// Widgets whose designed size_h is their MOST: one showing fewer rows than
+// its box shrinks to them and the widgets below move up, and a taller one
+// scrolls inside its own table area (owner, 2026-11-08: "huge spaces between
+// widgets must be eliminated"). Grids first; a records table kept its whole
+// box, 40 to 73 px empty under a few records.
+export const FIT_HEIGHT_WIDGET_TYPES = new Set(["grid", "form"]);
+
 // Button widgets: intrinsic beside a taller sibling, but drawn at their
 // designed size_h exactly, as the design canvas draws them.
 export const BUTTON_WIDGET_TYPES = new Set(["automation_button", "integration_button"]);

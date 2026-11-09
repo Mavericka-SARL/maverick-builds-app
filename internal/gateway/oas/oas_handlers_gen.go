@@ -833,7 +833,10 @@ func (s *Server) handleAddBusinessMemberRequest(args [1]string, argsEscaped bool
 
 // handleAddGridDimensionRequest handles addGridDimension operation.
 //
-// Add a dimension to a grid.
+// Every metric of the grid takes the dimension. Values already typed into them are filed under
+// member in the same transaction (and their cell history with them); while they hold any, the add
+// without a member is refused (409 VALUES_NEED_MEMBER). A posting into one of the grid's metrics
+// that maps no dimension of its family refuses the add (409 POSTINGS_DO_NOT_FIT).
 //
 // POST /api/developer/grids/{id}/dimensions/{dimId}
 func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -963,6 +966,21 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 	}
 
 	var rawBody []byte
+	request, rawBody, close, err := s.decodeAddGridDimensionRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
 
 	var response AddGridDimensionRes
 	if m := s.cfg.Middleware; m != nil {
@@ -971,7 +989,7 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 			OperationName:    AddGridDimensionOperation,
 			OperationSummary: "Add a dimension to a grid",
 			OperationID:      "addGridDimension",
-			Body:             nil,
+			Body:             request,
 			RawBody:          rawBody,
 			Params: middleware.Parameters{
 				{
@@ -987,7 +1005,7 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 		}
 
 		type (
-			Request  = struct{}
+			Request  = OptAddGridDimensionReq
 			Params   = AddGridDimensionParams
 			Response = AddGridDimensionRes
 		)
@@ -1000,12 +1018,12 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 			mreq,
 			unpackAddGridDimensionParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.AddGridDimension(ctx, params)
+				response, err = s.h.AddGridDimension(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.AddGridDimension(ctx, params)
+		response, err = s.h.AddGridDimension(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -1024,7 +1042,13 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 
 // handleAddGridMetricRequest handles addGridMetric operation.
 //
-// Add a metric to a grid (a metric may belong to only one grid at a time).
+// The metric's typed values move to the grid's coordinate in the same transaction. A grid dimension
+// they lack takes the member named in members (refused 409 VALUES_NEED_MEMBER without one). A
+// dimension they carry that the grid has not got is combined away by the metric's own rule — its
+// aggregation rule across a standard dimension (sum added up, average averaged, count counted), its
+// time summary across a time dimension — and the values replaced stay in the cell history; a rule
+// that cannot combine stored values (none, rate, formula, a text or pick-list metric) refuses (409
+// VALUES_CANNOT_COMBINE). Every posting into the metric must fit the grid (409 POSTINGS_DO_NOT_FIT).
 //
 // POST /api/developer/grids/{id}/metrics/{metricId}
 func (s *Server) handleAddGridMetricRequest(args [2]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -1154,6 +1178,21 @@ func (s *Server) handleAddGridMetricRequest(args [2]string, argsEscaped bool, w 
 	}
 
 	var rawBody []byte
+	request, rawBody, close, err := s.decodeAddGridMetricRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
 
 	var response AddGridMetricRes
 	if m := s.cfg.Middleware; m != nil {
@@ -1162,7 +1201,7 @@ func (s *Server) handleAddGridMetricRequest(args [2]string, argsEscaped bool, w 
 			OperationName:    AddGridMetricOperation,
 			OperationSummary: "Add a metric to a grid (a metric may belong to only one grid at a time)",
 			OperationID:      "addGridMetric",
-			Body:             nil,
+			Body:             request,
 			RawBody:          rawBody,
 			Params: middleware.Parameters{
 				{
@@ -1178,7 +1217,7 @@ func (s *Server) handleAddGridMetricRequest(args [2]string, argsEscaped bool, w 
 		}
 
 		type (
-			Request  = struct{}
+			Request  = OptAddGridMetricReq
 			Params   = AddGridMetricParams
 			Response = AddGridMetricRes
 		)
@@ -1191,12 +1230,12 @@ func (s *Server) handleAddGridMetricRequest(args [2]string, argsEscaped bool, w 
 			mreq,
 			unpackAddGridMetricParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.AddGridMetric(ctx, params)
+				response, err = s.h.AddGridMetric(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.AddGridMetric(ctx, params)
+		response, err = s.h.AddGridMetric(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -7368,7 +7407,10 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 //
 // The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
 // without saying whether the id exists elsewhere); the source field and every mapped field must be
-// fields of the table.
+// fields of the table. A metric a mapping feeds shows its records only: values typed into it before
+// are set aside (kept, read by no grid, chart, export or calculation until no mapping feeds the
+// metric), and typed_set_aside says how many cells hold one. Metrics > Clear values removes them. A
+// record holding a value is refused when a mapped field is empty.
 //
 // POST /api/developer/form-integrations
 func (s *Server) handleCreateFormMappingRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -11032,7 +11074,7 @@ func (s *Server) handleDeleteAiSessionRequest(args [1]string, argsEscaped bool, 
 
 // handleDeleteAllNotificationsRequest handles deleteAllNotifications operation.
 //
-// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+// They leave the list; the rows stay marked, so Workflow History and queued mail are unaffected.
 //
 // DELETE /api/notifications
 func (s *Server) handleDeleteAllNotificationsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -22563,8 +22605,10 @@ func (s *Server) handleGetMeRequest(args [0]string, argsEscaped bool, w http.Res
 
 // handleGetMyWorkflowHistoryRequest handles getMyWorkflowHistory operation.
 //
-// List the 50 most recent workflow instances where the caller started the instance or was assigned a
-// step.
+// The caller's runs — started, assigned a step, or notified of — in the selected application
+// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
+// answer for it. With instance_id, that one run of the caller's in any application, with its
+// application_id, so a notification about another application's run can switch there.
 //
 // GET /api/workflow/my-history
 func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -22682,6 +22726,16 @@ func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped b
 			return
 		}
 	}
+	params, err := decodeGetMyWorkflowHistoryParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -22694,13 +22748,18 @@ func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped b
 			OperationID:      "getMyWorkflowHistory",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "instance_id",
+					In:   "query",
+				}: params.InstanceID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = GetMyWorkflowHistoryParams
 			Response = []WorkflowInstance
 		)
 		response, err = middleware.HookMiddleware[
@@ -22710,14 +22769,14 @@ func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped b
 		](
 			m,
 			mreq,
-			nil,
+			unpackGetMyWorkflowHistoryParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.GetMyWorkflowHistory(ctx)
+				response, err = s.h.GetMyWorkflowHistory(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.GetMyWorkflowHistory(ctx)
+		response, err = s.h.GetMyWorkflowHistory(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -25764,8 +25823,11 @@ func (s *Server) handleHealthzRequest(args [0]string, argsEscaped bool, w http.R
 
 // handleImportDimensionMembersRequest handles importDimensionMembers operation.
 //
-// One-off dimension member import (code/label/parent_code/property:<name> columns; codes
-// auto-generated from labels when absent).
+// A property:<name> column fills the property declared under that name whatever its case, or under
+// its identifier (property:Sales Segment fills a declared sales_segment); any other column declares
+// a text property named by its identifier (lower case, other characters as underscores). A column
+// with no letter or digit, or two columns filling one property, refuse the file (400). A value a
+// number or date property cannot read refuses the file (422 INVALID_PROPERTY_VALUE, by row).
 //
 // POST /api/import/dimension-members
 func (s *Server) handleImportDimensionMembersRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -25954,7 +26016,12 @@ func (s *Server) handleImportDimensionMembersRequest(args [0]string, argsEscaped
 //
 // For a caller who reaches the table's application (404 otherwise), who becomes each record's
 // creator. A row's optional status column sets its status; a row whose status the caller may not
-// create (approved or rejected, unless the caller administers the application) fails validation.
+// create (approved or rejected, unless the caller administers the application) fails validation. A
+// client that may send a file again — after a closed connection, a timeout or a 502 — sends an
+// Idempotency-Key: the same key from the same person for the same model returns the first import's
+// answer ("replayed": true) and creates nothing. The key is kept with the import's Recent Imports
+// line, written in the transaction that creates the records; a refused file holds none, so its
+// correction goes under the same key.
 //
 // POST /api/forms/{id}/import
 func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -26114,6 +26181,10 @@ func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "Idempotency-Key",
+					In:   "header",
+				}: params.IdempotencyKey,
 			},
 			Raw: r,
 		}
@@ -26156,8 +26227,11 @@ func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool
 
 // handleImportModelRequest handles importModel operation.
 //
-// Import a model export package into an application, creating a new model and revision (tenant
-// admins for their own tenant, platform admins for any).
+// The package is held to the checks the engine applies when the same things are saved: a calculated
+// metric's formula or a calculated member's formula that a save would refuse, a member hierarchy
+// cycle, or a revision that would fail publishing's time checks refuses the import (400), naming the
+// metric, member or grid. A calculated metric's dependencies are derived from its formula; the
+// package's own dependencies are not read.
 //
 // POST /api/admin/models/import
 func (s *Server) handleImportModelRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -37983,6 +38057,21 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 	}
 
 	var rawBody []byte
+	request, rawBody, close, err := s.decodePromoteAiDraftRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
 
 	var response PromoteAiDraftRes
 	if m := s.cfg.Middleware; m != nil {
@@ -37991,7 +38080,7 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 			OperationName:    PromoteAiDraftOperation,
 			OperationSummary: "Hand the session's AI draft to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and every other session of theirs working in the draft, and clear their draft; the response names the revision",
 			OperationID:      "promoteAiDraft",
-			Body:             nil,
+			Body:             request,
 			RawBody:          rawBody,
 			Params: middleware.Parameters{
 				{
@@ -38003,7 +38092,7 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 		}
 
 		type (
-			Request  = struct{}
+			Request  = OptPromoteAiDraftReq
 			Params   = PromoteAiDraftParams
 			Response = PromoteAiDraftRes
 		)
@@ -38016,12 +38105,12 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 			mreq,
 			unpackPromoteAiDraftParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.PromoteAiDraft(ctx, params)
+				response, err = s.h.PromoteAiDraft(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.PromoteAiDraft(ctx, params)
+		response, err = s.h.PromoteAiDraft(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -40506,6 +40595,208 @@ func (s *Server) handleRenameAiSessionRequest(args [1]string, argsEscaped bool, 
 	}
 
 	if err := encodeRenameAiSessionResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleRenameRevisionRequest handles renameRevision operation.
+//
+// Rename a revision (the live one too; the model's header follows).
+//
+// PATCH /api/developer/revisions/{id}
+func (s *Server) handleRenameRevisionRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("renameRevision"),
+		semconv.HTTPRequestMethodKey.String("PATCH"),
+		semconv.HTTPRouteKey.String("/api/developer/revisions/{id}"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), RenameRevisionOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: RenameRevisionOperation,
+			ID:   "renameRevision",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, RenameRevisionOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeRenameRevisionParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+	request, rawBody, close, err := s.decodeRenameRevisionRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
+
+	var response RenameRevisionRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    RenameRevisionOperation,
+			OperationSummary: "Rename a revision (the live one too; the model's header follows)",
+			OperationID:      "renameRevision",
+			Body:             request,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = *RenameRevisionReq
+			Params   = RenameRevisionParams
+			Response = RenameRevisionRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackRenameRevisionParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.RenameRevision(ctx, request, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.RenameRevision(ctx, request, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeRenameRevisionResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -53286,7 +53577,7 @@ func (s *Server) handleUpdateDimensionPropertyRequest(args [2]string, argsEscape
 
 // handleUpdateFolderRequest handles updateFolder operation.
 //
-// Rename or reparent a dashboard folder.
+// Rename or reparent a dashboard folder (partial; only the fields sent change).
 //
 // PATCH /api/developer/folders/{id}
 func (s *Server) handleUpdateFolderRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -53437,7 +53728,7 @@ func (s *Server) handleUpdateFolderRequest(args [1]string, argsEscaped bool, w h
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateFolderOperation,
-			OperationSummary: "Rename or reparent a dashboard folder",
+			OperationSummary: "Rename or reparent a dashboard folder (partial; only the fields sent change)",
 			OperationID:      "updateFolder",
 			Body:             request,
 			RawBody:          rawBody,
@@ -53451,7 +53742,7 @@ func (s *Server) handleUpdateFolderRequest(args [1]string, argsEscaped bool, w h
 		}
 
 		type (
-			Request  = *FolderRequest
+			Request  = *UpdateFolderRequest
 			Params   = UpdateFolderParams
 			Response = UpdateFolderRes
 		)
@@ -53691,7 +53982,7 @@ func (s *Server) handleUpdateFormRequest(args [1]string, argsEscaped bool, w htt
 // handleUpdateFormMappingRequest handles updateFormMapping operation.
 //
 // What the mapping names is checked as on create, against the mapping's own model, revision and
-// table (400).
+// table (400). A new target metric sets its typed values aside, as on create (typed_set_aside).
 //
 // PATCH /api/developer/form-integrations/{id}
 func (s *Server) handleUpdateFormMappingRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -55114,7 +55405,7 @@ func (s *Server) handleUpdateIntegrationConnectionRequest(args [1]string, argsEs
 
 // handleUpdateMetricRequest handles updateMetric operation.
 //
-// Update a metric definition (re-wires formula dependencies and recalculates affected revisions).
+// Update a metric definition (re-wires formula dependencies and recalculates the metric's revision).
 //
 // PATCH /api/developer/metrics/{id}
 func (s *Server) handleUpdateMetricRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -55265,7 +55556,7 @@ func (s *Server) handleUpdateMetricRequest(args [1]string, argsEscaped bool, w h
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateMetricOperation,
-			OperationSummary: "Update a metric definition (re-wires formula dependencies and recalculates affected revisions)",
+			OperationSummary: "Update a metric definition (re-wires formula dependencies and recalculates the metric's revision)",
 			OperationID:      "updateMetric",
 			Body:             request,
 			RawBody:          rawBody,
@@ -57676,7 +57967,10 @@ func (s *Server) handleValidateWorkflowRequest(args [1]string, argsEscaped bool,
 
 // handleWritebackRequest handles writeback operation.
 //
-// Write a single cell value (triggers recalculation).
+// Dim_codes names one leaf member of each dimension of the grid the metric is on, and no other
+// dimension: a dimension the grid has not got is refused (400 NOT_METRIC_DIMENSION), and so is one
+// missing (400 MISSING_DIMENSION). A clear is not held to this, so a value stored at another
+// coordinate before the check can be removed by naming that coordinate exactly.
 //
 // POST /api/cells
 func (s *Server) handleWritebackRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -57864,10 +58158,11 @@ func (s *Server) handleWritebackRequest(args [0]string, argsEscaped bool, w http
 // handleWritebackBatchRequest handles writebackBatch operation.
 //
 // Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
-// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
-// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
-// refused. With dry_run every cell is checked and none written. A chat connection's write (the
-// connector's write_cells) is also refused when the tenant turned chat writes off.
+// rules, workflow locks, the plan's limits, one member of each of the metric's grid dimensions and
+// no other (NOT_METRIC_DIMENSION, MISSING_DIMENSION) — before any is written; a refused cell
+// refuses the batch (422, each refused cell by its index) and nothing is written. Two writes to one
+// cell are refused. With dry_run every cell is checked and none written. A chat connection's write
+// (the connector's write_cells) is also refused when the tenant turned chat writes off.
 //
 // POST /api/cells/batch
 func (s *Server) handleWritebackBatchRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

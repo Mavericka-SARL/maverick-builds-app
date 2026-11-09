@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, GitFork, Bell, CheckSquare, ChevronUp, ChevronDown, AlertTriangle, Play } from "lucide-react";
 import { api, type Task, type WorkflowDefPublic, type DevDimension } from "../../api/client";
-import { LoadingState, EmptyState, StatusBadge, Textarea, TextInput, Button, Dialog, Field, InlineAlert, Txt } from "../../ui";
+import { LoadingState, EmptyState, StatusBadge, Textarea, TextInput, Button, Dialog, Field, InlineAlert, Txt, SearchInput, Toolbar, ToolbarGroup } from "../../ui";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { WorkflowStepActions } from "../WorkflowStepActions";
 import { useDateFormat } from "../dateFormat";
 import { momentDate } from "../dateSerial";
+import { taskSearchText, matchesAllWords, TASK_SEARCH_PLACEHOLDER } from "./taskSearch";
 
 // ── Start a workflow (dialog generated from context_schema) ──────────────────
 //
@@ -313,6 +314,7 @@ export function WorkflowInbox() {
 
   const [comment, setComment] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState("");
 
   if (isLoading) return <LoadingState label="Loading tasks…" />;
   if (tasks.length === 0) {
@@ -330,10 +332,19 @@ export function WorkflowInbox() {
     return new Date(dueAt).getTime() - now.getTime() < 24 * 60 * 60 * 1000;
   };
 
+  const shown = tasks.filter((t: Task) => matchesAllWords(taskSearchText(t, (d) => momentDate(d, dateFormat), now), query));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <StartWorkflowSection />
-      {tasks.map((t: Task) => {
+      <Toolbar>
+        <ToolbarGroup>
+          <SearchInput placeholder={TASK_SEARCH_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} width={340} aria-label="Search tasks" />
+          <span className="mvx-admin-muted">{shown.length} of {tasks.length}</span>
+        </ToolbarGroup>
+      </Toolbar>
+      {shown.length === 0 && <EmptyState label={`No task matches “${query.trim()}”.`} />}
+      {shown.map((t: Task) => {
         const isOpen = expanded[t.id] ?? true;
         const commentVal = comment[t.id] ?? "";
         const canSubmit = !t.required_comment || commentVal.trim().length > 0;
@@ -352,6 +363,7 @@ export function WorkflowInbox() {
                 <div className="mvx-admin-object__name">{t.step_name || t.step_def_id}</div>
                 <div className="mvx-admin-object__meta">
                   {t.workflow_name}
+                  {t.model_name && <span> · <Txt>Model</Txt>: {t.model_name}</span>}
                   {t.requested_by && <span> · requested by {t.requested_by}</span>}
                   {t.context?.revision && <span> · {t.context.revision}</span>}
                 </div>

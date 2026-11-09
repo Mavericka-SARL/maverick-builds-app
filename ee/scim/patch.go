@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 )
 
 // PATCH per RFC 7644 §3.5.2, in the forms the big providers send. Entra ID
@@ -235,6 +237,9 @@ func (s *Service) applyGroupPatch(ctx context.Context, g groupRow, body []byte) 
 
 func (s *Service) renameGroup(ctx context.Context, id, name string, externalID *string) error {
 	if name != "" {
+		if err := assignee.CheckBusinessRoleName(name); err != nil {
+			return bad("invalidValue", err.Error())
+		}
 		if _, err := s.Pool.Exec(ctx, `UPDATE identity.business_role SET name = $2 WHERE id = $1::uuid`, id, strings.TrimSpace(name)); err != nil {
 			if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
 				return conflict("a group named " + name + " already exists")

@@ -92,6 +92,7 @@ type planRetries struct {
 	attempts       int
 	lastProblems   int
 	partialAsked   bool
+	lastSig        string
 	warnedSameOnce map[string]bool
 	// leftOut are the failing steps of the plan the passing steps were
 	// asked for: the developer is told them beside the proposal, whatever
@@ -120,9 +121,18 @@ const unproposedNudge = "(Sent by the server, not the developer.) You ended this
 	"although your reply says it has, or that a proposal follows. If the developer asked for changes, call propose_actions now with the whole plan; " +
 	"if part of it cannot be done, propose the rest and say plainly which part you left out and why. If they asked only a question, answer it without saying anything was changed."
 
+// announcesProposal: a reply saying a plan is about to be sent — "I'll send
+// the corrected single proposal now", "I will submit the plan" — which four
+// turns of the Creator & Agency build (2026-11-08) ended with, proposing
+// nothing; the fixed phrases below had no send, submit or post.
+var announcesProposal = regexp.MustCompile(`(?i)\b(i'?ll|i will|i am going to|i'm going to|let me)\s+(now\s+)?(send|submit|post|prepare|propose|resubmit|re-?propose|re-?send|put together)\b[^.?!\n]{0,80}\b(proposal|plan|steps)\b`)
+
 // claimsUnproposedChange reports whether a reply, ending a turn that
 // proposed nothing, says the model was changed or announces a proposal.
 func claimsUnproposedChange(reply string) bool {
+	if announcesProposal.MatchString(reply) {
+		return true
+	}
 	r := strings.ToLower(reply)
 	for _, p := range []string{"i have created", "i've created", "i have added", "i've added", "i have updated", "i've updated",
 		"i have made the", "i've made the", "i have set", "i've set", "i have fixed", "i've fixed", "i have removed", "i've removed",
@@ -183,6 +193,69 @@ func presentsChoices(reply string) bool {
 // maxFallingRejections caps the corrections while the failures keep falling.
 const maxFallingRejections = 8
 
+// emptyReplyNudge goes back once when a turn would end on an empty reply:
+// seven turns of the Creator & Agency build (2026-11-08) ended with nothing
+// shown and nothing proposed, and the developer could only say "continue".
+const emptyReplyNudge = "(Sent by the server, not the developer.) Your last message was empty, so the developer saw nothing. " +
+	"Go on with the request: call propose_actions with the whole plan if it is ready; otherwise say what you found, what is left and what you need."
+
+// maxUnreadablePlans is how many propose_actions calls whose arguments are
+// not a plan go back to the model in one turn before the turn ends.
+const maxUnreadablePlans = 2
+
+// unreadablePlanResult is the tool result of a propose_actions call whose
+// arguments did not arrive as a plan: a long plan cut off at the model's
+// output limit used to end the turn with "invalid steps", and the model
+// never learned why (a 68-step value plan, 2026-11-08).
+func unreadablePlanResult(chars int, cutOff bool, err error) string {
+	why := "it held no steps"
+	switch {
+	case cutOff:
+		why = fmt.Sprintf("it was cut off at your output limit after %d characters", chars)
+	case err != nil:
+		why = fmt.Sprintf("its arguments are not complete JSON (%d characters arrived: %v)", chars, err)
+	}
+	return "Proposal NOT created: propose_actions was not read — " + why + ". Propose again in parts the developer can confirm one at a time: " +
+		"at most about 30 steps per call, and load sheet values with import_file_data instead of typing them into steps. " +
+		"Say in your reply which part comes next."
+}
+
+// problemSignature is a plan's problems with step numbers and ids left
+// out, so the same failure in a renumbered plan reads the same.
+var (
+	sigStepNum = regexp.MustCompile(`step \d+`)
+	sigUUID    = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+)
+
+func problemSignature(problems []string) string {
+	norm := make([]string, len(problems))
+	for i, p := range problems {
+		norm[i] = sigUUID.ReplaceAllString(sigStepNum.ReplaceAllString(p, "step #"), "#id")
+	}
+	return strings.Join(norm, "\n")
+}
+
+// repeats reports whether problems are the last failing plan's again: the
+// model is not getting closer (2026-11-08: six plans in a row failed on the
+// same misnumbered "<created in step N>"), so it is asked for the steps that
+// pass, or to stop, instead of a seventh try.
+func (r *planRetries) repeats(problems []string) bool {
+	sig := problemSignature(problems)
+	same := r.lastSig != "" && sig == r.lastSig
+	r.lastSig = sig
+	return same
+}
+
+// escalate is the next mode once a failure repeats: the passing steps,
+// then stop.
+func (r *planRetries) escalate() retryMode {
+	if !r.partialAsked {
+		r.partialAsked = true
+		return retryPartial
+	}
+	return retryStop
+}
+
 type retryMode int
 
 const (
@@ -206,19 +279,24 @@ func (r *planRetries) next(problems int) retryMode {
 	}
 }
 
-// warnedBefore reports whether these exact warnings were already sent back
-// once this turn — a plan proposed again unchanged after a warning is the
-// model saying it is intended, and goes to the developer with them.
+// warnedBefore reports whether every one of these warnings was already sent
+// back this turn — beside a failing plan or a running one. A plan proposed
+// again with only warnings it was given is the model saying they are
+// intended, and goes to the developer with them; one round per warning, not
+// one per combination of them.
 func (r *planRetries) warnedBefore(warnings []string) bool {
-	key := strings.Join(warnings, "\n")
 	if r.warnedSameOnce == nil {
 		r.warnedSameOnce = map[string]bool{}
 	}
-	if r.warnedSameOnce[key] {
-		return true
+	all := true
+	for _, w := range warnings {
+		key := problemSignature([]string{w})
+		if !r.warnedSameOnce[key] {
+			all = false
+		}
+		r.warnedSameOnce[key] = true
 	}
-	r.warnedSameOnce[key] = true
-	return false
+	return all
 }
 
 // warningResult is the tool result of a plan that runs but whose formulas
@@ -317,4 +395,16 @@ func noChangeNote(reply string, refused bool) string {
 			"Anything the reply above describes as done is not in the model."
 	}
 	return ""
+}
+
+// replacedToolNote is what a proposal's tool result adds when it replaced a
+// pending one of steps steps.
+func replacedToolNote(steps int) string {
+	return fmt.Sprintf(" It replaces the earlier pending proposal (%d step(s)), which is withdrawn and will not run: "+
+		"whatever of it is still wanted must be in this proposal, or proposed again after it.", steps)
+}
+
+// replacedChatNote tells the developer the same.
+func replacedChatNote(steps int) string {
+	return fmt.Sprintf("(From the server.) This proposal replaces the earlier one (%d step(s)), which is withdrawn: confirming runs only the proposal below.", steps)
 }

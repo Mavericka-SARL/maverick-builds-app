@@ -377,11 +377,14 @@ func (s *Store) CreateDefinition(ctx context.Context, modelID, revisionID, name,
 	if status != "draft" && status != "active" {
 		return nil, fmt.Errorf("status must be draft or active")
 	}
+	// A new connector has passed no test, and activation needs a passed test
+	// of the current configuration (UpdateDefinition): creating one active
+	// skipped that gate, so it could be scheduled untested (2026-10-09). The
+	// wizard and the AI Developer create drafts; this refuses the rest.
 	if status == "active" {
-		if err := cfg.Validate(allowInsecure); err != nil {
-			return nil, err
-		}
-	} else if cfg.Kind != ConfigKind {
+		return nil, fmt.Errorf("a new connector is created as a draft: activation requires a successful test of the current configuration")
+	}
+	if cfg.Kind != ConfigKind {
 		return nil, fmt.Errorf("config kind must be %s", ConfigKind)
 	}
 	raw, _ := json.Marshal(cfg)
@@ -490,6 +493,94 @@ func (s *Store) SetLinkOwner(ctx context.Context, id, userID string) error {
 }
 
 // MarkTested records a successful test of the config identified by hash.
+// ErrUntested refuses a run of a connector whose configuration differs from
+// the one its last successful test passed.
+var ErrUntested = errors.New("the configuration has changed since its last successful test: test it again before it runs")
+
+// TestedOrRemappedCopy reports whether def may run on its last test: its
+// configuration is the one that test passed (Definition.Tested), or def is a
+// copy that differs from a tested connector of the same name in another
+// revision of its model only by its target — what a revision copy changes
+// (it remaps the target to the new revision's) — and then takes that test
+// over (owner's decision, 2026-10-06: a copy whose only change is the
+// remapped target keeps its source's test; any other change needs a new
+// test, and runs enforce the gate). A copy used to stay active with a test
+// of another configuration, and runs checked only status and enabled.
+func (s *Store) TestedOrRemappedCopy(ctx context.Context, def *Definition) (bool, error) {
+	if def.Tested() {
+		return true, nil
+	}
+	if def.Config == nil {
+		return false, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT config::text, last_tested_hash FROM model.integration_def
+		WHERE model_id = $1::uuid AND name = $2 AND id <> $3::uuid AND type = 'rest_api'
+		  AND COALESCE(last_tested_hash, '') <> ''`, def.ModelID, def.Name, def.ID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw, hash string
+		if err := rows.Scan(&raw, &hash); err != nil {
+			return false, err
+		}
+		var other Config
+		if json.Unmarshal([]byte(raw), &other) != nil || ConfigHash(&other) != hash {
+			continue // that one's own test is stale too
+		}
+		probe := *def.Config
+		probe.TargetID = other.TargetID
+		if ConfigHash(&probe) != hash {
+			continue
+		}
+		rows.Close()
+		own := ConfigHash(def.Config)
+		if err := s.MarkTested(ctx, def.ID, own); err != nil {
+			return false, err
+		}
+		def.LastTestedHash = own
+		return true, nil
+	}
+	return false, rows.Err()
+}
+
+// CarryRemappedTests gives every connector of revisionID that differs from
+// a tested one of its model only by its remapped target that test
+// (TestedOrRemappedCopy) — run after a revision copy.
+func (s *Store) CarryRemappedTests(ctx context.Context, modelID, revisionID string) error {
+	rows, err := s.db.Query(ctx, `
+		SELECT id::text FROM model.integration_def
+		WHERE model_id = $1::uuid AND revision_id = $2::uuid AND type = 'rest_api'`, modelID, revisionID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		def, err := s.GetDefinition(ctx, modelID, id)
+		if err != nil {
+			return err
+		}
+		if _, err := s.TestedOrRemappedCopy(ctx, def); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) MarkTested(ctx context.Context, id, hash string) error {
 	_, err := s.db.Exec(ctx, `
 		UPDATE model.integration_def SET last_tested_hash=$2, last_tested_at=now() WHERE id=$1::uuid

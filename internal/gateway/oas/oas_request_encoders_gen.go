@@ -56,6 +56,46 @@ func encodeAddBusinessMemberRequest(
 	return nil
 }
 
+func encodeAddGridDimensionRequest(
+	req OptAddGridDimensionReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	if !req.Set {
+		// Keep request with empty body if value is not set.
+		return nil
+	}
+	e := new(jx.Encoder)
+	{
+		if req.Set {
+			req.Encode(e)
+		}
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeAddGridMetricRequest(
+	req OptAddGridMetricReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	if !req.Set {
+		// Keep request with empty body if value is not set.
+		return nil
+	}
+	e := new(jx.Encoder)
+	{
+		if req.Set {
+			req.Encode(e)
+		}
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeAdminSwitchModelLinkRequest(
 	req *AdminSwitchModelLinkReq,
 	r *http.Request,
@@ -758,6 +798,26 @@ func encodePreviewImportReshapeRequest(
 	return nil
 }
 
+func encodePromoteAiDraftRequest(
+	req OptPromoteAiDraftReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	if !req.Set {
+		// Keep request with empty body if value is not set.
+		return nil
+	}
+	e := new(jx.Encoder)
+	{
+		if req.Set {
+			req.Encode(e)
+		}
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodePutGoogleConnectionRequest(
 	req *PutGoogleConnectionReq,
 	r *http.Request,
@@ -794,6 +854,20 @@ func encodeQueryFormRecordsRequest(
 
 func encodeRenameAiSessionRequest(
 	req *RenameAiSessionReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeRenameRevisionRequest(
+	req *RenameRevisionReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"
@@ -1453,7 +1527,7 @@ func encodeUpdateDimensionPropertyRequest(
 }
 
 func encodeUpdateFolderRequest(
-	req *FolderRequest,
+	req *UpdateFolderRequest,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

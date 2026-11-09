@@ -71,7 +71,8 @@ func TestCommitFormChecksAndPostsEachRecord(t *testing.T) {
 		}
 		return n
 	}
-	written, skipped, err := c.CommitPull(ctx, def, header, rows, "", true, dev)
+	out, err := c.CommitPull(ctx, def, header, rows, integration.PullOptions{DryRun: true, RunBy: dev})
+	written, skipped := out.Written, out.Skipped
 	if err != nil || written != 1 || skipped != 3 {
 		t.Fatalf("dry run: written=%d skipped=%d err=%v, want 1 and 3", written, skipped, err)
 	}
@@ -82,7 +83,8 @@ func TestCommitFormChecksAndPostsEachRecord(t *testing.T) {
 		t.Fatalf("a dry run is listed in Recent Imports (%d job(s))", n)
 	}
 
-	written, skipped, err = c.CommitPull(ctx, def, header, rows, "", false, dev)
+	out, err = c.CommitPull(ctx, def, header, rows, integration.PullOptions{RunBy: dev})
+	written, skipped = out.Written, out.Skipped
 	if err != nil || written != 1 || skipped != 3 {
 		t.Fatalf("run: written=%d skipped=%d err=%v, want 1 and 3", written, skipped, err)
 	}

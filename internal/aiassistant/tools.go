@@ -176,7 +176,7 @@ var WriteToolNames = []string{
 	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards", "arrange_dashboard",
 	"set_date_format",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
-	"set_tags", "create_revision", StartNewDraftTool,
+	"set_tags", "create_revision", StartNewDraftTool, "rename_draft",
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
 	"publish_workflow_def", "archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
 	"create_form_def", "update_form_def", "delete_form_def",
@@ -214,7 +214,7 @@ func proposeActionsSchema() json.RawMessage {
 						"description": map[string]any{"type": "string",
 							"description": "One-line human-readable description of this step shown to the developer"},
 						"params": map[string]any{"type": "object",
-							"description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"},
+							"description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally label (the display name, e.g. GL Account for gl_account), parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"},
 					},
 					"required": []string{"tool", "description", "params"},
 				},
@@ -681,7 +681,9 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
 		SELECT g.id::text, g.name, g.tags,
 		       COALESCE((SELECT string_agg(md.name,', ') FROM model.grid_metric gm JOIN model.metric_def md ON md.id=gm.metric_id WHERE gm.grid_id=g.id),''),
-		       COALESCE((SELECT string_agg(dd.name || COALESCE(' (display level ' || gdim.display_level || ')', ''), ', ')
+		       COALESCE((SELECT string_agg(dd.name || COALESCE(' (display level ' || gdim.display_level || ')', '')
+		                   || CASE WHEN NOT EXISTS (SELECT 1 FROM model.dimension_member dm WHERE dm.dimension_id = dd.id)
+		                           THEN ' (no members yet — add members first; the grid has no rows along it until then)' ELSE '' END, ', ')
 		                 FROM model.grid_dimension gdim JOIN model.dimension_def dd ON dd.id=gdim.dimension_id WHERE gdim.grid_id=g.id),'')
 		FROM model.grid_def g
 		WHERE g.model_id=$1::uuid

@@ -59,16 +59,25 @@ type Invoker interface {
 	AddBusinessMember(ctx context.Context, request *BusinessMemberRequest, params AddBusinessMemberParams) (AddBusinessMemberRes, error)
 	// AddGridDimension invokes addGridDimension operation.
 	//
-	// Add a dimension to a grid.
+	// Every metric of the grid takes the dimension. Values already typed into them are filed under
+	// member in the same transaction (and their cell history with them); while they hold any, the add
+	// without a member is refused (409 VALUES_NEED_MEMBER). A posting into one of the grid's metrics
+	// that maps no dimension of its family refuses the add (409 POSTINGS_DO_NOT_FIT).
 	//
 	// POST /api/developer/grids/{id}/dimensions/{dimId}
-	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error)
+	AddGridDimension(ctx context.Context, request OptAddGridDimensionReq, params AddGridDimensionParams) (AddGridDimensionRes, error)
 	// AddGridMetric invokes addGridMetric operation.
 	//
-	// Add a metric to a grid (a metric may belong to only one grid at a time).
+	// The metric's typed values move to the grid's coordinate in the same transaction. A grid dimension
+	// they lack takes the member named in members (refused 409 VALUES_NEED_MEMBER without one). A
+	// dimension they carry that the grid has not got is combined away by the metric's own rule — its
+	// aggregation rule across a standard dimension (sum added up, average averaged, count counted), its
+	// time summary across a time dimension — and the values replaced stay in the cell history; a rule
+	// that cannot combine stored values (none, rate, formula, a text or pick-list metric) refuses (409
+	// VALUES_CANNOT_COMBINE). Every posting into the metric must fit the grid (409 POSTINGS_DO_NOT_FIT).
 	//
 	// POST /api/developer/grids/{id}/metrics/{metricId}
-	AddGridMetric(ctx context.Context, params AddGridMetricParams) (AddGridMetricRes, error)
+	AddGridMetric(ctx context.Context, request OptAddGridMetricReq, params AddGridMetricParams) (AddGridMetricRes, error)
 	// AdminInfraNodes invokes adminInfraNodes operation.
 	//
 	// Latest health sample per cluster node (disk/memory/load), fed by the node-stats DaemonSet.
@@ -315,7 +324,10 @@ type Invoker interface {
 	//
 	// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
 	// without saying whether the id exists elsewhere); the source field and every mapped field must be
-	// fields of the table.
+	// fields of the table. A metric a mapping feeds shows its records only: values typed into it before
+	// are set aside (kept, read by no grid, chart, export or calculation until no mapping feeds the
+	// metric), and typed_set_aside says how many cells hold one. Metrics > Clear values removes them. A
+	// record holding a value is refused when a mapped field is empty.
 	//
 	// POST /api/developer/form-integrations
 	CreateFormMapping(ctx context.Context, request *CreateFormMappingRequest) (CreateFormMappingRes, error)
@@ -452,7 +464,7 @@ type Invoker interface {
 	DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error)
 	// DeleteAllNotifications invokes deleteAllNotifications operation.
 	//
-	// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+	// They leave the list; the rows stay marked, so Workflow History and queued mail are unaffected.
 	//
 	// DELETE /api/notifications
 	DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error)
@@ -857,11 +869,13 @@ type Invoker interface {
 	GetMe(ctx context.Context) (GetMeRes, error)
 	// GetMyWorkflowHistory invokes getMyWorkflowHistory operation.
 	//
-	// List the 50 most recent workflow instances where the caller started the instance or was assigned a
-	// step.
+	// The caller's runs — started, assigned a step, or notified of — in the selected application
+	// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
+	// answer for it. With instance_id, that one run of the caller's in any application, with its
+	// application_id, so a notification about another application's run can switch there.
 	//
 	// GET /api/workflow/my-history
-	GetMyWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error)
 	// GetNotificationSettings invokes getNotificationSettings operation.
 	//
 	// Outbound notification settings for this tenant — which channels deliver, and whether overdue
@@ -987,8 +1001,11 @@ type Invoker interface {
 	Healthz(ctx context.Context) (*HealthzOK, error)
 	// ImportDimensionMembers invokes importDimensionMembers operation.
 	//
-	// One-off dimension member import (code/label/parent_code/property:<name> columns; codes
-	// auto-generated from labels when absent).
+	// A property:<name> column fills the property declared under that name whatever its case, or under
+	// its identifier (property:Sales Segment fills a declared sales_segment); any other column declares
+	// a text property named by its identifier (lower case, other characters as underscores). A column
+	// with no letter or digit, or two columns filling one property, refuse the file (400). A value a
+	// number or date property cannot read refuses the file (422 INVALID_PROPERTY_VALUE, by row).
 	//
 	// POST /api/import/dimension-members
 	ImportDimensionMembers(ctx context.Context, request *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
@@ -996,14 +1013,22 @@ type Invoker interface {
 	//
 	// For a caller who reaches the table's application (404 otherwise), who becomes each record's
 	// creator. A row's optional status column sets its status; a row whose status the caller may not
-	// create (approved or rejected, unless the caller administers the application) fails validation.
+	// create (approved or rejected, unless the caller administers the application) fails validation. A
+	// client that may send a file again — after a closed connection, a timeout or a 502 — sends an
+	// Idempotency-Key: the same key from the same person for the same model returns the first import's
+	// answer ("replayed": true) and creates nothing. The key is kept with the import's Recent Imports
+	// line, written in the transaction that creates the records; a refused file holds none, so its
+	// correction goes under the same key.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
 	// ImportModel invokes importModel operation.
 	//
-	// Import a model export package into an application, creating a new model and revision (tenant
-	// admins for their own tenant, platform admins for any).
+	// The package is held to the checks the engine applies when the same things are saved: a calculated
+	// metric's formula or a calculated member's formula that a save would refuse, a member hierarchy
+	// cycle, or a revision that would fail publishing's time checks refuses the import (400), naming the
+	// metric, member or grid. A calculated metric's dependencies are derived from its formula; the
+	// package's own dependencies are not read.
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, request *ModelImportRequest) (ImportModelRes, error)
@@ -1444,7 +1469,7 @@ type Invoker interface {
 	// theirs working in the draft, and clear their draft; the response names the revision.
 	//
 	// POST /api/ai/sessions/{id}/promote-draft
-	PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
+	PromoteAiDraft(ctx context.Context, request OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
 	// PublishWorkflow invokes publishWorkflow operation.
 	//
 	// Publish a workflow definition (rejected if it fails validation).
@@ -1544,6 +1569,12 @@ type Invoker interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, request *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// RenameRevision invokes renameRevision operation.
+	//
+	// Rename a revision (the live one too; the model's header follows).
+	//
+	// PATCH /api/developer/revisions/{id}
+	RenameRevision(ctx context.Context, request *RenameRevisionReq, params RenameRevisionParams) (RenameRevisionRes, error)
 	// ReopenWorkflowInstance invokes reopenWorkflowInstance operation.
 	//
 	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
@@ -2021,10 +2052,10 @@ type Invoker interface {
 	UpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (UpdateDimensionPropertyRes, error)
 	// UpdateFolder invokes updateFolder operation.
 	//
-	// Rename or reparent a dashboard folder.
+	// Rename or reparent a dashboard folder (partial; only the fields sent change).
 	//
 	// PATCH /api/developer/folders/{id}
-	UpdateFolder(ctx context.Context, request *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
+	UpdateFolder(ctx context.Context, request *UpdateFolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm invokes updateForm operation.
 	//
 	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
@@ -2034,7 +2065,7 @@ type Invoker interface {
 	// UpdateFormMapping invokes updateFormMapping operation.
 	//
 	// What the mapping names is checked as on create, against the mapping's own model, revision and
-	// table (400).
+	// table (400). A new target metric sets its typed values aside, as on create (typed_set_aside).
 	//
 	// PATCH /api/developer/form-integrations/{id}
 	UpdateFormMapping(ctx context.Context, request *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)
@@ -2081,7 +2112,7 @@ type Invoker interface {
 	UpdateIntegrationConnection(ctx context.Context, request *UpdateIntegrationConnectionReq, params UpdateIntegrationConnectionParams) (UpdateIntegrationConnectionRes, error)
 	// UpdateMetric invokes updateMetric operation.
 	//
-	// Update a metric definition (re-wires formula dependencies and recalculates affected revisions).
+	// Update a metric definition (re-wires formula dependencies and recalculates the metric's revision).
 	//
 	// PATCH /api/developer/metrics/{id}
 	UpdateMetric(ctx context.Context, request *UpdateMetricRequest, params UpdateMetricParams) (UpdateMetricRes, error)
@@ -2165,17 +2196,21 @@ type Invoker interface {
 	ValidateWorkflow(ctx context.Context, request OptValidateWorkflowReq, params ValidateWorkflowParams) (ValidateWorkflowRes, error)
 	// Writeback invokes writeback operation.
 	//
-	// Write a single cell value (triggers recalculation).
+	// Dim_codes names one leaf member of each dimension of the grid the metric is on, and no other
+	// dimension: a dimension the grid has not got is refused (400 NOT_METRIC_DIMENSION), and so is one
+	// missing (400 MISSING_DIMENSION). A clear is not held to this, so a value stored at another
+	// coordinate before the check can be removed by naming that coordinate exactly.
 	//
 	// POST /api/cells
 	Writeback(ctx context.Context, request *WritebackRequest) (WritebackRes, error)
 	// WritebackBatch invokes writebackBatch operation.
 	//
 	// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
-	// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
-	// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
-	// refused. With dry_run every cell is checked and none written. A chat connection's write (the
-	// connector's write_cells) is also refused when the tenant turned chat writes off.
+	// rules, workflow locks, the plan's limits, one member of each of the metric's grid dimensions and
+	// no other (NOT_METRIC_DIMENSION, MISSING_DIMENSION) — before any is written; a refused cell
+	// refuses the batch (422, each refused cell by its index) and nothing is written. Two writes to one
+	// cell are refused. With dry_run every cell is checked and none written. A chat connection's write
+	// (the connector's write_cells) is also refused when the tenant turned chat writes off.
 	//
 	// POST /api/cells/batch
 	WritebackBatch(ctx context.Context, request *WritebackBatchReq) (WritebackBatchRes, error)
@@ -2742,15 +2777,18 @@ func (c *Client) sendAddBusinessMember(ctx context.Context, request *BusinessMem
 
 // AddGridDimension invokes addGridDimension operation.
 //
-// Add a dimension to a grid.
+// Every metric of the grid takes the dimension. Values already typed into them are filed under
+// member in the same transaction (and their cell history with them); while they hold any, the add
+// without a member is refused (409 VALUES_NEED_MEMBER). A posting into one of the grid's metrics
+// that maps no dimension of its family refuses the add (409 POSTINGS_DO_NOT_FIT).
 //
 // POST /api/developer/grids/{id}/dimensions/{dimId}
-func (c *Client) AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error) {
-	res, err := c.sendAddGridDimension(ctx, params)
+func (c *Client) AddGridDimension(ctx context.Context, request OptAddGridDimensionReq, params AddGridDimensionParams) (AddGridDimensionRes, error) {
+	res, err := c.sendAddGridDimension(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendAddGridDimension(ctx context.Context, params AddGridDimensionParams) (res AddGridDimensionRes, err error) {
+func (c *Client) sendAddGridDimension(ctx context.Context, request OptAddGridDimensionReq, params AddGridDimensionParams) (res AddGridDimensionRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("addGridDimension"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -2833,6 +2871,9 @@ func (c *Client) sendAddGridDimension(ctx context.Context, params AddGridDimensi
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
 	}
+	if err := encodeAddGridDimensionRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
 
 	{
 		type bitset = [1]uint8
@@ -2886,15 +2927,21 @@ func (c *Client) sendAddGridDimension(ctx context.Context, params AddGridDimensi
 
 // AddGridMetric invokes addGridMetric operation.
 //
-// Add a metric to a grid (a metric may belong to only one grid at a time).
+// The metric's typed values move to the grid's coordinate in the same transaction. A grid dimension
+// they lack takes the member named in members (refused 409 VALUES_NEED_MEMBER without one). A
+// dimension they carry that the grid has not got is combined away by the metric's own rule — its
+// aggregation rule across a standard dimension (sum added up, average averaged, count counted), its
+// time summary across a time dimension — and the values replaced stay in the cell history; a rule
+// that cannot combine stored values (none, rate, formula, a text or pick-list metric) refuses (409
+// VALUES_CANNOT_COMBINE). Every posting into the metric must fit the grid (409 POSTINGS_DO_NOT_FIT).
 //
 // POST /api/developer/grids/{id}/metrics/{metricId}
-func (c *Client) AddGridMetric(ctx context.Context, params AddGridMetricParams) (AddGridMetricRes, error) {
-	res, err := c.sendAddGridMetric(ctx, params)
+func (c *Client) AddGridMetric(ctx context.Context, request OptAddGridMetricReq, params AddGridMetricParams) (AddGridMetricRes, error) {
+	res, err := c.sendAddGridMetric(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendAddGridMetric(ctx context.Context, params AddGridMetricParams) (res AddGridMetricRes, err error) {
+func (c *Client) sendAddGridMetric(ctx context.Context, request OptAddGridMetricReq, params AddGridMetricParams) (res AddGridMetricRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("addGridMetric"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -2976,6 +3023,9 @@ func (c *Client) sendAddGridMetric(ctx context.Context, params AddGridMetricPara
 	r, err := ht.NewRequest(ctx, "POST", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeAddGridMetricRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
 	}
 
 	{
@@ -6959,7 +7009,10 @@ func (c *Client) sendCreateForm(ctx context.Context, request *CreateFormRequest,
 //
 // The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
 // without saying whether the id exists elsewhere); the source field and every mapped field must be
-// fields of the table.
+// fields of the table. A metric a mapping feeds shows its records only: values typed into it before
+// are set aside (kept, read by no grid, chart, export or calculation until no mapping feeds the
+// metric), and typed_set_aside says how many cells hold one. Metrics > Clear values removes them. A
+// record holding a value is refused when a mapped field is empty.
 //
 // POST /api/developer/form-integrations
 func (c *Client) CreateFormMapping(ctx context.Context, request *CreateFormMappingRequest) (CreateFormMappingRes, error) {
@@ -9352,7 +9405,7 @@ func (c *Client) sendDeleteAiSession(ctx context.Context, params DeleteAiSession
 
 // DeleteAllNotifications invokes deleteAllNotifications operation.
 //
-// They leave the list; the rows stay marked, so My Workflow History and queued mail are unaffected.
+// They leave the list; the rows stay marked, so Workflow History and queued mail are unaffected.
 //
 // DELETE /api/notifications
 func (c *Client) DeleteAllNotifications(ctx context.Context) (*DeleteAllNotificationsOK, error) {
@@ -17484,16 +17537,18 @@ func (c *Client) sendGetMe(ctx context.Context) (res GetMeRes, err error) {
 
 // GetMyWorkflowHistory invokes getMyWorkflowHistory operation.
 //
-// List the 50 most recent workflow instances where the caller started the instance or was assigned a
-// step.
+// The caller's runs — started, assigned a step, or notified of — in the selected application
+// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
+// answer for it. With instance_id, that one run of the caller's in any application, with its
+// application_id, so a notification about another application's run can switch there.
 //
 // GET /api/workflow/my-history
-func (c *Client) GetMyWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error) {
-	res, err := c.sendGetMyWorkflowHistory(ctx)
+func (c *Client) GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error) {
+	res, err := c.sendGetMyWorkflowHistory(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendGetMyWorkflowHistory(ctx context.Context) (res []WorkflowInstance, err error) {
+func (c *Client) sendGetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) (res []WorkflowInstance, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("getMyWorkflowHistory"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17533,6 +17588,27 @@ func (c *Client) sendGetMyWorkflowHistory(ctx context.Context) (res []WorkflowIn
 	var pathParts [1]string
 	pathParts[0] = "/api/workflow/my-history"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "instance_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "instance_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.InstanceID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -19616,8 +19692,11 @@ func (c *Client) sendHealthz(ctx context.Context) (res *HealthzOK, err error) {
 
 // ImportDimensionMembers invokes importDimensionMembers operation.
 //
-// One-off dimension member import (code/label/parent_code/property:<name> columns; codes
-// auto-generated from labels when absent).
+// A property:<name> column fills the property declared under that name whatever its case, or under
+// its identifier (property:Sales Segment fills a declared sales_segment); any other column declares
+// a text property named by its identifier (lower case, other characters as underscores). A column
+// with no letter or digit, or two columns filling one property, refuse the file (400). A value a
+// number or date property cannot read refuses the file (422 INVALID_PROPERTY_VALUE, by row).
 //
 // POST /api/import/dimension-members
 func (c *Client) ImportDimensionMembers(ctx context.Context, request *ImportDimensionMembersReq) (ImportDimensionMembersRes, error) {
@@ -19729,7 +19808,12 @@ func (c *Client) sendImportDimensionMembers(ctx context.Context, request *Import
 //
 // For a caller who reaches the table's application (404 otherwise), who becomes each record's
 // creator. A row's optional status column sets its status; a row whose status the caller may not
-// create (approved or rejected, unless the caller administers the application) fails validation.
+// create (approved or rejected, unless the caller administers the application) fails validation. A
+// client that may send a file again — after a closed connection, a timeout or a 502 — sends an
+// Idempotency-Key: the same key from the same person for the same model returns the first import's
+// answer ("replayed": true) and creates nothing. The key is kept with the import's Recent Imports
+// line, written in the transaction that creates the records; a refused file holds none, so its
+// correction goes under the same key.
 //
 // POST /api/forms/{id}/import
 func (c *Client) ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error) {
@@ -19806,6 +19890,23 @@ func (c *Client) sendImportFormRecords(ctx context.Context, request *FormImportR
 		return res, errors.Wrap(err, "encode request")
 	}
 
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "Idempotency-Key",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.IdempotencyKey.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
+	}
+
 	{
 		type bitset = [1]uint8
 		var satisfied bitset
@@ -19858,8 +19959,11 @@ func (c *Client) sendImportFormRecords(ctx context.Context, request *FormImportR
 
 // ImportModel invokes importModel operation.
 //
-// Import a model export package into an application, creating a new model and revision (tenant
-// admins for their own tenant, platform admins for any).
+// The package is held to the checks the engine applies when the same things are saved: a calculated
+// metric's formula or a calculated member's formula that a save would refuse, a member hierarchy
+// cycle, or a revision that would fail publishing's time checks refuses the import (400), naming the
+// metric, member or grid. A calculated metric's dependencies are derived from its formula; the
+// package's own dependencies are not read.
 //
 // POST /api/admin/models/import
 func (c *Client) ImportModel(ctx context.Context, request *ModelImportRequest) (ImportModelRes, error) {
@@ -27591,12 +27695,12 @@ func (c *Client) sendPreviewImportReshape(ctx context.Context, request *PreviewI
 // theirs working in the draft, and clear their draft; the response names the revision.
 //
 // POST /api/ai/sessions/{id}/promote-draft
-func (c *Client) PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (PromoteAiDraftRes, error) {
-	res, err := c.sendPromoteAiDraft(ctx, params)
+func (c *Client) PromoteAiDraft(ctx context.Context, request OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error) {
+	res, err := c.sendPromoteAiDraft(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendPromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (res PromoteAiDraftRes, err error) {
+func (c *Client) sendPromoteAiDraft(ctx context.Context, request OptPromoteAiDraftReq, params PromoteAiDraftParams) (res PromoteAiDraftRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("promoteAiDraft"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -27660,6 +27764,9 @@ func (c *Client) sendPromoteAiDraft(ctx context.Context, params PromoteAiDraftPa
 	r, err := ht.NewRequest(ctx, "POST", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodePromoteAiDraftRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
 	}
 
 	{
@@ -29427,6 +29534,134 @@ func (c *Client) sendRenameAiSession(ctx context.Context, request *RenameAiSessi
 
 	stage = "DecodeResponse"
 	result, err := decodeRenameAiSessionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// RenameRevision invokes renameRevision operation.
+//
+// Rename a revision (the live one too; the model's header follows).
+//
+// PATCH /api/developer/revisions/{id}
+func (c *Client) RenameRevision(ctx context.Context, request *RenameRevisionReq, params RenameRevisionParams) (RenameRevisionRes, error) {
+	res, err := c.sendRenameRevision(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendRenameRevision(ctx context.Context, request *RenameRevisionReq, params RenameRevisionParams) (res RenameRevisionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("renameRevision"),
+		semconv.HTTPRequestMethodKey.String("PATCH"),
+		semconv.URLTemplateKey.String("/api/developer/revisions/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RenameRevisionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/developer/revisions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PATCH", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeRenameRevisionRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RenameRevisionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRenameRevisionResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -37801,15 +38036,15 @@ func (c *Client) sendUpdateDimensionProperty(ctx context.Context, request *Prope
 
 // UpdateFolder invokes updateFolder operation.
 //
-// Rename or reparent a dashboard folder.
+// Rename or reparent a dashboard folder (partial; only the fields sent change).
 //
 // PATCH /api/developer/folders/{id}
-func (c *Client) UpdateFolder(ctx context.Context, request *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error) {
+func (c *Client) UpdateFolder(ctx context.Context, request *UpdateFolderRequest, params UpdateFolderParams) (UpdateFolderRes, error) {
 	res, err := c.sendUpdateFolder(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendUpdateFolder(ctx context.Context, request *FolderRequest, params UpdateFolderParams) (res UpdateFolderRes, err error) {
+func (c *Client) sendUpdateFolder(ctx context.Context, request *UpdateFolderRequest, params UpdateFolderParams) (res UpdateFolderRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("updateFolder"),
 		semconv.HTTPRequestMethodKey.String("PATCH"),
@@ -38058,7 +38293,7 @@ func (c *Client) sendUpdateForm(ctx context.Context, request *CreateFormRequest,
 // UpdateFormMapping invokes updateFormMapping operation.
 //
 // What the mapping names is checked as on create, against the mapping's own model, revision and
-// table (400).
+// table (400). A new target metric sets its typed values aside, as on create (typed_set_aside).
 //
 // PATCH /api/developer/form-integrations/{id}
 func (c *Client) UpdateFormMapping(ctx context.Context, request *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error) {
@@ -38979,7 +39214,7 @@ func (c *Client) sendUpdateIntegrationConnection(ctx context.Context, request *U
 
 // UpdateMetric invokes updateMetric operation.
 //
-// Update a metric definition (re-wires formula dependencies and recalculates affected revisions).
+// Update a metric definition (re-wires formula dependencies and recalculates the metric's revision).
 //
 // PATCH /api/developer/metrics/{id}
 func (c *Client) UpdateMetric(ctx context.Context, request *UpdateMetricRequest, params UpdateMetricParams) (UpdateMetricRes, error) {
@@ -40600,7 +40835,10 @@ func (c *Client) sendValidateWorkflow(ctx context.Context, request OptValidateWo
 
 // Writeback invokes writeback operation.
 //
-// Write a single cell value (triggers recalculation).
+// Dim_codes names one leaf member of each dimension of the grid the metric is on, and no other
+// dimension: a dimension the grid has not got is refused (400 NOT_METRIC_DIMENSION), and so is one
+// missing (400 MISSING_DIMENSION). A clear is not held to this, so a value stored at another
+// coordinate before the check can be removed by naming that coordinate exactly.
 //
 // POST /api/cells
 func (c *Client) Writeback(ctx context.Context, request *WritebackRequest) (WritebackRes, error) {
@@ -40711,10 +40949,11 @@ func (c *Client) sendWriteback(ctx context.Context, request *WritebackRequest) (
 // WritebackBatch invokes writebackBatch operation.
 //
 // Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
-// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
-// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
-// refused. With dry_run every cell is checked and none written. A chat connection's write (the
-// connector's write_cells) is also refused when the tenant turned chat writes off.
+// rules, workflow locks, the plan's limits, one member of each of the metric's grid dimensions and
+// no other (NOT_METRIC_DIMENSION, MISSING_DIMENSION) — before any is written; a refused cell
+// refuses the batch (422, each refused cell by its index) and nothing is written. Two writes to one
+// cell are refused. With dry_run every cell is checked and none written. A chat connection's write
+// (the connector's write_cells) is also refused when the tenant turned chat writes off.
 //
 // POST /api/cells/batch
 func (c *Client) WritebackBatch(ctx context.Context, request *WritebackBatchReq) (WritebackBatchRes, error) {

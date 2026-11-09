@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/recordpost"
@@ -30,6 +32,8 @@ func newMemberCache() *recordpost.MemberCache { return recordpost.NewMemberCache
 func (h *handler) records() *recordpost.Poster {
 	return &recordpost.Poster{Pool: h.db.For, Log: h.log, MembersChanged: func(ctx context.Context, form *crudapp.FormDef) {
 		h.recalcDimensionDependents(ctx, form.KeepsDimensionID)
+	}, RecalcDone: func(ctx context.Context, _ string) {
+		h.resumeHeldConditions(ctx)
 	}}
 }
 
@@ -81,8 +85,11 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 // whose target is a table, and the AI Developer's import of an attached
 // file. dryRun checks every row and creates nothing.
 // replaceBy names the field a load replaces by (recordpost.ImportRequest):
-// the records it deletes are ones act may delete, as by hand.
-func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool, replaceBy string) (recordpost.ImportResult, error) {
+// the records it deletes are ones act may delete, as by hand. beforeCommit
+// (recordpost.ImportRequest.BeforeCommit) runs in the records' transaction:
+// the records import writes its Recent Imports line, with its
+// Idempotency-Key, there.
+func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool, replaceBy string, beforeCommit func(context.Context, pgx.Tx, recordpost.ImportResult) error) (recordpost.ImportResult, error) {
 	// Each record of a table keeping a dimension is a new member: within the
 	// edition's members per dimension, as a record saved by hand is.
 	if form.KeepsDimension() && h.plans != nil {
@@ -105,7 +112,7 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			return ""
 		},
 		AppID: scope.appID, RevisionID: scope.revisionID,
-		DryRun: dryRun, ReplaceBy: replaceBy, ByPerson: true,
+		DryRun: dryRun, ReplaceBy: replaceBy, ByPerson: true, BeforeCommit: beforeCommit,
 		DeleteRefusal: func(rec *crudapp.FormRecord) string {
 			if !scope.access(rec).CanDelete(rec.Status) {
 				return "you may not delete it"

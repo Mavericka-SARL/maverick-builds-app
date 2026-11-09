@@ -176,3 +176,22 @@ func BrokerEndpoint(publicBase, realm, alias string) string {
 func SAMLEntityID(publicBase, realm string) string {
 	return fmt.Sprintf("%s/realms/%s", strings.TrimSuffix(publicBase, "/"), realm)
 }
+
+// ListIdentityProviders lists the realm's identity providers.
+func (c *Client) ListIdentityProviders(ctx context.Context) ([]IdentityProvider, error) {
+	var out []IdentityProvider
+	if _, err := c.do(ctx, http.MethodGet, "/identity-provider/instances", nil, &out); err != nil {
+		return nil, fmt.Errorf("list identity providers: %w", err)
+	}
+	return out, nil
+}
+
+// PutIdentityProvider writes idp as it is, by its alias: the caller read it
+// (a secret comes back masked, and Keycloak keeps the stored one for the
+// mask).
+func (c *Client) PutIdentityProvider(ctx context.Context, idp IdentityProvider) error {
+	if _, err := c.do(ctx, http.MethodPut, "/identity-provider/instances/"+url.PathEscape(idp.Alias), idp, nil); err != nil {
+		return fmt.Errorf("update identity provider %s: %w", idp.Alias, err)
+	}
+	return nil
+}

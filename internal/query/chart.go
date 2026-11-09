@@ -863,6 +863,10 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 			ORDER BY dim_members, entered_at DESC, id DESC
 		) direct
 		WHERE NOT EXISTS (SELECT 1 FROM covered c WHERE c.dim_members = direct.dim_members)
+		  -- A metric records feed shows its records only (writeguard.FedMetricsCTE).
+		  AND NOT EXISTS (SELECT 1 FROM model.form_metric_mapping mm
+			WHERE mm.target_metric_id = $3::uuid AND mm.model_id = $1::uuid
+			  AND (mm.revision_id IS NULL OR mm.revision_id = $2::uuid))
 		UNION ALL
 		SELECT value, dim_members
 		FROM runtime.fact_input
@@ -1166,16 +1170,19 @@ func (r *ChartResolver) evalCalcMetricVisited(
 }
 
 // resolveInput reads an input metric at point by its aggregation and time
-// summary. A pin on a dimension the input neither has nor relates to is
-// dropped first, as the scheduler and the scoped reads drop it: the input is
-// the same there whatever that member, never rolled up along it — drv_global
-// [cost_type] read at All Departments × FY 2027 added its one rate up once
-// per department and month (84 × 2.5 = 210).
+// summary, for a formula's variable or a workflow condition. A pin on a
+// dimension the input neither has nor relates to is dropped first, as the
+// scheduler and the scoped reads drop it: the input is the same there
+// whatever that member, never rolled up along it — drv_global [cost_type]
+// read at All Departments × FY 2027 added its one rate up once per
+// department and month (84 × 2.5 = 210). ok is false where nothing was
+// recorded beneath point, a total across a dimension included, as the
+// scheduler binds a variable (blank to ISBLANK and "", 0 in arithmetic).
 func resolveInput(ctx context.Context, allDims map[string]*rollup.Dimension, def *fullMetricDef, point map[string]string, fetch rollup.RawValue) (float64, bool, error) {
 	if norm, err := rollup.NormalizeCombo(allDims, def.DimensionIDs, point, nil); err == nil {
 		point = norm
 	}
-	return rollup.ResolveTime(ctx, allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+	return rollup.ResolveTimeRecorded(ctx, allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
 		rollup.TimeSummaryRule(def.TimeSummary), point, fetch)
 }
 

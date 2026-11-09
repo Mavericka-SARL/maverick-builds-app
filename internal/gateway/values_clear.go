@@ -17,7 +17,7 @@ import (
 // metrics, or one metric, in the revision the grid or metric belongs to,
 // optionally under chosen members. A developer's, from Grids › Clear values,
 // Metrics › Clear values and the AI Developer's clear_input_values. The only
-// bulk clear was a full reload, which empties the whole revision.
+// bulk clear was a full reload, which then emptied the whole revision.
 
 // nothingToClearCode marks the refusal of a grid or metric with no input
 // metric: a clear of everything has nothing to do there (ai_values.go).

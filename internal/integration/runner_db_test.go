@@ -77,6 +77,11 @@ func mkPullDef(t *testing.T, st *integration.Store, modelID, revID, gridID, url 
 	if err != nil {
 		t.Fatalf("create def: %v", err)
 	}
+	// A run writes only on a passed test of its configuration (runner):
+	// these runs stand for an activated, tested connector.
+	if err := st.MarkTested(context.Background(), def.ID, integration.ConfigHash(def.Config)); err != nil {
+		t.Fatal(err)
+	}
 	return def
 }
 
@@ -325,6 +330,11 @@ func TestRunner_PushPerRecordAndBatch(t *testing.T) {
 		def, cerr := st.CreateDefinition(ctx, modelID, revID, fmt.Sprintf("Push batch=%v", batch), "", nil, "draft", conn.ID, cfg, true)
 		if cerr != nil {
 			t.Fatalf("create push def: %v", cerr)
+		}
+		// A run writes only on a passed test of its configuration (runner):
+		// these runs stand for an activated, tested connector.
+		if err := st.MarkTested(context.Background(), def.ID, integration.ConfigHash(def.Config)); err != nil {
+			t.Fatal(err)
 		}
 		return def
 	}

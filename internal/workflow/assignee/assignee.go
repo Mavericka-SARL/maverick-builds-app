@@ -127,6 +127,7 @@ const stepAssigneeSQL = `EXISTS (
 	            WHERE asg_uda.user_id = {user} AND asg_uda.workspace_id IS NULL
 	              AND asg_uda.role::text = 'developer'
 	        ) AS unscoped_developer,
+	        COALESCE((SELECT asg_pw.platform_wide FROM identity."user" asg_pw WHERE asg_pw.id = {user}), false) AS platform_wide,
 	        EXISTS (
 	            SELECT 1 FROM identity.role_assignment asg_wta
 	            JOIN core.workspace asg_wtws ON asg_wtws.id = asg_wta.workspace_id
@@ -170,7 +171,7 @@ const stepAssigneeSQL = `EXISTS (
 	        -- on an account with no tenant, everywhere — narrowed by its
 	        -- grants to exactly the granted applications.
 	        asg_held.unscoped_developer
-	            AND (asg_held.home OR (asg_held.customerless AND (NOT asg_held.has_grants OR asg_held.granted_app))) AS unscoped_developer_here
+	            AND (asg_held.home OR (asg_held.customerless AND ((asg_held.platform_wide AND NOT asg_held.has_grants) OR asg_held.granted_app))) AS unscoped_developer_here
 	) asg_unscoped
 	CROSS JOIN LATERAL (
 	    SELECT (

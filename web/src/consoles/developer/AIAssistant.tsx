@@ -262,6 +262,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_api_integration: "Create REST API connector", update_api_integration: "Update REST API connector",
   create_connection: "Create sign-in connection", update_connection: "Update sign-in connection",
   run_integration: "Run integration", trigger_automation_rule: "Trigger automation rule",
+  rename_draft: "Rename the AI draft",
   recalculate_revision: "Recalculate revision", clear_input_values: "Clear values", fill_sample_values: "Fill with sample values",
 };
 function friendlyTool(tool: string): string {
@@ -736,6 +737,9 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [dragOver, setDragOver]     = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [draftBusy, setDraftBusy]   = useState(false);
+  // The name the draft takes as it becomes the working revision; null while
+  // the banner shows its buttons.
+  const [promoteName, setPromoteName] = useState<string | null>(null);
   const [showActivity, setShowActivity] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
@@ -856,12 +860,16 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   // AI-specific endpoint clears the session's draft_revision_id server-side
   // too, which makes the "AI draft" banner disappear below and finishes the
   // session; the console then switches to the draft.
+  // The revision is named as it is taken: a draft otherwise kept "AI Draft"
+  // and its time, which the header shows every business user once it goes
+  // live. The session's title is offered; blank keeps the draft's name.
   const promoteDraft = async () => {
     if (!sessionId || !currentSession?.draft_revision_id) return;
     setDraftBusy(true);
     setError(null);
     try {
-      const resp = await api.aiPromoteDraft(sessionId!);
+      const resp = await api.aiPromoteDraft(sessionId!, (promoteName ?? "").trim());
+      setPromoteName(null);
       setCurrentSession(resp.session);
       setMessages(resp.messages ?? []);
       if (resp.revision) onSelectRevision?.(resp.revision.id, resp.revision.name);
@@ -1292,12 +1300,34 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <span style={{ flex: 1, fontSize: 12 }}>
               Working in your AI draft — every new session continues it until you use it as your working revision or discard it. It goes live only when you Set active in Models.
             </span>
-            <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
-              Use as working revision
-            </Button>
-            <Button size="sm" disabled={draftBusy} onClick={discardDraft}>
-              Discard
-            </Button>
+            {promoteName === null ? (
+              <>
+                <Button size="sm" variant="primary" disabled={draftBusy} onClick={() => setPromoteName((currentSession.title ?? "").trim().slice(0, 80))}>
+                  Use as working revision
+                </Button>
+                <Button size="sm" disabled={draftBusy} onClick={discardDraft}>
+                  Discard
+                </Button>
+              </>
+            ) : (
+              <>
+                <TextInput
+                  aria-label="Name of the revision"
+                  value={promoteName}
+                  onChange={(e) => setPromoteName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") promoteDraft(); if (e.key === "Escape") setPromoteName(null); }}
+                  placeholder="Revision name (blank keeps the draft's)"
+                  autoFocus
+                  style={{ width: 240 }}
+                />
+                <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
+                  Use as working revision
+                </Button>
+                <Button size="sm" disabled={draftBusy} onClick={() => setPromoteName(null)}>
+                  Cancel
+                </Button>
+              </>
+            )}
           </div>
         )}
 

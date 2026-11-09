@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mavericks-engine/mavericks/ee/sso"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/dormancy"
 	"github.com/mavericks-engine/mavericks/internal/gateway"
@@ -405,6 +406,28 @@ func main() {
 	// internal/workflow/scheduler.go).
 	schedCtx, cancelScheduler := context.WithCancel(ctx)
 	defer cancelScheduler()
+	// Tenants' identity providers follow the licence in Keycloak: switched
+	// off while single sign-on is not usable, back on when a key returns. At
+	// start, then every 15 minutes, since a key expires by the clock.
+	if kc != nil {
+		go func() {
+			tick := time.NewTicker(15 * time.Minute)
+			defer tick.Stop()
+			for {
+				if n, err := sso.Reconcile(schedCtx, kc, lic.Usable(license.FeatureSSO)); err != nil {
+					log.Warn().Err(err).Msg("single sign-on providers could not be matched to the licence")
+				} else if n > 0 {
+					log.Info().Int("changed", n).Bool("sso_usable", lic.Usable(license.FeatureSSO)).
+						Msg("single sign-on providers switched to follow the licence")
+				}
+				select {
+				case <-schedCtx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+	}
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	// One scheduler per database: workflow timers live with the data they

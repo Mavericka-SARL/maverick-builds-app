@@ -261,13 +261,15 @@ func baWhoSees() modeltransfer.Dashboard {
 
 Roles decide which pages a person opens. **Access rules** decide which numbers on those pages they can change, only read, or not see at all, set for one person or for a role, which everyone in it then holds. A rule is set on a dimension member — an office, a region — or on a metric.`, 132),
 
-		baText(`## Three levels
+		baText(`## The levels
 
 - **Write** — the default. The person can change every input number they can see.
 - **Read** — they see the numbers but cannot change them. It applies to that member alone: *Read* on *Nordics* leaves Oslo and Stockholm open.
 - **Hidden** — gone from grids, charts and selectors, and so is everything under it: hide *Iberia*, and Lisbon and Madrid go with it.
 
-A metric takes the same three levels: *Read* on *spent* makes it read-only for that person in every grid. *Hidden* on a metric hides every metric calculated from it as well — *remaining*, built on *spent*, would otherwise show it.`, 216),
+A dimension member can also be marked **Only these** (or **Only these, read-only**): the person then sees only the members so marked in that dimension, with their totals above and their own members below. Every other member is hidden from them, including members added later — mark the two accounts a manager looks after, and a new account stays out of their sight until you add it.
+
+A metric takes the same three levels: *Read* on *spent* makes it read-only for that person in every grid. *Hidden* on a metric hides every metric calculated from it as well — *remaining*, built on *spent*, would otherwise show it.`, 300),
 
 		baText(`## Totals for someone who cannot see everything
 

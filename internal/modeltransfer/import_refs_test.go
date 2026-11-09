@@ -835,3 +835,37 @@ func TestRowIDOf(t *testing.T) {
 		}
 	}
 }
+
+// A chart's series names are keyed by metric id: the import moves the keys
+// onto the imported metrics, as it moves the chart's metric_ids, so each
+// custom legend name stays with its series instead of falling back to the
+// metric's label.
+func TestImportRemapsSeriesNames(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	app, user := importTarget(t, ctx, pool)
+	metricID := uuid.NewString()
+	pkg := decodePackage(t, `{
+	  "model_name": "Series",
+	  "dimensions": [{"id": "dim-region", "name": "Region", "members": [{"id": "mem-n", "code": "N", "label": "North"}]}],
+	  "metrics": [{"id": "`+metricID+`", "name": "Revenue", "is_input": true}],
+	  "grids": [{"id": "grid-plan", "name": "Plan", "metrics": [{"metric_id": "`+metricID+`"}], "dimensions": [{"dimension_id": "dim-region"}]}],
+	  "dashboards": [{"id": "dash", "name": "Overview", "widgets": [
+	    {"widget_type": "chart", "ref_id": "grid-plan", "widget_props": {"chart": {"chart_type": "bar", "dimension_id": "dim-region",
+	      "metric_ids": ["`+metricID+`"], "series_names": {"`+metricID+`": "Sales"}}}}]}]
+	}`)
+	_, revID, err := importInto(ctx, pool, app, user, pkg)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var newMetric, names string
+	if err := pool.QueryRow(ctx, `
+		SELECT m.id::text, w.widget_props->'chart'->>'series_names'
+		FROM model.metric_def m, model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
+		WHERE m.revision_id = $1::uuid AND d.revision_id = $1::uuid`, revID).Scan(&newMetric, &names); err != nil {
+		t.Fatalf("read chart: %v", err)
+	}
+	if want := `{"` + newMetric + `": "Sales"}`; names != want {
+		t.Errorf("series_names = %s, want %s (keyed by the imported metric)", names, want)
+	}
+}

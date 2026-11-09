@@ -438,6 +438,12 @@ type revokedGrant struct {
 // nothing. A platform admin's is left alone: its reach is every tenant with
 // it or without. It then checks no account is left platform-wide, and fails
 // — rolling the removal back — if one is.
+//
+// It tests the account's shape — no tenant, an unscoped developer grant, no
+// application or model grant (unnarrowedDeveloperSQL) — not the
+// platform_wide marker, which a grant cleared: the marker keeps such an
+// account from widening (migration 167), and this takes away the grant
+// that no longer opens anything.
 func revokeUnnarrowed(ctx context.Context, tx pgx.Tx, accounts []string) ([]revokedGrant, error) {
 	if len(accounts) == 0 {
 		return nil, nil
@@ -450,7 +456,7 @@ func revokeUnnarrowed(ctx context.Context, tx pgx.Tx, accounts []string) ([]revo
 		WHERE u.id = ra.user_id AND ra.user_id = ANY($1::uuid[])
 		  AND ra.role = 'developer' AND ra.workspace_id IS NULL
 		  AND `+fmt.Sprintf(notPlatformAdmin, "ra.user_id")+`
-		  AND `+platformWideBuilderSQL("ra.user_id")+`
+		  AND `+unnarrowedDeveloperSQL("ra.user_id")+`
 		RETURNING ra.user_id::text, u.email`, accounts)
 	if err != nil {
 		return nil, err
@@ -476,7 +482,7 @@ func revokeUnnarrowed(ctx context.Context, tx pgx.Tx, accounts []string) ([]revo
 	var left bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM unnest($1::uuid[]) AS acc(id)
-		               WHERE `+fmt.Sprintf(notPlatformAdmin, "acc.id")+` AND `+platformWideBuilderSQL("acc.id")+`)`,
+		               WHERE `+fmt.Sprintf(notPlatformAdmin, "acc.id")+` AND `+unnarrowedDeveloperSQL("acc.id")+`)`,
 		accounts).Scan(&left); err != nil {
 		return nil, err
 	}
@@ -987,6 +993,22 @@ var errInviteNeedsRoleAndWorkspace = errors.New("role and workspace_id are both 
 // is the platform's only (auditPlatformOnly): shown in the caller's tenant,
 // it said which addresses had accounts, and which were platform admins'.
 func (h *handler) refuseExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, userID, email, role, workspaceID, reason string) {
+	// Listed as a new invitation would be: a pending person, here with
+	// nothing granted (identity.refused_invitation, migration 165). The
+	// tenant's list lacking the address told a tenant admin it was a
+	// platform administrator's (private observations, 2026-09-30).
+	id := uuid.NewString()
+	if tenant := h.customerOfWorkspace(ctx, workspaceID); tenant != "" {
+		name, _ := ctx.Value(inviteNameKey{}).(string)
+		if err := h.db.QueryRow(ctx, `
+			INSERT INTO identity.refused_invitation (customer_id, email, display_name)
+			VALUES ($1::uuid, $2, $3)
+			ON CONFLICT (customer_id, lower(email)) DO UPDATE SET display_name = EXCLUDED.display_name
+			RETURNING id::text`, tenant, strings.TrimSpace(email), name).Scan(&id); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserInvitationRefused,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -994,8 +1016,11 @@ func (h *handler) refuseExistingAccount(ctx context.Context, w http.ResponseWrit
 		Metadata: map[string]string{"email": email, "role": role, "workspace_id": workspaceID,
 			"existing_account": "true", "granted": "false", "refused": reason, auditVisibilityKey: auditPlatformOnly},
 	})
-	jsonOK(w, map[string]any{"id": uuid.NewString(), "status": "created", "invited": h.kc != nil && !h.tempPasswords})
+	jsonOK(w, map[string]any{"id": id, "status": "created", "invited": h.kc != nil && !h.tempPasswords})
 }
+
+// inviteNameKey carries an invitation's display name to its refusal.
+type inviteNameKey struct{}
 
 // An audit event whose metadata has visibility=platform is shown to platform
 // admins only, never in a tenant's audit scope (auditScope).
@@ -1119,15 +1144,38 @@ func (h *handler) adminSetAccountEnabled(ctx context.Context, w http.ResponseWri
 		jsonOK(w, map[string]any{"status": "unchanged", "disabled": !enabled})
 		return
 	}
-	if h.kc != nil && sub != "" && !strings.HasPrefix(sub, "admin-created-") && !h.identityHeldElsewhere(ctx, sub) {
-		if err := h.kc.SetUserEnabled(ctx, sub, enabled); err != nil {
-			jsonErr(w, fmt.Errorf("the identity provider refused: %w", err), http.StatusBadGateway)
-			return
+	var idpErr error
+	setIdP := func() error {
+		if h.kc != nil && sub != "" && !strings.HasPrefix(sub, "admin-created-") && !h.identityHeldElsewhere(ctx, sub) {
+			if err := h.kc.SetUserEnabled(ctx, sub, enabled); err != nil {
+				idpErr = fmt.Errorf("the identity provider refused: %w", err)
+				return idpErr
+			}
 		}
+		return nil
 	}
-	if _, err := h.db.Exec(ctx, `
-		UPDATE identity.user SET disabled_at = CASE WHEN $2 THEN NULL ELSE COALESCE(disabled_at, now()) END, updated_at = now()
-		WHERE id = $1::uuid`, userID, enabled); err != nil {
+	write := func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE identity.user SET disabled_at = CASE WHEN $2 THEN NULL ELSE COALESCE(disabled_at, now()) END, updated_at = now()
+			WHERE id = $1::uuid`, userID, enabled)
+		return err
+	}
+	// A tenant admin's disable is serialised with tenant_admin revocations
+	// and re-checks that one remains; a platform admin may disable the last.
+	var err error
+	if enabled || tiers.platform {
+		err = h.guardNothing(ctx, write, setIdP)
+	} else {
+		err = h.guardLastTenantAdmin(ctx, userID, write, setIdP)
+	}
+	switch {
+	case errors.Is(err, errLastTenantAdmin):
+		jsonErr(w, fmt.Errorf("forbidden: this account is its tenant's last tenant admin; make someone else tenant admin before you disable it"), http.StatusForbidden)
+		return
+	case idpErr != nil:
+		jsonErr(w, idpErr, http.StatusBadGateway)
+		return
+	case err != nil:
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}

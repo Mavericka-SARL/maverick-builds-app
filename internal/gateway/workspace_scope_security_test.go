@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -543,8 +544,11 @@ func TestAdminAndDeveloperRoutesIgnoreBusinessRolesElsewhere(t *testing.T) {
 		t.Run(tc.sub, func(t *testing.T) {
 			f := setupWSFixture(t)
 			for _, c := range tc.calls(f) {
-				if code, raw := f.do(t, c.method, c.path, tc.sub, c.app, "", c.body); code != http.StatusForbidden {
-					t.Errorf("%s %s as %s (business_user in tenant 2): status %d %s, want 403", c.method, c.path, tc.sub, code, raw)
+				// 404 where the route resolves the id itself (another
+				// tenant's row answers as an unknown one), 403 where the
+				// route's own guard refuses first.
+				if code, raw := f.do(t, c.method, c.path, tc.sub, c.app, "", c.body); code != http.StatusForbidden && code != http.StatusNotFound {
+					t.Errorf("%s %s as %s (business_user in tenant 2): status %d %s, want 403 or 404", c.method, c.path, tc.sub, code, raw)
 				}
 			}
 			one := func(sql string, args ...any) string {
@@ -628,8 +632,9 @@ func TestDeveloperGrantElsewhereIsNoBuilderAtHome(t *testing.T) {
 	if code := f.status(t, "PATCH", "/api/business-admin/roles/"+f.role1b, sub, f.app2, map[string]string{"name": "Hijacked"}); code != http.StatusForbidden {
 		t.Errorf("rename ws1b's role: status %d, want 403", code)
 	}
-	if code := f.status(t, "PATCH", "/api/developer/metrics/"+f.metricC, sub, "", map[string]string{"name": "Hijacked"}); code != http.StatusForbidden {
-		t.Errorf("edit ws1b's metric: status %d, want 403", code)
+	// A metric out of scope answers as an unknown one (requireResourceAccess).
+	if code := f.status(t, "PATCH", "/api/developer/metrics/"+f.metricC, sub, "", map[string]string{"name": "Hijacked"}); code != http.StatusNotFound {
+		t.Errorf("edit ws1b's metric: status %d, want 404", code)
 	}
 	var roleName, metricName string
 	if err := f.pool.QueryRow(context.Background(), `SELECT (SELECT name FROM identity.business_role WHERE id=$1::uuid), (SELECT name FROM model.metric_def WHERE id=$2::uuid)`, f.role1b, f.metricC).Scan(&roleName, &metricName); err != nil {
@@ -733,5 +738,28 @@ func TestOpenTaskStaysInItsApplication(t *testing.T) {
 	}
 	if code, raw := f.do(t, "POST", "/api/tasks/"+open3b+"/complete", "ws-bu2", "", "", map[string]string{"decision": "approve"}); code != http.StatusOK {
 		t.Errorf("tenant 2's business user deciding its open step: status %d %s", code, raw)
+	}
+}
+
+// The import list described someone else's import — its file, target and
+// first problem — to any tenant admin, whatever tenant the model was in:
+// tenant 1's administrator who is a user of tenant 2 read tenant 2's (found
+// auditing the tenant_admin branches, 2026-11-08). It is a builder's only of
+// the models of the tenants it administers.
+func TestImportListKeepsATenantAdminToItsTenant(t *testing.T) {
+	f := setupWSFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO import.import_job (model_id, status, file_url, created_by, revision_id, target_type, target_name, file_name)
+		VALUES ($1::uuid, 'committed', 's3://x/payroll.csv', (SELECT id FROM identity."user" WHERE keycloak_sub = 'ws-bu2'), $2::uuid, 'grid', 'Payroll', 'payroll.csv')`,
+		f.modelD, f.revD); err != nil {
+		t.Fatal(err)
+	}
+	code, raw := f.do(t, "GET", "/api/import/jobs", "ws-ta-cross", f.app3, "", nil)
+	if code != 200 {
+		t.Fatalf("list imports as ws-ta-cross: %d %s", code, raw)
+	}
+	if strings.Contains(string(raw), "payroll.csv") || strings.Contains(string(raw), "Payroll") {
+		t.Errorf("tenant 1's administrator reads tenant 2's import: %s", raw)
 	}
 }

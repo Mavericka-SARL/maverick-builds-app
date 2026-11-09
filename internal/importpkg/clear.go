@@ -16,7 +16,7 @@ import (
 
 // Clearing typed values in bulk: a metric's, or a grid's input metrics',
 // across the revision or under chosen members. The only bulk clear was a
-// full reload, which empties the whole revision; anything narrower went cell
+// full reload, which then emptied the whole revision; anything narrower went cell
 // by cell (a tester asking the AI Developer to clear test data got a
 // full-reload integration that never ran, 2026-10-15).
 

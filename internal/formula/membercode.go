@@ -8,14 +8,8 @@ package formula
 // ordering, "<>", a wildcard pattern — does not name the member. Used to
 // refuse deleting a member a formula names (MEMBER_IN_USE).
 func CriterionEqualsCode(v Value, code string) bool {
-	if code == "" || v.IsError() || v.IsBlank() {
-		return false
-	}
-	c := parseCriterion(v)
-	if c.op != opEq || c.wildcards {
-		return false
-	}
-	return c.matches(StringVal(code))
+	_, ok := criterionNamesCode(v, code, false)
+	return ok
 }
 
 // LiteralText returns the text a literal node compares as — a string as is,

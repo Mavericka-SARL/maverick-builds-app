@@ -64,6 +64,12 @@ type DimEvalContext struct {
 	// the source) the implementer returns CodeConflictingDimensions, never
 	// a value.
 	Resolve func(metric string, overrides map[string]string) (value float64, found bool, err *FormulaError)
+	// NoValue reports, for a read Resolve did not find, whether the source
+	// has no value at the overridden coordinates by its own rules (time
+	// summary none over several periods, aggregation none above its
+	// members), as opposed to nothing recorded there. LOOKUP is then blank,
+	// as the *VALUE functions are; nothing recorded reads 0. nil: never.
+	NoValue func(metric string, overrides map[string]string) bool
 	// CoordKey returns a stable key of the cell's coordinates, including
 	// the time period, with the given dimensions left out.
 	CoordKey func(excludeDims []string) string
@@ -91,6 +97,12 @@ const (
 	CodeUnknownProperty      = "UNKNOWN_PROPERTY"
 	CodeUnknownMember        = "UNKNOWN_MEMBER"
 	CodeDimensionNotOnSource = "DIMENSION_NOT_ON_SOURCE"
+	// CodeDimensionNotOnMetric: a formula reads a dimension at the cell —
+	// bare, as dim.property or through PARENT — that is not one of its own
+	// metric's grid dimensions, so the read is blank at every cell.
+	// Refused at formula save, grid placement, grid-dimension removal and
+	// revision activation.
+	CodeDimensionNotOnMetric = "DIMENSION_NOT_ON_METRIC"
 	// CodeConflictingDimensions: a LOOKUP or conditional aggregation
 	// overrides two dimensions related to the same dimension of its source
 	// (employees and region on a source keyed by employees), an
@@ -358,6 +370,9 @@ func fnLOOKUP(ctx *EvalContext, args []Node) Value {
 	val, found, ferr := d.Resolve(source, overrides)
 	if ferr != nil {
 		return ErrorVal(ferr)
+	}
+	if !found && d.NoValue != nil && d.NoValue(source, overrides) {
+		return BlankVal()
 	}
 	if codec, ok := d.picklist(source); ok {
 		if !found {

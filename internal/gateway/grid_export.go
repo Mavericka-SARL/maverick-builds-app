@@ -219,6 +219,12 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 			FROM runtime.fact_input
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL
 			  AND metric_id = ANY($3::uuid[])
+			  -- A metric records feed shows its records only: its typed
+			  -- values are set aside (writeguard.FedMetricsCTE), and a file
+			  -- holding them would be refused on its way back in.
+			  AND NOT EXISTS (SELECT 1 FROM model.form_metric_mapping mm
+				WHERE mm.target_metric_id = fact_input.metric_id AND mm.model_id = $1::uuid
+				  AND (mm.revision_id IS NULL OR mm.revision_id = $2::uuid))
 			ORDER BY metric_id, dim_members, entered_at DESC, id DESC
 		) fi`, modelID, revisionID, metricIDs)
 	if err != nil {

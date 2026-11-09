@@ -155,6 +155,10 @@ func Seed(t *testing.T, pool *pgxpool.Pool) *Fixture {
 	ex(`UPDATE identity.user SET disabled_at = now() WHERE id = $1::uuid`, f.Users["ba_1a_off"])
 	imp := user("imp_1a", f.Cust1)
 	role(imp, "business_user", f.WS1a)
+	// Business roles named like platform roles: migration 164 refuses them
+	// now, but the predicate still treats one written before it as naming
+	// nobody, so this test database lets them in.
+	ex(`ALTER TABLE identity.business_role DROP CONSTRAINT IF EXISTS business_role_name_not_platform_role`)
 	for _, name := range []string{"business_admin", "developer", "tenant_admin", "platform_admin"} {
 		br := one(`INSERT INTO identity.business_role (workspace_id, name) VALUES ($1::uuid, $2) RETURNING id::text`, f.WS1a, name)
 		ex(`INSERT INTO identity.business_role_member (role_id, user_id) VALUES ($1::uuid, $2::uuid)`, br, imp)

@@ -2,10 +2,13 @@
  * A file imported into a grid again — corrected, or the same one sent twice
  * — can replace the cells it lists. File imports offered only Incremental,
  * described as "Add / update rows" although it adds each value to the cell's
- * (so a second import doubled it), and Full reload, which wipes the
- * revision.
+ * (so a second import doubled it), and Full reload, which wiped the
+ * revision. Full reload now clears the grid the file is imported into —
+ * every metric of it — and says so; other grids keep their values.
  *
- * The server side is internal/importpkg/commit_rows_test.go.
+ * The server side is internal/importpkg/commit_rows_test.go, and for full
+ * reload TestFullReloadClearsOnlyTheGridsItWrites (store_test.go) and
+ * TestFullReloadClearsItsGridsAndRecalculates (internal/gateway).
  */
 import { test, expect } from "@playwright/test";
 import { mockApi, loadAs } from "./mocks";
@@ -40,4 +43,40 @@ test("a file import can replace the cells it lists, and says that incremental ad
 
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0].import_mode).toBe("replace");
+});
+
+test("a full reload says it clears the grid the file is imported into, not the revision", async ({ page }) => {
+  await mockApi(page);
+  const sent: Array<{ import_mode?: string }> = [];
+  await page.route("**/api/import/upload", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.dry_run) return route.fulfill(json({ dry_run: true, rows: 1, values: 1, error_rows: 0, errors: [] }));
+    sent.push(body);
+    await route.fulfill(json({ job_id: "job-1", status: "committed", total_rows: 1, valid_rows: 1, error_rows: 0, revision_id: "rev-1" }));
+  });
+  await page.route("**/api/developer/revisions*", (route) => route.fulfill(json([{ id: "rev-1", name: "Working", is_active: true }])));
+  await loadAs(page, "developer");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Integrations" }).click();
+  await page.getByRole("button", { name: "New Import" }).click();
+  await page.getByLabel("Grid", { exact: true }).selectOption({ label: "OPEX Planning Grid" });
+  await page.getByLabel("Target revision").selectOption("rev-1");
+
+  await expect(page.getByText(/Delete every value of this grid \(all its metrics/)).toBeVisible();
+  await expect(page.getByText("Delete all data for this revision")).toHaveCount(0);
+  await page.getByLabel(/Full reload/).check();
+  await page.locator('input[type="file"]').setInputFiles({ name: "plan.csv", mimeType: "text/csv",
+    buffer: Buffer.from("Department,Region,metric,value\nSALES,EMEA,opex_marketing,10\n") });
+  await page.getByRole("button", { name: "Next: Shape" }).click();
+  await page.getByRole("button", { name: /^Next: Map Columns/ }).click();
+  await page.getByRole("button", { name: "Next: Validate" }).click();
+  await page.getByRole("button", { name: /Commit Import/ }).first().click();
+
+  await expect(page.getByText(/every value of grid OPEX Planning Grid in revision Working/).first()).toBeVisible();
+  await expect(page.getByText(/Other grids keep their values/).first()).toBeVisible();
+  await page.getByRole("button", { name: /Commit Import \(\d+ rows?\)/ }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("Every value of grid OPEX Planning Grid in revision Working is deleted");
+  await page.getByRole("button", { name: "Delete and import" }).click();
+
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0].import_mode).toBe("full_reload");
 });

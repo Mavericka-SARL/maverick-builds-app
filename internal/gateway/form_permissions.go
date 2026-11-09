@@ -61,9 +61,15 @@ type servedForm struct {
 // lists one model's forms) through the same resolveFormRecordScope the sync
 // and the create decide by; what depends on the table itself — whether it
 // has a status field — is the table's.
+//
+// A form whose records the caller does not reach is left out, unless the
+// caller builds its model (Build lists every table): a dashboard's records
+// widget showed it with no records and no actions, the records routes
+// answering 404 (decided 2026-10-06).
 func (h *handler) withFormPermissions(ctx context.Context, act *actor, forms []*crudapp.FormDef) ([]servedForm, error) {
 	out := make([]servedForm, 0, len(forms))
 	byModel := map[string]formRecordScope{}
+	builds := map[string]bool{}
 	for _, f := range forms {
 		served := servedForm{FormDef: f, Permissions: formRecordScope{}.formPermissions()}
 		if act != nil {
@@ -78,6 +84,19 @@ func (h *handler) withFormPermissions(ctx context.Context, act *actor, forms []*
 				}
 			}
 			scope.formID, scope.form = f.ID, f
+			if !scope.reach {
+				b, seen := builds[f.ModelID]
+				if !seen {
+					var err error
+					if b, err = h.actorCanAccessModel(withBuilderRoute(ctx), act, f.ModelID); err != nil {
+						return nil, err
+					}
+					builds[f.ModelID] = b
+				}
+				if !b {
+					continue
+				}
+			}
 			// Who may add records, and a table everyone edits' view,
 			// are the table's own.
 			var err error

@@ -92,7 +92,19 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 		JOIN model.metric_def md ON md.id = f.metric_id AND md.is_input
 		WHERE f.model_id = $1::uuid AND f.revision_id = $2::uuid AND f.source_ref IS NULL
 		  AND f.dim_members->>$3 = $4
+		  -- Nor a typed value a metric records feed has set aside.
+		  AND NOT EXISTS (SELECT 1 FROM model.form_metric_mapping mm
+			WHERE mm.target_metric_id = f.metric_id AND mm.model_id = $1::uuid
+			  AND (mm.revision_id IS NULL OR mm.revision_id = $2::uuid))
 		  AND (COALESCE(cardinality($5::text[]), 0) = 0 OR f.metric_id::text = ANY($5::text[]))
+		  -- Only values at the metric's own coordinate: one stored before
+		  -- the cell write checked it, with a dimension the metric's grid has
+		  -- not or without one it has, is read by no grid, so it is not
+		  -- copied (and does not refuse the whole copy).
+		  AND COALESCE((SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(f.dim_members) k), '{}')
+		    = COALESCE((SELECT array_agg(gd.dimension_id::text ORDER BY gd.dimension_id::text)
+		                FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+		                WHERE gm.metric_id = f.metric_id), '{}')
 		ORDER BY f.metric_id, f.dim_members, f.entered_at DESC`,
 		modelID, revisionID, body.DimensionID, body.From, body.MetricIDs)
 	if err != nil {
@@ -134,6 +146,7 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cells := make([]preparedCell, 0, len(sources))
+	infos := map[string]cellMetricInfo{}
 	var refused []cellBatchRefusal
 	for _, s := range sources {
 		req := writebackReq{ModelID: modelID, RevisionID: revisionID, MetricID: s.metricID, DimCodes: s.codes}
@@ -145,7 +158,18 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 		default:
 			continue
 		}
-		c, ref := h.prepareCell(ctx, a, revisionID, req, s.format)
+		info, known := infos[s.metricID]
+		if !known {
+			info = cellMetricInfo{format: s.format}
+			var lerr error
+			_ = h.db.QueryRow(ctx, `SELECT COALESCE(NULLIF(label,''), name) FROM model.metric_def WHERE id=$1::uuid`, s.metricID).Scan(&info.label)
+			if info.gridName, info.dims, lerr = h.metricOwnDimensions(ctx, s.metricID); lerr != nil {
+				jsonErr(w, lerr, http.StatusInternalServerError)
+				return
+			}
+			infos[s.metricID] = info
+		}
+		c, ref := h.prepareCell(ctx, a, revisionID, req, info)
 		if ref != nil {
 			if len(refused) < 20 {
 				refused = append(refused, cellBatchRefusal{MetricID: s.metricID, Status: ref.status, Code: ref.code, Error: ref.message})

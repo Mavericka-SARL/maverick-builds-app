@@ -1027,6 +1027,13 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		return "", "", fmt.Errorf("update metric: %w", err)
 	}
+	// A rename carries into the highlight rules, closed rules and data
+	// exports naming the metric, as the developer's metric save does.
+	if p.Name != storedName {
+		if _, err := metricformula.RenameMetricInRules(ctx, e.pool, p.MetricID, storedName, p.Name); err != nil {
+			return "", "", fmt.Errorf("rename %s in the rules and exports naming it: %w", storedName, err)
+		}
+	}
 	if p.Label != nil {
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET label=NULLIF(btrim($2),'') WHERE id=$1::uuid`, p.MetricID, *p.Label); err != nil {
 			return "", "", fmt.Errorf("set label: %w", err)
@@ -1068,6 +1075,16 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	if formulaSent {
 		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
 			return "", "", fmt.Errorf("wire formula dependencies: %w", er)
+		}
+	}
+	// A rename carries into the formulas and workflow conditions naming it.
+	if p.Name != storedName {
+		n, err := metricformula.RenameMetricInFormulas(ctx, e.pool, p.MetricID, storedName, p.Name)
+		if err != nil {
+			return "", "", fmt.Errorf("rename %s in the formulas that read it: %w", storedName, err)
+		}
+		if n > 0 {
+			return fmt.Sprintf("Metric '%s' updated (renamed from '%s'; %d formula(s) reading it now use the new name)", p.Name, storedName, n), "", nil
 		}
 	}
 	return fmt.Sprintf("Metric '%s' updated", p.Name), "", nil
@@ -1118,7 +1135,10 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 const dimensionAggRule = "sum"
 
 type createDimensionParams struct {
-	Name                string `json:"name"`
+	Name string `json:"name"`
+	// Label is the display name selectors and headers show ("GL Account"
+	// for gl_account), as update_dimension sets it.
+	Label               string `json:"label"`
 	RevisionID          string `json:"revision_id"`
 	ParentDimensionName string `json:"parent_dimension_name"` // if set, this dimension is a child of that one — members' parent_code resolves against the PARENT dimension's members
 	ParentDimensionID   string `json:"parent_dimension_id"`   // the same, by id (either field)
@@ -1288,6 +1308,14 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 			return "", "", metricformula.DimensionNameTaken(err, p.Name)
 		}
 		return "", "", fmt.Errorf("insert dimension: %w", err)
+	}
+	if label := strings.TrimSpace(p.Label); label != "" && label != p.Name {
+		if len([]rune(label)) > 80 {
+			return "", "", fmt.Errorf("label: at most 80 characters")
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET label=$2 WHERE id=$1::uuid`, newID, label); err != nil {
+			return "", "", fmt.Errorf("set label: %w", err)
+		}
 	}
 	if timeCfg.Type == timedim.TypeTime {
 		// Time members go through the shared validation + reindex path in
@@ -1884,20 +1912,44 @@ func (e *WriteExecutor) addDimensionProperty(ctx context.Context, raw json.RawMe
 		INSERT INTO model.dimension_property (dimension_id, name, data_type)
 		VALUES ($1::uuid, $2, $3) RETURNING id::text
 	`, mappedDimID, p.Name, p.DataType).Scan(&newID); err != nil {
+		// Another change declared the name, in some case, at the same
+		// moment: the unique index (migration 170) refused this one.
+		if err := metricformula.PropertyNameConflict(ctx, e.pool, mappedDimID, p.Name, err); metricformula.IsPropertyNameConflict(err) {
+			return "", "", err
+		}
 		return "", "", fmt.Errorf("insert dimension property: %w", err)
 	}
 	withValue, undeclared, err := metricformula.AdoptPropertyValues(ctx, e.pool, mappedDimID, p.Name)
 	if err != nil {
 		return "", "", fmt.Errorf("adopt property values: %w", err)
 	}
+	// The members holding a value before the declaration: kept from a
+	// declaration deleted before, or set before it was declared.
+	fromBefore := withValue
+	// A table keeping the dimension fills it from its field of that name.
+	filled, err := recordpost.FillKeptProperties(ctx, e.pool, mappedDimID)
+	if err != nil {
+		return "", "", fmt.Errorf("fill the property from the table keeping the dimension: %w", err)
+	}
+	withValue += filled
 	msg := fmt.Sprintf("Property '%s' (%s) declared (id: %s) — formulas can now read it as <dimension>.%s; %d member(s) have a value",
 		p.Name, p.DataType, newID, p.Name, withValue)
+	if filled > 0 {
+		msg += fmt.Sprintf(" (%d filled from the field of that name of the table keeping the dimension, which keeps them up to date)", filled)
+	}
 	if withValue == 0 && len(undeclared) > 0 {
 		msg += fmt.Sprintf(". WARNING: the members' values are under %s, not '%s' — set them under '%s' with update_dimension_member, or declare the name they use, or every formula reading '%s' sees blanks",
 			strings.Join(undeclared, ", "), p.Name, p.Name, p.Name)
 	}
+	if note := metricformula.PreexistingValuesNote(p.Name, fromBefore); note != "" {
+		msg += ". NOTE: " + note + clearValuesOffer
+	}
 	return msg, newID, nil
 }
+
+// clearValuesOffer follows a metricformula.PreexistingValuesNote in a step
+// result: values are never cleared unless asked, so the assistant asks.
+const clearValuesOffer = ` — unless you set them yourself in this proposal, ask the developer whether they are stale; on a yes, clear them with update_dimension_property {"dimension_id", "property", "clear_values": true}`
 
 // ── update_dimension_property / delete_dimension_property ────────────────────
 
@@ -2045,6 +2097,9 @@ func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.Ra
 		Property    string `json:"property"`
 		Name        string `json:"name"`
 		DataType    string `json:"data_type"`
+		// ClearValues removes the property's value from every member —
+		// only when the developer asked for it.
+		ClearValues bool `json:"clear_values"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -2054,13 +2109,14 @@ func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.Ra
 		return "", "", err
 	}
 	name, dataType := strings.TrimSpace(p.Name), strings.TrimSpace(p.DataType)
-	if name == "" && dataType == "" {
-		return "", "", fmt.Errorf("nothing to change: provide name, data_type, or both")
+	if name == "" && dataType == "" && !p.ClearValues {
+		return "", "", fmt.Errorf("nothing to change: provide name, data_type, clear_values, or several")
 	}
-	if name == "" {
+	nameGiven, typeGiven := name != "", dataType != ""
+	if !nameGiven {
 		name = prop.name
 	}
-	if dataType == "" {
+	if !typeGiven {
 		dataType = prop.dataType
 	}
 	if err := metricformula.ValidatePropertyDeclaration(ctx, e.pool, prop.dimID, prop.id, name, dataType); err != nil {
@@ -2071,8 +2127,35 @@ func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.Ra
 		return "", "", err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	// Read again under a row lock, as the developer PATCH does: a rename
+	// at the same moment may have renamed the property since.
+	if err := tx.QueryRow(ctx, `SELECT name, data_type FROM model.dimension_property WHERE id=$1::uuid FOR UPDATE`,
+		prop.id).Scan(&prop.name, &prop.dataType); err != nil {
+		return "", "", fmt.Errorf("property %s no longer exists", prop.id)
+	}
+	if !nameGiven {
+		name = prop.name
+	}
+	if !typeGiven {
+		dataType = prop.dataType
+	}
+	var cleared int64
+	if p.ClearValues {
+		if cleared, err = metricformula.ClearPropertyValues(ctx, tx, prop.dimID, prop.name); err != nil {
+			return "", "", fmt.Errorf("clear property values: %w", err)
+		}
+	}
+	// A new type must read every value the members hold.
+	if dataType != prop.dataType {
+		if err := metricformula.CheckPropertyValues(ctx, tx, prop.dimID, prop.name, dataType); err != nil {
+			return "", "", err
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE model.dimension_property SET name=$2, data_type=$3 WHERE id=$1::uuid`,
 		prop.id, name, dataType); err != nil {
+		if err := metricformula.PropertyNameConflict(ctx, e.pool, prop.dimID, name, err); metricformula.IsPropertyNameConflict(err) {
+			return "", "", err
+		}
 		return "", "", fmt.Errorf("update dimension property: %w", err)
 	}
 	if err := metricformula.RenamePropertyValues(ctx, tx, prop.dimID, prop.name, name); err != nil {
@@ -2097,6 +2180,9 @@ func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.Ra
 	}
 	if dataType != prop.dataType {
 		changed = append(changed, fmt.Sprintf("type %s → %s", prop.dataType, dataType))
+	}
+	if p.ClearValues {
+		changed = append(changed, fmt.Sprintf("values cleared from %d member(s)", cleared))
 	}
 	if len(changed) == 0 {
 		changed = append(changed, "unchanged")
@@ -2193,6 +2279,10 @@ type createGridParams struct {
 	Metrics    []string `json:"metrics"`
 	Dimensions []string `json:"dimensions"`
 	Tags       []string `json:"tags"`
+	// Members: for each listed metric that already holds values, the member
+	// (code) of each grid dimension they lack that they belong to, by
+	// dimension id or name (add_grid_metric's members).
+	Members map[string]string `json:"members"`
 }
 
 func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -2244,7 +2334,7 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 		attachedDims++
 	}
 	for _, mid := range p.MetricIDs {
-		params, _ := json.Marshal(map[string]string{"grid_id": newID, "metric_id": mid})
+		params, _ := json.Marshal(map[string]any{"grid_id": newID, "metric_id": mid, "members": p.Members})
 		if _, _, err := e.addGridMetric(ctx, params); err != nil {
 			skipped = append(skipped, fmt.Sprintf("metric %s: %v", mid, err))
 			continue
@@ -2272,6 +2362,9 @@ func (e *WriteExecutor) addGridMetric(ctx context.Context, raw json.RawMessage) 
 	var p struct {
 		GridID   string `json:"grid_id"`
 		MetricID string `json:"metric_id"`
+		// Members: the member (code) of each grid dimension the metric's
+		// values lack that they belong to, by dimension id or name.
+		Members map[string]string `json:"members"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
@@ -2314,40 +2407,57 @@ func (e *WriteExecutor) addGridMetric(ctx context.Context, raw json.RawMessage) 
 		return "", "", fmt.Errorf("metric is already in grid %q — a metric can only belong to one grid; remove it there first", existingGridName)
 	}
 
-	var sortOrder int
-	_ = e.pool.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order),0)+1 FROM model.grid_metric WHERE grid_id=$1::uuid`, p.GridID).Scan(&sortOrder)
-	if err := e.gridMembershipTx(ctx, p.GridID, `
-		INSERT INTO model.grid_metric (grid_id, metric_id, sort_order)
-		VALUES ($1::uuid, $2::uuid, $3) ON CONFLICT DO NOTHING
-	`, p.GridID, p.MetricID, sortOrder); err != nil {
+	// The same change as the console's (modeledit.AttachGridMetric): the
+	// grid's time validation, postings that must fit the grid, and the
+	// metric's values moved to the grid's coordinate — given the member
+	// named for a dimension they lack, combined by the metric's own rule
+	// along one the grid has not got.
+	members := map[string]string{}
+	for dim, member := range p.Members {
+		dimID, err := e.requireInModel(ctx, "dimension", dim)
+		if err != nil {
+			return "", "", err
+		}
+		members[dimID] = member
+	}
+	var res modeledit.GridValuesResult
+	if err := e.gridValuesTx(ctx, func(tx pgx.Tx) (err error) {
+		res, err = modeledit.AttachGridMetric(ctx, tx, p.GridID, p.MetricID, members, e.userID)
+		return err
+	}); err != nil {
 		return "", "", fmt.Errorf("add grid metric: %w", err)
 	}
-	return "Metric added to grid", "", nil
+	return "Metric added to grid" + gridValuesNote(res), "", nil
 }
 
-// gridMembershipTx applies a grid membership change and re-runs the
-// revision's time validation in the same transaction — the AI Developer's
-// twin of the developer console's grid handlers, so a grid can never gain a
-// second time dimension or strand a time-series metric off its axis.
-func (e *WriteExecutor) gridMembershipTx(ctx context.Context, gridID, sql string, args ...any) error {
+// gridValuesTx runs one grid change that moves stored values in a
+// transaction — the AI Developer's twin of the developer console's grid
+// handlers (modeledit.AddGridDimension, modeledit.AttachGridMetric).
+func (e *WriteExecutor) gridValuesTx(ctx context.Context, change func(pgx.Tx) error) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	if _, err := tx.Exec(ctx, sql, args...); err != nil {
-		return err
-	}
-	var modelID, revisionID string
-	if err := tx.QueryRow(ctx,
-		`SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridID,
-	).Scan(&modelID, &revisionID); err != nil {
-		return err
-	}
-	if err := metricformula.ValidateGridTime(ctx, tx, modelID, revisionID, gridID); err != nil {
+	if err := change(tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// gridValuesNote says what a grid change did to the values already stored.
+func gridValuesNote(res modeledit.GridValuesResult) string {
+	var parts []string
+	if res.Moved > 0 {
+		parts = append(parts, fmt.Sprintf("%d stored values filed under the member named", res.Moved))
+	}
+	if res.Combined > 0 {
+		parts = append(parts, fmt.Sprintf("%d stored values combined by the metric's own rule along the dimensions the grid has not got", res.Combined))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, "; ") + ")"
 }
 
 // ── add_grid_dimension ────────────────────────────────────────────────────────
@@ -2356,6 +2466,9 @@ func (e *WriteExecutor) addGridDimension(ctx context.Context, raw json.RawMessag
 	var p struct {
 		GridID      string `json:"grid_id"`
 		DimensionID string `json:"dimension_id"`
+		// Member: the member (code) of the dimension the grid's metrics'
+		// values belong to; required while they hold any.
+		Member string `json:"member"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
@@ -2374,13 +2487,14 @@ func (e *WriteExecutor) addGridDimension(ctx context.Context, raw json.RawMessag
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
-	if err := e.gridMembershipTx(ctx, p.GridID, `
-		INSERT INTO model.grid_dimension (grid_id, dimension_id)
-		VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING
-	`, p.GridID, p.DimensionID); err != nil {
+	var res modeledit.GridValuesResult
+	if err := e.gridValuesTx(ctx, func(tx pgx.Tx) (err error) {
+		res, err = modeledit.AddGridDimension(ctx, tx, p.GridID, p.DimensionID, p.Member)
+		return err
+	}); err != nil {
 		return "", "", fmt.Errorf("add grid dimension: %w", err)
 	}
-	return "Dimension added to grid", "", nil
+	return "Dimension added to grid" + gridValuesNote(res), "", nil
 }
 
 // ── set_tags ──────────────────────────────────────────────────────────────────
@@ -2959,7 +3073,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// input metric blank.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO runtime.fact_input
-			  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value)
+			  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value, link_ref)
 			SELECT
 				fi.model_id, fi.revision_name,
 				new_m.id,
@@ -2971,7 +3085,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				                               AND new_d.revision_id = $2::uuid),
 				fi.value, fi.entered_by,
 				$2::uuid,
-				fi.source_ref, fi.entered_at, fi.text_value
+				-- link_ref names a model link by its link_id, the same in
+				-- every revision (migration 169): copied as it is.
+				fi.source_ref, fi.entered_at, fi.text_value, fi.link_ref
 			FROM runtime.fact_input fi
 			JOIN model.metric_def old_m ON old_m.id = fi.metric_id
 			JOIN model.metric_def new_m ON new_m.model_id = old_m.model_id
@@ -3208,7 +3324,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 				COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
 				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1),
-				         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text")+` THEN i.target_id END),
+				         CASE WHEN `+integration.RevisionlessTargetSQL("i.target_id::text", "i.model_id")+` THEN i.target_id END),
 				CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
 					SELECT jsonb_object_agg(e.key, COALESCE((
 						SELECT to_jsonb(m.new_id::text) FROM idmap m
@@ -3219,7 +3335,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 						                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
 						 LIMIT 1),
 					CASE WHEN e.key = 'target_id' AND jsonb_typeof(e.value) = 'string'
-					          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')")+`
+					          AND NOT `+integration.RevisionlessTargetSQL("(e.value #>> '{}')", "i.model_id")+`
 					     THEN 'null'::jsonb ELSE e.value END))
 					FROM jsonb_each(i.config) e), i.config)
 				ELSE i.config END,
@@ -3233,6 +3349,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		}
 		if _, err := tx.Exec(ctx, integration.CopySchedulesSQL, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy connector schedules into new revision: %w", err)
+		}
+		if err := integration.NewStoreOn(tx).CarryRemappedTests(ctx, e.modelID, newID); err != nil {
+			return "", "", fmt.Errorf("carry connector tests into new revision: %w", err)
 		}
 
 		// Copy workflow definitions and automation rules — the same
@@ -3966,8 +4085,11 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 		memberRules = *p.Rules
 	}
 	for i, r := range memberRules {
-		if r.Access != "read" && r.Access != "hidden" {
-			return "", "", fmt.Errorf("rule %d: access must be \"read\" or \"hidden\", got %q", i+1, r.Access)
+		// "only" / "only_read": the member is on the person's allow-list
+		// for its dimension — every other member is hidden from them,
+		// members added later included (writeguard.AccessOnly).
+		if r.Access != "read" && r.Access != "hidden" && r.Access != writeguard.AccessOnly && r.Access != writeguard.AccessOnlyRead {
+			return "", "", fmt.Errorf("rule %d: access must be \"read\", \"hidden\", \"only\" or \"only_read\", got %q", i+1, r.Access)
 		}
 		if strings.TrimSpace(r.Dimension) == "" || strings.TrimSpace(r.MemberCode) == "" {
 			return "", "", fmt.Errorf("rule %d: dimension and member_code are required", i+1)

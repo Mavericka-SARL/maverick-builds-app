@@ -299,6 +299,69 @@ func checkSourceDimensions(metricName string, an *formula.Analysis, rd *revision
 	return nil
 }
 
+// cellDimReads returns the dimensions an reads at the cell's own member,
+// with how each is written: its CellDims (dim.property values, PARENT) and
+// every plain reference that names a dimension of the revision and no
+// metric (isMetric) — a metric of the same name is what such a name reads.
+func cellDimReads(an *formula.Analysis, rd *revisionDims, isMetric func(string) bool) []formula.CellDimRead {
+	out := append([]formula.CellDimRead(nil), an.CellDims...)
+	for _, ref := range an.References {
+		if ref.Dimensional || rd.lookup(ref.Name) == nil || isMetric(ref.Name) {
+			continue
+		}
+		out = append(out, formula.CellDimRead{Dim: ref.Name, Text: ref.Name})
+	}
+	return out
+}
+
+// checkCellDimensions refuses a read of a dimension at the cell — bare, as
+// dim.property or through PARENT — when the dimension is not one of the
+// metric's own grid dimensions (ownDims): no cell of the metric has a
+// member of it, so the read is blank everywhere (DIMENSION_NOT_ON_METRIC).
+// A related dimension (a property grouping or a parent dimension of a grid
+// dimension) is no exception: a cell pins only its grid's dimensions. The
+// message says how to read it through a dimension the grid has.
+func checkCellDimensions(metricName string, reads []formula.CellDimRead, rd *revisionDims, ownDims []string) error {
+	for _, read := range reads {
+		d := rd.lookup(read.Dim)
+		if d == nil {
+			continue // reported by checkDimensionNames
+		}
+		if containsID(ownDims, d.id) {
+			continue
+		}
+		hint := ""
+		if st := rd.structure[d.id]; st != nil && st.SourceDimensionID != "" && st.SourceProperty != "" && containsID(ownDims, st.SourceDimensionID) {
+			if src := rd.byID[st.SourceDimensionID]; src != nil {
+				hint = fmt.Sprintf(" (%s groups %s by %s: write %s.%s)", d.name, src.name, st.SourceProperty, src.name, st.SourceProperty)
+			}
+		}
+		for _, own := range ownDims {
+			if hint != "" {
+				break
+			}
+			if st := rd.structure[own]; st != nil && st.ParentDimensionID == d.id {
+				if o := rd.byID[own]; o != nil {
+					hint = fmt.Sprintf(" (%s is the parent dimension of %s: write PARENT(%s))", d.name, o.name, o.name)
+				}
+			}
+		}
+		return invalidCode(formula.CodeDimensionNotOnMetric,
+			"%s reads %s at the cell (%s), but %s is not one of its grid's dimensions (%s), so it is blank at every cell — put %s on the grid, or read it through a dimension the grid has%s",
+			metricName, d.name, read.Text, d.name, dimNames(rd, ownDims), d.name, hint)
+	}
+	return nil
+}
+
+func containsID(ids []string, id string) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
 func onSource(rd *revisionDims, srcDims []string, d *dimInfo) bool {
 	for _, own := range srcDims {
 		if own == d.id {

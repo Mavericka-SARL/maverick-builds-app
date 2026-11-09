@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
@@ -290,7 +291,7 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		// dimension (by name), or of any when it names none.
 		{`UPDATE model.metric_def md
 		  SET highlight_rules = (SELECT jsonb_agg(CASE WHEN jsonb_typeof(r->'members') = 'array' AND r->'members' ? $3
-		                                                AND COALESCE(r->>'dimension', '') IN ('', d.name)
+		                                                AND lower(COALESCE(r->>'dimension', '')) IN ('', lower(d.name))
 		                                           THEN jsonb_set(r, '{members}', (SELECT jsonb_agg(CASE WHEN m = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE m END ORDER BY mo)
 		                                                                          FROM jsonb_array_elements(r->'members') WITH ORDINALITY AS y(m, mo)))
 		                                           ELSE r END ORDER BY o)
@@ -311,6 +312,10 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 	// The dimension's calculated members name it in their formulas.
 	if err := RewriteMemberFormulas(ctx, db, dimID, oldCode, newCode); err != nil {
 		errs = append(errs, fmt.Errorf("re-key calculated member formulas: %w", err))
+	}
+	// Metric formulas and data exports name it by its code too.
+	if _, err := metricformula.RenameMemberInFormulas(ctx, db, dimID, oldCode, newCode); err != nil {
+		errs = append(errs, fmt.Errorf("re-key metric formulas and exports: %w", err))
 	}
 	return errors.Join(errs...)
 }

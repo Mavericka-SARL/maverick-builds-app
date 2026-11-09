@@ -581,6 +581,11 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	if err != nil {
 		return "", "", err
 	}
+	if p.TargetType == "form" {
+		if err := recordpost.CheckColumnMapFields(ctx, e.pool, targetID, cfg.ColumnMap); err != nil {
+			return "", "", err
+		}
+	}
 	if err := p.Reshape.Validate(); err != nil {
 		return "", "", err
 	}
@@ -799,6 +804,11 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 			changed = append(changed, "sheet")
 		}
 		if p.ColumnMap != nil {
+			if row.TargetType == "form" {
+				if err := recordpost.CheckColumnMapFields(ctx, e.pool, targetID, p.ColumnMap); err != nil {
+					return "", "", err
+				}
+			}
 			c["column_map"] = p.ColumnMap
 			changed = append(changed, "column_map")
 		}

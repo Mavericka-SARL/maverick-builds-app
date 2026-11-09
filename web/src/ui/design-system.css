@@ -2277,6 +2277,18 @@ td[data-sel] .mvx-cell-input { background: transparent; }
 .mvx-records-fill > * { flex-shrink: 0; }
 .mvx-records-fill > .mvx-table-wrap { flex-shrink: 1; }
 
+/* A records widget fills its box; in a dashboard box that is at most as tall
+   as designed (FIT_HEIGHT_WIDGET_TYPES), the panel and its list take the
+   records' height, and the list scrolls once that is more than the box. */
+.mvx-records-box { height: 100%; }
+.mvx-dash-cell__body--fit > .mvx-records-box {
+  height: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mvx-dash-cell__body--fit > .mvx-records-box > .mvx-records-fill { height: auto; }
+
 /* A pick-list cell: a member chosen from a list. */
 .mvx-cell-select {
   width: auto;

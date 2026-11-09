@@ -525,3 +525,57 @@ func TestKeptDimensionsLinkRecords(t *testing.T) {
 		}
 	})
 }
+
+// A cascading delete took records the deleter could not see, and its
+// confirmation counted them all (2026-10-17). The plan now counts only the
+// records the deleter sees, and refuses while a record they cannot see is
+// linked to it, without saying how many (owner's decision, 2026-11-08).
+func TestCascadeDeleteRefusesWhileHiddenRecordsAreLinked(t *testing.T) {
+	d := setupSalesDemo(t)
+	accountDim := idOf(d.call("POST", "/api/developer/dimensions", d.dev, map[string]any{"name": "crm_account", "revision_id": d.revID}))
+	table := func(body map[string]any) string {
+		t.Helper()
+		return idOf(d.call("POST", "/api/forms", d.dev, body))
+	}
+	accounts := table(map[string]any{"name": "accounts", "label": "Accounts", "fields": []map[string]any{
+		{"name": "code", "label": "Code", "type": "autocode", "code_prefix": "ACC-", "code_digits": 4},
+		{"name": "name", "label": "Name", "type": "text", "required": true},
+	}, "keeps_dimension_id": accountDim, "member_label_field": "name", "edit_access": "everyone"})
+	followups := table(map[string]any{"name": "followups", "label": "Follow-ups", "own_records_only": true, "fields": []map[string]any{
+		{"name": "title", "label": "Title", "type": "text", "required": true},
+		{"name": "account", "label": "Account", "type": "dimension", "dimension_id": accountDim, "on_delete": "cascade"},
+	}})
+	type rec struct {
+		ID   string         `json:"id"`
+		Data map[string]any `json:"data"`
+	}
+	create := func(persona, formID string, data map[string]any) rec {
+		t.Helper()
+		raw, _ := json.Marshal(d.call("POST", "/api/forms/"+formID+"/records", persona, map[string]any{"data": data}))
+		var r rec
+		_ = json.Unmarshal(raw, &r)
+		return r
+	}
+	acme := create(d.westRep, accounts, map[string]any{"name": "Acme"})
+	create(d.westRep, followups, map[string]any{"title": "Call back", "account": acme.Data["code"]})
+	create(d.eastRep, followups, map[string]any{"title": "East's own", "account": acme.Data["code"]})
+
+	plan := d.call("GET", "/api/records/"+acme.ID+"/delete-plan", d.westRep, nil)
+	cascade, _ := plan["cascade"].([]any)
+	if plan["can_delete"] != false || len(cascade) != 1 || cascade[0].(map[string]any)["count"] != float64(1) {
+		t.Errorf("West's plan = %v, want refused, counting West's one follow-up", plan)
+	}
+	if refusal, _ := plan["refusal"].(string); !strings.Contains(refusal, "records you cannot see") || strings.Contains(refusal, "2") {
+		t.Errorf("West's refusal = %q", refusal)
+	}
+	if status, body := d.req("DELETE", "/api/records/"+acme.ID, d.westRep, nil); status != http.StatusConflict {
+		t.Errorf("West deleting Acme: %d %s, want 409", status, body)
+	}
+	// An administrator of the tables sees both follow-ups and deletes it.
+	if plan := d.call("GET", "/api/records/"+acme.ID+"/delete-plan", d.admin, nil); plan["can_delete"] != true {
+		t.Errorf("the administrator's plan = %v, want deletable", plan)
+	}
+	if out := d.call("DELETE", "/api/records/"+acme.ID, d.admin, nil); out["deleted"] != float64(3) {
+		t.Errorf("the administrator's delete = %v, want 3 records", out)
+	}
+}

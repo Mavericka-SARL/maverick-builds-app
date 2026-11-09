@@ -95,14 +95,17 @@ func CheckOwnership(ctx context.Context, q RowQuerier, modelID, revisionID, targ
 }
 
 // RevisionlessTargetSQL is an SQL condition that holds unless the text
-// expression id names a grid, form, dimension or dashboard of some revision.
-// A revision copy keeps a connector's target it could not map to the new
-// revision only when it holds: a target of another revision is cleared
-// rather than carried, so the copy cannot read or write the revision it was
-// copied from (decided 2026-10-06).
-func RevisionlessTargetSQL(id string) string {
+// expression id names a grid, form, dimension or dashboard of some revision,
+// or one of a model other than the SQL expression model's. A revision copy
+// keeps a connector's target it could not map to the new revision only when
+// it holds: a target of another revision is cleared rather than carried, so
+// the copy cannot read or write the revision it was copied from (decided
+// 2026-10-06), and another model's is cleared too — a planted or crafted
+// target used to be carried into every new revision, refused only when it
+// ran (private observations, 2026-09-29).
+func RevisionlessTargetSQL(id, model string) string {
 	q := func(table string) string {
-		return `SELECT 1 FROM ` + table + ` WHERE id::text = ` + id + ` AND revision_id IS NOT NULL`
+		return `SELECT 1 FROM ` + table + ` WHERE id::text = ` + id + ` AND (revision_id IS NOT NULL OR model_id <> ` + model + `)`
 	}
 	return `NOT EXISTS (` + q("model.grid_def") + ` UNION ALL ` + q("model.form_def") +
 		` UNION ALL ` + q("model.dimension_def") + ` UNION ALL ` + q("model.dashboard_def") + `)`

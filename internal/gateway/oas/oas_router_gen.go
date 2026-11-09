@@ -190,7 +190,7 @@ var (
 		"POST": "Authorization,Content-Type",
 	}
 	rn275AllowedHeaders = map[string]string{
-		"POST": "Authorization",
+		"POST": "Authorization,Content-Type",
 	}
 	rn230AllowedHeaders = map[string]string{
 		"GET": "Authorization",
@@ -387,14 +387,14 @@ var (
 	rn19AllowedHeaders = map[string]string{
 		"DELETE": "Authorization",
 		"PATCH":  "Authorization,Content-Type",
-		"POST":   "Authorization",
+		"POST":   "Authorization,Content-Type",
 	}
 	rn292AllowedHeaders = map[string]string{
 		"PUT": "Authorization,Content-Type",
 	}
 	rn22AllowedHeaders = map[string]string{
 		"DELETE": "Authorization",
-		"POST":   "Authorization",
+		"POST":   "Authorization,Content-Type",
 	}
 	rn162AllowedHeaders = map[string]string{
 		"POST": "Authorization,Content-Type",
@@ -501,6 +501,7 @@ var (
 	}
 	rn2AllowedHeaders = map[string]string{
 		"DELETE": "Authorization",
+		"PATCH":  "Authorization,Content-Type",
 	}
 	rn3AllowedHeaders = map[string]string{
 		"PUT": "Authorization",
@@ -575,7 +576,7 @@ var (
 		"GET": "Authorization",
 	}
 	rn220AllowedHeaders = map[string]string{
-		"POST": "Authorization,Content-Type",
+		"POST": "Authorization,Content-Type,Idempotency-Key",
 	}
 	rn87AllowedHeaders = map[string]string{
 		"GET":  "Authorization",
@@ -2625,7 +2626,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 													s.notAllowed(w, r, notAllowedParams{
 														allowedMethods: "POST",
 														allowedHeaders: rn275AllowedHeaders,
-														acceptPost:     "",
+														acceptPost:     "application/json",
 														acceptPatch:    "",
 													})
 												}
@@ -4744,7 +4745,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 														s.notAllowed(w, r, notAllowedParams{
 															allowedMethods: "DELETE,PATCH,POST",
 															allowedHeaders: rn19AllowedHeaders,
-															acceptPost:     "",
+															acceptPost:     "application/json",
 															acceptPatch:    "application/json",
 														})
 													}
@@ -4819,7 +4820,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 														s.notAllowed(w, r, notAllowedParams{
 															allowedMethods: "DELETE,POST",
 															allowedHeaders: rn22AllowedHeaders,
-															acceptPost:     "",
+															acceptPost:     "application/json",
 															acceptPatch:    "",
 														})
 													}
@@ -5906,12 +5907,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 												s.handleDeleteRevisionRequest([1]string{
 													args[0],
 												}, elemIsEscaped, w, r)
+											case "PATCH":
+												s.handleRenameRevisionRequest([1]string{
+													args[0],
+												}, elemIsEscaped, w, r)
 											default:
 												s.notAllowed(w, r, notAllowedParams{
-													allowedMethods: "DELETE",
+													allowedMethods: "DELETE,PATCH",
 													allowedHeaders: rn2AllowedHeaders,
 													acceptPost:     "",
-													acceptPatch:    "",
+													acceptPatch:    "application/json",
 												})
 											}
 
@@ -12476,7 +12481,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 													return r, true
 												case "PATCH":
 													r.name = UpdateFolderOperation
-													r.summary = "Rename or reparent a dashboard folder"
+													r.summary = "Rename or reparent a dashboard folder (partial; only the fields sent change)"
 													r.operationID = "updateFolder"
 													r.operationGroup = ""
 													r.pathPattern = "/api/developer/folders/{id}"
@@ -13663,7 +13668,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 													return r, true
 												case "PATCH":
 													r.name = UpdateMetricOperation
-													r.summary = "Update a metric definition (re-wires formula dependencies and recalculates affected revisions)"
+													r.summary = "Update a metric definition (re-wires formula dependencies and recalculates the metric's revision)"
 													r.operationID = "updateMetric"
 													r.operationGroup = ""
 													r.pathPattern = "/api/developer/metrics/{id}"
@@ -13974,6 +13979,15 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 												r.name = DeleteRevisionOperation
 												r.summary = "Delete a revision (rejected if it is the model's active revision)"
 												r.operationID = "deleteRevision"
+												r.operationGroup = ""
+												r.pathPattern = "/api/developer/revisions/{id}"
+												r.args = args
+												r.count = 1
+												return r, true
+											case "PATCH":
+												r.name = RenameRevisionOperation
+												r.summary = "Rename a revision (the live one too; the model's header follows)"
+												r.operationID = "renameRevision"
 												r.operationGroup = ""
 												r.pathPattern = "/api/developer/revisions/{id}"
 												r.args = args

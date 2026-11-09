@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 )
@@ -58,6 +60,13 @@ type ImportRequest struct {
 	// ByPerson says CreatorID is the person loading the file, whom a refusal
 	// addresses as "you".
 	ByPerson bool
+	// BeforeCommit, when set, runs in the records' transaction once every
+	// record is created (res says how many, and how many were replaced),
+	// just before it commits: what it writes commits with them, and its
+	// error rolls the whole file back and is Import's. The records import
+	// writes its Recent Imports line there, holding the Idempotency-Key the
+	// file was sent under, so a file sent again is not created twice.
+	BeforeCommit func(ctx context.Context, tx pgx.Tx, res ImportResult) error
 }
 
 // ImportResult is what an import did, or would do in a dry run.
@@ -133,12 +142,12 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	// A dry run of a connector nobody has run yet has no principal: there
 	// is nobody's access to check its rows against.
 	view := &AccessView{}
-	var checks *tablePosting // what a row posts, checked once per cell
+	checks, err := ps.newTablePosting(ctx, form) // what a row posts, checked once per cell
+	if err != nil {
+		return res, err
+	}
 	if req.CreatorID != "" {
 		if view, err = ps.AccessViewFor(ctx, req.CreatorID, form); err != nil {
-			return res, err
-		}
-		if checks, err = ps.newTablePosting(ctx, form); err != nil {
 			return res, err
 		}
 	}
@@ -212,6 +221,12 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			}
 		}
 		if !rowValid {
+			continue
+		}
+		// A row holding a value with a mapped field empty would post at a
+		// partial coordinate: refused naming its column, whoever imports.
+		if field, msg := checks.emptyMappedField("", &RecordState{Status: status, Data: data}); field != "" {
+			errs = append(errs, RowError{Row: row.RowNumber, Column: firstNonEmpty(headerOf[field], field), Message: msg})
 			continue
 		}
 		if req.CreatorID != "" {
@@ -299,6 +314,14 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			return ImportResult{}, fmt.Errorf("create record: %w", cErr)
 		}
 		recs = append(recs, rec)
+	}
+	if req.BeforeCommit != nil {
+		done := res
+		done.Created = len(recs)
+		if err := req.BeforeCommit(ctx, tx, done); err != nil {
+			membersAdded = false
+			return ImportResult{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		membersAdded = false

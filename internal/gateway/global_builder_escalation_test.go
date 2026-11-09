@@ -39,6 +39,8 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee/assigneetest"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
+	"github.com/mavericks-engine/mavericks/pkg/logger"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // gbUser creates an account of tenant cust ("" = none of its own) with
@@ -113,15 +115,15 @@ func TestTenantAdminCannotMakePlatformWideBuilder(t *testing.T) {
 	// Live case 2: a tenant_admin of ws1a with no customer_id, granting
 	// itself. It could not grant this to another account, so not to itself.
 	self := f.gbUser(t, "gb-ta-self", "", [2]string{"tenant_admin", f.ws1a})
-	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusForbidden)
+	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusNotFound)
 	f.expect(t, "gb-ta-self", "POST", "/api/admin/users/"+self+"/roles", "", map[string]string{"role": "developer"}, http.StatusForbidden)
 	f.renameMetric(t, "gb-ta-self", f.metricD, http.StatusForbidden)
-	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusForbidden)
+	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusNotFound)
 	// What it may grant anyone, it may grant itself: developer inside its
 	// own workspace, which adds nothing in tenant 2.
 	f.expect(t, "gb-ta-self", "POST", "/api/admin/users/"+self+"/roles", "", map[string]string{"role": "developer", "workspace_id": f.ws1a}, http.StatusOK)
 	f.renameMetric(t, "gb-ta-self", f.metricD, http.StatusForbidden, http.StatusNotFound)
-	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusForbidden)
+	f.expect(t, "gb-ta-self", "PATCH", "/api/admin/applications/"+f.app3, "", appRename, http.StatusNotFound)
 	if got := f.one(t, `SELECT name FROM core.application WHERE id=$1::uuid`, f.app3); got == appRename["name"] {
 		t.Errorf("tenant 2's application was renamed")
 	}
@@ -277,13 +279,22 @@ func TestNarrowedCustomerlessDeveloperIsNotPlatformWide(t *testing.T) {
 	f.renameMetric(t, "gb-narrow-kept", f.metricC, http.StatusOK)
 	f.renameMetric(t, "gb-narrow-kept", f.metricD, http.StatusForbidden, http.StatusNotFound)
 
-	// A platform admin's removal is as it was: it may mean to make the
-	// account platform-wide.
+	// A platform admin's removal no longer widens either: platform-wide
+	// reach is the platform_wide marker (migration 167), which the grant
+	// cleared. A platform admin who means it grants the unscoped developer
+	// role afresh, which sets the marker.
 	pw := f.gbUser(t, "gb-platform-widened", "", [2]string{"developer", ""})
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, pw, f.app2); err != nil {
 		t.Fatal(err)
 	}
 	f.expect(t, "mm-platform", "DELETE", "/api/admin/users/"+pw+"/access/apps/"+f.app2, "", nil, http.StatusOK)
+	f.renameMetric(t, "gb-platform-widened", f.metricD, http.StatusForbidden, http.StatusNotFound)
+	if _, err := f.pool.Exec(ctx, `DELETE FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'developer'`, pw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'developer')`, pw); err != nil {
+		t.Fatal(err)
+	}
 	f.renameMetric(t, "gb-platform-widened", f.metricD, http.StatusOK)
 }
 
@@ -740,4 +751,37 @@ func TestSCIMChangesOnlyTheTenantsOwnAccounts(t *testing.T) {
 	if code, body := f.do(t, f.srv, http.MethodDelete, "/api/scim/v2/Users/"+own, nil, bearer); code != http.StatusNoContent {
 		t.Errorf("DELETE own account: %d %s", code, body)
 	}
+}
+
+// Platform-wide reach was the absence of grant rows: a developer with no
+// tenant, narrowed to one application, became a builder of every tenant
+// when its last grant went by a path that did not also revoke its developer
+// grant (private observations, 2026-09-30). The platform_wide marker
+// (migration 167) decides it now: set by the unscoped developer grant to an
+// account with no grants, cleared by any grant, so a removed grant narrows.
+func TestRemovedGrantNarrowsAPlatformWideBuilder(t *testing.T) {
+	f := setupDevRouteFixture(t)
+	ctx := context.Background()
+	wide := f.gbUser(t, "pw-wide", "", [2]string{"developer", ""})
+	narrowed := f.gbUser(t, "pw-narrowed", "", [2]string{"developer", ""})
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, narrowed, f.app1); err != nil {
+		t.Fatal(err)
+	}
+	h := &handler{db: tenantdb.NewHandle(f.pool, nil), log: logger.New("test")}
+	isWide := func(id string) bool {
+		t.Helper()
+		return h.isGlobalBuilder(ctx, &actor{UserID: id, Roles: []string{"developer"}})
+	}
+	if !isWide(wide) || isWide(narrowed) {
+		t.Fatalf("before: wide %v, narrowed %v; want true, false", isWide(wide), isWide(narrowed))
+	}
+	// Its last grant deleted by a path that does not revoke the developer
+	// grant with it: still narrowed, not a builder of every tenant.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM identity.user_app_access WHERE user_id = $1::uuid`, narrowed); err != nil {
+		t.Fatal(err)
+	}
+	if isWide(narrowed) {
+		t.Error("deleting the narrowed developer's last grant made it platform-wide")
+	}
+	f.expect(t, "pw-narrowed", "PATCH", "/api/admin/applications/"+f.app3, "", map[string]string{"name": "Hijacked"}, http.StatusForbidden, http.StatusNotFound)
 }

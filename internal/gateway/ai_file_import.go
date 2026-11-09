@@ -27,6 +27,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
@@ -102,7 +103,18 @@ func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req ai
 		return nil, fmt.Errorf("column_map names column(s) %s that %s does not have%s — its columns are: %s",
 			strings.Join(missing, ", "), f.describe(), after, strings.Join(header, ", "))
 	}
-	if f.mapped, err = importpkg.ApplyColumnMap(header, rows, req.ColumnMap); err != nil {
+	if req.TargetType == "form" {
+		// A column mapped to no field of the table is refused, not read
+		// past; a table this plan creates is checked when it is saved.
+		var exists bool
+		_ = h.db.For(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.form_def WHERE id::text = $1)`, req.TargetID).Scan(&exists)
+		if exists {
+			if err := recordpost.CheckColumnMapFields(ctx, h.db.For(ctx), req.TargetID, req.ColumnMap); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if f.mapped, err = importpkg.ApplyColumnMapTo(header, rows, req.ColumnMap, req.TargetType); err != nil {
 		return nil, err
 	}
 	f.rows = rows
@@ -440,7 +452,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 				return fail(err)
 			}
 		}
-		imported, errs, err := h.importDimensionMembersCSV(ctx, req.TargetID, cr, colIdx)
+		imported, errs, notices, err := h.importDimensionMembersCSV(ctx, req.TargetID, cr, colIdx)
 		if err != nil {
 			return fail(err)
 		}
@@ -452,7 +464,11 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		var dimName string
 		_ = h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id=$1::uuid`, req.TargetID).Scan(&dimName)
 		// A dimension file imports whole or not at all: errs is 0 here.
-		return fmt.Sprintf("Imported %d member(s) from %s into dimension '%s'", imported, f.describe(), dimName), nil
+		msg := fmt.Sprintf("Imported %d member(s) from %s into dimension '%s'", imported, f.describe(), dimName)
+		for _, n := range notices {
+			msg += ". NOTE: " + aiPreexistingValuesOffer(n)
+		}
+		return msg, nil
 	}
 
 	// Grid: the same checks and commit as POST /api/import/upload, into
@@ -820,7 +836,7 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 	if !scope.reach {
 		return 0, "", table, fmt.Errorf("you cannot add records to table '%s'", table)
 	}
-	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun, replaceBy)
+	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun, replaceBy, nil)
 	n, rowErrs := res.Created, res.Errors
 	if err != nil {
 		return 0, "", table, err
@@ -855,4 +871,11 @@ func (h *handler) aiReplaceBy(ctx context.Context, req aiassistant.FileImportReq
 	var v string
 	_ = h.db.For(ctx).QueryRow(ctx, `SELECT COALESCE(config->>'replace_by', '') FROM model.integration_def WHERE id = $1::uuid`, req.IntegrationID).Scan(&v)
 	return v
+}
+
+// aiPreexistingValuesOffer follows a metricformula.PreexistingValuesNote in
+// the AI Developer's result: values are never cleared unless asked, so the
+// assistant offers it and clears them only on the developer's yes.
+func aiPreexistingValuesOffer(note string) string {
+	return note + ` — ask the developer whether they are stale; on a yes, clear them with update_dimension_property {"dimension_id", "property", "clear_values": true}`
 }
