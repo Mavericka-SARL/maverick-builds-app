@@ -22,11 +22,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
@@ -317,7 +320,118 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 	if _, err := metricformula.RenameMemberInFormulas(ctx, db, dimID, oldCode, newCode); err != nil {
 		errs = append(errs, fmt.Errorf("re-key metric formulas and exports: %w", err))
 	}
+	// Records, their postings and the postings' row filters, and the
+	// workflow runs holding the member: left on the old code, a record
+	// reposted to a code that no longer existed, a row filter stopped
+	// matching, and a run's condition and lock lost the member (2026-11-09).
+	if err := rekeyRecordsAndRuns(ctx, db, dimID, oldCode, newCode); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// rekeyRecordsAndRuns carries a member's code change into the records of
+// tables with a field of its dimension (a record holds the code), each
+// posting's coordinates, the row filters that name the code for such a
+// field, and the "Dimension member" fields of workflow runs.
+func rekeyRecordsAndRuns(ctx context.Context, db DB, dimID, oldCode, newCode string) error {
+	var errs []error
+	for _, s := range []struct{ q, tag string }{
+		{`UPDATE runtime.form_record r
+		  SET data = r.data || (
+		      SELECT jsonb_object_agg(fe->>'name', to_jsonb($2::text))
+		      FROM jsonb_array_elements(fd.fields) fe
+		      WHERE fe->>'type' = 'dimension' AND fe->>'dimension_id' = $1 AND r.data->>(fe->>'name') = $3)
+		  FROM model.form_def fd
+		  WHERE fd.id = r.form_id AND jsonb_typeof(fd.fields) = 'array'
+		    AND EXISTS (SELECT 1 FROM jsonb_array_elements(fd.fields) fe
+		                WHERE fe->>'type' = 'dimension' AND fe->>'dimension_id' = $1 AND r.data->>(fe->>'name') = $3)`, "records"},
+		{`UPDATE runtime.form_record_posting
+		  SET dim_members = jsonb_set(dim_members, ARRAY[$1::text], to_jsonb($2::text))
+		  WHERE dim_members->>$1 = $3`, "record postings"},
+	} {
+		if _, err := db.Exec(ctx, s.q, dimID, newCode, oldCode); err != nil {
+			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))
+		}
+	}
+	if err := rekeyRowFilters(ctx, db, dimID, oldCode, newCode); err != nil {
+		errs = append(errs, err)
+	}
+	var modelID, revisionID string
+	if err := db.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text, '') FROM model.dimension_def WHERE id=$1::uuid`,
+		dimID).Scan(&modelID, &revisionID); err != nil {
+		errs = append(errs, fmt.Errorf("re-key workflow runs: the dimension: %w", err))
+	} else if _, err := metricformula.RenameWorkflowRunValues(ctx, db, modelID, revisionID, "Dimension member", dimID, oldCode, newCode); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// rekeyRowFilters replaces oldCode with newCode in the values of each
+// posting row filter's condition on a field of dimension dimID.
+func rekeyRowFilters(ctx context.Context, db DB, dimID, oldCode, newCode string) error {
+	rows, err := db.Query(ctx, `
+		SELECT m.id::text, m.row_filter,
+		       COALESCE((SELECT jsonb_agg(fe->>'name') FROM jsonb_array_elements(fd.fields) fe
+		                 WHERE fe->>'type' = 'dimension' AND fe->>'dimension_id' = $1), '[]'::jsonb)
+		FROM model.form_metric_mapping m JOIN model.form_def fd ON fd.id = m.form_id
+		WHERE jsonb_typeof(m.row_filter) = 'array' AND m.row_filter <> '[]'::jsonb AND jsonb_typeof(fd.fields) = 'array'
+		  AND EXISTS (SELECT 1 FROM jsonb_array_elements(fd.fields) fe WHERE fe->>'type' = 'dimension' AND fe->>'dimension_id' = $1)`, dimID)
+	if err != nil {
+		return fmt.Errorf("re-key row filters: %w", err)
+	}
+	type mapping struct {
+		id     string
+		filter []crudapp.RowCondition
+		fields []string
+	}
+	var found []mapping
+	for rows.Next() {
+		var m mapping
+		var rawFilter, rawFields []byte
+		if err := rows.Scan(&m.id, &rawFilter, &rawFields); err != nil {
+			rows.Close()
+			return fmt.Errorf("re-key row filters: %w", err)
+		}
+		if json.Unmarshal(rawFilter, &m.filter) == nil && json.Unmarshal(rawFields, &m.fields) == nil {
+			found = append(found, m)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("re-key row filters: %w", err)
+	}
+	swap := func(list []string) bool {
+		changed := false
+		for i, v := range list {
+			if strings.EqualFold(strings.TrimSpace(v), oldCode) {
+				list[i] = newCode
+				changed = true
+			}
+		}
+		return changed
+	}
+	for _, m := range found {
+		changed := false
+		for i := range m.filter {
+			if !slices.Contains(m.fields, m.filter[i].Field) {
+				continue
+			}
+			changed = swap(m.filter[i].Is) || changed
+			changed = swap(m.filter[i].IsNot) || changed
+		}
+		if !changed {
+			continue
+		}
+		b, err := json.Marshal(m.filter)
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(ctx, `UPDATE model.form_metric_mapping SET row_filter = $2::jsonb WHERE id = $1::uuid`, m.id, string(b)); err != nil {
+			return fmt.Errorf("re-key row filters: %w", err)
+		}
+	}
+	return nil
 }
 
 // SplitParentFacts moves existing fact_input rows from a parent member to its
@@ -342,6 +456,11 @@ func SplitParentFacts(ctx context.Context, db DB, dimID, parentMemberID, childCo
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// The parent's values move to the child: carried, not entered, so the
+	// metrics' input rules (migration 173) do not refuse them.
+	if _, err = tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', 'on', true)`); err != nil {
+		return nil, err
+	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
 		SELECT model_id, revision_id, metric_id,

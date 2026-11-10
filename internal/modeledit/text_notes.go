@@ -95,6 +95,11 @@ func ConvertTextNotes(ctx context.Context, db DB, metricID, format, picklistDimI
 			return fmt.Errorf("clear a note: %w", err)
 		}
 	}
+	// The notes become numbers: carried, not entered, so the metric's input
+	// rules (migration 173) do not refuse them.
+	if _, err := db.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', 'on', true)`); err != nil {
+		return err
+	}
 	for i, n := range notes {
 		if unconverted[n.cell] {
 			continue
@@ -105,6 +110,9 @@ func ConvertTextNotes(ctx context.Context, db DB, metricID, format, picklistDimI
 			n.model, n.revision, metricID, n.cell, values[i], userID); err != nil {
 			return fmt.Errorf("convert a note: %w", err)
 		}
+	}
+	if _, err := db.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', '', true)`); err != nil {
+		return err
 	}
 	return nil
 }

@@ -187,3 +187,70 @@ func TestCreateDedicatedTenantGettingStarted(t *testing.T) {
 		t.Fatalf("tenants listing: %d %s", code, body)
 	}
 }
+
+// TestDedicatedTenantGetsItsFirstAdministrator: with a database per tenant,
+// a platform administrator never holds the tenant's roles (owner decision
+// 2026-11-09); the tenant starts with a first tenant administrator invited
+// into its default workspace instead, the account its people's work starts
+// from.
+func TestDedicatedTenantGetsItsFirstAdministrator(t *testing.T) {
+	f := newDedicatedFixture(t, Deps{})
+	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", map[string]any{"name": "First Admin Co"})
+	var out map[string]string
+	if code != 200 || json.Unmarshal(body, &out) != nil || out["workspace_id"] == "" {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	inTenant := f.pa
+	inTenant.tenant = out["id"]
+	code, body = do(t, f.srv, inTenant, http.MethodPost, "/api/admin/users", map[string]any{
+		"email": "owner@firstadmin.co", "first_name": "Olga", "last_name": "Owner", "role": "tenant_admin", "workspace_id": out["workspace_id"]})
+	if code != 200 && code != 201 {
+		t.Fatalf("invite the first administrator: %d %s", code, body)
+	}
+	p, err := f.router.Pool(f.ctx, out["id"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := p.QueryRow(f.ctx, `SELECT count(*) FROM identity.role_assignment ra JOIN identity.user u ON u.id = ra.user_id
+		WHERE lower(u.email) = 'owner@firstadmin.co' AND ra.role = 'tenant_admin'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the first administrator holds tenant_admin %d time(s) in the tenant's database (%v), want 1", n, err)
+	}
+}
+
+// A platform admin removes a self-service tenant by hand (owner decision
+// 2026-11-09: dormancy stays off on the Playground). In dedicated mode that
+// is the Tenants screen's delete: the tenant's database is dropped, its
+// catalog row goes, and its people with it. Only checked by reading before.
+func TestPlatformAdminDeletesADedicatedTenant(t *testing.T) {
+	f := newDedicatedFixture(t, Deps{})
+	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", map[string]any{"name": "Signed Up And Gone"})
+	var out map[string]string
+	if code != 200 || json.Unmarshal(body, &out) != nil || out["id"] == "" {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	tn, err := f.router.Catalog().Get(f.ctx, out["id"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	inTenant := f.pa
+	inTenant.tenant = out["id"]
+	if code, body := do(t, f.srv, inTenant, http.MethodPost, "/api/admin/users", map[string]any{
+		"email": "gone@signedup.test", "first_name": "Gil", "last_name": "Gone", "role": "tenant_admin", "workspace_id": out["workspace_id"]}); code != 200 && code != 201 {
+		t.Fatalf("its administrator: %d %s", code, body)
+	}
+
+	if code, body := do(t, f.srv, f.pa, http.MethodDelete, "/api/admin/tenants/"+out["id"], nil); code != http.StatusOK && code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", code, body)
+	}
+	var dbs int
+	if err := f.control.QueryRow(f.ctx, `SELECT count(*) FROM pg_database WHERE datname = $1`, tn.Database).Scan(&dbs); err != nil || dbs != 0 {
+		t.Fatalf("database %s still exists (%d, %v)", tn.Database, dbs, err)
+	}
+	if _, err := f.router.Catalog().Get(f.ctx, out["id"]); err == nil {
+		t.Fatal("the tenant is still in the catalog")
+	}
+	if code, body := do(t, f.srv, f.pa, http.MethodGet, "/api/admin/tenants", nil); code != 200 || strings.Contains(string(body), out["id"]) {
+		t.Fatalf("the Tenants list after the delete: %d, still lists it: %v", code, strings.Contains(string(body), out["id"]))
+	}
+}

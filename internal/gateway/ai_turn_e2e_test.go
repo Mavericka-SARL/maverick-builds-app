@@ -323,7 +323,12 @@ func TestSendMessage_TurnTimeLimit(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(sse, "event: error") || !strings.Contains(sse, "Stopped after") {
 		t.Fatalf("a turn past its limit: %d\n%s", status, sse)
 	}
-	msgs, _ := env.chat.ListMessages(context.Background(), env.session)
+	// Read with its error, and checked before indexing: an empty read on a
+	// busy machine panicked here and stopped the package (2026-11-07).
+	msgs, err := env.chat.ListMessages(context.Background(), env.session)
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("the transcript after the stop: %d messages, err=%v", len(msgs), err)
+	}
 	if last := msgs[len(msgs)-1]; last.Role != "assistant" || !strings.Contains(last.Content, "import_file_data") {
 		t.Errorf("the transcript ends with %q, want the stop and its advice", last.Content)
 	}

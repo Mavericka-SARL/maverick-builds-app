@@ -65,7 +65,7 @@ func (s *CreateApplicationRequest) setDefaults() {
 // setDefaults set default value of fields.
 func (s *CreateDimensionRequest) setDefaults() {
 	{
-		val := string("sum")
+		val := CreateDimensionRequestAggRule("sum")
 		s.AggRule.SetTo(val)
 	}
 	{

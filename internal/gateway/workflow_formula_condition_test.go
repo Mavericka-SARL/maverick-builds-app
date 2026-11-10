@@ -146,6 +146,30 @@ func TestWorkflowConditionReadsTheModel(t *testing.T) {
 		t.Errorf("NA variance 9 vs 5 (company 1): the task is %q (%q), want sent back — the region pins the point", st, comment)
 	}
 
+	// A run reading another revision pins the copy of its dimension there,
+	// renamed or not: by name, a dimension renamed in that revision lost the
+	// pin and the company's 1 completed the round (2026-11-09).
+	next := must("POST", "/api/developer/revisions", map[string]any{"name": "Next " + t.Name(), "source_revision_id": rev})
+	var nextRegion string
+	if err := f.pool.QueryRow(ctx, `SELECT d.id::text FROM model.dimension_def d JOIN model.dimension_def o ON o.lineage_id = d.lineage_id
+		WHERE o.id = $1::uuid AND d.revision_id = $2::uuid`, region, next).Scan(&nextRegion); err != nil {
+		t.Fatalf("the copied region: %v", err)
+	}
+	if status, raw := call("PATCH", "/api/developer/dimensions/"+nextRegion, map[string]any{"name": "round_area"}); status != http.StatusOK {
+		t.Fatalf("rename the copied region: %d %s", status, raw)
+	}
+	inst4, err := store.StartWorkflow(ctx, def.ID, f.managerID, map[string]string{"region": "NA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE workflow.workflow_instance SET context = context || jsonb_build_object('revision_id', $2::text) WHERE id = $1::uuid`, inst4.Id, next); err != nil {
+		t.Fatal(err)
+	}
+	completeTask(inst4.Id)
+	if st, _, comment, _ := stepOf(inst4.Id, "correct"); st != "in_progress" || !strings.Contains(comment, "rework") {
+		t.Errorf("NA variance 9 in the next revision, its region renamed: the task is %q (%q), want sent back — the pin follows the dimension", st, comment)
+	}
+
 	// A formula naming nothing in the model is refused at validation.
 	bad := json.RawMessage(strings.Replace(string(steps), "round_threshold", "round_thresold", 1))
 	if _, err := store.UpdateWorkflowDefFull(ctx, def.ID, def.Name, "", "manual", "", f.approverID, bad, schema, nil); err != nil {

@@ -430,8 +430,15 @@ func PropertyNameConflict(ctx context.Context, q Querier, dimensionID, name stri
 		"the dimension already has a property named %q — another change declared it at the same moment; property names are unique regardless of case", taken)}}
 }
 
-// IsPropertyNameConflict reports whether err is PropertyNameConflict's.
+// IsPropertyNameConflict reports whether err is PROPERTY_NAME_TAKEN, raised
+// by the database (PropertyNameConflict) or by ValidatePropertyDeclaration's
+// own check: the gateway answers both with 409, a conflict either way. The
+// pre-check's used to be a 400 (owner decision 2026-11-09).
 func IsPropertyNameConflict(err error) bool {
 	var nc *nameConflict
-	return errors.As(err, &nc)
+	if errors.As(err, &nc) {
+		return true
+	}
+	var ve *ValidationError
+	return errors.As(err, &ve) && ve.Code == CodePropertyNameTaken
 }

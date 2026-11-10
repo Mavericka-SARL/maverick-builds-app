@@ -322,11 +322,13 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 	// failures.
 	// bind resolves the formula's variables at combo: its plain references,
 	// the text of text metrics it reads, and the cell's own member codes.
-	// blank names the references with no value there (ISBLANK, x = "").
-	bind := func(combo map[string]string) (map[string]formula.Value, map[string]bool, map[string]float64, error) {
+	// blank names the references with no value there (ISBLANK, x = "");
+	// noValue those of them whose source has none there by its own rules
+	// (formula.EvalContext.NoValue).
+	bind := func(combo map[string]string) (map[string]formula.Value, map[string]bool, map[string]bool, map[string]float64, error) {
 		values := make(map[string]float64, len(def.DependsOnID))
 		notes := map[string]string{}
-		var blank map[string]bool
+		var blank, noValue map[string]bool
 		for _, depID := range def.DependsOnID {
 			depDef := allDefs[depID]
 			if parseErr == nil && !plain[strings.ToUpper(depDef.Name)] {
@@ -338,7 +340,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 			}
 			v, found, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+				return nil, nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
 			values[depDef.Name] = v // bind unconditionally: preserves "0 on miss" formula-variable semantics
 			if !found {
@@ -346,6 +348,12 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 					blank = map[string]bool{}
 				}
 				blank[strings.ToUpper(depDef.Name)] = true
+				if noValueByRule(allDims, depDef, metricDimIDs[depID], combo) {
+					if noValue == nil {
+						noValue = map[string]bool{}
+					}
+					noValue[strings.ToUpper(depDef.Name)] = true
+				}
 			}
 		}
 		// Upper-cased keys, as EvalWithContext does: EvalNode does not.
@@ -362,7 +370,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				vars[strings.ToUpper(name)] = formula.StringVal(memberCode)
 			}
 		}
-		return vars, blank, values, nil
+		return vars, blank, noValue, values, nil
 	}
 
 	// A text calculation on a time dimension is evaluated at its period
@@ -396,11 +404,11 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				shifted[k] = v
 			}
 			shifted[axis.dim.ID] = axis.periods[at].Code
-			vars, blank, _, err := bind(shifted)
+			vars, blank, noValue, _, err := bind(shifted)
 			if err != nil {
 				return formula.ErrorVal(&formula.FormulaError{Code: "#REF!", Message: err.Error()})
 			}
-			return formula.EvalNode(&formula.EvalContext{Vars: vars, Blank: blank, Dim: reads.context(shifted, useMemo), Time: timeAt(shifted, tc, useMemo)}, n)
+			return formula.EvalNode(&formula.EvalContext{Vars: vars, Blank: blank, NoValue: noValue, Dim: reads.context(shifted, useMemo), Time: timeAt(shifted, tc, useMemo)}, n)
 		}
 		tc.Span = axis.span
 		return tc
@@ -408,7 +416,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 
 	evalCell := func(combo map[string]string, useMemo bool) (formula.Value, bool, error) {
 		reads.data = false
-		vars, blank, values, bindErr := bind(combo)
+		vars, blank, noValue, values, bindErr := bind(combo)
 		if bindErr != nil {
 			return formula.Value{}, false, bindErr
 		}
@@ -426,7 +434,14 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 		if parseErr != nil {
 			return formula.Value{}, noData(), parseErr
 		}
-		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Blank: blank, Dim: reads.context(combo, useMemo), Time: timeAt(combo, nil, useMemo)}, node))
+		ectx := &formula.EvalContext{Vars: vars, Blank: blank, NoValue: noValue, Dim: reads.context(combo, useMemo), Time: timeAt(combo, nil, useMemo)}
+		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(ectx, node))
+		if !result.IsError() && ectx.ReadNoValue() {
+			// It read a source with no value here by that source's own
+			// rules (bn with time summary none over a year): no value, as
+			// LOOKUP of it is — never the 0 the variable is bound as.
+			return formula.Value{}, true, errBlankResult
+		}
 		if result.IsError() {
 			// A blank or unknown member is a configuration problem at this
 			// cell, never an absence of data — even when nothing was read

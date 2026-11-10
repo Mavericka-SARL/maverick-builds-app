@@ -109,6 +109,16 @@ func TestClosedCells_Route(t *testing.T) {
 		t.Errorf("grid: %d, closed_when missing in %.400s", code, graw)
 	}
 
+	// A rule naming no metric of the revision (saved before renames reached
+	// closed rules, or imported) refuses the write, saying which rule to
+	// correct — not a 500 on every write to the input (2026-11-09).
+	if _, err := f.pool.Exec(ctx, `UPDATE model.metric_def SET closed_when = '[{"metric":"gone","op":"=","value":1}]'::jsonb WHERE id=$1::uuid`, plan); err != nil {
+		t.Fatal(err)
+	}
+	if status, raw := write("M03", 5); status != http.StatusForbidden || !strings.Contains(raw, `names \"gone\"`) || !strings.Contains(raw, "correct") {
+		t.Errorf("dangling closed rule: %d %s, want 403 naming the rule", status, raw)
+	}
+
 	// [] removes them: M01 opens.
 	if code, raw := patch(map[string]any{"name": "plan_pct", "formula": "", "closed_when": []any{}}); code != http.StatusOK {
 		t.Fatalf("clear closed_when: %d %s", code, raw)

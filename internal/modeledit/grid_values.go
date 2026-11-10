@@ -250,6 +250,11 @@ func AttachGridMetric(ctx context.Context, tx pgx.Tx, gridID, metricID string, m
 		if _, err := tx.Exec(ctx, `SELECT set_config('mvx.delete_reason', '', true)`); err != nil {
 			return res, err
 		}
+		// The values move to the grid's cells: carried, not entered, so the
+		// metric's input rules (migration 173) do not refuse them.
+		if _, err := tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', 'on', true)`); err != nil {
+			return res, err
+		}
 		for _, c := range combined {
 			raw, _ := json.Marshal(c.dims)
 			if _, err := tx.Exec(ctx, `
@@ -258,6 +263,9 @@ func AttachGridMetric(ctx context.Context, tx pgx.Tx, gridID, metricID string, m
 				modelID, c.revisionID, metricID, string(raw), c.value, actorID); err != nil {
 				return res, err
 			}
+		}
+		if _, err := tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', '', true)`); err != nil {
+			return res, err
 		}
 	}
 	if len(lacking) > 0 {

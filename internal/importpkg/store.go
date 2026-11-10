@@ -657,6 +657,12 @@ func (s *Store) CommitImportWith(ctx context.Context, jobID, modelID, revisionID
 		`, modelID, revisionID, userID)
 	}
 	if err != nil {
+		// An incremental load adds to the cells' values: a sum its metric's
+		// input rules refuse is refused by the database (migration 173) —
+		// whole, with its sentence.
+		if vr := writeguard.AsValueRefused(err); vr != nil {
+			return nil, 0, vr
+		}
 		return nil, 0, fmt.Errorf("flush staging: %w", err)
 	}
 	cleared := 0

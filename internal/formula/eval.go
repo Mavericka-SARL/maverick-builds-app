@@ -19,6 +19,16 @@ type EvalContext struct {
 	// read them blank, so x = "" is TRUE where nothing was entered, as in
 	// Excel. nil: every bound variable has a value.
 	Blank map[string]bool
+	// NoValue names the variables (upper-cased, a subset of Blank) whose
+	// source has no value at the cell by its own rules — time summary none
+	// over several periods, aggregation none above its members — as opposed
+	// to nothing recorded there. A cell whose evaluation reads one as a
+	// value has no value either (ReadNoValue): it used to store the 0 the
+	// variable is bound as (owner decision 2026-11-09). ISBLANK and a
+	// comparison test it without reading it, so IF(ISBLANK(x), 0, x) is 0.
+	NoValue map[string]bool
+	// readNoValue records that the evaluation read a NoValue variable.
+	readNoValue bool
 	// Funcs overrides or extends built-in functions (keys should be UPPER-CASE).
 	Funcs map[string]CustomFunc
 	// Time is the current time coordinate, set by a caller evaluating a
@@ -34,6 +44,10 @@ type EvalContext struct {
 	// combo, sharing the parent's Dim.Memo.
 	Dim *DimEvalContext
 }
+
+// ReadNoValue reports whether the evaluation read a NoValue variable as a
+// value: the cell then has no value, whatever the arithmetic made of it.
+func (ctx *EvalContext) ReadNoValue() bool { return ctx != nil && ctx.readNoValue }
 
 func (ctx *EvalContext) lookup(name string) (Value, bool) {
 	if ctx == nil || ctx.Vars == nil {
@@ -102,6 +116,9 @@ func (ctx *EvalContext) eval(node Node) Value {
 		return BoolVal(n.Val)
 	case *Ident:
 		if v, ok := ctx.lookup(n.Name); ok {
+			if ctx.NoValue[strings.ToUpper(n.Name)] {
+				ctx.readNoValue = true
+			}
 			return ctx.decodePicklist(n.Name, v)
 		}
 		if v, ok := ctx.unboundDimension(n.Name); ok {

@@ -443,7 +443,7 @@ func (r *dimReads) context(combo map[string]string, useMemo bool) *formula.DimEv
 			return false
 		}
 		def := r.defs[depID]
-		return rollup.NoValueByRule(r.meta.dims, srcDims, rollup.AggRule(def.AggRule), rollup.TimeSummaryRule(def.TimeSummary), norm)
+		return rollup.NoValueByRule(r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule), rollup.TimeSummaryRule(def.TimeSummary), norm)
 	}
 	if useMemo {
 		d.Memo = r.memo
@@ -670,6 +670,30 @@ func exactRows(dep *MetricDef, valueMap map[string]float64, dimIDToName map[stri
 // cell — a leaf nobody entered, and equally a total across a dimension (a
 // month with no postings on any account): the variable is then blank to
 // ISBLANK and comparisons with "", and 0 in arithmetic, as at a leaf.
+// NoValueAt reports whether a metric of dimensions srcDims, aggregation
+// aggRule and time summary timeSummary has no value at combo by its own
+// rules (rollup.NoValueByRule over combo normalised onto its dimensions), as
+// opposed to nothing recorded there. Live reads use it to name the values
+// EvaluateMetricWithDimContext's noValue holds.
+func NoValueAt(dims map[string]*rollup.Dimension, metricID string, srcDims []string, aggRule, timeSummary string, combo map[string]string) bool {
+	norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil)
+	if err != nil {
+		return false
+	}
+	return rollup.NoValueByRule(dims, metricID, srcDims, rollup.AggRule(aggRule), rollup.TimeSummaryRule(timeSummary), norm)
+}
+
+// noValueByRule reports whether dep has no value at combo by its own rules
+// (rollup.NoValueByRule over combo normalised onto dep's dimensions, as
+// resolveDependency reads it), as opposed to nothing recorded there.
+func noValueByRule(dims map[string]*rollup.Dimension, dep *MetricDef, srcDims []string, combo map[string]string) bool {
+	norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil)
+	if err != nil {
+		return false
+	}
+	return rollup.NoValueByRule(dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule), rollup.TimeSummaryRule(dep.TimeSummary), norm)
+}
+
 func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, dep *MetricDef, srcDims []string,
 	combo map[string]string, fetch rollup.RawValue, src *exactSource,
 ) (float64, bool, error) {

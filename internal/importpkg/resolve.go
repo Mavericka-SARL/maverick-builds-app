@@ -23,7 +23,7 @@ package importpkg
 
 import (
 	"context"
-	"github.com/mavericks-engine/mavericks/internal/formula"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +31,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	importpkgv1 "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1"
+	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
 // RawRow is one data row from a parsed CSV or XLSX file, keyed by the
@@ -40,6 +42,7 @@ import (
 // the plan's earlier steps leave it).
 type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 type RawRow struct {
@@ -130,6 +133,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		return nil, nil, err
 	}
 	legacyPair := hasMetricIDCol && hasValueCol
+	var numbers []stagedNumber
 
 	// Cache dimension_member lookups (dimID, code) -> (memberID, isLeaf) across
 	// rows — an import file typically repeats the same member codes many times.
@@ -378,6 +382,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 			for k, v := range dimMembers {
 				memberCopy[k] = v
 			}
+			numbers = append(numbers, stagedNumber{at: len(staged), column: ev.column, raw: ev.valueRaw})
 			staged = append(staged, StagingRow{
 				MetricID:   metricID,
 				DimMembers: memberCopy,
@@ -387,7 +392,50 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		}
 	}
 
+	// A number its metric's input rules refuse (migration 173) is the row's
+	// error, as an unparsable one is: a file is refused naming the row, a
+	// connector skips it. The database refuses the value anyway.
+	if len(numbers) > 0 {
+		cells := make([]writeguard.ValueCell, len(numbers))
+		for i, n := range numbers {
+			r := staged[n.at]
+			cells[i] = writeguard.ValueCell{MetricID: r.MetricID, DimCodes: r.DimMembers, Value: r.Value}
+		}
+		refusals, err := writeguard.InputRuleRefusals(ctx, pool, cells)
+		if err != nil {
+			return nil, nil, fmt.Errorf("input rules: %w", err)
+		}
+		if len(refusals) > 0 {
+			drop := make(map[int]bool, len(refusals))
+			for i, n := range numbers {
+				refusal, ok := refusals[i]
+				if !ok {
+					continue
+				}
+				drop[n.at] = true
+				errs = append(errs, &importpkgv1.ImportError{
+					RowNumber: int32(staged[n.at].RowNumber), Column: n.column,
+					ErrorCode: writeguard.CodeInputRule, RawValue: n.raw, Message: refusal,
+				})
+			}
+			kept := staged[:0]
+			for i, r := range staged {
+				if !drop[i] {
+					kept = append(kept, r)
+				}
+			}
+			staged = kept
+		}
+	}
+
 	return staged, errs, nil
+}
+
+// stagedNumber is a staged number: where it is in staged, and the column
+// and text it came from.
+type stagedNumber struct {
+	at          int
+	column, raw string
 }
 
 // monthNumber reads an English month name or its three-letter abbreviation

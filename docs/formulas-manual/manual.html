@@ -509,7 +509,7 @@
   <li><b>Other dimensions</b>: those the cell and the source share stay at the cell's members; a dimension of the source the cell does not have is totalled; a dimension of the cell the source does not have is ignored.</li>
   <li>Each dimension must be one of the source's, or related to one (a parent/child dimension chain, or a property grouping), else <code>DIMENSION_NOT_ON_SOURCE</code>. Two dimensions that both relate to the same dimension of the source conflict: <code>CONFLICTING_DIMENSION_ARGUMENTS</code>.</li>
   <li>With nothing recorded at the target, LOOKUP reads 0.</li>
-  <li><b>No value by the source's own rules</b>: a source with time summary <b>None</b> has no value at an aggregate period (Q1, FY26) or over all periods, and one with aggregation <b>None</b> has none above its leaf members. LOOKUP there is <b>blank</b>, as <code>YEARVALUE</code> is: <code>ISBLANK</code> is TRUE and the cell stores no value (it is left out of totals), never a 0.</li>
+  <li><b>No value by the source's own rules</b>: a source with time summary <b>None</b> has no value at an aggregate period (Q1, FY26) or over all periods, and one with aggregation <b>None</b> has none above its leaf members. LOOKUP there is <b>blank</b>, as <code>YEARVALUE</code> is: <code>ISBLANK</code> is TRUE and the cell stores no value (it is left out of totals), never a 0. So is a formula that reads such a source by its name there — <code>bn</code> or <code>bn + 1</code> on a grid without the month, or at Q1 — while one that only tests it decides as written: <code>IF(ISBLANK(bn), 0, bn)</code> is 0.</li>
   <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
 </ul>
 

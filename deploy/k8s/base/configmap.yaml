@@ -23,14 +23,13 @@ data:
   KEYCLOAK_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: "mavericks"
 
-  # MinIO object storage (S3-compatible). MINIO_ROOT_USER is plain
-  # (non-secret) config, matching infra/minio.yaml's own pod env; the
-  # password counterpart is in mavericks-secrets (MINIO_ROOT_PASSWORD).
-  # Previously only MinIO's own pod had MINIO_ROOT_USER — consumers (the
-  # gateway) had no way to authenticate against it until this key was added.
+  # MinIO object storage (S3-compatible), where the backups and Postgres's
+  # WAL archive go. MINIO_ROOT_USER is plain (non-secret) config, matching
+  # infra/minio.yaml's own pod env; the password counterpart is in
+  # mavericks-secrets (MINIO_ROOT_PASSWORD). The gateway reads none of it
+  # since the package export was removed (2026-10-12).
   MINIO_URL: "http://minio:9000"
   MINIO_ROOT_USER: "mavericks"
-  OBJECT_STORE_BUCKET: "mavericks"
 
   # The gateway's listener port
   HTTP_PORT: "8080"

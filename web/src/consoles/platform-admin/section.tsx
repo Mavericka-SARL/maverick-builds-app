@@ -1,26 +1,14 @@
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers, Link2, MessageSquare } from "lucide-react";
 import { api } from "../../api/client";
-import { UsersPanel } from "../admin/UsersPanel";
-import { InfraNodesTab } from "./InfraNodesTab";
-import { LicenseTab } from "./LicenseTab";
-import { PlansTab } from "./PlansTab";
 import { SettingsScopePicker, DEPLOYMENT_SCOPE } from "./SettingsScopePicker";
 import { UsersScopePicker } from "./UsersScopePicker";
 import { ALL_PEOPLE, peopleIn } from "./people";
-import { NotificationSettingsTab } from "../admin/NotificationSettingsTab";
-import { ModelLinksTab } from "../admin/ModelLinksTab";
-import { ChatConnectorSettingsTab } from "../admin/ChatConnectorSettingsTab";
-import { TenantAIKeysTab } from "../../ee/aikeys/TenantAIKeysTab";
-import { SsoTab } from "../../ee/sso/SsoTab";
-import { ScimTab } from "../../ee/scim/ScimTab";
-import { UsageTab } from "../../ee/usage/UsageTab";
-import { BrandingTab } from "../../ee/branding/BrandingTab";
 import { computeAssignableRoles, canManageResourceAccess } from "../admin/roles";
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
 import { tabId, localTab, sectionOf, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
-import { ApplicationsView, AuditView } from "./PlatformAdminConsole";
+import { InfraNodesTab, LicenseTab, PlansTab, NotificationSettingsTab, ModelLinksTab, ChatConnectorSettingsTab, TenantAIKeysTab, SsoTab, ScimTab, UsageTab, BrandingTab, ApplicationsView, AuditView, UsersPanel } from "./screens";
 
 /** Tabs whose content is one tenant's (or the deployment's) settings. */
 const SCOPED_TABS = new Set<string>(["notifications", "chat-connector", "ai-keys", "sso", "scim", "branding", "audit"]);
@@ -118,6 +106,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
         <PageLayout title={TAB_LABELS[cur]} meta={meta}>
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
+          <Suspense fallback={<LoadingState />}>
           {!isLoading && !error && cur === "applications" && tenants && <ApplicationsView tenants={tenants} isPlatformAdmin={isPlatformAdmin} canTransferModels={isTenantAdmin || isPlatformAdmin} />}
           {scope === "platform" && cur === "users" && (
             <UsersScopePicker tenants={tenants ?? []} value={usersScope} onChange={setUsersScope} />
@@ -147,6 +136,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
           {cur === "plans" && scope === "platform" && <PlansTab />}
           {cur === "infra" && scope === "platform" && <InfraNodesTab />}
           {cur === "license" && scope === "platform" && <LicenseTab />}
+          </Suspense>
         </PageLayout>
       );
     },

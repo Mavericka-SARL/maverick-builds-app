@@ -121,10 +121,6 @@ services:
       # cannot create users (it answers 503 and says why).
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       CONSOLE_URL: https://${CONSOLE_HOST}
-      MINIO_URL: http://minio:9000
-      MINIO_ROOT_USER: mavericks
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-      OBJECT_STORE_BUCKET: mavericks
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}

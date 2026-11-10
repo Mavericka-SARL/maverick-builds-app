@@ -9,13 +9,15 @@ import (
 // grid: a setting on a grid with no dimensions (Actual Through Month = 9 had
 // to be imported from a sheet of mixed text, which took models several turns
 // or failed), and values by member. A total member, a missing dimension and a
-// calculated metric are refused by the plan check.
+// calculated metric are refused by the plan check, and so is a value the
+// metric's input rules refuse.
 func TestAIDeveloperWritesInputValues(t *testing.T) {
 	b := runAIBuild(t, "Set Actual Through Month to 9 and the prices", []map[string]any{
 		proposeStep("create_dimension", "Region", map[string]any{"name": "region", "members": []map[string]any{
 			{"code": "ALL", "label": "All"}, {"code": "EU", "label": "Europe", "parent_code": "ALL"}, {"code": "US", "label": "US", "parent_code": "ALL"}}}),
 		proposeStep("create_metric", "Setting", map[string]any{"name": "actual_through_month", "is_input": true}),
-		proposeStep("create_metric", "Price", map[string]any{"name": "price", "is_input": true, "format": "currency", "format_currency": "€"}),
+		proposeStep("create_metric", "Price", map[string]any{"name": "price", "is_input": true, "format": "currency", "format_currency": "€",
+			"input_rules": map[string]any{"min": 0}}),
 		proposeStep("create_metric", "Double price", map[string]any{"name": "double_price", "formula": "price * 2"}),
 		proposeStep("create_grid", "Setup", map[string]any{"name": "Setup", "metrics": []string{"actual_through_month"}}),
 		proposeStep("create_grid", "Prices", map[string]any{"name": "Prices", "metrics": []string{"price", "double_price"}, "dimensions": []string{"region"}}),
@@ -57,6 +59,9 @@ func TestAIDeveloperWritesInputValues(t *testing.T) {
 		"a total's clear":     {map[string]any{"metric_id": "price", "values": []map[string]any{{"members": map[string]string{"region": "ALL"}, "value": nil}}}, "has members under it"},
 		"a missing member":    {map[string]any{"metric_id": "price", "values": []map[string]any{{"value": 1}}}, "names no member of region"},
 		"a calculated metric": {map[string]any{"metric_id": "double_price", "values": []map[string]any{{"members": map[string]string{"region": "EU"}, "value": 1}}}, "is calculated"},
+		// The metric's input rules (migration 173) refuse it in the check,
+		// before anything is written.
+		"a negative price": {map[string]any{"metric_id": "price", "values": []map[string]any{{"members": map[string]string{"region": "EU"}, "value": -4}}}, "price accepts values of at least 0: -4 refused at EU"},
 	} {
 		got := b.proposeRefused("write "+what, []map[string]any{proposeStep("write_input_values", what, tc.params)})
 		if !strings.Contains(got, tc.want) {

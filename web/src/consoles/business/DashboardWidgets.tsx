@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { serialToLocal } from "../dateSerial";
 import { DateFormatContext, useDateFormat } from "../dateFormat";
 import { scaleFor, scales } from "../numberScale";
@@ -6,12 +6,13 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon, Maximize2, X as XIcon } from "lucide-react";
 import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
-import { ContextSelectors } from "../dashboard/ChartWidget";
+import { useImportKey } from "../../api/useImportKey";
+import { ContextSelectors } from "../dashboard/ContextSelectors";
 import { DashboardContextSyncContext, DashboardSlotContext, useFollowsBar, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, FIT_HEIGHT_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
-import { ChartWidget } from "../dashboard/ChartWidget";
+import { ChartWidget } from "../dashboard/lazyChart";
 import { FormPanel } from "./FormPanel";
 import { BoardPanel } from "./BoardPanel";
 import { ImportWidget } from "./ImportWidget";
@@ -347,7 +348,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
     inner = <IntegrationButtonWidget integrationId={widget.ref_id} label={buttonLabel(widget, "Import")} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} />;
   } else if (widget.widget_type === "chart" && widget.ref_id && widget.widget_props?.chart) {
-    inner = <ChartWidget widget={widget} ctx={ctx} />;
+    inner = <Suspense fallback={<LoadingState />}><ChartWidget widget={widget} ctx={ctx} /></Suspense>;
   } else if (widget.widget_type === "metric_kpi" && widget.ref_id) {
     inner = <MetricKpiWidget metricId={widget.ref_id} ctx={ctx} widgetProps={widget.widget_props ?? undefined} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "import" && widget.ref_id) {
@@ -613,9 +614,11 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
   // An export downloads a file built from this user's own view of the grid.
   const isExport = type === "file_export";
 
+  const importKey = useImportKey();
   const run = useMutation({
-    mutationFn: (file?: { csv?: string; xlsx_base64?: string }) => api.runIntegration(integrationId, file),
-    onSuccess: (data) => setResult(data as typeof result),
+    mutationFn: (file?: { csv?: string; xlsx_base64?: string }) =>
+      api.runIntegration(integrationId, file, undefined, undefined, undefined, importKey.keyFor(JSON.stringify([integrationId, file ?? null]))),
+    onSuccess: (data) => { importKey.done(); setResult(data as typeof result); },
     // A refused file lists its rows in the error's body: nothing went in.
     onError: (err) => setResult({ message: (err as Error).message, errors: (err as ApiError).body?.errors as ImportRowError[] | undefined }),
   });

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -450,6 +451,28 @@ func (c *DBCommitter) commitTimeDimension(ctx context.Context, dimID string, cfg
 	return len(parsed), len(rows) - len(parsed), nil
 }
 
+// ErrModelLinkTableNeedsKey refuses a model link into a table that would
+// add the source's rows again at every run: the link reads the source's
+// whole rows each time, and a table that keeps no dimension adds a loaded
+// row as a new record unless the load replaces by a field (replace_by). A
+// run of two source rows left 4 records after two runs (2026-11-09).
+var ErrModelLinkTableNeedsKey = errors.New("a model link into a table needs \"When a run brings rows again\" set to replace the records with the same value of a field: " +
+	"each run reads the source's whole rows, which would otherwise be added again as new records")
+
+// CheckModelLinkTable is the rule for a model link into a table: it replaces
+// by a field, unless the table keeps a dimension, whose records a load
+// already adds and updates by their code. Any other connector, or a model
+// link into a grid or a dimension, passes.
+func CheckModelLinkTable(cfg *Config, form *crudapp.FormDef) error {
+	if cfg == nil || cfg.Protocol != ProtocolModel || cfg.TargetType != TargetForm || form == nil {
+		return nil
+	}
+	if strings.TrimSpace(cfg.ReplaceBy) == "" && !form.KeepsDimension() {
+		return ErrModelLinkTableNeedsKey
+	}
+	return nil
+}
+
 // commitForm creates a record of the target table for each row through
 // recordpost.ImportRows — the checks and posting a record saved by hand
 // gets: its values, where it may post within the run principal's access,
@@ -460,6 +483,9 @@ func (c *DBCommitter) commitTimeDimension(ctx context.Context, dimID string, cfg
 func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (int, int, error) {
 	form, err := crudapp.NewStore(c.Pool).GetForm(ctx, def.Config.TargetID)
 	if err != nil {
+		return 0, 0, err
+	}
+	if err := CheckModelLinkTable(def.Config, form); err != nil {
 		return 0, 0, err
 	}
 	var appID, revisionID string

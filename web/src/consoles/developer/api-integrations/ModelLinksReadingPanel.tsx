@@ -6,11 +6,19 @@ import { ModelLinksTable } from "../../ModelLinksTable";
 // The source side of model links: the links of other models of this tenant
 // that read this model, and the switch this model's developers hold over
 // each. Shown only when there is one.
-export function ModelLinksReadingPanel() {
+//
+// The server answers for the model the request resolves to: the working
+// revision's model, else X-Model-Id, else the application's first. The cache
+// key names all three, so a page opened in one model never shows (or lets
+// the switch act on) the links of the model opened before (2026-10-26).
+export function ModelLinksReadingPanel({ revisionId }: { revisionId?: string }) {
   const qc = useQueryClient();
+  const appId = localStorage.getItem("selected_app_id") ?? "";
+  const modelId = localStorage.getItem("selected_model_id") ?? "";
+  const queryKey = ["model-links-reading", appId, modelId, revisionId ?? ""];
   const { data: links = [], isLoading } = useQuery({
-    queryKey: ["model-links-reading"],
-    queryFn: () => api.listModelLinksReadingModel(),
+    queryKey,
+    queryFn: () => api.listModelLinksReadingModel(revisionId),
   });
   if (!isLoading && links.length === 0) return null;
   return (
@@ -22,7 +30,7 @@ export function ModelLinksReadingPanel() {
       <ModelLinksTable links={links} loading={isLoading} sides={["source"]} emptyTitle="No link reads this model"
         onSwitch={async (link, _side, on) => {
           await api.switchModelLinkSource(link.id, on);
-          await qc.invalidateQueries({ queryKey: ["model-links-reading"] });
+          await qc.invalidateQueries({ queryKey });
         }} />
     </div>
   );

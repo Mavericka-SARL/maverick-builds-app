@@ -91,6 +91,13 @@ func (r *Router) Deprovision(ctx context.Context, customerID string) error {
 	if err != nil {
 		return err
 	}
+	// Out of the ready list first: the tenant's loops end below, and a watch
+	// pass between Forget and the catalog delete started them again, on the
+	// database being dropped (the watch test's "started 2 times",
+	// 2026-11-06), and no request opens a pool to it while it goes.
+	if err := r.catalog.SetStatus(ctx, customerID, StatusDisabled, "being deleted"); err != nil {
+		return err
+	}
 	r.Forget(customerID)
 	// FORCE disconnects any remaining session (PostgreSQL 13+); a pool that
 	// another gateway replica still holds would otherwise block the drop.

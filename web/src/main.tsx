@@ -9,6 +9,20 @@ import { SignUpPage } from "./signup/SignUpPage";
 import { LegalPage } from "./public/legal/LegalPage";
 import "./index.css";
 
+// A screen loaded when first opened (developer/screens.ts) names a file of
+// the release the page was opened on; after a deploy that file is gone. The
+// page then loads the current release once, rather than leaving the screen
+// blank; a second failure within a minute is left to show its error.
+window.addEventListener("vite:preloadError", (event) => {
+  const key = "reloaded_for_release_at";
+  let last = 0;
+  try { last = Number(sessionStorage.getItem(key) ?? 0); } catch { /* storage unavailable */ }
+  if (Date.now() - last < 60_000) return;
+  try { sessionStorage.setItem(key, String(Date.now())); } catch { /* storage unavailable */ }
+  event.preventDefault();
+  window.location.reload();
+});
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000 } },
 });

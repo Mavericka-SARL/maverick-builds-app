@@ -3,10 +3,12 @@ package writeguard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 )
@@ -28,6 +30,12 @@ type Cell struct {
 // Every write entry point that writes typed values calls it next to
 // CheckWriteMetrics: the grid's cells and batches, the AI Developer's
 // write_input_values, file imports.
+//
+// A rule naming no metric of the revision — saved before renames and
+// deletes carried into closed rules, or brought in by a model import or a
+// revision copy — cannot say whether the cell is closed. The write is
+// refused (fail closed) with a reason naming the rule to correct: it used to
+// be an error, which every cell write answered with a 500 (2026-11-09).
 func ClosedReason(ctx context.Context, pool *pgxpool.Pool, revisionID string, cells []Cell) (string, error) {
 	if len(cells) == 0 {
 		return "", nil
@@ -76,14 +84,17 @@ func ClosedReason(ctx context.Context, pool *pgxpool.Pool, revisionID string, ce
 		values map[string]float64
 	}
 	conditions := map[string]*condition{}
+	// load answers nil, nil for a name that is no metric of the revision.
 	load := func(name string) (*condition, error) {
 		if c, ok := conditions[strings.ToLower(name)]; ok {
 			return c, nil
 		}
 		var condID string
 		if err := pool.QueryRow(ctx, `SELECT id::text FROM model.metric_def WHERE revision_id=$1::uuid AND lower(name)=lower($2) LIMIT 1`,
-			revisionID, name).Scan(&condID); err != nil {
-			return nil, fmt.Errorf("closed rule names %q, which is no metric of this revision", name)
+			revisionID, name).Scan(&condID); errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		} else if err != nil {
+			return nil, fmt.Errorf("load closed rule metric %q: %w", name, err)
 		}
 		c := &condition{values: map[string]float64{}}
 		drows, err := pool.Query(ctx, `SELECT DISTINCT gd.dimension_id::text FROM model.grid_metric gm
@@ -136,6 +147,10 @@ func ClosedReason(ctx context.Context, pool *pgxpool.Pool, revisionID string, ce
 			c, err := load(r.Metric)
 			if err != nil {
 				return "", err
+			}
+			if c == nil {
+				return fmt.Sprintf("%s takes no input until its closed rule is corrected: the rule names %q, which is no metric of this revision. "+
+					"A developer can correct or remove it in the metric's settings.", m.label, r.Metric), nil
 			}
 			if r.Holds(c.values[cellKey(c.dims, cell.DimCodes)]) {
 				return fmt.Sprintf("%s takes no input here: this cell is closed (%s %s %s)%s",

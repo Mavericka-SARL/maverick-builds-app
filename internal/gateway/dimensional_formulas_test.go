@@ -183,7 +183,11 @@ func TestDimensionalFormulasOverHTTP(t *testing.T) {
 	f.refused("a name with a space", "POST", props, map[string]any{"name": "Sales Segment", "data_type": "text"}, metricformula.CodeInvalidPropertyName)
 	f.refused("a name starting with a digit", "POST", props, map[string]any{"name": "2nd", "data_type": "text"}, metricformula.CodeInvalidPropertyName)
 	f.refused("an unknown type", "POST", props, map[string]any{"name": "tier", "data_type": "money"}, metricformula.CodeInvalidPropertyType)
-	f.refused("a name differing only in case", "POST", props, map[string]any{"name": "SEGMENT", "data_type": "text"}, metricformula.CodePropertyNameTaken)
+	// A name taken is a conflict (409), whichever check sees it first.
+	if status, raw := f.req("POST", props, map[string]any{"name": "SEGMENT", "data_type": "text"}); status != http.StatusConflict ||
+		!strings.Contains(string(raw), metricformula.CodePropertyNameTaken) {
+		t.Errorf("a name differing only in case: %d %s, want 409 %s", status, raw, metricformula.CodePropertyNameTaken)
+	}
 	f.refused("a rename to a bad name", "PATCH", props+"/"+factorProp, map[string]any{"name": "fac-tor"}, metricformula.CodeInvalidPropertyName)
 
 	f.setMember("EMEA", map[string]string{"segment": "SMB", "factor": "2"})

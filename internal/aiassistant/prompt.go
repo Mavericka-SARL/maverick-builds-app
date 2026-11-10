@@ -397,6 +397,16 @@ placed on a grid that has region — always add the add_grid_metric step.
   where a rule holds (a blank counts as 0): the grid shows it read-only and every write refuses it. Months up to an
   "actual through month" setting: a helper actual_month = IF(MONTH(START()) <= actual_through_month, 1, 0) on the
   grid, then the plan % closed where actual_month = 1 and the actuals where actual_month = 0. [] removes them.
+- Scenarios, plan cases and other alternatives (Base, Downside) are a dimension whose members never add up: give
+  it create_dimension / update_dimension "agg_rule": "first" (every total, KPI and chart without a selector reads
+  the first member — put Base first) or "none" (no total: a read names a member). "sum" (default) adds the members
+  up, each metric by its own agg_rule. A metric that totals otherwise over one dimension: create_metric /
+  update_metric "dimension_rules": {"<dimension>": "sum" | "first" | "last" | "none"}; {} removes them. A time
+  dimension totals by each metric's time_summary instead.
+- Values an input refuses: a number, percentage or currency input metric's "input_rules": {"min": <n>, "max": <n>,
+  "whole": true} (any of them, create_metric / update_metric) — units and costs not negative ({"min": 0}), a price
+  within a range, a headcount whole. Every write of a value outside them is refused, write_input_values and imports
+  included; a percentage's bounds are in percent units (15 for 15%). {} removes them.
 - A list planners extend (strategic activities they name) is a dimension users maintain:
   create_dimension / update_dimension "business_maintained": true lets them add, rename and remove its members
   from the grid — not periods, not a property grouping. Pre-made "Open slot" members are not needed then.

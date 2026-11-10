@@ -271,39 +271,57 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 	// The metrics being written, as lowercased names. nil written list =
 	// metrics unknown: represented as a single wildcard so metric-scoped
 	// instances still match (conservative — never a bypass).
-	type writtenMetric struct{ name, display string }
+	type writtenMetric struct{ name, display, lineage string }
 	var written []writtenMetric
 	if len(metricIDs) > 0 {
 		mRows, mErr := pool.Query(ctx,
-			`SELECT DISTINCT lower(name), name FROM model.metric_def WHERE id::text = ANY($1)`, metricIDs)
+			`SELECT DISTINCT lower(name), name, lineage_id::text FROM model.metric_def WHERE id::text = ANY($1)`, metricIDs)
 		if mErr != nil {
 			return false, "", fmt.Errorf("resolve written metrics: %w", mErr)
 		}
 		for mRows.Next() {
-			var lower, display string
-			if mRows.Scan(&lower, &display) == nil {
-				written = append(written, writtenMetric{name: lower, display: display})
+			var lower, display, lineage string
+			if mRows.Scan(&lower, &display, &lineage) == nil {
+				written = append(written, writtenMetric{name: lower, display: display, lineage: lineage})
 			}
 		}
 		mRows.Close()
 	}
 	if len(written) == 0 {
-		written = []writtenMetric{{name: "", display: ""}} // wildcard
+		written = []writtenMetric{{}} // wildcard
 	}
 
 	// The write's members and their ancestors, by dimension: a write on
 	// France is inside Europe.
-	covered := map[string]map[string]bool{}
+	// Keyed by dimension lineage, as the locks' bindings are: a write in a
+	// revision copied after the approval is still inside its scope.
+	var chains [][]AncestorRef
+	var chainDims []string
 	for _, memberID := range memberIDs {
 		chain, chainErr := AncestorChain(ctx, pool, memberID)
 		if chainErr != nil {
 			return false, "", fmt.Errorf("check ancestor chain: %w", chainErr)
 		}
+		chains = append(chains, chain)
 		for _, anc := range chain {
-			if covered[anc.DimensionID] == nil {
-				covered[anc.DimensionID] = map[string]bool{}
+			chainDims = append(chainDims, anc.DimensionID)
+		}
+	}
+	lineageOf, err := dimensionLineages(ctx, pool, chainDims)
+	if err != nil {
+		return false, "", err
+	}
+	covered := map[string]map[string]bool{}
+	for _, chain := range chains {
+		for _, anc := range chain {
+			key := anc.DimensionID
+			if lineage := lineageOf[anc.DimensionID]; lineage != "" {
+				key = lineage
 			}
-			covered[anc.DimensionID][anc.Code] = true
+			if covered[key] == nil {
+				covered[key] = map[string]bool{}
+			}
+			covered[key][anc.Code] = true
 		}
 	}
 
@@ -314,7 +332,7 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 	for _, wm := range written {
 		seen := map[string]bool{}
 		for _, l := range locks {
-			if !l.covers(covered) || !l.coversMetric(wm.name) {
+			if !l.covers(covered) || !l.coversMetric(wm.name, wm.lineage) {
 				continue
 			}
 			key := l.scopeKey()

@@ -1815,6 +1815,11 @@ func rejectForeignRevision(w http.ResponseWriter, err error) bool {
 		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return true
 	}
+	// An X-Model-Id the caller may not open (resolveAppRevisionID).
+	if errors.Is(err, errModelNotOpen) {
+		jsonCodeErr(w, http.StatusNotFound, "MODEL_NOT_OPEN", err.Error())
+		return true
+	}
 	return false
 }
 
@@ -2000,6 +2005,10 @@ type metricRow struct {
 	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
 	// RowStyle "total" draws the metric's row as a total (migration 159).
 	RowStyle string `json:"row_style,omitempty"`
+	// InputRules: the values an input metric's cells accept
+	// (metricformula.InputRules, migration 173); absent when any. Only set
+	// in /api/grid.
+	InputRules json.RawMessage `json:"input_rules,omitempty"`
 }
 
 // aggregateEvaluated reports metricRow.AggregateEvaluated for m — the
@@ -3150,6 +3159,19 @@ type gridDimension struct {
 	// dimension's members (business_members.go).
 	BusinessMaintained bool            `json:"business_maintained,omitempty"`
 	Members            []gridDimMember `json:"members"`
+	// TotalRule is how its members total (migration 174): "first", "last"
+	// or "none"; absent, they add up. MetricRules are the metrics' own
+	// rules over it, by metric id, which win (rollup.RuleCombo).
+	TotalRule   string            `json:"total_rule,omitempty"`
+	MetricRules map[string]string `json:"metric_rules,omitempty"`
+}
+
+// applyGridTotalRules sets each dimension's total rules from rules.
+func applyGridTotalRules(dims []gridDimension, rules rollup.RevisionTotalRules) {
+	for i := range dims {
+		dims[i].TotalRule = rules.Dimension[dims[i].ID]
+		dims[i].MetricRules = rules.Metric[dims[i].ID]
+	}
 }
 
 // gridAccessRules echoes the reader's own rules, its hidden ones left out.
@@ -3227,7 +3249,7 @@ func factRowHidden(dm map[string]string, hidden map[string]map[string]bool) bool
 func toRollupDims(allDims []gridDimension) map[string]*rollup.Dimension {
 	out := make(map[string]*rollup.Dimension, len(allDims))
 	for _, d := range allDims {
-		rd := &rollup.Dimension{ID: d.ID, IsTime: d.DimensionType == "time"}
+		rd := &rollup.Dimension{ID: d.ID, IsTime: d.DimensionType == "time", TotalRule: d.TotalRule, MetricRules: d.MetricRules}
 		if d.TimeGranularity != nil {
 			rd.TimeGranularity = *d.TimeGranularity
 		}
@@ -3600,6 +3622,15 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	} else {
 		allDims = dims
 	}
+	// How each dimension's members total (migration 174): the totals below
+	// and the console's own follow them.
+	totalRules, trErr := calculation.LoadTotalRules(ctx, h.db.For(ctx), modelID, revisionID)
+	if trErr != nil {
+		jsonErr(w, trErr, http.StatusInternalServerError)
+		return
+	}
+	applyGridTotalRules(dims, totalRules)
+	applyGridTotalRules(allDims, totalRules)
 
 	// ── access rules for the requesting user ─────────────────────────────────
 	// Resolved once (act, above) and applied to every representation of the
@@ -3831,7 +3862,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
 			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
-			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when, rev.row_style
+			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when, rev.row_style, NULLIF(rev.input_rules, '{}'::jsonb)
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3845,7 +3876,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb)
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3856,7 +3887,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3915,7 +3946,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb)
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3925,7 +3956,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -4303,7 +4334,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// non-time dimensions combine per period, then the periods reduce. See
 	// applyInputAggregation.
 	if !metaOnly {
-		if err := h.applyInputAggregation(ctx, modelID, revisionID, allMetrics, metricDims, allDims, cells, totals, groupedInput, scopeSubtrees); err != nil {
+		if err := h.applyInputAggregation(ctx, modelID, revisionID, allMetrics, metricDims, allDims, cells, totals, groupedInput, scopeSubtrees, scopePinned); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -4917,8 +4948,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5084,6 +5115,10 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	if err := modeledit.RemapPicklistDimensions(ctx, tx, modelID, newID, srcRevID); err != nil {
 		return "", err
 	}
+	// Step A5: the metrics' own total rules, over the copy's dimensions.
+	if err := modeledit.CopyMetricDimensionRules(ctx, tx, modelID, newID, srcRevID); err != nil {
+		return "", err
+	}
 
 	// Step B: fact copy (user-entered values). dim_map must be rebuilt here
 	// via a join since it's not shared across Exec calls. source_ref and
@@ -5094,7 +5129,11 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// read's "latest direct entry wins" ORDER BY entered_at DESC. The
 	// sibling internal/modeltransfer package documents this exact hazard
 	// by name (FactsPolicy) and avoids it.
-	if _, err := tx.Exec(ctx, `
+	//
+	// The values are carried, not entered: a metric's input rules (migration
+	// 173) do not refuse a value stored before a rule was added.
+	if err := writeguard.SkipInputRules(ctx, tx, func() error {
+		_, err := tx.Exec(ctx, `
 		INSERT INTO runtime.fact_input
 		  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value, link_ref)
 		SELECT
@@ -5117,7 +5156,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		                           AND new_m.name = old_m.name
 		                           AND new_m.revision_id = $2::uuid
 		WHERE fi.revision_id = $3::uuid AND fi.model_id = $1::uuid
-	`, srcArgs...); err != nil {
+	`, srcArgs...)
+		return err
+	}); err != nil {
 		return "", fmt.Errorf("revision fact copy failed: %w", err)
 	}
 
@@ -5887,9 +5928,15 @@ type devMetric struct {
 	// ClosedWhen: the cells that take no input (metricformula.ClosedRule).
 	ClosedWhen json.RawMessage `json:"closed_when"`
 	// RowStyle: "total" draws the metric's row as a total; "" as any row.
-	RowStyle   string   `json:"row_style"`
-	DependsOn  []string `json:"depends_on"`
-	DependedBy []string `json:"depended_by"`
+	RowStyle string `json:"row_style"`
+	// InputRules: the values its cells accept (metricformula.InputRules),
+	// {} for any.
+	InputRules json.RawMessage `json:"input_rules"`
+	// DimensionRules: its own total rules by dimension id (migration 174),
+	// {} for none: the dimensions' rules apply.
+	DimensionRules json.RawMessage `json:"dimension_rules"`
+	DependsOn      []string        `json:"depends_on"`
+	DependedBy     []string        `json:"depended_by"`
 	// Tags: free-form labels the developer console filters by.
 	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
@@ -5947,7 +5994,8 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when, m.row_style,
+		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when, m.row_style, m.input_rules,
+		       COALESCE((SELECT jsonb_object_agg(r.dimension_id::text, r.rule) FROM model.metric_dimension_rule r WHERE r.metric_id = m.id), '{}'::jsonb),
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5979,7 +6027,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dm.RowStyle, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dm.RowStyle, &dm.InputRules, &dm.DimensionRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6061,6 +6109,11 @@ type addMetricReq struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen closes cells to input (metricformula.CheckClosedRules).
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// InputRules: the values its cells accept (metricformula.InputRules).
+	InputRules json.RawMessage `json:"input_rules"`
+	// DimensionRules: its own total rule over a dimension, {"<dimension id
+	// or name>": "sum" | "first" | "last" | "none"} (migration 174).
+	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
 	RowStyle string `json:"row_style"`
 }
@@ -6134,6 +6187,16 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if string(closedRules) != "[]" && !req.IsInput {
 		jsonErr(w, fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway"), http.StatusBadRequest)
+		return
+	}
+	inputRules, err := metricformula.CheckInputRules(req.InputRules, req.IsInput, req.Format)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	dimensionRules, err := metricformula.CheckMetricDimensionRules(ctx, h.db.For(ctx), modelID, req.RevisionID, req.DimensionRules)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -6240,6 +6303,12 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if metricInsertErr == nil && string(closedRules) != "[]" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules))
+	}
+	if metricInsertErr == nil && string(inputRules) != "{}" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET input_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(inputRules))
+	}
+	if metricInsertErr == nil && len(dimensionRules) > 0 {
+		metricInsertErr = metricformula.SetMetricDimensionRules(ctx, tx, newID, dimensionRules)
 	}
 	if metricInsertErr == nil && rowStyle != "" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, newID, rowStyle)
@@ -7069,6 +7138,11 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		}
 		timeCfg := timedim.Config{Type: body.DimensionType, Granularity: body.TimeGranularity, FiscalYearStartMonth: body.FiscalYearStart}
 		if err := timedim.ValidateConfig(&timeCfg); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		// How its members total (migration 174).
+		if err := metricformula.CheckDimensionTotalRule(body.AggRule, timeCfg.Type); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -9163,7 +9237,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 		var modelID string
 		_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&modelID)
 		if modelID != "" {
-			go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+			go h.recalcDimensionRevision(context.WithoutCancel(ctx), modelID, dimensionID) //nolint:contextcheck
 		}
 	}
 	// Imported codes, parents and properties are what LOOKUP, PARENT and
@@ -10030,6 +10104,16 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// Sent again under the same Idempotency-Key — a dashboard button or Run
+	// clicked again after a 502 or a closed connection — a run into a grid
+	// or a table is answered from the first and loads nothing. Without one,
+	// it created every record twice and added incremental values twice
+	// (2026-11-09). A dimension's run needs none: loading its members again
+	// adds none.
+	key, ok := importIdempotencyKey(w, r)
+	if !ok {
+		return
+	}
 	tail := strings.TrimPrefix(r.URL.Path, "/api/integrations/")
 	parts := strings.SplitN(tail, "/", 2)
 	intID := parts[0]
@@ -10143,6 +10227,16 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("a dry run checks a file for a grid or a table, not a dimension"), http.StatusBadRequest)
 		return
 	}
+	keyKind := "grid"
+	switch intg.TargetType {
+	case "form":
+		keyKind = "table"
+	case "dimension":
+		key = ""
+	}
+	if key != "" && !dryRun && !h.replayKeyedImport(w, ctx, importpkg.NewStore(h.db.For(ctx)), intModelID, act.UserID, key, keyKind, integrationRunReplay) {
+		return
+	}
 
 	// A csv_import integration carries its file in the request body — CSV
 	// text, or a workbook as xlsx_base64 (+ sheet); a google_sheets one
@@ -10233,10 +10327,40 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, errors.New(msg), http.StatusBadRequest)
 			return
 		}
-		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy, nil)
+		tableJob := func(created int) importpkg.FinishedJob {
+			job := h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, created, nil, nil)
+			if cfg.ReplaceBy != "" {
+				job.Details.Mode = string(importpkg.ModeReplace)
+			}
+			return job
+		}
+		// The run's Recent Imports line, with its key, commits with the
+		// records it created — or, the key taken by another request sent at
+		// the same time, nothing of the file does (as formImport).
+		var recordJob func(context.Context, pgx.Tx, recordpost.ImportResult) error
+		jobRecorded := false
+		if !dryRun {
+			recordJob = func(ctx context.Context, tx pgx.Tx, res recordpost.ImportResult) error {
+				job := tableJob(res.Created)
+				if job.ModelID == "" || res.Created == 0 {
+					return nil
+				}
+				_, err := importpkg.RecordJobTx(ctx, tx, job, key)
+				jobRecorded = err == nil
+				return err
+			}
+		}
+		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy, recordJob)
 		imported, rowErrs := res.Created, res.Errors
 		if dryRun && iErr == nil {
 			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
+			return
+		}
+		if errors.Is(iErr, importpkg.ErrImportKeyInUse) {
+			// Sent twice at once: the other send created the records.
+			if h.replayKeyedImport(w, ctx, importpkg.NewStore(h.db.For(ctx)), intModelID, act.UserID, key, "table", integrationRunReplay) {
+				jsonErr(w, iErr, http.StatusConflict)
+			}
 			return
 		}
 		if iErr != nil {
@@ -10260,11 +10384,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			note = replacedNote(res.Replaced)
 		}
 		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", note)
-		job := h.tableImportJob(ctx, intg.TargetID, intg.Type, act.UserID, fileName, started, imported, nil, nil)
-		if cfg.ReplaceBy != "" {
-			job.Details.Mode = string(importpkg.ModeReplace)
+		if !jobRecorded {
+			h.recordImportJob(ctx, tableJob(imported))
 		}
-		h.recordImportJob(ctx, job)
 		jsonOK(w, map[string]any{"rows_imported": imported, "rows_replaced": res.Replaced, "error_rows": 0})
 
 	case "dimension":
@@ -10304,7 +10426,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type,
-			h.gridJobDetails(ctx, intRevisionID, intg.TargetID, mode, fileName, started), dryRun)
+			h.gridJobDetails(ctx, intRevisionID, intg.TargetID, mode, fileName, started), dryRun, key)
 	}
 }
 
@@ -10746,8 +10868,9 @@ func (h *handler) appIDFromFormID(ctx context.Context, formID string) (string, e
 }
 
 // resolveAppRevisionID resolves the working revision for application-scoped
-// endpoints (workflows, automation rules): explicit ?revision_id wins, else
-// the active revision of the app's model. Returns "" (revision-global) when
+// endpoints (workflows, automation rules): explicit ?revision_id wins, then
+// the active revision of the model X-Model-Id selects, else that of the
+// app's oldest model. Returns "" (revision-global) when
 // the app has no revisions yet.
 func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, appID string) (string, error) {
 	// A caller-named revision must be one of this application's own: it is
@@ -10769,6 +10892,23 @@ func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, app
 			return "", errRevisionNotOpen
 		}
 		return rev, nil
+	}
+	// The model the request selects (X-Model-Id), as forms, grids and
+	// integrations follow it: a client naming no revision got the
+	// application's oldest model — on a signed-up tenant the tour — while
+	// working in another (owner decision 2026-11-09). A foreign or closed
+	// model id is refused, as everywhere else.
+	if r.Header.Get("X-Model-Id") != "" {
+		act, err := h.resolveActor(ctx, r)
+		if err != nil {
+			return "", errRevisionNotOpen
+		}
+		modelID, err := h.headerModelInApp(ctx, r, appID, act)
+		if err != nil {
+			return "", err
+		}
+		revID, _, _ := h.resolveRevisionCtx(ctx, "", modelID)
+		return revID, nil
 	}
 	var modelID string
 	if err := h.db.QueryRow(ctx, appWorkingModelQuery, appID).Scan(&modelID); err != nil {
@@ -12228,6 +12368,13 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			HighlightRules *json.RawMessage `json:"highlight_rules"`
 			// Omitted leaves the closed rules; [] removes them.
 			ClosedWhen *json.RawMessage `json:"closed_when"`
+			// InputRules: the values its cells accept
+			// (metricformula.InputRules); omitted leaves them, {} removes
+			// them.
+			InputRules *json.RawMessage `json:"input_rules"`
+			// DimensionRules: its own total rules by dimension (migration
+			// 174); omitted leaves them, {} removes them.
+			DimensionRules *json.RawMessage `json:"dimension_rules"`
 			// RowStyle "total" draws the metric's row as a total; ""
 			// as any row; omitted leaves it.
 			RowStyle *string `json:"row_style"`
@@ -12383,6 +12530,28 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
+		// Input rules are checked against the metric as it is saved; rules
+		// left on one that no longer takes a number in its cells (now
+		// calculated, text, a pick-list…) are dropped unless the request
+		// sends them, and then refused.
+		var inputRules json.RawMessage
+		if patch.InputRules != nil {
+			var iErr error
+			if inputRules, iErr = metricformula.CheckInputRules(*patch.InputRules, metricIsInput, body.Format); iErr != nil {
+				jsonErr(w, iErr, http.StatusBadRequest)
+				return
+			}
+		} else if !metricIsInput || !slices.Contains(metricformula.InputRuleFormats, body.Format) {
+			inputRules = json.RawMessage("{}")
+		}
+		var dimensionRules map[string]string // set when the request sends dimension_rules
+		if patch.DimensionRules != nil {
+			var dErr error
+			if dimensionRules, dErr = metricformula.CheckMetricDimensionRules(ctx, h.db.For(ctx), modelID, metricRevisionID, *patch.DimensionRules); dErr != nil {
+				jsonErr(w, dErr, http.StatusBadRequest)
+				return
+			}
+		}
 		if body.AggRule == "" {
 			body.AggRule = "sum"
 		}
@@ -12475,6 +12644,18 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		if closedRules != nil {
 			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, metricID, string(closedRules)); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if inputRules != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET input_rules=$2::jsonb WHERE id=$1::uuid AND input_rules IS DISTINCT FROM $2::jsonb`, metricID, string(inputRules)); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if dimensionRules != nil {
+			if err := metricformula.SetMetricDimensionRules(ctx, tx, metricID, dimensionRules); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12586,7 +12767,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		if patch.Name == nil && patch.Formula == nil && patch.AggRule == nil && patch.AggNumeratorMetricID == nil &&
 			patch.AggDenominatorMetricID == nil && patch.Format == nil && patch.FormatDecimals == nil &&
 			patch.FormatCurrency == nil && patch.TimeSummary == nil && patch.PicklistDimensionID == nil &&
-			patch.PicklistAllowParents == nil && patch.ClosedWhen == nil && patch.IsInput == nil && !patch.DropValues {
+			patch.PicklistAllowParents == nil && patch.ClosedWhen == nil && patch.IsInput == nil && !patch.DropValues &&
+			patch.DimensionRules == nil {
 			revIDs = nil
 		}
 
@@ -12933,6 +13115,24 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				nameKindErr(w, err)
 				return
 			}
+			// agg_rule: how its members total (migration 174). A change
+			// moves every total over the dimension: the revision
+			// recalculates.
+			var ruleModelID, storedRule string
+			ruleChanged := false
+			if body.AggRule != "" {
+				var dimType string
+				if err := h.db.QueryRow(ctx, `SELECT model_id::text, dimension_type, agg_rule FROM model.dimension_def WHERE id=$1::uuid`, dimID).
+					Scan(&ruleModelID, &dimType, &storedRule); err != nil {
+					jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+					return
+				}
+				if err := metricformula.CheckDimensionTotalRule(body.AggRule, dimType); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+				ruleChanged = body.AggRule != storedRule
+			}
 			if body.ParentDimensionID != nil {
 				// The shared rules (metricformula.ValidateParentDimension, also
 				// the AI Developer's): same model AND revision, not itself, no
@@ -13052,6 +13252,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// What the dimension's members stand for changed: every
 				// formula reading through the grouping recalculates.
 				go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
+			}
+			if ruleChanged {
+				go h.recalcDimensionRevision(context.WithoutCancel(ctx), ruleModelID, dimID) //nolint:contextcheck
 			}
 			auditMeta := map[string]string{"name": body.Name}
 			if body.Label != nil {
@@ -13238,7 +13441,7 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				var modelID string
 				_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
 				if modelID != "" {
-					go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+					go h.recalcDimensionRevision(context.WithoutCancel(ctx), modelID, dimID) //nolint:contextcheck
 				}
 			}
 			if body.ParentMemberID != nil {
@@ -13390,7 +13593,7 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				var modelID string
 				_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
 				if modelID != "" {
-					go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+					go h.recalcDimensionRevision(context.WithoutCancel(ctx), modelID, dimID) //nolint:contextcheck
 				}
 			}
 			if isTime || body.Code != oldCode || !sameOptionalID(prevParentID, body.ParentMemberID) || body.Properties != nil {
@@ -13432,7 +13635,7 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			// forces a recalc — unlike the rename/create/reparent cases
 			// just above, deleting a member never triggered one.
 			if memberModelID != "" {
-				go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), memberModelID) //nolint:contextcheck
+				go h.recalcDimensionRevision(context.WithoutCancel(ctx), memberModelID, dimID) //nolint:contextcheck
 			}
 			// The walk from inputs misses a metric reading the dimension
 			// only through dependency-free metrics; this one does not
@@ -13490,6 +13693,10 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				body.DataType = "text"
 			}
 			if err := metricformula.ValidatePropertyDeclaration(ctx, h.db.For(ctx), dimID, "", body.Name, body.DataType); err != nil {
+				if metricformula.IsPropertyNameConflict(err) {
+					jsonErr(w, err, http.StatusConflict)
+					return
+				}
 				if metricformula.IsValidationError(err) {
 					jsonErr(w, err, http.StatusBadRequest)
 					return
@@ -13570,6 +13777,10 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				body.DataType = oldType
 			}
 			if err := metricformula.ValidatePropertyDeclaration(ctx, h.db.For(ctx), dimID, propID, body.Name, body.DataType); err != nil {
+				if metricformula.IsPropertyNameConflict(err) {
+					jsonErr(w, err, http.StatusConflict)
+					return
+				}
 				if metricformula.IsValidationError(err) {
 					jsonErr(w, err, http.StatusBadRequest)
 					return
@@ -15863,6 +16074,14 @@ func jsonErr(w http.ResponseWriter, err error, code int) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": pgErr.Message, "code": "plan_limit", "limit": "max_storage_mb"})
 		return
 	}
+	// A value its metric's input rules refuse (migration 173), on whichever
+	// path it came: 422 with the guard's sentence, naming metric, value and
+	// cell.
+	if vr := writeguard.AsValueRefused(err); vr != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": vr.Message, "code": writeguard.CodeInputRule})
+		return
+	}
 	// A member write the kept-member guard refused (migration 144), on
 	// whichever path: the dimension's members are a table's records.
 	if errors.As(err, &pgErr) && pgErr.Code == keptMemberCode {
@@ -17611,7 +17830,7 @@ func (h *handler) validateMemberParent(ctx context.Context, dimID string, parent
 func (h *handler) applyInputAggregation(
 	ctx context.Context, modelID, revisionID string,
 	allMetrics []metricRow, metricDims map[string][]string, allDims []gridDimension,
-	cells, totals map[string]float64, fromStore bool, scopeSubtrees map[string]map[string]bool,
+	cells, totals map[string]float64, fromStore bool, scopeSubtrees map[string]map[string]bool, scopePinned map[string]string,
 ) error {
 	rdims := toRollupDims(allDims)
 	var store *calculation.Store
@@ -17640,7 +17859,24 @@ func (h *handler) applyInputAggregation(
 			axis = &trimmed
 		}
 		timeReduced := axis != nil && m.TimeSummary != "" && m.TimeSummary != "sum"
-		if !flat && !timeReduced {
+		// A dimension totalling as one member (first, last) or not at all
+		// (none; migration 174): the total reads that member's leaves.
+		memberRules := rollup.HasMemberRules(rdims, m.ID, ownDims)
+		var ruled map[string]string
+		if memberRules {
+			rc, ok := rollup.RuleCombo(rdims, m.ID, ownDims, scopePinned)
+			if !ok {
+				delete(totals, m.ID)
+				continue
+			}
+			ruled = map[string]string{}
+			for _, d := range ownDims {
+				if code, pinned := rc[d]; pinned && rdims[d].RuleFor(m.ID) != "" && rdims[d].RuleFor(m.ID) != rollup.TotalSum {
+					ruled[d] = code
+				}
+			}
+		}
+		if !flat && !timeReduced && !memberRules {
 			continue // the SUM above is the answer
 		}
 		rule := m.AggRule
@@ -17668,7 +17904,7 @@ func (h *handler) applyInputAggregation(
 						break
 					}
 				}
-				if inScope {
+				if inScope && atRuled(dm, ruled) {
 					leaves = append(leaves, leafValue{combo: dm, value: v})
 				}
 			}
@@ -17686,13 +17922,17 @@ func (h *handler) applyInputAggregation(
 				for i, dimID := range ownDims {
 					combo[dimID] = codes[i]
 				}
-				leaves = append(leaves, leafValue{combo: combo, value: v})
+				if atRuled(combo, ruled) {
+					leaves = append(leaves, leafValue{combo: combo, value: v})
+				}
 			}
 		}
 		oneLeaf := true // the scope pins every non-time dimension to one leaf
 		for _, d := range ownDims {
 			if dim := rdims[d]; dim == nil || dim.IsTime {
 				continue
+			} else if _, one := ruled[d]; one {
+				continue // the total rule reads one member
 			} else if sub, pinned := scopeSubtrees[d]; pinned {
 				oneLeaf = oneLeaf && len(sub) == 1
 			} else {
@@ -17706,6 +17946,17 @@ func (h *handler) applyInputAggregation(
 		}
 	}
 	return nil
+}
+
+// atRuled reports whether combo is at the member each total rule chose
+// (dimension id → code; nil: every combo is).
+func atRuled(combo, ruled map[string]string) bool {
+	for d, code := range ruled {
+		if combo[d] != code {
+			return false
+		}
+	}
+	return true
 }
 
 // gridValuesTx runs one grid change that moves stored values
@@ -17858,7 +18109,7 @@ func (h *handler) generateTimeMembers(w http.ResponseWriter, r *http.Request, di
 	var modelID string
 	_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
 	if modelID != "" && created > 0 {
-		go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+		go h.recalcDimensionRevision(context.WithoutCancel(ctx), modelID, dimID) //nolint:contextcheck
 		// The pass above visits revisions holding typed values; a metric
 		// reading the period set in a revision without any moves here.
 		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
@@ -17956,18 +18207,30 @@ func sameOptionalID(a, b *string) bool {
 	return *a == *b
 }
 
-// recalcAllInputsAcrossRevisions recalculates every calculated metric
-// downstream of any input, for every revision with fact data — the same
-// blunt-but-correct "recalc everything" pattern developerMetricAction's own
-// PATCH case already uses after a formula edit. Used for changes (like
-// dimension-member deletion) that can affect an aggregate calc metric's
-// value without touching model.calc_dependency at all, so there's no
-// specific affected-metric list to target precisely.
-func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID string) {
-	ctx, done := h.backgroundRecalc(ctx, "recalculation of every revision")
+// recalcDimensionRevision recalculates every calculated metric
+// downstream of any input — the same blunt-but-correct "recalc everything"
+// pattern developerMetricAction's own PATCH case already uses after a
+// formula edit — in the revision dimensionID belongs to. Used for changes
+// (like dimension-member deletion) that can affect an aggregate calc
+// metric's value without touching model.calc_dependency at all, so there's
+// no specific affected-metric list to target precisely.
+//
+// A dimension and its members belong to one revision: a change to them used
+// to recalculate every revision of the model holding data, approved ones
+// included (2026-11-09). A legacy dimension with no revision still
+// recalculates every revision with data, as all of them read it
+// (metricRecalcRevisions).
+func (h *handler) recalcDimensionRevision(ctx context.Context, modelID, dimensionID string) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation after a dimension change")
 	defer done()
+	var dimRevisionID string
+	if err := h.db.QueryRow(ctx, `SELECT COALESCE(revision_id::text, '') FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&dimRevisionID); err != nil {
+		h.log.Warn().Err(err).Str("dimension", dimensionID).Msg("recalc after a dimension change: dimension not found")
+		return
+	}
 	inputRows, _ := h.db.Query(ctx,
-		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND is_input=true`, modelID)
+		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND is_input=true
+		   AND ($2 = '' OR revision_id IS NULL OR revision_id = NULLIF($2, '')::uuid)`, modelID, dimRevisionID)
 	var inputIDs []string
 	for inputRows.Next() {
 		var id string
@@ -17979,19 +18242,9 @@ func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID st
 		return
 	}
 
-	revRows, _ := h.db.Query(ctx,
-		`SELECT DISTINCT revision_id::text FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id IS NOT NULL`, modelID)
-	var revIDs []string
-	for revRows.Next() {
-		var rid string
-		_ = revRows.Scan(&rid)
-		revIDs = append(revIDs, rid)
-	}
-	revRows.Close()
-
 	calcStore := calculation.NewStore(h.db.For(ctx))
 	sched := calculation.NewScheduler(h.log, calcStore)
-	for _, rid := range revIDs {
+	for _, rid := range h.metricRecalcRevisions(ctx, modelID, dimRevisionID) {
 		if err := sched.RecalcFromAllInputs(ctx, modelID, rid, inputIDs); err != nil {
 			h.log.Warn().Err(err).Str("model", modelID).Str("revision", rid).
 				Msg("recalc all inputs failed")

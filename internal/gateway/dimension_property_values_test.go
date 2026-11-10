@@ -183,8 +183,8 @@ func TestMemberPropertyValueMustMatchItsType(t *testing.T) {
 
 // Two declarations or renames differing only in case, sent at once, leave
 // one property: the database's unique index refuses the loser, answered
-// 409 PROPERTY_NAME_TAKEN naming the winner (or 400 when it lost before the
-// write).
+// 409 PROPERTY_NAME_TAKEN naming the winner — also when it lost before the
+// write, to the pre-check (owner decision 2026-11-09: one status for both).
 func TestPropertyNamesDifferingInCaseAreNotDeclaredAtOnce(t *testing.T) {
 	f := setupDimFormulaFixture(t)
 	props := "/api/developer/dimensions/" + f.region + "/properties"
@@ -227,7 +227,7 @@ func TestPropertyNamesDifferingInCaseAreNotDeclaredAtOnce(t *testing.T) {
 				switch {
 				case statuses[j] == http.StatusOK:
 					ok++
-				case (statuses[j] == http.StatusConflict || statuses[j] == http.StatusBadRequest) && strings.Contains(bodies[j], metricformula.CodePropertyNameTaken):
+				case statuses[j] == http.StatusConflict && strings.Contains(bodies[j], metricformula.CodePropertyNameTaken):
 				default:
 					t.Errorf("round %d: %s %s answered %d %s", i, reqs[j].method, reqs[j].name, statuses[j], bodies[j])
 				}

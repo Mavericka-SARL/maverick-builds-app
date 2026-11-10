@@ -131,8 +131,10 @@ func (s *Store) evalConditionFormula(ctx context.Context, instanceID, text strin
 		return false, false, "the workflow's model could not be read"
 	}
 
-	// Each "Dimension member" variable pins its dimension (by name in the
-	// revision read, so a definition built on another revision still pins).
+	// Each "Dimension member" variable pins its dimension in the revision
+	// read: the copy of the same lineage, so a definition built on another
+	// revision still pins, and so does a dimension renamed since (by name,
+	// a rename lost the member, 2026-11-09); else one of the same name.
 	var schema []struct {
 		Key         string `json:"key"`
 		DataType    string `json:"data_type"`
@@ -147,8 +149,10 @@ func (s *Store) evalConditionFormula(ctx context.Context, instanceID, text strin
 		}
 		var dimID string
 		if s.db.QueryRow(ctx, `
-			SELECT d.id::text FROM model.dimension_def d JOIN model.dimension_def o ON lower(o.name) = lower(d.name)
-			WHERE o.id::text = $1 AND d.model_id::text = $2 AND d.revision_id::text = $3`, v.DimensionID, modelID, revisionID).Scan(&dimID) == nil {
+			SELECT d.id::text FROM model.dimension_def d
+			JOIN model.dimension_def o ON o.lineage_id = d.lineage_id OR lower(o.name) = lower(d.name)
+			WHERE o.id::text = $1 AND d.model_id::text = $2 AND d.revision_id::text = $3
+			ORDER BY (o.lineage_id = d.lineage_id) DESC LIMIT 1`, v.DimensionID, modelID, revisionID).Scan(&dimID) == nil {
 			point[dimID] = code
 		}
 	}

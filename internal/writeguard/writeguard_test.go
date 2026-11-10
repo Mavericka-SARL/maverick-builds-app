@@ -608,3 +608,125 @@ func TestApprovedInstanceStaysLockedAfterLaterSteps(t *testing.T) {
 		t.Error("EU is still locked after a later approval step rejected it")
 	}
 }
+
+// TestMetricScopedLockFollowsARename: an approved (CA, revenue) round keeps
+// revenue's cells at CA locked once revenue is renamed — whether the run
+// still holds the old name (the rename was made in another revision, where
+// a copy of the metric shares its lineage) or none of the application's
+// metrics is called that any more. By name only, renaming a metric under
+// approval opened its cells (2026-11-09).
+func TestMetricScopedLockFollowsARename(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'geography') RETURNING id::text`, f.modelID, f.revisionID)
+	caID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'CA', 'Canada') RETURNING id::text`, dimID)
+	revenueID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'revenue', true) RETURNING id::text`, f.modelID, f.revisionID)
+	costID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'cost', true) RETURNING id::text`, f.modelID, f.revisionID)
+	appID := q(`SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID)
+	schema := `[{"key":"country","data_type":"Dimension member","dimension_id":"` + dimID + `"},{"key":"metric","data_type":"Metric"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'Metric approval', 'manual', '[]', $2::jsonb, 'published') RETURNING id::text`, appID, schema)
+	instID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by)
+	             VALUES ($1::uuid, 'completed', '{"country":"CA","metric":"revenue"}'::jsonb, $2::uuid) RETURNING id::text`, defID, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, completed_at)
+	   VALUES ($1::uuid, 'a1', 'completed', 'approve', now()) RETURNING id::text`, instID)
+	locked := func(metricID string) bool {
+		t.Helper()
+		l, _, err := WorkflowLockReasonForMetrics(ctx, pool, f.modelID, []string{caID}, []string{metricID})
+		if err != nil {
+			t.Fatalf("lock check: %v", err)
+		}
+		return l
+	}
+
+	// Another revision holds a copy of revenue (the same lineage), renamed
+	// there; this revision's revenue keeps the run's name.
+	rev2 := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Next') RETURNING id::text`, f.modelID)
+	copyID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, lineage_id)
+	             SELECT model_id, $2::uuid, 'turnover', true, lineage_id FROM model.metric_def WHERE id=$1::uuid RETURNING id::text`, revenueID, rev2)
+	if !locked(copyID) {
+		t.Error("the renamed copy of revenue in another revision must stay locked at CA")
+	}
+	// Renamed here too: no metric is called revenue any more, and the run
+	// was rewritten by the rename.
+	q(`UPDATE model.metric_def SET name='turnover' WHERE id=$1::uuid RETURNING id::text`, revenueID)
+	q(`UPDATE workflow.workflow_instance SET context = jsonb_set(context, '{metric}', '"turnover"') WHERE id=$1::uuid RETURNING id::text`, instID)
+	if !locked(revenueID) || !locked(copyID) {
+		t.Error("turnover must stay locked at CA in both revisions after the rename reached the run")
+	}
+	if locked(costID) {
+		t.Error("cost must stay writable at CA")
+	}
+}
+
+// TestApprovedLockReachesACopiedRevision: a round approved for CA in one
+// revision keeps CA locked in a revision copied from it — a promoted
+// revision keeps approved numbers frozen (owner decision 2026-11-09). The
+// copy's dimension has new ids but the same lineage.
+func TestApprovedLockReachesACopiedRevision(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'geography') RETURNING id::text`, f.modelID, f.revisionID)
+	caID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'CA', 'Canada') RETURNING id::text`, dimID)
+	appID := q(`SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID)
+	schema := `[{"key":"country","data_type":"Dimension member","dimension_id":"` + dimID + `"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, revision_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, $2::uuid, 'Approval', 'manual', '[]', $3::jsonb, 'published') RETURNING id::text`, appID, f.revisionID, schema)
+	instID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by)
+	             VALUES ($1::uuid, 'completed', '{"country":"CA"}'::jsonb, $2::uuid) RETURNING id::text`, defID, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, completed_at)
+	   VALUES ($1::uuid, 'a1', 'completed', 'approve', now()) RETURNING id::text`, instID)
+
+	next := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Next') RETURNING id::text`, f.modelID)
+	copyDim := q(`INSERT INTO model.dimension_def (model_id, revision_id, name, lineage_id)
+	              SELECT model_id, $2::uuid, name, lineage_id FROM model.dimension_def WHERE id=$1::uuid RETURNING id::text`, dimID, next)
+	copyCA := q(`INSERT INTO model.dimension_member (dimension_id, code, label, lineage_id)
+	             SELECT $2::uuid, code, label, lineage_id FROM model.dimension_member WHERE id=$1::uuid RETURNING id::text`, caID, copyDim)
+	usID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'US', 'United States') RETURNING id::text`, copyDim)
+
+	locked := func(member string) bool {
+		t.Helper()
+		l, _, err := WorkflowLockReasonForMetrics(ctx, pool, f.modelID, []string{member}, nil)
+		if err != nil {
+			t.Fatalf("lock check: %v", err)
+		}
+		return l
+	}
+	if !locked(caID) {
+		t.Fatal("CA must be locked in the approval's own revision")
+	}
+	if !locked(copyCA) {
+		t.Error("CA must stay locked in the revision copied from it")
+	}
+	if locked(usID) {
+		t.Error("US must stay writable in the copy")
+	}
+	// The grid of the copy draws the scope read-only on its own dimension.
+	scopes, err := WorkflowLockScopes(ctx, pool, f.modelID, []LockMetric{{ID: q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'revenue', true) RETURNING id::text`, f.modelID, next), Name: "revenue"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scopes) != 1 || len(scopes[0].Fields) != 1 || len(scopes[0].Fields[0][copyDim]) == 0 {
+		t.Errorf("the copy's grid scopes = %+v, want CA on the copied dimension %s", scopes, copyDim)
+	}
+}

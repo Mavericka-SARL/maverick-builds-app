@@ -19,8 +19,9 @@ spec:
     matchLabels:
       app: pgbouncer
   strategy:
-    # Recreate avoids two instances holding connections simultaneously during
-    # a config change; switch to RollingUpdate once you have proper draining.
+    # One replica here, replaced whole. A production overlay runs two with a
+    # rolling update and half the connection cap each (prod.example's
+    # pgbouncer-ha.yaml).
     type: Recreate
   template:
     metadata:

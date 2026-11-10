@@ -1,12 +1,11 @@
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { Inbox, History, Shield, KeyRound, Boxes, Copy } from "lucide-react";
 import { useDemo } from "../../api/useDemo";
 import { AppsTab } from "../business/AppsTab";
 import { useModelLabel } from "../business/modelLabel";
-import { PageLayout } from "../../ui";
+import { PageLayout, LoadingState } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
-import { WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./BusinessAdminConsole";
-import { CopyValuesTab } from "./CopyValuesTab";
+import { CopyValuesTab, WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./screens";
 
 type Tab = "inbox" | "history" | "roles" | "access" | "copy" | "models";
 
@@ -69,12 +68,14 @@ export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput
       const cur = localTab(active) as Tab;
       return (
         <PageLayout title={TAB_LABELS[cur]}>
+          <Suspense fallback={<LoadingState />}>
           {cur === "inbox" && <WorkflowInbox />}
           {cur === "history" && <WorkflowHistory focusInstanceId={focusInstanceId} />}
           {cur === "roles" && <RolesTab builds={roles.includes("developer")} />}
           {cur === "access" && <AccessRulesTab />}
           {cur === "copy" && <CopyValuesTab />}
           {cur === "models" && <AppsTab />}
+          </Suspense>
         </PageLayout>
       );
     },

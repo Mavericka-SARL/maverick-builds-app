@@ -15,7 +15,13 @@
 //	# staging/production, a real account (password grant on the realm):
 //	go run ./cmd/loadtest -base https://staging.example.com \
 //	  -keycloak https://auth-staging.example.com -username dev@example.com -password ... \
-//	  -users 100 -duration 2m -target-p95 2s
+//	  -client mavericks-loadtest -users 100 -duration 2m -target-p95 2s
+//
+//	  The REST API accepts tokens of the clients GATEWAY_TOKEN_CLIENTS lists
+//	  (the console's by default). Give the realm a public client with direct
+//	  access grants for the test (mavericks-loadtest above), list it in
+//	  GATEWAY_TOKEN_CLIENTS on the deployment under test only, and remove both
+//	  afterwards; or pass -token, a console token.
 //
 //	# before DNS exists: pin hosts and accept the placeholder certificate
 //	  -resolve staging.example.com=203.0.113.10 -resolve auth-staging.example.com=203.0.113.10 -insecure
@@ -63,6 +69,7 @@ func (r resolveFlag) Set(v string) error {
 type config struct {
 	base, token, devUser                string
 	keycloak, realm, username, password string
+	tokenClient                         string
 	app, model, revision, grid, metric  string
 	users                               int
 	duration, ramp, think               time.Duration
@@ -85,6 +92,7 @@ func main() {
 	flag.StringVar(&c.realm, "realm", envOr("KEYCLOAK_REALM", "mavericks"), "Keycloak realm")
 	flag.StringVar(&c.username, "username", os.Getenv("MAVERICKS_USERNAME"), "account for the password grant")
 	flag.StringVar(&c.password, "password", os.Getenv("MAVERICKS_PASSWORD"), "its password")
+	flag.StringVar(&c.tokenClient, "client", envOr("KEYCLOAK_CLIENT", "admin-cli"), "Keycloak client of the password grant: one the deployment lists in GATEWAY_TOKEN_CLIENTS")
 	flag.StringVar(&c.app, "app", "", "application id (default: the account's, via /api/demo)")
 	flag.StringVar(&c.model, "model", "", "model id (default: from /api/demo)")
 	flag.StringVar(&c.revision, "revision", "", "revision id (default: from /api/demo)")
@@ -194,7 +202,7 @@ func newClient(c config) *http.Client {
 }
 
 func passwordGrant(ctx context.Context, client *http.Client, c config) (string, error) {
-	form := url.Values{"grant_type": {"password"}, "client_id": {"admin-cli"}, "username": {c.username}, "password": {c.password}}
+	form := url.Values{"grant_type": {"password"}, "client_id": {c.tokenClient}, "username": {c.username}, "password": {c.password}}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.keycloak, "/")+"/realms/"+c.realm+"/protocol/openid-connect/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)

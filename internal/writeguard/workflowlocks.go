@@ -24,29 +24,48 @@ import (
 type workflowLock struct {
 	bindings    []lockBinding   // its Dimension member fields with a value, in the schema's order
 	metricNames map[string]bool // lowercased names from its Metric fields; empty = every metric
-	locked      bool            // awaiting an approval, or approved
+	// metricLineages are the lineages (metric_def.lineage_id) of the metrics
+	// its Metric fields name, in any revision of the application's models.
+	// A rename keeps a metric's lineage, so a lock follows it: by name only,
+	// renaming a metric under approval opened its cells (2026-11-09).
+	metricLineages map[string]bool
+	locked         bool // awaiting an approval, or approved
 }
 
-// lockBinding is one Dimension member field's value.
-type lockBinding struct{ dimID, code string }
+// lockBinding is one Dimension member field's value. lineage is its
+// dimension's lineage_id, shared with the dimension's copy in every revision
+// of the model: a round approved in one revision keeps its members locked
+// in a revision copied from it — a promoted revision keeps approved numbers
+// frozen (owner decision 2026-11-09). By dimension id only, the copy, whose
+// ids are new, was open.
+type lockBinding struct{ dimID, lineage, code string }
 
 // scopeKey identifies the member scope: a newer instance of the same scope
 // supersedes an older one for the metrics it covers.
 func (l workflowLock) scopeKey() string {
 	parts := make([]string, len(l.bindings))
 	for i, b := range l.bindings {
-		parts[i] = b.dimID + "=" + b.code
+		parts[i] = b.key() + "=" + b.code
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\x1f")
 }
 
+// key is what a binding's dimension is matched by: its lineage, else (a
+// dimension gone since) its id.
+func (b lockBinding) key() string {
+	if b.lineage != "" {
+		return b.lineage
+	}
+	return b.dimID
+}
+
 // covers reports whether a write is inside l's member scope. covered is the
-// write's members and their ancestors: dimension ID → codes.
+// write's members and their ancestors: dimension lineage → codes.
 func (l workflowLock) covers(covered map[string]map[string]bool) bool {
 	present := false
 	for _, b := range l.bindings {
-		codes, ok := covered[b.dimID]
+		codes, ok := covered[b.key()]
 		if !ok {
 			continue
 		}
@@ -58,10 +77,11 @@ func (l workflowLock) covers(covered map[string]map[string]bool) bool {
 	return present
 }
 
-// coversMetric reports whether l locks the metric named name (lowercased;
-// "" = the metric is not known, which every lock covers).
-func (l workflowLock) coversMetric(name string) bool {
-	return len(l.metricNames) == 0 || name == "" || l.metricNames[name]
+// coversMetric reports whether l locks the metric named name (lowercased)
+// of lineage lineage ("" for both = the metric is not known, which every
+// lock covers).
+func (l workflowLock) coversMetric(name, lineage string) bool {
+	return len(l.metricNames) == 0 || (name == "" && lineage == "") || l.metricNames[name] || (lineage != "" && l.metricLineages[lineage])
 }
 
 // LastApprovalJoinSQL joins ws.decision onto workflow_instance wi and
@@ -143,7 +163,7 @@ func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) 
 		_ = json.Unmarshal(ctxJSON, &values)
 		var vars []contextVarDef
 		_ = json.Unmarshal(schemaJSON, &vars)
-		l := workflowLock{metricNames: map[string]bool{}}
+		l := workflowLock{metricNames: map[string]bool{}, metricLineages: map[string]bool{}}
 		for _, v := range vars {
 			if v.DataType == "Dimension member" && v.DimensionID != "" && values[v.Key] != "" {
 				l.bindings = append(l.bindings, lockBinding{dimID: v.DimensionID, code: values[v.Key]})
@@ -173,34 +193,112 @@ func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) 
 		return nil, err
 	}
 
+	// Each binding's dimension by its lineage.
+	var dimIDs []string
+	for _, l := range locks {
+		for _, b := range l.bindings {
+			dimIDs = append(dimIDs, b.dimID)
+		}
+	}
+	if len(dimIDs) > 0 {
+		lineages, err := dimensionLineages(ctx, pool, dimIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range locks {
+			for j := range locks[i].bindings {
+				locks[i].bindings[j].lineage = lineages[locks[i].bindings[j].dimID]
+			}
+		}
+	}
+
 	// Id-shaped metric context values resolve to names, so every scope is
-	// name-keyed whatever the start path stored.
+	// name-keyed whatever the start path stored; and every value, an id or a
+	// name, to the lineages of the metrics it names in the application's
+	// models, so a scope also follows its metrics through a rename.
 	if len(metricValueIsRaw) > 0 {
 		rawVals := make([]string, 0, len(metricValueIsRaw))
+		lowerVals := make([]string, 0, len(metricValueIsRaw))
 		for v := range metricValueIsRaw {
 			rawVals = append(rawVals, v)
+			lowerVals = append(lowerVals, strings.ToLower(v))
 		}
-		idName, err := pool.Query(ctx, `SELECT id::text, lower(name) FROM model.metric_def WHERE id::text = ANY($1)`, rawVals)
-		if err == nil {
-			resolved := map[string]string{}
-			for idName.Next() {
-				var id, name string
-				if idName.Scan(&id, &name) == nil {
-					resolved[strings.ToLower(id)] = name
-				}
+		found, err := pool.Query(ctx, `
+			SELECT m.id::text, lower(m.name), m.lineage_id::text FROM model.metric_def m
+			JOIN core.model cm ON cm.id = m.model_id
+			WHERE cm.application_id = $1::uuid AND (m.id::text = ANY($2) OR lower(m.name) = ANY($3))`, appID, rawVals, lowerVals)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workflow lock metrics: %w", err)
+		}
+		idName := map[string]string{}
+		lineagesOf := map[string][]string{} // lowercased value (id or name) → lineages
+		for found.Next() {
+			var id, name, lineage string
+			if err := found.Scan(&id, &name, &lineage); err != nil {
+				found.Close()
+				return nil, err
 			}
-			idName.Close()
-			for i := range locks {
-				for key := range locks[i].metricNames {
-					if name, ok := resolved[key]; ok {
-						delete(locks[i].metricNames, key)
-						locks[i].metricNames[name] = true
-					}
+			id = strings.ToLower(id)
+			idName[id] = name
+			lineagesOf[id] = append(lineagesOf[id], lineage)
+			lineagesOf[name] = append(lineagesOf[name], lineage)
+		}
+		found.Close()
+		if err := found.Err(); err != nil {
+			return nil, err
+		}
+		for i := range locks {
+			for key := range locks[i].metricNames {
+				for _, lineage := range lineagesOf[key] {
+					locks[i].metricLineages[lineage] = true
+				}
+				if name, ok := idName[key]; ok {
+					delete(locks[i].metricNames, key)
+					locks[i].metricNames[name] = true
 				}
 			}
 		}
 	}
 	return locks, nil
+}
+
+// dimensionLineages is the lineage of each of dimIDs that still exists.
+func dimensionLineages(ctx context.Context, pool *pgxpool.Pool, dimIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	rows, err := pool.Query(ctx, `SELECT id::text, lineage_id::text FROM model.dimension_def WHERE id::text = ANY($1)`, dimIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve dimension lineages: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, lineage string
+		if err := rows.Scan(&id, &lineage); err != nil {
+			return nil, err
+		}
+		out[id] = lineage
+	}
+	return out, rows.Err()
+}
+
+// metricLineages is the lineage of each of metricIDs.
+func metricLineages(ctx context.Context, pool *pgxpool.Pool, metricIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(metricIDs) == 0 {
+		return out, nil
+	}
+	rows, err := pool.Query(ctx, `SELECT id::text, lineage_id::text FROM model.metric_def WHERE id::text = ANY($1)`, metricIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve metric lineages: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, lineage string
+		if err := rows.Scan(&id, &lineage); err != nil {
+			return nil, err
+		}
+		out[id] = lineage
+	}
+	return out, rows.Err()
 }
 
 // lockReason says what l locks, by the members' labels: "Europe · Budget
@@ -248,12 +346,20 @@ func WorkflowLockScopes(ctx context.Context, pool *pgxpool.Pool, modelID string,
 	if err != nil || len(locks) == 0 {
 		return nil, err
 	}
+	ids := make([]string, len(metrics))
+	for i, m := range metrics {
+		ids[i] = m.ID
+	}
+	lineages, err := metricLineages(ctx, pool, ids)
+	if err != nil {
+		return nil, err
+	}
 	lockedMetrics := map[int][]string{}
 	for _, m := range metrics {
 		name := strings.ToLower(m.Name)
 		seen := map[string]bool{}
 		for i, l := range locks {
-			if len(l.bindings) == 0 || !l.coversMetric(name) {
+			if len(l.bindings) == 0 || !l.coversMetric(name, lineages[m.ID]) {
 				continue
 			}
 			key := l.scopeKey()
@@ -275,6 +381,12 @@ func WorkflowLockScopes(ctx context.Context, pool *pgxpool.Pool, modelID string,
 	}
 	sort.Ints(order)
 	out := make([]LockScope, 0, len(order))
+	// The grid's own revision (its metrics'): a scope bound to another
+	// revision's dimensions is drawn on this revision's copies of them.
+	var gridRevision string
+	if len(ids) > 0 {
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(revision_id::text, '') FROM model.metric_def WHERE id::text = $1`, ids[0]).Scan(&gridRevision)
+	}
 	for _, i := range order {
 		l := locks[i]
 		scope := LockScope{MetricIDs: lockedMetrics[i], Reason: lockReason(ctx, pool, l, "")}
@@ -283,9 +395,51 @@ func WorkflowLockScopes(ctx context.Context, pool *pgxpool.Pool, modelID string,
 			if err != nil {
 				return nil, err
 			}
+			if gridRevision != "" {
+				if covered, err = inRevision(ctx, pool, covered, gridRevision); err != nil {
+					return nil, err
+				}
+			}
 			scope.Fields = append(scope.Fields, covered)
 		}
 		out = append(out, scope)
+	}
+	return out, nil
+}
+
+// inRevision re-keys covered (dimension ID → codes) onto the dimensions of
+// revisionID with the same lineage; a dimension with no copy there keeps its
+// id.
+func inRevision(ctx context.Context, pool *pgxpool.Pool, covered map[string][]string, revisionID string) (map[string][]string, error) {
+	ids := make([]string, 0, len(covered))
+	for id := range covered {
+		ids = append(ids, id)
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT s.id::text, c.id::text FROM model.dimension_def s
+		JOIN model.dimension_def c ON c.lineage_id = s.lineage_id AND c.model_id = s.model_id AND c.revision_id = $2::uuid
+		WHERE s.id::text = ANY($1)`, ids, revisionID)
+	if err != nil {
+		return nil, fmt.Errorf("map lock scope onto the revision: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string][]string, len(covered))
+	mapped := map[string]bool{}
+	for rows.Next() {
+		var src, dst string
+		if err := rows.Scan(&src, &dst); err != nil {
+			return nil, err
+		}
+		out[dst] = covered[src]
+		mapped[src] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for id, codes := range covered {
+		if !mapped[id] {
+			out[id] = codes
+		}
 	}
 	return out, nil
 }

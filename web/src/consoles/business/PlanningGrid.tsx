@@ -4,7 +4,7 @@ import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
-import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
+import { api, dimLabel, memberTotalRule, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput, Txt } from "../../ui";
@@ -1078,6 +1078,37 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     return dim.members.some(m => m.parent_code === member.code);
   }
 
+  // The leaf members at or under code, in the dimension's order.
+  function leavesUnder(dim: DimInfo, code: string): DimMember[] {
+    const inTree = new Set([code]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const m of dim.members) {
+        if (!inTree.has(m.code) && m.parent_code && inTree.has(m.parent_code)) { inTree.add(m.code); grew = true; }
+      }
+    }
+    return dim.members.filter(m => inTree.has(m.code) && !m.formula && !isAggNode(dim, m));
+  }
+
+  // How a metric totals over each dimension (migration 174), as the server
+  // reads it (rollup.RuleCombo): a dimension totalling as one member
+  // (first, last) at a member with members under it is read at the first or
+  // last leaf there; one with no total (none) has no value above its
+  // members — undefined. Without such a rule the combo comes back as it is.
+  function ruleCombo(metricId: string, fc: DimMember[]): DimMember[] | undefined {
+    let out: DimMember[] | null = null;
+    for (let i = 0; i < dims.length; i++) {
+      const rule = memberTotalRule(dims[i], metricId);
+      if (rule === "sum" || !fc[i] || !isAggNode(dims[i], fc[i])) continue;
+      if (rule === "none") return undefined;
+      const leaves = leavesUnder(dims[i], fc[i].code);
+      if (leaves.length === 0) return undefined;
+      out ??= [...fc];
+      out[i] = rule === "first" ? leaves[0] : leaves[leaves.length - 1];
+    }
+    return out ?? fc;
+  }
+
   // Recursively resolves a cell value for any metric (INPUT or CALC) at any combo.
   // For parent dimension members, reduces the leaves under them flat by the
   // metric's agg_rule (flatValue).
@@ -1118,11 +1149,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // `totals` answers; if the server withheld it, no client rollup of the
     // visible children may stand in for it.
     if (withheld.has(metricId) && dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code && fc[i].code !== SELECTION_CODE)) return null;
+    // The metric's total rules (ruleCombo). The formula/rate branch below
+    // reads the server's rows by the combo as shown: they follow the rules
+    // already.
+    const ruled = ruleCombo(metricId, fc);
+    if (ruled === undefined) return undefined;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
     // agg_rule none (an index, a pick-list): nothing above the leaves of
     // its non-time dimensions, as the server answers.
-    if (aggRule === "none" && fc.some((m, i) => dims[i].dimension_type !== "time" && isAggNode(dims[i], m))) return undefined;
+    if (aggRule === "none" && ruled.some((m, i) => dims[i].dimension_type !== "time" && isAggNode(dims[i], m))) return undefined;
 
     // 'formula' and 'rate' cannot be derived from children at all. The first
     // is this metric's own expression re-evaluated against aggregated inputs;
@@ -1184,6 +1220,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // A leaf's own cell is its value as it is: running it through
     // flatValue would combine one value by agg_rule, and a count of one
     // leaf is 1, not the leaf's value.
+    fc = ruled;
     if (!comboIsAgg(fc)) {
       const direct = g.cells[getKey(metricId, fc)];
       if (direct !== undefined) return direct;
@@ -1499,8 +1536,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // — the same number the server's totals give: an average is the mean of
     // every leaf with a value, not the mean of the rows, and a leaf reached
     // from two rows (a parent row beside its own children in a multi-
-    // dimension row zone) counts once.
-    const combos = rowCombos.map(rc => fullCombo(rc, cc));
+    // dimension row zone) counts once. A row dimension totalling as one
+    // member reads only that member's rows; one with no total has none
+    // (migration 174).
+    const atRule = rowRuleMembers(metricId);
+    if (atRule === undefined) return undefined;
+    const combos = rowCombos.filter(rc => atRule.every(([j, code]) => rc[j]?.code === code)).map(rc => fullCombo(rc, cc));
     if (combos.some(fc => withheld.has(getKey(metricId, fc)))) return null;
     return flatValue(metricId, combos, aggRule);
   }
@@ -1508,8 +1549,24 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // Whether colTotal gives a metric a total over the rows: text has none,
   // agg none none across a non-time dimension, and a ratio (formula, rate,
   // an evaluated average) only where one member stands for all rows.
+  // The member each row dimension's total rule reads (row dimension index,
+  // code) for a metric; undefined when a row dimension has no total.
+  function rowRuleMembers(metricId: string): [number, string][] | undefined {
+    const out: [number, string][] = [];
+    for (let j = 0; j < rowDims.length; j++) {
+      const rule = memberTotalRule(rowDims[j], metricId);
+      if (rule === "sum") continue;
+      if (rule === "none") return undefined;
+      const leaves = rowDims[j].members.filter(x => !x.formula && !isAggNode(rowDims[j], x));
+      if (leaves.length === 0) return undefined;
+      out.push([j, (rule === "first" ? leaves[0] : leaves[leaves.length - 1]).code]);
+    }
+    return out;
+  }
+
   function metricHasRowTotal(m: Metric): boolean {
     if (isTextMetric(m) || m.format === "date") return false;
+    if (rowRuleMembers(m.id) === undefined) return false;
     const aggRule = m.agg_rule ?? "sum";
     const acrossNonTime = rowDims.some(dim => dim.dimension_type !== "time");
     if (aggRule === "none") return !acrossNonTime;

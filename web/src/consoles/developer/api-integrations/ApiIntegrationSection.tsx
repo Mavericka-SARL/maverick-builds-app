@@ -40,7 +40,7 @@ export function ApiIntegrationSection({ revisionId }: { revisionId?: string }) {
         }
       />
       <ApiIntegrationList revisionId={revisionId} onEdit={d => setEditing(d)} />
-      <ModelLinksReadingPanel />
+      <ModelLinksReadingPanel revisionId={revisionId} />
     </div>
   );
 }

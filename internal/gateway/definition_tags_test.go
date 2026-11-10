@@ -75,18 +75,18 @@ func TestDefinitionTagsAndPartialDimensionPatch(t *testing.T) {
 
 	// staff is a declared child of departments. A rename alone must keep
 	// the parent, the rollup rule and the tags.
-	if _, err := f.pool.Exec(ctx, `UPDATE model.dimension_def SET agg_rule='average', tags='{people}' WHERE id=$1::uuid`, f.staffDimID); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE model.dimension_def SET agg_rule='first', tags='{people}' WHERE id=$1::uuid`, f.staffDimID); err != nil {
 		t.Fatal(err)
 	}
 	call("PATCH", "/api/developer/dimensions/"+f.staffDimID, map[string]any{"name": "staff_members"})
 	name, agg, parent, tags := dimRow(f.staffDimID)
-	if name != "staff_members" || agg != "average" || parent == nil || *parent != f.deptsDimID || !slices.Equal(tags, []string{"people"}) {
-		t.Errorf("after rename: name=%s agg=%s parent=%v tags=%v; want staff_members/average/%s/[people]", name, agg, parent, tags, f.deptsDimID)
+	if name != "staff_members" || agg != "first" || parent == nil || *parent != f.deptsDimID || !slices.Equal(tags, []string{"people"}) {
+		t.Errorf("after rename: name=%s agg=%s parent=%v tags=%v; want staff_members/first/%s/[people]", name, agg, parent, tags, f.deptsDimID)
 	}
 	// Tags alone change only the tags.
 	call("PATCH", "/api/developer/dimensions/"+f.staffDimID, map[string]any{"tags": []string{"people", "hr"}})
 	name, agg, parent, tags = dimRow(f.staffDimID)
-	if name != "staff_members" || agg != "average" || parent == nil || !slices.Equal(tags, []string{"people", "hr"}) {
+	if name != "staff_members" || agg != "first" || parent == nil || !slices.Equal(tags, []string{"people", "hr"}) {
 		t.Errorf("after tag edit: name=%s agg=%s parent=%v tags=%v", name, agg, parent, tags)
 	}
 

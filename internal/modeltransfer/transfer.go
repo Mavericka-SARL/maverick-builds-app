@@ -26,6 +26,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
+	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 )
@@ -36,8 +37,11 @@ const (
 	// of records): a table's records have a status only when it has a
 	// status field. A version 1 package is still imported; its tables are
 	// given the status field their records then always had
-	// (Package.upgrade).
-	PackageVersion = 2
+	// (Package.upgrade). Version 3 (total rules, migration 174): a
+	// dimension's agg_rule is how its members total, and a metric carries
+	// its own rules by dimension; before it a dimension's agg_rule meant
+	// nothing, and imports as sum.
+	PackageVersion = 3
 	// OldestPackageVersion is the oldest version an import takes.
 	OldestPackageVersion = 1
 	// FactsPolicy documents, as an explicit and inspectable field rather
@@ -155,6 +159,12 @@ type Metric struct {
 	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
 	// RowStyle "total" draws its row as a total (migration 159).
 	RowStyle string `json:"row_style,omitempty"`
+	// InputRules: the values its cells accept (migration 173); absent when
+	// none, and in packages made before it existed.
+	InputRules json.RawMessage `json:"input_rules,omitempty"`
+	// DimensionRules: its own total rule over a dimension, by the
+	// package's dimension id (migration 174); absent when none.
+	DimensionRules map[string]string `json:"dimension_rules,omitempty"`
 }
 
 type Dependency struct {
@@ -531,7 +541,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
 		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
-		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb), row_style
+		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb), row_style,
+		       NULLIF(input_rules, '{}'::jsonb)
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -540,11 +551,40 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen, &m.RowStyle); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen, &m.RowStyle, &m.InputRules); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		pkg.Metrics = append(pkg.Metrics, m)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Each metric's own total rules, by dimension id (migration 174).
+	byMetric := map[string]int{}
+	for i, m := range pkg.Metrics {
+		byMetric[m.ID] = i
+	}
+	rows, err = q.Query(ctx, `
+		SELECT r.metric_id::text, r.dimension_id::text, r.rule FROM model.metric_dimension_rule r
+		JOIN model.metric_def m ON m.id = r.metric_id
+		WHERE m.model_id=$1::uuid AND (m.revision_id=$2::uuid OR m.revision_id IS NULL)`, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var metricID, dimID, rule string
+		if err := rows.Scan(&metricID, &dimID, &rule); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if i, ok := byMetric[metricID]; ok {
+			if pkg.Metrics[i].DimensionRules == nil {
+				pkg.Metrics[i].DimensionRules = map[string]string{}
+			}
+			pkg.Metrics[i].DimensionRules[dimID] = rule
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -1809,65 +1849,72 @@ func ImportRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 }
 
 // upgrade brings a package of an older version up to PackageVersion, in
-// place, as migration 139 brought a database's tables up: version 1 tables
+// place, as migrations brought a database's tables up. Version 1 tables
 // gave every record a status, so each gets a status field (named "status",
 // or "record_status" when a field of its own is called "status"), and its
 // records widgets keep their "+ New record" button.
 func (pkg *Package) upgrade() {
 	// Only a package that says it is version 1: one that names no version
 	// is made by hand (the gateway refuses it), and means what it says now.
-	if pkg.Version != 1 {
+	if pkg.Version != 1 && pkg.Version != 2 {
 		return
 	}
-	// A version 1 import gave a record without a status a draft's.
-	for i := range pkg.FormRecords {
-		if pkg.FormRecords[i].Status == "" {
-			pkg.FormRecords[i].Status = "draft"
-		}
-	}
-	for i := range pkg.Forms {
-		var fields []map[string]any
-		if err := json.Unmarshal(pkg.Forms[i].Fields, &fields); err != nil {
-			fields = nil
-		}
-		hasStatus, statusTaken := false, false
-		for _, f := range fields {
-			if f["type"] == "status" {
-				hasStatus = true
-			}
-			if f["name"] == "status" {
-				statusTaken = true
+	if pkg.Version == 1 {
+		// A version 1 import gave a record without a status a draft's.
+		for i := range pkg.FormRecords {
+			if pkg.FormRecords[i].Status == "" {
+				pkg.FormRecords[i].Status = "draft"
 			}
 		}
-		if hasStatus {
-			continue
-		}
-		name := "status"
-		if statusTaken {
-			name = "record_status"
-		}
-		fields = append(fields, map[string]any{"name": name, "label": "Status", "type": "status", "required": false})
-		if raw, err := json.Marshal(fields); err == nil {
-			pkg.Forms[i].Fields = raw
-		}
-	}
-	// A version 1 records widget always offered "+ New record"; a widget
-	// now shows it only when it says so.
-	for di := range pkg.Dashboards {
-		for wi := range pkg.Dashboards[di].Widgets {
-			w := &pkg.Dashboards[di].Widgets[wi]
-			if w.WidgetType != "form" {
+		for i := range pkg.Forms {
+			var fields []map[string]any
+			if err := json.Unmarshal(pkg.Forms[i].Fields, &fields); err != nil {
+				fields = nil
+			}
+			hasStatus, statusTaken := false, false
+			for _, f := range fields {
+				if f["type"] == "status" {
+					hasStatus = true
+				}
+				if f["name"] == "status" {
+					statusTaken = true
+				}
+			}
+			if hasStatus {
 				continue
 			}
-			var props map[string]any
-			if json.Unmarshal(w.Props, &props) != nil || props == nil {
-				props = map[string]any{}
+			name := "status"
+			if statusTaken {
+				name = "record_status"
 			}
-			props["new_record_button"] = true
-			if raw, err := json.Marshal(props); err == nil {
-				w.Props = raw
+			fields = append(fields, map[string]any{"name": name, "label": "Status", "type": "status", "required": false})
+			if raw, err := json.Marshal(fields); err == nil {
+				pkg.Forms[i].Fields = raw
 			}
 		}
+		// A version 1 records widget always offered "+ New record"; a widget
+		// now shows it only when it says so.
+		for di := range pkg.Dashboards {
+			for wi := range pkg.Dashboards[di].Widgets {
+				w := &pkg.Dashboards[di].Widgets[wi]
+				if w.WidgetType != "form" {
+					continue
+				}
+				var props map[string]any
+				if json.Unmarshal(w.Props, &props) != nil || props == nil {
+					props = map[string]any{}
+				}
+				props["new_record_button"] = true
+				if raw, err := json.Marshal(props); err == nil {
+					w.Props = raw
+				}
+			}
+		}
+	}
+	// Before version 3 a dimension's agg_rule meant nothing (migration 174):
+	// every dimension imports adding its members up, as it did.
+	for i := range pkg.Dimensions {
+		pkg.Dimensions[i].AggRule = rollup.TotalSum
 	}
 	pkg.Version = PackageVersion
 }
@@ -1942,6 +1989,9 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			timeCfg.FiscalYearStartMonth = *d.FiscalYearStart
 		}
 		if err = timedim.ValidateConfig(&timeCfg); err != nil {
+			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
+		}
+		if err = metricformula.CheckDimensionTotalRule(d.AggRule, timeCfg.Type); err != nil {
 			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		if err = tx.QueryRow(ctx, `
@@ -2122,6 +2172,33 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
 				return "", fmt.Errorf("metric %q closed rules: %w", m.Name, err)
+			}
+		}
+		if len(m.InputRules) > 0 {
+			rules, iErr := metricformula.CheckInputRules(m.InputRules, m.IsInput, m.Format)
+			if iErr != nil {
+				return "", fmt.Errorf("metric %q: %w", m.Name, iErr)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET input_rules=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
+				return "", fmt.Errorf("metric %q input rules: %w", m.Name, err)
+			}
+		}
+		if len(m.DimensionRules) > 0 {
+			// By the imported dimensions' ids; a dimension the package does
+			// not carry is skipped, as every reference to one is.
+			byNewID := map[string]string{}
+			for dimRef, rule := range m.DimensionRules {
+				if newDim, ok := dimMap[dimRef]; ok {
+					byNewID[newDim] = rule
+				}
+			}
+			raw, _ := json.Marshal(byNewID)
+			rules, rErr := metricformula.CheckMetricDimensionRules(ctx, tx, modelID, revisionID, raw)
+			if rErr != nil {
+				return "", fmt.Errorf("metric %q: %w", m.Name, rErr)
+			}
+			if err = metricformula.SetMetricDimensionRules(ctx, tx, metricMap[m.ID], rules); err != nil {
+				return "", fmt.Errorf("metric %q: %w", m.Name, err)
 			}
 		}
 		if m.RowStyle != "" {
@@ -2544,6 +2621,13 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	// NULL, and not the stale original-model mapping ID) — dropping it here
 	// rather than importing a dangling reference, matching the "skip what
 	// doesn't resolve" convention used throughout this function.
+	//
+	// The package's values are carried, not entered: its metrics' input
+	// rules (migration 173) do not refuse a value stored before a rule was
+	// added, or an export would not import again.
+	if _, err = tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', 'on', true)`); err != nil {
+		return "", err
+	}
 	for _, f := range pkg.Facts {
 		mid, ok := metricMap[f.MetricID]
 		if !ok {

@@ -648,6 +648,11 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const canJoin = !!me?.join_new_tenant;
   const [joinChoice, setJoinChoice] = useState<boolean | null>(null);
   const join = canJoin && (joinChoice ?? true);
+  // The tenant's first administrator, invited into it as it is created: with
+  // a database per tenant a platform administrator never holds a tenant's
+  // roles, so this is how such a tenant starts (owner decision 2026-11-09).
+  const [firstAdmin, setFirstAdmin] = useState({ email: "", first_name: "", last_name: "" });
+  const [firstAdminNote, setFirstAdminNote] = useState("");
   const [query, setQuery] = useState("");
   const matches = tenancyMatches(tenants, query);
   const shownTenants = matches ? tenants.filter(t => matches.has(`tenant:${t.id}`)) : tenants;
@@ -657,12 +662,30 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const inv = () => invalidateTenancy(qc);
 
   const createTenant = useMutation({
-    mutationFn: () => api.createAdminTenant({ name: tenantName, plan: tenantPlan, getting_started: gettingStarted, join }),
-    onSuccess: () => {
+    mutationFn: async () => {
+      const tenant = await api.createAdminTenant({ name: tenantName, plan: tenantPlan, getting_started: gettingStarted, join });
+      const email = firstAdmin.email.trim();
+      if (join || !email) return { tenant, admin: null };
+      try {
+        const admin = await api.createAdminUser({ email, first_name: firstAdmin.first_name.trim(), last_name: firstAdmin.last_name.trim(),
+          role: "tenant_admin", workspace_id: tenant.workspace_id }, tenant.id);
+        return { tenant, admin, email };
+      } catch (e) {
+        // The tenant stands; the invitation can be sent again from Users.
+        return { tenant, admin: null, email, adminError: (e as Error).message };
+      }
+    },
+    onSuccess: (res) => {
       // Roles are read once, at sign-in: start the console again so it is
       // composed from every role just taken, and opens on the tour.
       if (join) { window.location.assign("/"); return; }
+      setFirstAdminNote(res.adminError
+        ? `The tenant was created, but ${res.email} could not be made its administrator: ${res.adminError}. Add them under Users.`
+        : res.admin?.temporary_password
+          ? `${res.email} is the tenant's administrator. Temporary password (shown once): ${res.admin.temporary_password}`
+          : res.admin ? `${res.email} is the tenant's administrator and was sent an invitation.` : "");
       inv(); setAddTenant(false); setTenantName(""); setTenantPlan("commercial"); setGettingStarted(true);
+      setFirstAdmin({ email: "", first_name: "", last_name: "" });
     },
   });
   const deleteTenant = useMutation({
@@ -731,6 +754,19 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
               />
             )}
           </div>
+          {!join && (
+            <div style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <span className="mvx-admin-muted" title="Invited into the tenant as its administrator. With a database per tenant this is how the tenant starts: a platform administrator does not hold its roles. Leave empty to add people later under Users.">
+                First administrator (optional)
+              </span>
+              <TextInput type="email" value={firstAdmin.email} onChange={e => setFirstAdmin(a => ({ ...a, email: e.target.value }))}
+                placeholder="E-mail" aria-label="First administrator's e-mail" style={{ width: 220 }} />
+              <TextInput value={firstAdmin.first_name} onChange={e => setFirstAdmin(a => ({ ...a, first_name: e.target.value }))}
+                placeholder="First name" aria-label="First administrator's first name" style={{ width: 140 }} />
+              <TextInput value={firstAdmin.last_name} onChange={e => setFirstAdmin(a => ({ ...a, last_name: e.target.value }))}
+                placeholder="Last name" aria-label="First administrator's last name" style={{ width: 140 }} />
+            </div>
+          )}
           {createTenant.isError && <span className="mvx-admin-error">{(createTenant.error as Error).message}</span>}
         </div>
       ) : isPlatformAdmin && tenants.length > 0 ? (
@@ -739,6 +775,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
         </Button>
       ) : null}
 
+      {firstAdminNote && <InlineAlert tone="info">{firstAdminNote}</InlineAlert>}
       {matches && shownTenants.length === 0 && (
         <EmptyState label={`No tenant, application, model or revision matches "${query.trim()}".`} />
       )}

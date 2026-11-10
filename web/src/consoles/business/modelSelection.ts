@@ -24,6 +24,22 @@ function subscribe(listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 
+/**
+ * Whether appId's model modelId is the one the consoles work in: the
+ * selected application, and its pinned model or, with none pinned, its
+ * default. A model not yet known (the application list still loading) counts
+ * as current, so nothing switches on a guess.
+ */
+export function isCurrentModel(qc: QueryClient, appId: string, modelId: string | null | undefined): boolean {
+  if (appId !== (localStorage.getItem(SELECTED_APP_KEY) ?? "")) return false;
+  if (!modelId) return true;
+  const pinned = localStorage.getItem(SELECTED_MODEL_KEY);
+  if (pinned) return pinned === modelId;
+  const apps = qc.getQueryData<AppInfo[]>(["apps"]) ?? [];
+  const fallback = apps.find((a) => a.id === appId)?.models?.find((md) => md.is_default)?.id;
+  return !fallback || fallback === modelId;
+}
+
 /** Changes whenever the console switched model in place. */
 export function useModelSwitches(): number {
   return useSyncExternalStore(subscribe, () => switches);

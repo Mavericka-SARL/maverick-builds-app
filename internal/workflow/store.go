@@ -631,6 +631,11 @@ func (s *Store) runOnApproveCopy(ctx context.Context, tx pgx.Tx, instanceID, use
 	var targetRevisionName string
 	_ = tx.QueryRow(ctx, `SELECT name FROM model.revision WHERE id=$1::uuid`, targetRevisionID).Scan(&targetRevisionName)
 
+	// The approved values are carried, not entered: the target's input rules
+	// (migration 173) do not refuse them.
+	if _, err := tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', 'on', true)`); err != nil {
+		return nil, fmt.Errorf("copy facts: %w", err)
+	}
 	rows, err := tx.Query(ctx, `
 		INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, text_value)
 		SELECT model_id, $1::uuid, $2, metric_id, dim_members, value, entered_by, text_value
@@ -660,6 +665,9 @@ func (s *Store) runOnApproveCopy(ctx context.Context, tx pgx.Tx, instanceID, use
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("copy facts: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('mvx.skip_input_rules', '', true)`); err != nil {
 		return nil, fmt.Errorf("copy facts: %w", err)
 	}
 	if len(copiedMetrics) == 0 {

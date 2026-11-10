@@ -358,8 +358,11 @@ func TestReorderDimensionMembers_ParentOnEitherSide(t *testing.T) {
 		t.Fatalf("Stores' parent dimension is %s after clearing it", got)
 	}
 	call("PUT", "/api/developer/dimensions/"+stores+"/members/order", map[string]any{"parent_member_id": t1, "member_ids": []string{s2, s1}})
-	if got := order(stores); got != "S0,S2,S1" {
-		t.Errorf("Stores after reordering T1's children: %s, want S0,S2,S1 (the group keeps its slots)", got)
+	// While Stores was a child of Teams its members took Build's order — T1's
+	// group, then the unassigned S0 (migration 171) — and the group keeps
+	// those slots once the parent dimension is cleared.
+	if got := order(stores); got != "S2,S1,S0" {
+		t.Errorf("Stores after reordering T1's children: %s, want S2,S1,S0 (the group keeps its slots)", got)
 	}
 	if got := q(`SELECT metadata->>'parent_code' FROM audit.audit_event
 		WHERE event_type='dimension.members_reordered' AND resource_id=$1 ORDER BY occurred_at DESC LIMIT 1`, stores); got != "T1" {
@@ -440,5 +443,92 @@ func TestReorderDimensionMembers_WaitsForReparent(t *testing.T) {
 	// Tree order of the tree after the re-parent: R2's children C1 (4) then C3 (6).
 	if got := q(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, dimID); got != "R3,R1,C2,R2,C1,C3" {
 		t.Errorf("stored order %s, want R3,R1,C2,R2,C1,C3 (C1 now under R2)", got)
+	}
+}
+
+// A child dimension's members list in Build's order everywhere: grouped by
+// their parent in the parent dimension, in that dimension's order, members
+// with none last, each group in its own order (owner decision 2026-11-09).
+// Added across two parents in turn they stayed interleaved, and a reorder
+// of the parent dimension left them as they were.
+func TestChildDimensionMembersFollowBuildOrder(t *testing.T) {
+	f := setupMMFixture(t)
+	ctx := context.Background()
+	const dev = "mm-dev"
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var s string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return s
+	}
+	call := func(method, path string, body any) string {
+		t.Helper()
+		code, raw := f.do(t, method, path, dev, f.app1, f.modelA, body)
+		if code != http.StatusOK && code != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, code, raw)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(raw, &out)
+		return out.ID
+	}
+	order := func(dimID string) string {
+		return q(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, dimID)
+	}
+	teams := call("POST", "/api/developer/dimensions", map[string]any{"name": "Teams", "revision_id": f.revA})
+	p := call("POST", "/api/developer/dimensions/"+teams+"/members", map[string]any{"code": "P", "label": "P"})
+	qq := call("POST", "/api/developer/dimensions/"+teams+"/members", map[string]any{"code": "Q", "label": "Q"})
+	stores := call("POST", "/api/developer/dimensions", map[string]any{"name": "Stores", "revision_id": f.revA, "parent_dimension_id": teams})
+	members := "/api/developer/dimensions/" + stores + "/members"
+	call("POST", members, map[string]any{"code": "A1", "label": "A1", "parent_member_id": p})
+	call("POST", members, map[string]any{"code": "B1", "label": "B1", "parent_member_id": qq})
+	call("POST", members, map[string]any{"code": "Z", "label": "Z"})
+	a2 := call("POST", members, map[string]any{"code": "A2", "label": "A2", "parent_member_id": p})
+	if got := order(stores); got != "A1,A2,B1,Z" {
+		t.Errorf("Stores after adding across two parents: %s, want A1,A2,B1,Z", got)
+	}
+	// Re-parented: A2 joins Q's group, keeping its place in the order there,
+	// as Build lists a group's members.
+	call("PATCH", members+"/"+a2, map[string]any{"code": "A2", "label": "A2", "parent_member_id": qq})
+	if got := order(stores); got != "A1,A2,B1,Z" {
+		t.Errorf("Stores after moving A2 under Q: %s, want A1,A2,B1,Z (P: A1 · Q: A2, B1 · none: Z)", got)
+	}
+	// The parent dimension reordered: the groups follow.
+	call("PUT", "/api/developer/dimensions/"+teams+"/members/order", map[string]any{"member_ids": []string{qq, p}})
+	if got := order(stores); got != "A2,B1,A1,Z" {
+		t.Errorf("Stores after putting Q before P: %s, want A2,B1,A1,Z", got)
+	}
+	// Written without an order (sort_order 0, as an import or a script may
+	// leave it): at its group's end, not its top. Siblings under a member of
+	// the dimension's own sharing an order stay together with their own
+	// children.
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid, 'A0', 'A0', $2::uuid)`, stores, p); err != nil {
+		t.Fatal(err)
+	}
+	if got := order(stores); got != "A2,B1,A1,A0,Z" {
+		t.Errorf("Stores after a member added without an order: %s, want A2,B1,A1,A0,Z", got)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order)
+		SELECT $1::uuid, c, c, id, 7 FROM model.dimension_member, unnest(ARRAY['K2','K1']) c WHERE dimension_id=$1::uuid AND code='A1'`, stores); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id)
+		SELECT $1::uuid, 'K2X', 'K2X', id FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='K2'`, stores); err != nil {
+		t.Fatal(err)
+	}
+	if got := order(stores); got != "A2,B1,A1,K1,K2,K2X,A0,Z" {
+		t.Errorf("Stores with A1's own children: %s, want A2,B1,A1,K1,K2,K2X,A0,Z", got)
+	}
+	// What a grid reads: the members in that order.
+	code, raw := f.do(t, "GET", "/api/dimensions", dev, f.app1, f.modelA, nil)
+	if code != http.StatusOK || !strings.Contains(string(raw), `"B1"`) {
+		t.Fatalf("GET /api/dimensions: %d", code)
+	}
+	a2i, b1, a1, z := strings.Index(string(raw), `"A2"`), strings.Index(string(raw), `"B1"`), strings.Index(string(raw), `"A1"`), strings.Index(string(raw), `"Z"`)
+	if !(a2i < b1 && b1 < a1 && a1 < z) {
+		t.Errorf("GET /api/dimensions lists Stores out of Build's order: A2@%d B1@%d A1@%d Z@%d", a2i, b1, a1, z)
 	}
 }

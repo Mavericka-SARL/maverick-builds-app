@@ -17021,6 +17021,50 @@ func (s *CreateDimensionRequest) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes CreateDimensionRequestAggRule as json.
+func (s CreateDimensionRequestAggRule) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes CreateDimensionRequestAggRule from json.
+func (s *CreateDimensionRequestAggRule) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CreateDimensionRequestAggRule to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch CreateDimensionRequestAggRule(v) {
+	case CreateDimensionRequestAggRuleSum:
+		*s = CreateDimensionRequestAggRuleSum
+	case CreateDimensionRequestAggRuleFirst:
+		*s = CreateDimensionRequestAggRuleFirst
+	case CreateDimensionRequestAggRuleLast:
+		*s = CreateDimensionRequestAggRuleLast
+	case CreateDimensionRequestAggRuleNone:
+		*s = CreateDimensionRequestAggRuleNone
+	default:
+		*s = CreateDimensionRequestAggRule(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CreateDimensionRequestAggRule) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CreateDimensionRequestAggRule) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes CreateDimensionRequestDimensionType as json.
 func (s CreateDimensionRequestDimensionType) Encode(e *jx.Encoder) {
 	e.Str(string(s))
@@ -19391,6 +19435,18 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.InputRules.Set {
+			e.FieldStart("input_rules")
+			s.InputRules.Encode(e)
+		}
+	}
+	{
+		if s.DimensionRules.Set {
+			e.FieldStart("dimension_rules")
+			s.DimensionRules.Encode(e)
+		}
+	}
+	{
 		if s.TimeSummary.Set {
 			e.FieldStart("time_summary")
 			s.TimeSummary.Encode(e)
@@ -19398,7 +19454,7 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateMetricRequest = [16]string{
+var jsonFieldsNameOfCreateMetricRequest = [18]string{
 	0:  "name",
 	1:  "label",
 	2:  "is_input",
@@ -19414,7 +19470,9 @@ var jsonFieldsNameOfCreateMetricRequest = [16]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "time_summary",
+	15: "input_rules",
+	16: "dimension_rules",
+	17: "time_summary",
 }
 
 // Decode decodes CreateMetricRequest from json.
@@ -19422,7 +19480,7 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode CreateMetricRequest to nil")
 	}
-	var requiredBitSet [2]uint8
+	var requiredBitSet [3]uint8
 	s.setDefaults()
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
@@ -19604,6 +19662,26 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
 			}
+		case "input_rules":
+			if err := func() error {
+				s.InputRules.Reset()
+				if err := s.InputRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"input_rules\"")
+			}
+		case "dimension_rules":
+			if err := func() error {
+				s.DimensionRules.Reset()
+				if err := s.DimensionRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimension_rules\"")
+			}
 		case "time_summary":
 			if err := func() error {
 				s.TimeSummary.Reset()
@@ -19623,8 +19701,9 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [2]uint8{
+	for i, mask := range [3]uint8{
 		0b00000101,
+		0b00000000,
 		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
@@ -19667,6 +19746,104 @@ func (s *CreateMetricRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *CreateMetricRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s CreateMetricRequestDimensionRules) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s CreateMetricRequestDimensionRules) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		elem.Encode(e)
+	}
+}
+
+// Decode decodes CreateMetricRequestDimensionRules from json.
+func (s *CreateMetricRequestDimensionRules) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CreateMetricRequestDimensionRules to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem CreateMetricRequestDimensionRulesItem
+		if err := func() error {
+			if err := elem.Decode(d); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode CreateMetricRequestDimensionRules")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CreateMetricRequestDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CreateMetricRequestDimensionRules) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CreateMetricRequestDimensionRulesItem as json.
+func (s CreateMetricRequestDimensionRulesItem) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes CreateMetricRequestDimensionRulesItem from json.
+func (s *CreateMetricRequestDimensionRulesItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CreateMetricRequestDimensionRulesItem to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch CreateMetricRequestDimensionRulesItem(v) {
+	case CreateMetricRequestDimensionRulesItemSum:
+		*s = CreateMetricRequestDimensionRulesItemSum
+	case CreateMetricRequestDimensionRulesItemFirst:
+		*s = CreateMetricRequestDimensionRulesItemFirst
+	case CreateMetricRequestDimensionRulesItemLast:
+		*s = CreateMetricRequestDimensionRulesItemLast
+	case CreateMetricRequestDimensionRulesItemNone:
+		*s = CreateMetricRequestDimensionRulesItemNone
+	default:
+		*s = CreateMetricRequestDimensionRulesItem(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CreateMetricRequestDimensionRulesItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CreateMetricRequestDimensionRulesItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -25805,7 +25982,7 @@ func (s *Dimension) encodeFields(e *jx.Encoder) {
 	}
 	{
 		e.FieldStart("agg_rule")
-		e.Str(s.AggRule)
+		s.AggRule.Encode(e)
 	}
 	{
 		if s.ParentDimensionID.Set {
@@ -25929,9 +26106,7 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 		case "agg_rule":
 			requiredBitSet[0] |= 1 << 3
 			if err := func() error {
-				v, err := d.Str()
-				s.AggRule = string(v)
-				if err != nil {
+				if err := s.AggRule.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -26098,6 +26273,50 @@ func (s *Dimension) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *Dimension) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes DimensionAggRule as json.
+func (s DimensionAggRule) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes DimensionAggRule from json.
+func (s *DimensionAggRule) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode DimensionAggRule to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch DimensionAggRule(v) {
+	case DimensionAggRuleSum:
+		*s = DimensionAggRuleSum
+	case DimensionAggRuleFirst:
+		*s = DimensionAggRuleFirst
+	case DimensionAggRuleLast:
+		*s = DimensionAggRuleLast
+	case DimensionAggRuleNone:
+		*s = DimensionAggRuleNone
+	default:
+		*s = DimensionAggRule(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s DimensionAggRule) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *DimensionAggRule) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -43176,6 +43395,103 @@ func (s *ImportUploadUnprocessableEntityErrorsItem) UnmarshalJSON(data []byte) e
 }
 
 // Encode implements json.Marshaler.
+func (s *InputRules) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *InputRules) encodeFields(e *jx.Encoder) {
+	{
+		if s.Min.Set {
+			e.FieldStart("min")
+			s.Min.Encode(e)
+		}
+	}
+	{
+		if s.Max.Set {
+			e.FieldStart("max")
+			s.Max.Encode(e)
+		}
+	}
+	{
+		if s.Whole.Set {
+			e.FieldStart("whole")
+			s.Whole.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfInputRules = [3]string{
+	0: "min",
+	1: "max",
+	2: "whole",
+}
+
+// Decode decodes InputRules from json.
+func (s *InputRules) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode InputRules to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "min":
+			if err := func() error {
+				s.Min.Reset()
+				if err := s.Min.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"min\"")
+			}
+		case "max":
+			if err := func() error {
+				s.Max.Reset()
+				if err := s.Max.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"max\"")
+			}
+		case "whole":
+			if err := func() error {
+				s.Whole.Reset()
+				if err := s.Whole.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"whole\"")
+			}
+		default:
+			return errors.Errorf("unexpected field %q", k)
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode InputRules")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *InputRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *InputRules) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
 func (s *IntegrationDef) Encode(e *jx.Encoder) {
 	e.ObjStart()
 	s.encodeFields(e)
@@ -49799,6 +50115,18 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.InputRules.Set {
+			e.FieldStart("input_rules")
+			s.InputRules.Encode(e)
+		}
+	}
+	{
+		if s.DimensionRules.Set {
+			e.FieldStart("dimension_rules")
+			s.DimensionRules.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("depends_on")
 		e.ArrStart()
 		for _, elem := range s.DependsOn {
@@ -49826,7 +50154,7 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfMetricDef = [18]string{
+var jsonFieldsNameOfMetricDef = [20]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -49842,9 +50170,11 @@ var jsonFieldsNameOfMetricDef = [18]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "depends_on",
-	16: "depended_by",
-	17: "tags",
+	15: "input_rules",
+	16: "dimension_rules",
+	17: "depends_on",
+	18: "depended_by",
+	19: "tags",
 }
 
 // Decode decodes MetricDef from json.
@@ -50037,8 +50367,28 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
 			}
+		case "input_rules":
+			if err := func() error {
+				s.InputRules.Reset()
+				if err := s.InputRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"input_rules\"")
+			}
+		case "dimension_rules":
+			if err := func() error {
+				s.DimensionRules.Reset()
+				if err := s.DimensionRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimension_rules\"")
+			}
 		case "depends_on":
-			requiredBitSet[1] |= 1 << 7
+			requiredBitSet[2] |= 1 << 1
 			if err := func() error {
 				s.DependsOn = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -50058,7 +50408,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"depends_on\"")
 			}
 		case "depended_by":
-			requiredBitSet[2] |= 1 << 0
+			requiredBitSet[2] |= 1 << 2
 			if err := func() error {
 				s.DependedBy = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -50107,8 +50457,8 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [3]uint8{
 		0b11110111,
-		0b10000001,
 		0b00000001,
+		0b00000110,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -50150,6 +50500,104 @@ func (s *MetricDef) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *MetricDef) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s MetricDefDimensionRules) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s MetricDefDimensionRules) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		elem.Encode(e)
+	}
+}
+
+// Decode decodes MetricDefDimensionRules from json.
+func (s *MetricDefDimensionRules) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode MetricDefDimensionRules to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem MetricDefDimensionRulesItem
+		if err := func() error {
+			if err := elem.Decode(d); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode MetricDefDimensionRules")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s MetricDefDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *MetricDefDimensionRules) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes MetricDefDimensionRulesItem as json.
+func (s MetricDefDimensionRulesItem) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes MetricDefDimensionRulesItem from json.
+func (s *MetricDefDimensionRulesItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode MetricDefDimensionRulesItem to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch MetricDefDimensionRulesItem(v) {
+	case MetricDefDimensionRulesItemSum:
+		*s = MetricDefDimensionRulesItemSum
+	case MetricDefDimensionRulesItemFirst:
+		*s = MetricDefDimensionRulesItemFirst
+	case MetricDefDimensionRulesItemLast:
+		*s = MetricDefDimensionRulesItemLast
+	case MetricDefDimensionRulesItemNone:
+		*s = MetricDefDimensionRulesItemNone
+	default:
+		*s = MetricDefDimensionRulesItem(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s MetricDefDimensionRulesItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *MetricDefDimensionRulesItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -53901,6 +54349,39 @@ func (s *OptCreateApplicationRequestMode) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes CreateDimensionRequestAggRule as json.
+func (o OptCreateDimensionRequestAggRule) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes CreateDimensionRequestAggRule from json.
+func (o *OptCreateDimensionRequestAggRule) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCreateDimensionRequestAggRule to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCreateDimensionRequestAggRule) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCreateDimensionRequestAggRule) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes CreateDimensionRequestDimensionType as json.
 func (o OptCreateDimensionRequestDimensionType) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -54030,6 +54511,40 @@ func (s OptCreateFormRequestEditAccess) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptCreateFormRequestEditAccess) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CreateMetricRequestDimensionRules as json.
+func (o OptCreateMetricRequestDimensionRules) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes CreateMetricRequestDimensionRules from json.
+func (o *OptCreateMetricRequestDimensionRules) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCreateMetricRequestDimensionRules to nil")
+	}
+	o.Set = true
+	o.Value = make(CreateMetricRequestDimensionRules)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCreateMetricRequestDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCreateMetricRequestDimensionRules) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -55404,6 +55919,39 @@ func (s *OptImportUploadRequestImportMode) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes InputRules as json.
+func (o OptInputRules) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes InputRules from json.
+func (o *OptInputRules) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptInputRules to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptInputRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptInputRules) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes int as json.
 func (o OptInt) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -55570,6 +56118,40 @@ func (s OptListedFormEditAccess) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptListedFormEditAccess) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes MetricDefDimensionRules as json.
+func (o OptMetricDefDimensionRules) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes MetricDefDimensionRules from json.
+func (o *OptMetricDefDimensionRules) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptMetricDefDimensionRules to nil")
+	}
+	o.Set = true
+	o.Value = make(MetricDefDimensionRules)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptMetricDefDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptMetricDefDimensionRules) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -57289,6 +57871,39 @@ func (s *OptUUID) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes UpdateDimensionRequestAggRule as json.
+func (o OptUpdateDimensionRequestAggRule) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes UpdateDimensionRequestAggRule from json.
+func (o *OptUpdateDimensionRequestAggRule) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptUpdateDimensionRequestAggRule to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptUpdateDimensionRequestAggRule) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptUpdateDimensionRequestAggRule) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes UpdateFormMappingRequestDimensionMappings as json.
 func (o OptUpdateFormMappingRequestDimensionMappings) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -57319,6 +57934,40 @@ func (s OptUpdateFormMappingRequestDimensionMappings) MarshalJSON() ([]byte, err
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptUpdateFormMappingRequestDimensionMappings) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes UpdateMetricRequestDimensionRules as json.
+func (o OptUpdateMetricRequestDimensionRules) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes UpdateMetricRequestDimensionRules from json.
+func (o *OptUpdateMetricRequestDimensionRules) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptUpdateMetricRequestDimensionRules to nil")
+	}
+	o.Set = true
+	o.Value = make(UpdateMetricRequestDimensionRules)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptUpdateMetricRequestDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptUpdateMetricRequestDimensionRules) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -77375,6 +78024,50 @@ func (s *UpdateDimensionRequest) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes UpdateDimensionRequestAggRule as json.
+func (s UpdateDimensionRequestAggRule) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes UpdateDimensionRequestAggRule from json.
+func (s *UpdateDimensionRequestAggRule) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode UpdateDimensionRequestAggRule to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch UpdateDimensionRequestAggRule(v) {
+	case UpdateDimensionRequestAggRuleSum:
+		*s = UpdateDimensionRequestAggRuleSum
+	case UpdateDimensionRequestAggRuleFirst:
+		*s = UpdateDimensionRequestAggRuleFirst
+	case UpdateDimensionRequestAggRuleLast:
+		*s = UpdateDimensionRequestAggRuleLast
+	case UpdateDimensionRequestAggRuleNone:
+		*s = UpdateDimensionRequestAggRuleNone
+	default:
+		*s = UpdateDimensionRequestAggRule(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s UpdateDimensionRequestAggRule) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *UpdateDimensionRequestAggRule) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes UpdateFolderBadRequest as json.
 func (s *UpdateFolderBadRequest) Encode(e *jx.Encoder) {
 	unwrapped := (*Error)(s)
@@ -79665,6 +80358,18 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.InputRules.Set {
+			e.FieldStart("input_rules")
+			s.InputRules.Encode(e)
+		}
+	}
+	{
+		if s.DimensionRules.Set {
+			e.FieldStart("dimension_rules")
+			s.DimensionRules.Encode(e)
+		}
+	}
+	{
 		if s.TimeSummary.Set {
 			e.FieldStart("time_summary")
 			s.TimeSummary.Encode(e)
@@ -79672,7 +80377,7 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateMetricRequest = [16]string{
+var jsonFieldsNameOfUpdateMetricRequest = [18]string{
 	0:  "name",
 	1:  "label",
 	2:  "tags",
@@ -79688,7 +80393,9 @@ var jsonFieldsNameOfUpdateMetricRequest = [16]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "time_summary",
+	15: "input_rules",
+	16: "dimension_rules",
+	17: "time_summary",
 }
 
 // Decode decodes UpdateMetricRequest from json.
@@ -79873,6 +80580,26 @@ func (s *UpdateMetricRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
 			}
+		case "input_rules":
+			if err := func() error {
+				s.InputRules.Reset()
+				if err := s.InputRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"input_rules\"")
+			}
+		case "dimension_rules":
+			if err := func() error {
+				s.DimensionRules.Reset()
+				if err := s.DimensionRules.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimension_rules\"")
+			}
 		case "time_summary":
 			if err := func() error {
 				s.TimeSummary.Reset()
@@ -79903,6 +80630,104 @@ func (s *UpdateMetricRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *UpdateMetricRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s UpdateMetricRequestDimensionRules) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s UpdateMetricRequestDimensionRules) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		elem.Encode(e)
+	}
+}
+
+// Decode decodes UpdateMetricRequestDimensionRules from json.
+func (s *UpdateMetricRequestDimensionRules) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode UpdateMetricRequestDimensionRules to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem UpdateMetricRequestDimensionRulesItem
+		if err := func() error {
+			if err := elem.Decode(d); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode UpdateMetricRequestDimensionRules")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s UpdateMetricRequestDimensionRules) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *UpdateMetricRequestDimensionRules) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes UpdateMetricRequestDimensionRulesItem as json.
+func (s UpdateMetricRequestDimensionRulesItem) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes UpdateMetricRequestDimensionRulesItem from json.
+func (s *UpdateMetricRequestDimensionRulesItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode UpdateMetricRequestDimensionRulesItem to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch UpdateMetricRequestDimensionRulesItem(v) {
+	case UpdateMetricRequestDimensionRulesItemSum:
+		*s = UpdateMetricRequestDimensionRulesItemSum
+	case UpdateMetricRequestDimensionRulesItemFirst:
+		*s = UpdateMetricRequestDimensionRulesItemFirst
+	case UpdateMetricRequestDimensionRulesItemLast:
+		*s = UpdateMetricRequestDimensionRulesItemLast
+	case UpdateMetricRequestDimensionRulesItemNone:
+		*s = UpdateMetricRequestDimensionRulesItemNone
+	default:
+		*s = UpdateMetricRequestDimensionRulesItem(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s UpdateMetricRequestDimensionRulesItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *UpdateMetricRequestDimensionRulesItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

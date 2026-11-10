@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -601,6 +602,11 @@ type createMetricParams struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen closes its cells to input (metricformula.ClosedRule).
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// InputRules: the values its cells accept (metricformula.InputRules).
+	InputRules json.RawMessage `json:"input_rules"`
+	// DimensionRules: its own total rule over a dimension (migration 174),
+	// {"<dimension>": "sum" | "first" | "last" | "none"}.
+	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
 	RowStyle string `json:"row_style"`
 }
@@ -651,6 +657,14 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if string(closedRules) != "[]" && !p.IsInput {
 		return "", "", fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway")
+	}
+	inputRules, err := metricformula.CheckInputRules(p.InputRules, p.IsInput, p.Format)
+	if err != nil {
+		return "", "", err
+	}
+	dimensionRules, err := metricformula.CheckMetricDimensionRules(ctx, e.pool, e.modelID, revID, p.DimensionRules)
+	if err != nil {
+		return "", "", err
 	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
@@ -753,6 +767,16 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set closed rules: %w", err)
 		}
 	}
+	if string(inputRules) != "{}" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET input_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(inputRules)); err != nil {
+			return "", "", fmt.Errorf("set input rules: %w", err)
+		}
+	}
+	if len(dimensionRules) > 0 {
+		if err := metricformula.SetMetricDimensionRules(ctx, e.pool, newID, dimensionRules); err != nil {
+			return "", "", err
+		}
+	}
 
 	// Wire formula dependencies from the edges the validator resolved. It
 	// looked them up within the metric's own revision; the loop that used to
@@ -808,6 +832,10 @@ type updateMetricParams struct {
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	// ClosedWhen: left out keeps them; [] removes them.
 	ClosedWhen json.RawMessage `json:"closed_when"`
+	// InputRules: left out keeps them; {} removes them.
+	InputRules json.RawMessage `json:"input_rules"`
+	// DimensionRules: left out keeps them; {} removes them.
+	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle: "total" or ""; left out keeps it.
 	RowStyle *string `json:"row_style"`
 }
@@ -964,6 +992,24 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	if p.FormatCurrency == "" {
 		p.FormatCurrency = "$"
 	}
+	// Input rules are checked against the metric as it is saved; left out,
+	// rules on one that no longer takes a number in its cells are dropped.
+	var inputRules json.RawMessage
+	if has("input_rules") {
+		var iErr error
+		if inputRules, iErr = metricformula.CheckInputRules(p.InputRules, metricIsInput, p.Format); iErr != nil {
+			return "", "", iErr
+		}
+	} else if !metricIsInput || !slices.Contains(metricformula.InputRuleFormats, p.Format) {
+		inputRules = json.RawMessage("{}")
+	}
+	var dimensionRules map[string]string
+	if has("dimension_rules") {
+		var dErr error
+		if dimensionRules, dErr = metricformula.CheckMetricDimensionRules(ctx, e.pool, e.modelID, metricRev, p.DimensionRules); dErr != nil {
+			return "", "", dErr
+		}
+	}
 	if err := metricformula.ValidateAggRule(p.AggRule, metricIsInput,
 		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.MetricID); err != nil {
 		return "", "", err
@@ -1071,6 +1117,16 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set closed rules: %w", err)
 		}
 	}
+	if inputRules != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET input_rules=$2::jsonb WHERE id=$1::uuid AND input_rules IS DISTINCT FROM $2::jsonb`, p.MetricID, string(inputRules)); err != nil {
+			return "", "", fmt.Errorf("set input rules: %w", err)
+		}
+	}
+	if dimensionRules != nil {
+		if err := metricformula.SetMetricDimensionRules(ctx, e.pool, p.MetricID, dimensionRules); err != nil {
+			return "", "", err
+		}
+	}
 	// Re-wire dependencies when the formula changed.
 	if formulaSent {
 		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
@@ -1129,13 +1185,12 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 
 // ── create_dimension ──────────────────────────────────────────────────────────
 
-// dimensionAggRule is what a dimension's agg_rule column holds: nothing
-// reads it — a metric's agg_rule decides how its values roll up — so the
-// assistant neither takes nor shows one.
-const dimensionAggRule = "sum"
-
 type createDimensionParams struct {
 	Name string `json:"name"`
+	// AggRule is how its members total (migration 174): "sum" (default),
+	// "first", "last" or "none" — a dimension of scenarios totals as its
+	// first member, or not at all.
+	AggRule string `json:"agg_rule"`
 	// Label is the display name selectors and headers show ("GL Account"
 	// for gl_account), as update_dimension sets it.
 	Label               string `json:"label"`
@@ -1233,6 +1288,13 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		return "", "", fmt.Errorf("name is required")
 	}
 	timeCfg := timedim.Config{Type: p.DimensionType, Granularity: p.TimeGranularity, FiscalYearStartMonth: p.FiscalYearStart}
+	if err := metricformula.CheckDimensionTotalRule(p.AggRule, p.DimensionType); err != nil {
+		return "", "", err
+	}
+	dimensionAggRule := p.AggRule
+	if dimensionAggRule == "" {
+		dimensionAggRule = "sum"
+	}
 	if err := timedim.ValidateConfig(&timeCfg); err != nil {
 		return "", "", err
 	}
@@ -2838,8 +2900,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -3021,6 +3083,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			return "", "", fmt.Errorf("remap dimension hierarchy into new revision: %w", err)
 		}
 		// A pick-list holds members of the copy's own dimension.
+		if err := modeledit.CopyMetricDimensionRules(ctx, tx, e.modelID, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("copy metric total rules: %w", err)
+		}
 		if err := modeledit.RemapPicklistDimensions(ctx, tx, e.modelID, newID, srcID); err != nil {
 			return "", "", err
 		}
@@ -3070,8 +3135,10 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// direct-entry, the same B1 hazard fixed in the developer-console
 		// handler this pass. This AI-draft path never copied facts at all
 		// before, so an AI-created draft revision started with every
-		// input metric blank.
-		if _, err := tx.Exec(ctx, `
+		// input metric blank. The values are carried, not entered: a
+		// metric's input rules (migration 173) do not refuse them.
+		if err := writeguard.SkipInputRules(ctx, tx, func() error {
+			_, err := tx.Exec(ctx, `
 			INSERT INTO runtime.fact_input
 			  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value, link_ref)
 			SELECT
@@ -3094,7 +3161,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			                           AND new_m.name = old_m.name
 			                           AND new_m.revision_id = $2::uuid
 			WHERE fi.revision_id = $3::uuid AND fi.model_id = $1::uuid
-		`, e.modelID, newID, srcID); err != nil {
+		`, e.modelID, newID, srcID)
+			return err
+		}); err != nil {
 			return "", "", fmt.Errorf("copy facts into new revision: %w", err)
 		}
 

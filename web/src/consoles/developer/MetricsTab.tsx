@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
-import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, type RowStyle, TIME_SUMMARIES } from "../../api/client";
+import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, type InputRules, type TotalRule, type RowStyle, TIME_SUMMARIES } from "../../api/client";
 import { HighlightRulesEditor } from "./HighlightRulesEditor";
 import { ClosedRulesEditor } from "./ClosedRulesEditor";
+import { InputRulesEditor } from "./InputRulesEditor";
+import { TotalRulesEditor } from "./TotalRulesEditor";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter, Txt } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
@@ -217,7 +219,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   modelId: string;
   allMetrics: DevMetric[];
   dimNames: string[];
-  dims: { id: string; name: string }[];
+  dims: { id: string; name: string; dimension_type?: string; agg_rule?: string }[];
   onTimeGrid: boolean;
   activeTag: string | null;
   onTagClick: (tag: string) => void;
@@ -242,6 +244,9 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(m.highlight_rules ?? []);
   const [closedRules, setClosedRules] = useState<ClosedRule[]>(m.closed_when ?? []);
+  const [inputRules, setInputRules] = useState<InputRules>(m.input_rules ?? {});
+  const [dimensionRules, setDimensionRules] = useState<Record<string, TotalRule>>(m.dimension_rules ?? {});
+  const dimensionRulesChanged = JSON.stringify(dimensionRules) !== JSON.stringify(m.dimension_rules ?? {});
   const [rowStyle, setRowStyle] = useState<RowStyle>(m.row_style ?? "");
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
@@ -258,6 +263,8 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   // A text input holds notes: never totalled, across members or time.
   const isNotes = format === "text" && isInput;
   const isCalcText = format === "text" && !isInput;
+  // Input rules bound a number: a number, percentage or currency input's.
+  const takesInputRules = isInput && (format === "number" || format === "percentage" || format === "currency");
   const canSave = name.trim() !== "" && (isInput || formula.trim() !== "") && (!isPicklist || picklistDim !== "");
   const kindChanged = isInput !== m.is_input;
 
@@ -277,6 +284,11 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       highlight_rules: highlightRules,
       row_style: rowStyle,
       ...(isInput ? { closed_when: closedRules } : {}),
+      // Left out for any other metric: the server drops rules that no
+      // longer apply.
+      ...(takesInputRules ? { input_rules: inputRules } : {}),
+      // Sent when changed: it moves the metric's totals (a recalculation).
+      ...(dimensionRulesChanged ? { dimension_rules: dimensionRules } : {}),
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -433,6 +445,20 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 </div>
                 <ClosedRulesEditor rules={closedRules} onChange={setClosedRules}
                   metricNames={allMetrics.filter(x => x.id !== m.id && !x.is_input).map(x => x.name)} />
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}>
+              <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>
+                Totals by dimension (this metric's own rule; otherwise each dimension's Members total):
+              </div>
+              <TotalRulesEditor rules={dimensionRules} onChange={setDimensionRules} dims={dims.filter(d => d.dimension_type !== "time")} />
+            </div>
+            {takesInputRules && (
+              <div style={{ marginTop: 8 }}>
+                <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>
+                  Accepted values (every write of another value is refused — typed, pasted, imported):
+                </div>
+                <InputRulesEditor rules={inputRules} onChange={setInputRules} unit={format === "percentage" ? "%" : undefined} />
               </div>
             )}
             {invalidRefs.length > 0 && (

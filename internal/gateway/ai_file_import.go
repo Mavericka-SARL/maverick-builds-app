@@ -493,7 +493,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	}
 	mode := importpkg.ImportMode(cmp.Or(req.ImportMode, string(importpkg.ModeReplace)))
 	metricIDs, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, mode, "ai_attachment",
-		h.gridJobDetails(ctx, req.RevisionID, req.TargetID, mode, f.filename, started))
+		h.gridJobDetails(ctx, req.RevisionID, req.TargetID, mode, f.filename, started), "")
 	if err != nil {
 		return fail(err)
 	}

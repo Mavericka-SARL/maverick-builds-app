@@ -100,3 +100,59 @@ func TestPassWaitsForAnotherGatewaysPass(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A pass's database lock ended with its connection: a PgBouncer restart or
+// a network blip released it while the pass ran on, and another gateway's
+// pass could start beside it (2026-10-28). The lock's connection is now
+// checked while the pass runs; a pass whose lock is lost is cancelled and
+// runs again under a fresh lock.
+func TestPassRunsAgainWhenItsLockIsLost(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	defer calculation.SetPassLockPing(50 * time.Millisecond)()
+	ctx := context.Background()
+	const revisionID = "00000000-0000-0000-0001-000000000002"
+	held := func() (pid int, n int) {
+		t.Helper()
+		if err := store.Pool().QueryRow(ctx, `SELECT coalesce(min(pid), 0), count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND granted AND objid = hashtext($1)::oid`, revisionID).Scan(&pid, &n); err != nil {
+			t.Fatal(err)
+		}
+		return pid, n
+	}
+
+	attempts := 0
+	err := calculation.RunUnderPassLock(calculation.NewScheduler(logger.New("calc-test"), store), revisionID, func(passCtx context.Context) error {
+		attempts++
+		if attempts > 1 {
+			if _, n := held(); n != 1 {
+				t.Errorf("the pass ran again without its lock (%d held)", n)
+			}
+			return nil
+		}
+		// The lock's connection goes, as a PgBouncer restart ends it.
+		pid, n := held()
+		if n != 1 {
+			t.Fatalf("the pass runs without its lock (%d held)", n)
+		}
+		if _, err := store.Pool().Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-passCtx.Done():
+			return passCtx.Err()
+		case <-time.After(30 * time.Second):
+			t.Error("the pass ran on after its lock was lost")
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("the pass under a fresh lock: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("the pass ran %d times, want 2 (once more after its lock was lost)", attempts)
+	}
+	if _, n := held(); n != 0 {
+		t.Fatalf("%d pass locks still held after the pass", n)
+	}
+}

@@ -473,3 +473,31 @@ test("responsive: source tiles single-column on phone; request panels stack on t
   expect(colsTablet).toBeGreaterThan(1);
   expect(state.externalContacted).toHaveLength(0);
 });
+
+// "Links reading this model" asks for the working revision's model and keys
+// its list on it: it showed the links of the model opened before
+// (2026-10-26), and its switch acted on that model's link.
+test("Links reading this model asks for the working revision's model", async ({ page }) => {
+  const state = freshState();
+  const asked: string[] = [];
+  await mockApi(page);
+  await stubConnector(page, state);
+  // The console works in the model's active revision when none is chosen.
+  await page.route(url => url.pathname === "/api/developer/revisions" && !url.searchParams.has("model_id"), (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: [{ id: "rev-7", name: "Budget 2027", is_active: true, created_at: "2026-01-01T00:00:00Z" }] })
+      : route.fallback());
+  await page.route(url => url.pathname === "/api/developer/model-links", (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("revision_id") ?? "");
+    return route.fulfill({ json: [{ id: "link-1", link_id: "link-1", name: "Sales plan from Budget", status: "active",
+      enabled: true, source_enabled: true, schedule: "",
+      target: { application_id: "app-2", application_name: "Sales", model_id: "model-2", model_name: "Sales planning", grid: "Plan" },
+      source: { application_id: "app-1", application_name: "Budget", model_id: "model-1", model_name: "Budget 2027", grid: "Plan" } }] });
+  });
+  await loadAs(page, "developer");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Integrations" }).click();
+  await page.getByRole("button", { name: /REST API/ }).click();
+  await expect(page.getByText("Links reading this model")).toBeVisible();
+  expect(asked, "every request names the working revision").toEqual(asked.map(() => "rev-7"));
+  expect(asked.length).toBeGreaterThan(0);
+});

@@ -107,6 +107,8 @@ type gridMetric struct {
 	TimeSummary    string   `json:"time_summary"`
 	Readonly       bool     `json:"readonly"`
 	DimensionIDs   []string `json:"dimension_ids"`
+	// InputRules: the values an input metric's cells accept; absent when any.
+	InputRules json.RawMessage `json:"input_rules"`
 }
 
 type member struct {
@@ -173,6 +175,9 @@ type MetricInfo struct {
 	Currency     string   `json:"currency,omitempty"`
 	ReadOnly     bool     `json:"read_only,omitempty"`
 	DimensionIDs []string `json:"dimension_ids,omitempty"`
+	// InputRules: the values an input metric's cells accept — {"min": n,
+	// "max": n, "whole": true}, any of them; write_cells refuses others.
+	InputRules json.RawMessage `json:"input_rules,omitempty"`
 }
 
 // DimensionInfo describes a grid dimension.
@@ -217,7 +222,7 @@ func (s *Session) DescribeGrid(ctx context.Context, p Pinned, gridID string) (*G
 		d.Metrics = append(d.Metrics, MetricInfo{
 			ID: m.ID, Name: m.Name, Label: m.Label, Kind: kind, Aggregation: m.AggRule, TimeSummary: m.TimeSummary,
 			Format: m.Format, Decimals: m.FormatDecimals, Currency: m.FormatCurrency, ReadOnly: m.Readonly,
-			DimensionIDs: m.DimensionIDs,
+			DimensionIDs: m.DimensionIDs, InputRules: m.InputRules,
 		})
 	}
 	for _, dim := range g.meta.Dimensions {

@@ -197,6 +197,43 @@ test("a dashboard Integration button sends a workbook as it is, and a file with 
   expect(bodies[1]).toEqual({ csv: "Country,Amount\nCA,1\n" });
 });
 
+// The same file sent again after a 502 goes under the key it was first sent
+// with, so the server loads it once; after a success the next send is a run
+// of its own. Without a key, a click again after a 502 loaded the file twice
+// (2026-11-09).
+test("a dashboard Integration button sends the same file again under its Idempotency-Key", async ({ page }) => {
+  await mockApi(page);
+  await dashboardWithButtons(page);
+  const keys: Array<string | undefined> = [];
+  await page.route("**/api/integrations/int-1/run", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    if (keys.length === 1) {
+      await route.fulfill({ status: 502, json: { error: "bad gateway" } });
+      return;
+    }
+    await route.fulfill({ json: { rows_imported: 1, values_imported: 1, error_rows: 0, errors: [] } });
+  });
+  await loadAs(page, "business_admin");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" }).click();
+  await page.getByRole("button", { name: "Explainer" }).first().click();
+
+  const send = async (n: number) => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("button", { name: /Done|Upload actuals/ }).first().click(),
+    ]);
+    await chooser.setFiles({ name: "actuals.csv", mimeType: "text/csv", buffer: Buffer.from("Country,Amount\nCA,1\n") });
+    await expect.poll(() => keys.length).toBe(n);
+  };
+  await send(1);
+  await send(2);
+  await send(3);
+  expect(keys[0]).toMatch(/^[0-9a-f]{32}$/);
+  expect(keys[1]).toBe(keys[0]);
+  expect(keys[2]).toMatch(/^[0-9a-f]{32}$/);
+  expect(keys[2]).not.toBe(keys[0]);
+});
+
 test("a dashboard Integration button on an export downloads the file", async ({ page }) => {
   await mockApi(page);
   await dashboardWithButtons(page);

@@ -32,7 +32,7 @@ func (t *tools) registerWrites(s *sdk.Server) {
 	f, yes := false, true
 	sdk.AddTool(s, &sdk.Tool{Name: "write_cells",
 		Annotations: &sdk.ToolAnnotations{Title: "Write grid cells", ReadOnlyHint: false, DestructiveHint: &yes, IdempotentHint: true, OpenWorldHint: &f},
-		Description: "Write input cells of a model's active revision as you: numbers, texts, dates, pick-list choices, or clears. All or nothing — every cell is checked as the console checks a typed one (input metrics only, your access rules, workflow locks, the workspace's plan) before any is written, and the grid is recalculated once. A refusal lists each refused cell by its index. Confirm the values with the person before writing; dry_run checks them without writing. Overwrites what the cells held; the cell history keeps the earlier values."},
+		Description: "Write input cells of a model's active revision as you: numbers, texts, dates, pick-list choices, or clears. All or nothing — every cell is checked as the console checks a typed one (input metrics only, your access rules, workflow locks, the metric's input_rules from describe_source, the workspace's plan) before any is written, and the grid is recalculated once. A refusal lists each refused cell by its index. Confirm the values with the person before writing; dry_run checks them without writing. Overwrites what the cells held; the cell history keeps the earlier values."},
 		called(t, "write_cells", func(ctx context.Context, s *reporting.Session, c call, in writeIn) (any, error) {
 			if !c.writes {
 				return nil, errReadOnly

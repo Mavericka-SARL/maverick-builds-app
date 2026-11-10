@@ -275,3 +275,59 @@ func TestRenameMemberInFormulas(t *testing.T) {
 		}
 	}
 }
+
+// TestRenameMetricInRulesReachesValues: a metric's rename also reaches what
+// holds its name as a value in its revision — a grid loader's column map, a
+// connector's mapping into a grid, a record's field of type metric, and the
+// Metric field of a workflow run — and nothing of another revision. Left on
+// the old name, a saved import failed, a record named no metric and a run
+// lost its metric (2026-11-09).
+func TestRenameMetricInRulesReachesValues(t *testing.T) {
+	f := newRenameFixture(t)
+	ctx := context.Background()
+	user := f.one(`INSERT INTO identity.user (keycloak_sub, email) VALUES ('rn', 'rn@t.co') RETURNING id::text`)
+	loader := func(rev string) string {
+		return f.one(`INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, config)
+			VALUES ($1::uuid, $2::uuid, 'Actuals', 'csv_import', 'grid', '{"column_map":{"Other amount":"Other","Region":"region","Note":"ignore"}}') RETURNING id::text`,
+			f.modelID, rev)
+	}
+	connector := func(rev string) string {
+		return f.one(`INSERT INTO model.integration_def (model_id, revision_id, name, type, config)
+			VALUES ($1::uuid, $2::uuid, 'Pull', 'rest_api', '{"target_type":"grid","mapping":{"fields":[{"source":"$.amt","target":"other"},{"source":"$.r","target":"region"}]}}') RETURNING id::text`,
+			f.modelID, rev)
+	}
+	record := func(rev string) string {
+		form := f.one(`INSERT INTO model.form_def (model_id, revision_id, name, label, fields) VALUES ($1::uuid, $2::uuid, 'adj', 'Adjustments',
+			'[{"name":"which","label":"Which","type":"metric"},{"name":"note","label":"Note","type":"text"}]') RETURNING id::text`, f.modelID, rev)
+		return f.one(`INSERT INTO runtime.form_record (form_id, data, created_by) VALUES ($1::uuid, '{"which":"other","note":"other"}', $2::uuid) RETURNING id::text`, form, user)
+	}
+	run := func(rev string) string {
+		def := f.one(`INSERT INTO workflow.workflow_def (application_id, revision_id, name, trigger_event, steps, status, context_schema)
+			VALUES ($1::uuid, $2::uuid, 'Approve', 'manual', '[]', 'published', '[{"key":"m","data_type":"Metric"},{"key":"t","data_type":"Text"}]') RETURNING id::text`, f.appID, rev)
+		return f.one(`INSERT INTO workflow.workflow_instance (workflow_def_id, context, started_by) VALUES ($1::uuid, '{"m":"OTHER","t":"other"}', $2::uuid) RETURNING id::text`, def, user)
+	}
+	l1, c1, r1, w1 := loader(f.revID), connector(f.revID), record(f.revID), run(f.revID)
+	l2, c2, r2, w2 := loader(f.rev2), connector(f.rev2), record(f.rev2), run(f.rev2)
+
+	f.exec(`UPDATE model.metric_def SET name='other_ind' WHERE id=$1::uuid`, f.other)
+	n, err := RenameMetricInRules(ctx, f.pool, f.other, "other", "other_ind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Errorf("rewrote %d holders, want 4 (a loader, a connector, a record, a run)", n)
+	}
+	f.wantJSON("the loader", f.jsonOf(`SELECT config::text FROM model.integration_def WHERE id=$1::uuid`, l1),
+		`{"column_map":{"Other amount":"other_ind","Region":"region","Note":"ignore"}}`)
+	f.wantJSON("the connector", f.jsonOf(`SELECT config::text FROM model.integration_def WHERE id=$1::uuid`, c1),
+		`{"target_type":"grid","mapping":{"fields":[{"source":"$.amt","target":"other_ind"},{"source":"$.r","target":"region"}]}}`)
+	f.wantJSON("the record", f.jsonOf(`SELECT data::text FROM runtime.form_record WHERE id=$1::uuid`, r1), `{"which":"other_ind","note":"other"}`)
+	f.wantJSON("the run", f.jsonOf(`SELECT context::text FROM workflow.workflow_instance WHERE id=$1::uuid`, w1), `{"m":"other_ind","t":"other"}`)
+
+	f.wantJSON("the other revision's loader", f.jsonOf(`SELECT config::text FROM model.integration_def WHERE id=$1::uuid`, l2),
+		`{"column_map":{"Other amount":"Other","Region":"region","Note":"ignore"}}`)
+	f.wantJSON("the other revision's connector", f.jsonOf(`SELECT config::text FROM model.integration_def WHERE id=$1::uuid`, c2),
+		`{"target_type":"grid","mapping":{"fields":[{"source":"$.amt","target":"other"},{"source":"$.r","target":"region"}]}}`)
+	f.wantJSON("the other revision's record", f.jsonOf(`SELECT data::text FROM runtime.form_record WHERE id=$1::uuid`, r2), `{"which":"other","note":"other"}`)
+	f.wantJSON("the other revision's run", f.jsonOf(`SELECT context::text FROM workflow.workflow_instance WHERE id=$1::uuid`, w2), `{"m":"OTHER","t":"other"}`)
+}

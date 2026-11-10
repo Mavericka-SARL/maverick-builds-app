@@ -68,7 +68,10 @@ export function BasicsStep({
       {/* A grid's mode. Full reload clears the target grid — every metric
           of it — not the revision: it used to clear every grid
           (2026-11-09), while this said "the target". */}
-      {config.direction === "pull" && (
+      {/* A table's loads have no import mode: "When a run brings rows
+          again" below is the table's own (owner decision 2026-11-09 — a
+          pull into a table ignored the mode it showed). */}
+      {config.direction === "pull" && config.target_type !== "form" && (
         <Field label="Import mode" description={config.protocol === "model"
           ? "A model link reads the source's whole values at each run: replace listed cells overwrites the cells a run brings; full reload first deletes every value of the target grid (other grids keep theirs)"
           : "incremental adds to existing values; replace listed cells overwrites the cells a run brings; full reload first deletes every value of the target grid (other grids keep theirs)"}>
@@ -81,10 +84,17 @@ export function BasicsStep({
         </Field>
       )}
       {config.direction === "pull" && config.target_type === "form" && config.target_id && (
-        <Field label="When a run brings rows again" description="Rows of a period (or site, ledger…) a run already loaded are otherwise added again.">
+        <Field label="When a run brings rows again" description={config.protocol === "model"
+          ? "A model link reads the source's whole rows at each run: choose the field whose records each run replaces, or every run adds them again."
+          : "Rows of a period (or site, ledger…) a run already loaded are otherwise added again."}>
           <Select value={config.replace_by ?? ""} aria-label="Replace by"
             onChange={e => onConfig({ replace_by: e.target.value || undefined })}>
-            <option value="">Add them to the earlier records</option>
+            {/* A model link brings the source's whole rows each run: adding
+                them would double the table (2026-11-09). A table that keeps
+                a dimension updates its records by their code instead. */}
+            <option value="" disabled={config.protocol === "model" && !(forms as FormDef[]).find(f => f.id === config.target_id)?.keeps_dimension_id}>
+              {(forms as FormDef[]).find(f => f.id === config.target_id)?.keeps_dimension_id ? "Update the records by their code" : "Add them to the earlier records"}
+            </option>
             {(forms as FormDef[]).find(f => f.id === config.target_id)?.keeps_dimension_id ? null
               : ((forms as FormDef[]).find(f => f.id === config.target_id)?.fields ?? [])
                 .filter(f => f.type === "dimension" || f.type === "select" || f.type === "text" || f.type === "date")

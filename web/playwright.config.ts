@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// The console's port. CI runs the suite in shards side by side on one
+// self-hosted host, each on a port of its own (E2E_PORT); 5173 otherwise.
+const port = Number(process.env.E2E_PORT || 5173);
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -9,7 +13,7 @@ export default defineConfig({
   reporter: [["html", { open: "never" }], ["list"]],
 
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${port}`,
     trace: "on-first-retry",
     // Dev mode: persona is controlled via localStorage
     storageState: undefined,
@@ -23,8 +27,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "VITE_DEV_MODE=true npm run dev",
-    url: "http://localhost:5173",
+    command: `VITE_DEV_MODE=true npm run dev -- --port ${port} --strictPort`,
+    url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },

@@ -1,0 +1,46 @@
+# PgBouncer in two replicas: with one, any change to it — a config edit, an
+# image update, an eviction, a node drain — refuses every database call for
+# the seconds its replacement takes to start.
+#
+# - Two replicas, preferably on two nodes, and a PodDisruptionBudget
+#   (pdb-pgbouncer.yaml) so a drain takes one at a time.
+# - A rolling update starts the new pod before stopping an old one
+#   (maxUnavailable 0). Each replica holds its own pools, which in
+#   transaction mode is harmless.
+# - Each replica enforces MAX_USER_CONNECTIONS on its own, so the base's 70
+#   halves: 2 × 35, under Postgres's max_connections (100) beside Keycloak's
+#   pool and the backups. Raise them together.
+# - After a Postgres restart PgBouncer serves a cached login failure for
+#   server_login_retry (15 s by default) and the old address for dns_max_ttl
+#   (15 s): 2 s and 5 s shorten the outage by that much.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: mavericks
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app: pgbouncer}
+      containers:
+        - name: pgbouncer
+          env:
+            - name: MAX_USER_CONNECTIONS
+              value: "35"
+            - name: SERVER_LOGIN_RETRY
+              value: "2"
+            - name: DNS_MAX_TTL
+              value: "5"

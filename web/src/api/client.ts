@@ -60,6 +60,10 @@ export interface DevMetric {
   closed_when?: ClosedRule[];
   // "total": its row is drawn as a total in every grid (bold, a rule above).
   row_style?: RowStyle;
+  // The values its cells accept; {} for any.
+  input_rules?: InputRules;
+  // Its own total rules by dimension id; {} for none (the dimensions' apply).
+  dimension_rules?: Record<string, TotalRule>;
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
@@ -129,6 +133,22 @@ export interface DimInfo {
   // Business users add, rename and remove its members (from the grid).
   business_maintained?: boolean;
   members: DimMember[];
+  /** How its members total (migration 174): "first", "last" or "none";
+   *  absent, they add up. metric_rules: the metrics' own rules over it, by
+   *  metric id, which win (memberTotalRule). */
+  total_rule?: TotalRule;
+  metric_rules?: Record<string, TotalRule>;
+}
+
+/** How a dimension's members total: "sum" adds them up (each metric by its
+ *  own agg_rule); "first"/"last" read the first/last member (Base of
+ *  scenarios); "none" gives no total — a read names a member. */
+export type TotalRule = "sum" | "first" | "last" | "none";
+
+/** A metric's total rule over a dimension: its own, else the dimension's. */
+export function memberTotalRule(dim: { total_rule?: TotalRule; metric_rules?: Record<string, TotalRule>; dimension_type?: string }, metricId: string): TotalRule {
+  if (dim.dimension_type === "time") return "sum";
+  return dim.metric_rules?.[metricId] ?? dim.total_rule ?? "sum";
 }
 
 export interface GridData {
@@ -558,6 +578,8 @@ export interface Metric {
   closed_when?: ClosedRule[];
   // "total": the grid draws its row as a total (bold label, a rule above).
   row_style?: RowStyle;
+  // The values its cells accept (absent: any); every write refuses others.
+  input_rules?: InputRules;
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -2244,6 +2266,16 @@ export interface WorkflowRunStatus {
 /** A metric's row style (metric.row_style): "total" draws its row as a total; "" as any row. */
 export type RowStyle = "" | "total";
 
+/** The values a number, percentage or currency input metric's cells accept
+ *  (metric.input_rules): none below min, none above max, whole numbers only
+ *  when whole — in stored units (a percentage stores 15 for 15%). Every write
+ *  of another value is refused; a clear is always accepted. */
+export interface InputRules {
+  min?: number;
+  max?: number;
+  whole?: boolean;
+}
+
 /** A cell of an input metric where this holds takes no input (metric.closed_when):
  *  a calculated metric of the same grid compared with a number (a blank is 0). */
 export interface ClosedRule {
@@ -2655,7 +2687,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[]; closed_when?: ClosedRule[] }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[]; closed_when?: ClosedRule[]; input_rules?: InputRules }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2777,10 +2809,11 @@ export const api = {
   // Native .xlsx upload — the file is sent as-is (base64) and parsed
   // server-side (column headers map to metric/dimension names there), not
   // transcoded to CSV client-side.
-  uploadImportXlsx: (xlsxBase64: string, revisionId?: string, importMode?: ImportModeParam) =>
+  uploadImportXlsx: (xlsxBase64: string, revisionId?: string, importMode?: ImportModeParam, key?: string) =>
     apiFetch<ImportUploadResult>(
       "/api/import/upload",
-      { method: "POST", body: JSON.stringify({ xlsx_base64: xlsxBase64, revision_id: revisionId, import_mode: importMode ?? "incremental" }) },
+      { method: "POST", body: JSON.stringify({ xlsx_base64: xlsxBase64, revision_id: revisionId, import_mode: importMode ?? "incremental" }),
+        ...(key ? { headers: { "Idempotency-Key": key } } : {}) },
     ),
   // Server-side fetch of a link-shared Google Sheet as CSV text — Google's
   // export endpoint sends no CORS headers, so the browser cannot fetch it
@@ -2880,11 +2913,14 @@ export const api = {
   // runs as it is. mapped: the csv is the Import Wizard's, already shaped and
   // mapped by its own steps, so the saved reshape and column map are not
   // applied a second time (they would read the model's names as source
-  // columns).
-  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout, mapped?: boolean) =>
-    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[] }>(`/api/integrations/${id}/run`, {
+  // columns). key: the run's Idempotency-Key (useImportKey) — sent again
+  // under it, a run into a grid or a table is answered from the first and
+  // loads nothing.
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout, mapped?: boolean, key?: string) =>
+    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[]; replayed?: boolean }>(`/api/integrations/${id}/run`, {
       method: "POST",
       body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}), ...(mapped ? { mapped: true } : {}) }),
+      ...(key ? { headers: { "Idempotency-Key": key } } : {}),
     }),
   checkIntegrationRun: (id: string, csv: string, rowLines?: number[], mapped?: boolean) =>
     apiFetch<ImportCheck>(`/api/integrations/${id}/run?dry_run=true`, { method: "POST", body: JSON.stringify({ csv, row_lines: rowLines, ...(mapped ? { mapped: true } : {}) }) }),
@@ -2950,7 +2986,7 @@ export const api = {
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
-    closed_when?: ClosedRule[]; row_style?: RowStyle; is_input?: boolean; drop_values?: boolean }) =>
+    closed_when?: ClosedRule[]; input_rules?: InputRules; dimension_rules?: Record<string, TotalRule>; row_style?: RowStyle; is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -3010,8 +3046,11 @@ export const api = {
   // for an existing account.
   // A deployment with no e-mail returns a new account's temporary_password
   // instead of inviting it: shown once, to be handed over.
-  createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }) =>
-    apiFetch<{ id: string; status: string; invited?: boolean; temporary_password?: string }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),
+  // tenantId addresses another tenant than the console's (X-Tenant-Id): a
+  // tenant just created, whose database holds its workspace.
+  createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }, tenantId?: string) =>
+    apiFetch<{ id: string; status: string; invited?: boolean; temporary_password?: string }>("/api/admin/users", {
+      method: "POST", body: JSON.stringify(body), ...(tenantId ? { headers: { "X-Tenant-Id": tenantId } } : {}) }),
   resendAdminUserInvite: (id: string) =>
     apiFetch<{ status: string; email: string }>(`/api/admin/users/${id}/invite`, { method: "POST" }),
   issueAdminUserTemporaryPassword: (id: string) =>
@@ -3248,7 +3287,8 @@ export const api = {
     return apiFetch<ModelLinkSource[]>(`/api/developer/model-link-sources${qs ? "?" + qs : ""}`);
   },
   /** The links that read the current model (its source side). */
-  listModelLinksReadingModel: () => apiFetch<ModelLink[]>("/api/developer/model-links"),
+  listModelLinksReadingModel: (revisionId?: string) =>
+    apiFetch<ModelLink[]>(`/api/developer/model-links${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
   switchModelLinkSource: (id: string, sourceEnabled: boolean) =>
     apiFetch<{ id: string; source_enabled: boolean }>(`/api/developer/model-links/${id}`, { method: "PATCH", body: JSON.stringify({ source_enabled: sourceEnabled }) }),
   adminListModelLinks: () => apiFetch<ModelLink[]>("/api/admin/model-links"),

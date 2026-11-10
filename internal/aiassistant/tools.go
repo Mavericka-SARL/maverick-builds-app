@@ -458,7 +458,10 @@ func (e *ToolExecutor) listMetrics(ctx context.Context, f metricFilter) (string,
 		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
 		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),''),
 		       CASE WHEN m.highlight_rules = '[]'::jsonb THEN '' ELSE m.highlight_rules::text END,
-		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END, m.row_style
+		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END, m.row_style,
+		       CASE WHEN m.input_rules = '{}'::jsonb THEN '' ELSE m.input_rules::text END,
+		       COALESCE((SELECT jsonb_object_agg(d.name, r.rule)::text FROM model.metric_dimension_rule r
+		                 JOIN model.dimension_def d ON d.id = r.dimension_id WHERE r.metric_id = m.id), '')
 		FROM model.metric_def m
 		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
 		  AND ($3 = '' OR EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = m.id AND gm.grid_id::text = $3))
@@ -479,8 +482,8 @@ func (e *ToolExecutor) listMetrics(ctx context.Context, f metricFilter) (string,
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		var label, picklist, highlights, closed, rowStyle string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights, &closed, &rowStyle)
+		var label, picklist, highlights, closed, rowStyle, inputRules, dimensionRules string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights, &closed, &rowStyle, &inputRules, &dimensionRules)
 		if rowStyle != "" {
 			agg += ", row_style: " + rowStyle
 		}
@@ -492,6 +495,12 @@ func (e *ToolExecutor) listMetrics(ctx context.Context, f metricFilter) (string,
 		}
 		if closed != "" {
 			agg += ", closed_when: " + closed
+		}
+		if inputRules != "" {
+			agg += ", input_rules: " + inputRules
+		}
+		if dimensionRules != "" {
+			agg += ", dimension_rules: " + dimensionRules
 		}
 		if label != "" {
 			name = fmt.Sprintf("%s \"%s\"", name, label)
@@ -578,7 +587,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		       COALESCE(m.properties,'{}'::jsonb)::text,
 		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
 		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags, COALESCE(btrim(m.formula),''),
-		       d.business_maintained, COALESCE(d.label,'')
+		       d.business_maintained, COALESCE(d.label,''), d.agg_rule
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -599,8 +608,12 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		var fiscalStart int
 		var tagList []string
 		var businessMaintained bool
-		var dimLabel string
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula, &businessMaintained, &dimLabel)
+		var dimLabel, totalRule string
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula, &businessMaintained, &dimLabel, &totalRule)
+		if totalRule != "" && totalRule != "sum" && !strings.Contains(dimTags[dname], "agg_rule") {
+			dimTags[dname] += fmt.Sprintf(" [agg_rule %s: its members total as %s]", totalRule, map[string]string{
+				"first": "the first member's value", "last": "the last member's value", "none": "nothing — a read names a member"}[totalRule])
+		}
 		if len(tagList) > 0 {
 			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
 		}

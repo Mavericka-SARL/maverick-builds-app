@@ -85,10 +85,15 @@ func TestUpdateDimension(t *testing.T) {
 	if r := load(groupID); r.name != "grouping" || r.agg != "sum" {
 		t.Errorf("after rename: %+v", r)
 	}
-	// A dimension has no rollup rule of its own (a metric's agg_rule
-	// decides): the tool does not take one.
+	// A dimension's total rule (migration 174) is sum, first, last or
+	// none: average is no way members total.
 	if _, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "agg_rule": "average"}); err == nil {
-		t.Error("update_dimension took an agg_rule")
+		t.Error("update_dimension took agg_rule average")
+	}
+	if _, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "agg_rule": "first"}); err != nil {
+		t.Errorf("agg_rule first: %v", err)
+	} else if r := load(groupID); r.agg != "first" {
+		t.Errorf("agg_rule after update_dimension: %+v", r)
 	}
 	_, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "name": "dept"})
 	wantCode("a taken name", err, metricformula.CodeDimensionNameTaken)

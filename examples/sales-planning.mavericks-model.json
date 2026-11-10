@@ -1,6 +1,6 @@
 {
   "format": "mavericks-model-export",
-  "version": 2,
+  "version": 3,
   "exported_at": "0001-01-01T00:00:00Z",
   "model_name": "Sales Planning",
   "storage_type": "oltp",

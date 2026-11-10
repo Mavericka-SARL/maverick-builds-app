@@ -24,9 +24,6 @@ data:
   CONSOLE_URL: "https://staging.example.com"
   KEYCLOAK_ISSUER: "https://auth-staging.example.com"
   KEYCLOAK_ADMIN_CLIENT_ID: "mavericks-admin"
-  # Object storage: a bucket of its own, so staging never writes next to
-  # production's objects or backups.
-  OBJECT_STORE_BUCKET: "mavericks-staging"
 
 ---
 # The console reaches Keycloak by its public name.

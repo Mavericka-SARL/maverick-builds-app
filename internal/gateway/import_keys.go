@@ -114,3 +114,15 @@ func gridImportReplay(prior *importpkg.KeyedJob) map[string]any {
 func tableImportReplay(prior *importpkg.KeyedJob) map[string]any {
 	return map[string]any{"status": "ok", "records_created": prior.TotalRows}
 }
+
+// integrationRunReplay is a saved integration's committed run, sent again,
+// in the run's own answer: what it loaded, and that nothing failed. A grid's
+// job keeps the values it wrote, not the file's rows, so both of a grid's
+// counts name its values.
+func integrationRunReplay(prior *importpkg.KeyedJob) map[string]any {
+	out := map[string]any{"rows_imported": prior.TotalRows, "error_rows": 0, "errors": []any{}}
+	if kindOf(prior.TargetType) == "grid" {
+		out["values_imported"] = prior.TotalRows
+	}
+	return out
+}

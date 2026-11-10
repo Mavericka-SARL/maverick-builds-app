@@ -1248,7 +1248,7 @@ func (r *ChartResolver) evalFormulaPoint(
 	visited map[string]bool,
 ) (float64, bool, error) {
 	varValues := make(map[string]float64, len(def.DependsOnID))
-	blank := map[string]bool{}
+	blank, noValue := map[string]bool{}, map[string]bool{}
 	for _, depID := range def.DependsOnID {
 		depDef, ok := cc.defs[depID]
 		if !ok {
@@ -1264,6 +1264,9 @@ func (r *ChartResolver) evalFormulaPoint(
 				val = v
 			} else {
 				blank[depDef.Name] = true
+				if calculation.NoValueAt(allDims, depDef.ID, depDef.DimensionIDs, depDef.AggRule, depDef.TimeSummary, dimMembers) {
+					noValue[depDef.Name] = true
+				}
 			}
 		} else {
 			v, ok, err := r.evalCalcMetricVisited(ctx, depID, dimMembers, allDims, cc, visited)
@@ -1285,7 +1288,7 @@ func (r *ChartResolver) evalFormulaPoint(
 	if def.Formula == "" {
 		return 0, false, fmt.Errorf("empty formula")
 	}
-	v, err := calculation.EvaluateMetricWithDimContext(cc.meta, def.Name, def.Formula, varValues, blank, namedDims, cc.meta.CellContext(dimMembers))
+	v, err := calculation.EvaluateMetricWithDimContext(cc.meta, def.Name, def.Formula, varValues, blank, noValue, namedDims, cc.meta.CellContext(dimMembers))
 	if errors.Is(err, calculation.ErrBlankResult) {
 		return 0, false, nil // no value there: no point, never a plotted 0
 	}
@@ -1503,7 +1506,17 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 		}
 		dim.Members = append(dim.Members, rollup.Member{ID: memberID, Code: code, ParentCode: parentCode, Properties: props, TimeIndex: timeIndex})
 	}
-	return dims, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// How the dimensions' members total (migration 174), as the scheduler
+	// totals them.
+	rules, err := calculation.LoadTotalRules(ctx, r.pool, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	rules.Apply(dims)
+	return dims, nil
 }
 
 // loadMetricDimensionIDs returns each metric's own native dimension IDs, via

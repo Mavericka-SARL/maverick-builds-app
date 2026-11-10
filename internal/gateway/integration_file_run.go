@@ -147,8 +147,11 @@ func fileColumnIndex(header []string) (map[string]int, error) {
 // import does: the plan's fact and storage limits, one import job (described
 // by details, when it has any), the write guard (CommitImport refuses
 // restricted members, metrics and locked scopes with
-// importpkg.ErrWriteDenied), and a recalculation afterwards.
-func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revisionID string, staged []importpkg.StagingRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails) ([]string, error) {
+// importpkg.ErrWriteDenied), and a recalculation afterwards. key is the
+// request's Idempotency-Key ("" for none): the job holds it, so the same
+// file sent again under it is answered from this one (replayKeyedImport);
+// one another request holds already is importpkg.ErrImportKeyInUse.
+func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revisionID string, staged []importpkg.StagingRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails, key string) ([]string, error) {
 	if cid := h.customerOfModel(ctx, modelID); cid != "" && h.plans != nil {
 		if err := h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, modelID, len(staged)); err != nil {
 			return nil, err
@@ -162,14 +165,35 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 	if err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
 	}
+	// A refused import saved nothing: its key is freed (the job aborted), so
+	// sent again it runs — and is refused again — instead of being answered
+	// "still running" for ten minutes.
+	releaseKey := func() {
+		if key != "" {
+			if err := store.ReleaseKey(context.WithoutCancel(ctx), job.Id); err != nil {
+				h.log.Warn().Err(err).Str("job_id", job.Id).Msg("release the idempotency key of a refused import")
+			}
+		}
+	}
+	if key != "" {
+		if err := store.SetJobKey(ctx, job.Id, key); err != nil {
+			releaseKey()
+			if errors.Is(err, importpkg.ErrImportKeyInUse) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("record the idempotency key: %w", err)
+		}
+	}
 	if details != (importpkg.JobDetails{}) {
 		h.describeImportJob(ctx, store, job.Id, details)
 	}
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
+		releaseKey()
 		return nil, fmt.Errorf("stage: %w", err)
 	}
 	metricIDs, err := store.CommitImport(ctx, job.Id, modelID, revisionID, act.UserID, mode)
 	if err != nil {
+		releaseKey()
 		if errors.Is(err, importpkg.ErrWriteDenied) {
 			return nil, err
 		}
@@ -186,8 +210,9 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 // detailed (row, column, message). The run is recorded in the integration's
 // history either way, and a refused one in Recent Imports as the Import
 // Wizard's is; a dry run (the Import Wizard's Validate step) only answers
-// what the run would do.
-func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails, dryRun bool) {
+// what the run would do. key is the run's Idempotency-Key ("" for none):
+// integrationRun answered a run sent again under it before calling this.
+func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context, act *actor, intID, modelID, revisionID string, header []string, rows []importpkg.RawRow, mode importpkg.ImportMode, source string, details importpkg.JobDetails, dryRun bool, key string) {
 	refused := func(errorRows int, errs []*importpkgv1.ImportError) {
 		h.recordImportJob(ctx, importpkg.FinishedJob{ModelID: modelID, RevisionID: revisionID, Source: source, UserID: act.UserID,
 			Details: details, ErrorRows: errorRows, Failed: true, Errors: errs})
@@ -249,7 +274,14 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		jsonOK(w, map[string]any{"rows_imported": 0, "values_imported": 0, "error_rows": 0, "errors": []any{}})
 		return
 	}
-	if _, err := h.commitGridRows(ctx, act, modelID, revisionID, staged, mode, source, details); err != nil {
+	if _, err := h.commitGridRows(ctx, act, modelID, revisionID, staged, mode, source, details, key); err != nil {
+		if errors.Is(err, importpkg.ErrImportKeyInUse) {
+			// Sent twice at once: the other send loads the file.
+			if h.replayKeyedImport(w, ctx, importpkg.NewStore(h.db.For(ctx)), modelID, act.UserID, key, "grid", integrationRunReplay) {
+				jsonErr(w, err, http.StatusConflict)
+			}
+			return
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, importpkg.ErrWriteDenied) {
 			status = http.StatusForbidden

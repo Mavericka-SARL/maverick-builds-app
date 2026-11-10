@@ -74,8 +74,9 @@ func (c *Config) validateModel() error {
 		return fmt.Errorf("a model link reads another model (direction pull)")
 	}
 	// Every run reads the source's values as they stand: added to the
-	// target's (incremental), a second run would double them.
-	if c.ImportMode != ModeReplace && c.ImportMode != ModeFullReload {
+	// target's (incremental), a second run would double them. A table's
+	// load has no import mode: it replaces by a field (CheckModelLinkTable).
+	if c.TargetType != TargetForm && c.ImportMode != ModeReplace && c.ImportMode != ModeFullReload {
 		return fmt.Errorf("a model link imports with replace or full_reload — each run reads the source's whole values, which incremental would add again")
 	}
 	if _, err := uuid.Parse(m.ModelID); err != nil {

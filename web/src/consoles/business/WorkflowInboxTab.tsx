@@ -9,6 +9,7 @@ import { WorkflowStepActions } from "../WorkflowStepActions";
 import { useDateFormat } from "../dateFormat";
 import { momentDate } from "../dateSerial";
 import { taskSearchText, matchesAllWords, TASK_SEARCH_PLACEHOLDER } from "./taskSearch";
+import { isCurrentModel, useSelectModel } from "./modelSelection";
 
 // ── Start a workflow (dialog generated from context_schema) ──────────────────
 //
@@ -299,6 +300,7 @@ export function StepTypeIcon({ type, size = 16 }: { type: string; size?: number 
 
 export function WorkflowInbox() {
   const qc = useQueryClient();
+  const selectModel = useSelectModel();
   const dateFormat = useDateFormat();
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["tasks"],
@@ -355,7 +357,24 @@ export function WorkflowInbox() {
             {/* Card header */}
             <div
               className="mvx-admin-object__header"
-              onClick={() => setExpanded(e => ({ ...e, [t.id]: !isOpen }))}
+              onClick={async () => {
+                // The Inbox lists every application's tasks; opening one of
+                // another model switches the consoles to it, so its history,
+                // dashboards and grids are the task's (owner decision
+                // 2026-11-09). The card stays open. The application list
+                // tells a switch in place from one into another tenant, which
+                // reloads.
+                if (t.application_id) {
+                  await qc.ensureQueryData({ queryKey: ["apps"], queryFn: api.getApps });
+                  if (!isCurrentModel(qc, t.application_id, t.model_id)) {
+                    selectModel(t.application_id, t.model_id ?? null);
+                    setExpanded(e => ({ ...e, [t.id]: true }));
+                    return;
+                  }
+                }
+                setExpanded(e => ({ ...e, [t.id]: !isOpen }));
+              }}
+              title={t.application_id && !isCurrentModel(qc, t.application_id, t.model_id) && t.model_name ? `Opens ${t.model_name}` : undefined}
               style={{ cursor: "pointer", borderBottom: isOpen ? undefined : "none" }}
             >
               <StepTypeIcon type={t.step_type} size={18} />

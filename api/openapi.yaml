@@ -976,6 +976,15 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        input_rules:
+          $ref: "#/components/schemas/InputRules"
+        dimension_rules:
+          type: object
+          additionalProperties: { type: string, enum: [sum, first, last, none] }
+          description: >-
+            The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+            dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+            dimension takes none: its totals are the metric's time_summary.
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
         tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
@@ -1000,7 +1009,7 @@ components:
         id:                   { type: string, format: uuid }
         name:                 { type: string }
         label:                { type: string, description: "Display name selectors and headers show; absent: the name" }
-        agg_rule:             { type: string }
+        agg_rule:             { type: string, enum: [sum, first, last, none], description: "How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last read the first / last member (Base of scenarios); none gives no total, a read names a member. A time dimension is sum: its totals are each metric's time_summary. A metric may set its own (dimension_rules)." }
         parent_dimension_id:  { type: string, format: uuid, nullable: true }
         dimension_type:
           type: string
@@ -1014,6 +1023,19 @@ components:
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
+    InputRules:
+      type: object
+      additionalProperties: false
+      description: >-
+        Number, percentage and currency input metrics: the values their cells accept. Every write of
+        another value is refused (422, code INPUT_RULE) — a typed or pasted cell, an import row, a
+        connector's record, the AI Developer's values. A clear is always accepted; values stored
+        before a rule was added stay, and copies carry them. {} removes them; omitted keeps them on
+        PATCH.
+      properties:
+        min:   { type: number, description: "No value below it (0: not negative). A percentage's bounds are in percent units: 15 for 15%." }
+        max:   { type: number, description: "No value above it" }
+        whole: { type: boolean, description: "Whole numbers only" }
     ClosedRule:
       type: object
       required: [metric, op, value]
@@ -1098,6 +1120,15 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        input_rules:
+          $ref: "#/components/schemas/InputRules"
+        dimension_rules:
+          type: object
+          additionalProperties: { type: string, enum: [sum, first, last, none] }
+          description: >-
+            The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+            dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+            dimension takes none: its totals are the metric's time_summary.
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1136,6 +1167,15 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        input_rules:
+          $ref: "#/components/schemas/InputRules"
+        dimension_rules:
+          type: object
+          additionalProperties: { type: string, enum: [sum, first, last, none] }
+          description: >-
+            The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+            dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+            dimension takes none: its totals are the metric's time_summary.
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1157,7 +1197,7 @@ components:
       required: [name]
       properties:
         name:                 { type: string }
-        agg_rule:             { type: string, default: sum }
+        agg_rule:             { type: string, enum: [sum, first, last, none], default: sum, description: "How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last read the first / last member (Base of scenarios); none gives no total, a read names a member. A time dimension is sum: its totals are each metric's time_summary. A metric may set its own (dimension_rules)." }
         revision_id:          { type: string, format: uuid }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Not allowed on a time dimension" }
         tags:                 { type: array, items: { type: string } }
@@ -1196,7 +1236,7 @@ components:
       properties:
         name:                 { type: string }
         label:                { type: string, maxLength: 80, description: "Display name selectors and headers show (formulas keep naming the dimension by name); empty shows the name again" }
-        agg_rule:             { type: string }
+        agg_rule:             { type: string, enum: [sum, first, last, none], description: "How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last read the first / last member (Base of scenarios); none gives no total, a read names a member. A time dimension is sum: its totals are each metric's time_summary. A metric may set its own (dimension_rules). A change recalculates the revision." }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Send null to detach the dimension from its parent" }
         tags:                 { type: array, items: { type: string } }
         source_dimension_id:

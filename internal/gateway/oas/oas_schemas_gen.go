@@ -6565,9 +6565,13 @@ func (*CreateDimensionPropertyOK) createDimensionPropertyRes() {}
 
 // Ref: #/components/schemas/CreateDimensionRequest
 type CreateDimensionRequest struct {
-	Name       string    `json:"name"`
-	AggRule    OptString `json:"agg_rule"`
-	RevisionID OptUUID   `json:"revision_id"`
+	Name string `json:"name"`
+	// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+	// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+	// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+	// (dimension_rules).
+	AggRule    OptCreateDimensionRequestAggRule `json:"agg_rule"`
+	RevisionID OptUUID                          `json:"revision_id"`
 	// Not allowed on a time dimension.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
 	Tags              []string   `json:"tags"`
@@ -6598,7 +6602,7 @@ func (s *CreateDimensionRequest) GetName() string {
 }
 
 // GetAggRule returns the value of AggRule.
-func (s *CreateDimensionRequest) GetAggRule() OptString {
+func (s *CreateDimensionRequest) GetAggRule() OptCreateDimensionRequestAggRule {
 	return s.AggRule
 }
 
@@ -6658,7 +6662,7 @@ func (s *CreateDimensionRequest) SetName(val string) {
 }
 
 // SetAggRule sets the value of AggRule.
-func (s *CreateDimensionRequest) SetAggRule(val OptString) {
+func (s *CreateDimensionRequest) SetAggRule(val OptCreateDimensionRequestAggRule) {
 	s.AggRule = val
 }
 
@@ -6710,6 +6714,65 @@ func (s *CreateDimensionRequest) SetTimeGranularity(val OptCreateDimensionReques
 // SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
 func (s *CreateDimensionRequest) SetFiscalYearStartMonth(val OptInt) {
 	s.FiscalYearStartMonth = val
+}
+
+// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+// (dimension_rules).
+type CreateDimensionRequestAggRule string
+
+const (
+	CreateDimensionRequestAggRuleSum   CreateDimensionRequestAggRule = "sum"
+	CreateDimensionRequestAggRuleFirst CreateDimensionRequestAggRule = "first"
+	CreateDimensionRequestAggRuleLast  CreateDimensionRequestAggRule = "last"
+	CreateDimensionRequestAggRuleNone  CreateDimensionRequestAggRule = "none"
+)
+
+// AllValues returns all CreateDimensionRequestAggRule values.
+func (CreateDimensionRequestAggRule) AllValues() []CreateDimensionRequestAggRule {
+	return []CreateDimensionRequestAggRule{
+		CreateDimensionRequestAggRuleSum,
+		CreateDimensionRequestAggRuleFirst,
+		CreateDimensionRequestAggRuleLast,
+		CreateDimensionRequestAggRuleNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateDimensionRequestAggRule) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateDimensionRequestAggRuleSum:
+		return []byte(s), nil
+	case CreateDimensionRequestAggRuleFirst:
+		return []byte(s), nil
+	case CreateDimensionRequestAggRuleLast:
+		return []byte(s), nil
+	case CreateDimensionRequestAggRuleNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateDimensionRequestAggRule) UnmarshalText(data []byte) error {
+	switch CreateDimensionRequestAggRule(data) {
+	case CreateDimensionRequestAggRuleSum:
+		*s = CreateDimensionRequestAggRuleSum
+		return nil
+	case CreateDimensionRequestAggRuleFirst:
+		*s = CreateDimensionRequestAggRuleFirst
+		return nil
+	case CreateDimensionRequestAggRuleLast:
+		*s = CreateDimensionRequestAggRuleLast
+		return nil
+	case CreateDimensionRequestAggRuleNone:
+		*s = CreateDimensionRequestAggRuleNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
@@ -7508,7 +7571,12 @@ type CreateMetricRequest struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle OptCreateMetricRequestRowStyle `json:"row_style"`
+	RowStyle   OptCreateMetricRequestRowStyle `json:"row_style"`
+	InputRules OptInputRules                  `json:"input_rules"`
+	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+	// dimension takes none: its totals are the metric's time_summary.
+	DimensionRules OptCreateMetricRequestDimensionRules `json:"dimension_rules"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -7588,6 +7656,16 @@ func (s *CreateMetricRequest) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *CreateMetricRequest) GetRowStyle() OptCreateMetricRequestRowStyle {
 	return s.RowStyle
+}
+
+// GetInputRules returns the value of InputRules.
+func (s *CreateMetricRequest) GetInputRules() OptInputRules {
+	return s.InputRules
+}
+
+// GetDimensionRules returns the value of DimensionRules.
+func (s *CreateMetricRequest) GetDimensionRules() OptCreateMetricRequestDimensionRules {
+	return s.DimensionRules
 }
 
 // GetTimeSummary returns the value of TimeSummary.
@@ -7670,9 +7748,88 @@ func (s *CreateMetricRequest) SetRowStyle(val OptCreateMetricRequestRowStyle) {
 	s.RowStyle = val
 }
 
+// SetInputRules sets the value of InputRules.
+func (s *CreateMetricRequest) SetInputRules(val OptInputRules) {
+	s.InputRules = val
+}
+
+// SetDimensionRules sets the value of DimensionRules.
+func (s *CreateMetricRequest) SetDimensionRules(val OptCreateMetricRequestDimensionRules) {
+	s.DimensionRules = val
+}
+
 // SetTimeSummary sets the value of TimeSummary.
 func (s *CreateMetricRequest) SetTimeSummary(val OptCreateMetricRequestTimeSummary) {
 	s.TimeSummary = val
+}
+
+// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+// dimension takes none: its totals are the metric's time_summary.
+type CreateMetricRequestDimensionRules map[string]CreateMetricRequestDimensionRulesItem
+
+func (s *CreateMetricRequestDimensionRules) init() CreateMetricRequestDimensionRules {
+	m := *s
+	if m == nil {
+		m = map[string]CreateMetricRequestDimensionRulesItem{}
+		*s = m
+	}
+	return m
+}
+
+type CreateMetricRequestDimensionRulesItem string
+
+const (
+	CreateMetricRequestDimensionRulesItemSum   CreateMetricRequestDimensionRulesItem = "sum"
+	CreateMetricRequestDimensionRulesItemFirst CreateMetricRequestDimensionRulesItem = "first"
+	CreateMetricRequestDimensionRulesItemLast  CreateMetricRequestDimensionRulesItem = "last"
+	CreateMetricRequestDimensionRulesItemNone  CreateMetricRequestDimensionRulesItem = "none"
+)
+
+// AllValues returns all CreateMetricRequestDimensionRulesItem values.
+func (CreateMetricRequestDimensionRulesItem) AllValues() []CreateMetricRequestDimensionRulesItem {
+	return []CreateMetricRequestDimensionRulesItem{
+		CreateMetricRequestDimensionRulesItemSum,
+		CreateMetricRequestDimensionRulesItemFirst,
+		CreateMetricRequestDimensionRulesItemLast,
+		CreateMetricRequestDimensionRulesItemNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateMetricRequestDimensionRulesItem) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateMetricRequestDimensionRulesItemSum:
+		return []byte(s), nil
+	case CreateMetricRequestDimensionRulesItemFirst:
+		return []byte(s), nil
+	case CreateMetricRequestDimensionRulesItemLast:
+		return []byte(s), nil
+	case CreateMetricRequestDimensionRulesItemNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateMetricRequestDimensionRulesItem) UnmarshalText(data []byte) error {
+	switch CreateMetricRequestDimensionRulesItem(data) {
+	case CreateMetricRequestDimensionRulesItemSum:
+		*s = CreateMetricRequestDimensionRulesItemSum
+		return nil
+	case CreateMetricRequestDimensionRulesItemFirst:
+		*s = CreateMetricRequestDimensionRulesItemFirst
+		return nil
+	case CreateMetricRequestDimensionRulesItemLast:
+		*s = CreateMetricRequestDimensionRulesItemLast
+		return nil
+	case CreateMetricRequestDimensionRulesItemNone:
+		*s = CreateMetricRequestDimensionRulesItemNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
@@ -9582,9 +9739,13 @@ type Dimension struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 	// Display name selectors and headers show; absent: the name.
-	Label             OptString  `json:"label"`
-	AggRule           string     `json:"agg_rule"`
-	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
+	Label OptString `json:"label"`
+	// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+	// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+	// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+	// (dimension_rules).
+	AggRule           DimensionAggRule `json:"agg_rule"`
+	ParentDimensionID OptNilUUID       `json:"parent_dimension_id"`
 	// Explicit and immutable. A dimension called month is NOT a time dimension unless marked so.
 	DimensionType DimensionDimensionType `json:"dimension_type"`
 	// Time dimensions only.
@@ -9621,7 +9782,7 @@ func (s *Dimension) GetLabel() OptString {
 }
 
 // GetAggRule returns the value of AggRule.
-func (s *Dimension) GetAggRule() string {
+func (s *Dimension) GetAggRule() DimensionAggRule {
 	return s.AggRule
 }
 
@@ -9686,7 +9847,7 @@ func (s *Dimension) SetLabel(val OptString) {
 }
 
 // SetAggRule sets the value of AggRule.
-func (s *Dimension) SetAggRule(val string) {
+func (s *Dimension) SetAggRule(val DimensionAggRule) {
 	s.AggRule = val
 }
 
@@ -9733,6 +9894,65 @@ func (s *Dimension) SetBusinessMaintained(val OptBool) {
 // SetMembers sets the value of Members.
 func (s *Dimension) SetMembers(val []DimensionMember) {
 	s.Members = val
+}
+
+// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+// (dimension_rules).
+type DimensionAggRule string
+
+const (
+	DimensionAggRuleSum   DimensionAggRule = "sum"
+	DimensionAggRuleFirst DimensionAggRule = "first"
+	DimensionAggRuleLast  DimensionAggRule = "last"
+	DimensionAggRuleNone  DimensionAggRule = "none"
+)
+
+// AllValues returns all DimensionAggRule values.
+func (DimensionAggRule) AllValues() []DimensionAggRule {
+	return []DimensionAggRule{
+		DimensionAggRuleSum,
+		DimensionAggRuleFirst,
+		DimensionAggRuleLast,
+		DimensionAggRuleNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s DimensionAggRule) MarshalText() ([]byte, error) {
+	switch s {
+	case DimensionAggRuleSum:
+		return []byte(s), nil
+	case DimensionAggRuleFirst:
+		return []byte(s), nil
+	case DimensionAggRuleLast:
+		return []byte(s), nil
+	case DimensionAggRuleNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *DimensionAggRule) UnmarshalText(data []byte) error {
+	switch DimensionAggRule(data) {
+	case DimensionAggRuleSum:
+		*s = DimensionAggRuleSum
+		return nil
+	case DimensionAggRuleFirst:
+		*s = DimensionAggRuleFirst
+		return nil
+	case DimensionAggRuleLast:
+		*s = DimensionAggRuleLast
+		return nil
+	case DimensionAggRuleNone:
+		*s = DimensionAggRuleNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Explicit and immutable. A dimension called month is NOT a time dimension unless marked so.
@@ -17422,6 +17642,50 @@ func (s *ImportUploadUnprocessableEntityErrorsItem) SetRawValue(val OptString) {
 	s.RawValue = val
 }
 
+// Number, percentage and currency input metrics: the values their cells accept. Every write of
+// another value is refused (422, code INPUT_RULE) — a typed or pasted cell, an import row, a
+// connector's record, the AI Developer's values. A clear is always accepted; values stored before a
+// rule was added stay, and copies carry them. {} removes them; omitted keeps them on PATCH.
+// Ref: #/components/schemas/InputRules
+type InputRules struct {
+	// No value below it (0: not negative). A percentage's bounds are in percent units: 15 for 15%.
+	Min OptFloat64 `json:"min"`
+	// No value above it.
+	Max OptFloat64 `json:"max"`
+	// Whole numbers only.
+	Whole OptBool `json:"whole"`
+}
+
+// GetMin returns the value of Min.
+func (s *InputRules) GetMin() OptFloat64 {
+	return s.Min
+}
+
+// GetMax returns the value of Max.
+func (s *InputRules) GetMax() OptFloat64 {
+	return s.Max
+}
+
+// GetWhole returns the value of Whole.
+func (s *InputRules) GetWhole() OptBool {
+	return s.Whole
+}
+
+// SetMin sets the value of Min.
+func (s *InputRules) SetMin(val OptFloat64) {
+	s.Min = val
+}
+
+// SetMax sets the value of Max.
+func (s *InputRules) SetMax(val OptFloat64) {
+	s.Max = val
+}
+
+// SetWhole sets the value of Whole.
+func (s *InputRules) SetWhole(val OptBool) {
+	s.Whole = val
+}
+
 // Ref: #/components/schemas/IntegrationDef
 type IntegrationDef struct {
 	ID         uuid.UUID            `json:"id"`
@@ -19688,7 +19952,12 @@ type MetricDef struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle OptMetricDefRowStyle `json:"row_style"`
+	RowStyle   OptMetricDefRowStyle `json:"row_style"`
+	InputRules OptInputRules        `json:"input_rules"`
+	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+	// dimension takes none: its totals are the metric's time_summary.
+	DimensionRules OptMetricDefDimensionRules `json:"dimension_rules"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -19770,6 +20039,16 @@ func (s *MetricDef) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *MetricDef) GetRowStyle() OptMetricDefRowStyle {
 	return s.RowStyle
+}
+
+// GetInputRules returns the value of InputRules.
+func (s *MetricDef) GetInputRules() OptInputRules {
+	return s.InputRules
+}
+
+// GetDimensionRules returns the value of DimensionRules.
+func (s *MetricDef) GetDimensionRules() OptMetricDefDimensionRules {
+	return s.DimensionRules
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -19862,6 +20141,16 @@ func (s *MetricDef) SetRowStyle(val OptMetricDefRowStyle) {
 	s.RowStyle = val
 }
 
+// SetInputRules sets the value of InputRules.
+func (s *MetricDef) SetInputRules(val OptInputRules) {
+	s.InputRules = val
+}
+
+// SetDimensionRules sets the value of DimensionRules.
+func (s *MetricDef) SetDimensionRules(val OptMetricDefDimensionRules) {
+	s.DimensionRules = val
+}
+
 // SetDependsOn sets the value of DependsOn.
 func (s *MetricDef) SetDependsOn(val []string) {
 	s.DependsOn = val
@@ -19875,6 +20164,75 @@ func (s *MetricDef) SetDependedBy(val []string) {
 // SetTags sets the value of Tags.
 func (s *MetricDef) SetTags(val []string) {
 	s.Tags = val
+}
+
+// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+// dimension takes none: its totals are the metric's time_summary.
+type MetricDefDimensionRules map[string]MetricDefDimensionRulesItem
+
+func (s *MetricDefDimensionRules) init() MetricDefDimensionRules {
+	m := *s
+	if m == nil {
+		m = map[string]MetricDefDimensionRulesItem{}
+		*s = m
+	}
+	return m
+}
+
+type MetricDefDimensionRulesItem string
+
+const (
+	MetricDefDimensionRulesItemSum   MetricDefDimensionRulesItem = "sum"
+	MetricDefDimensionRulesItemFirst MetricDefDimensionRulesItem = "first"
+	MetricDefDimensionRulesItemLast  MetricDefDimensionRulesItem = "last"
+	MetricDefDimensionRulesItemNone  MetricDefDimensionRulesItem = "none"
+)
+
+// AllValues returns all MetricDefDimensionRulesItem values.
+func (MetricDefDimensionRulesItem) AllValues() []MetricDefDimensionRulesItem {
+	return []MetricDefDimensionRulesItem{
+		MetricDefDimensionRulesItemSum,
+		MetricDefDimensionRulesItemFirst,
+		MetricDefDimensionRulesItemLast,
+		MetricDefDimensionRulesItemNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s MetricDefDimensionRulesItem) MarshalText() ([]byte, error) {
+	switch s {
+	case MetricDefDimensionRulesItemSum:
+		return []byte(s), nil
+	case MetricDefDimensionRulesItemFirst:
+		return []byte(s), nil
+	case MetricDefDimensionRulesItemLast:
+		return []byte(s), nil
+	case MetricDefDimensionRulesItemNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *MetricDefDimensionRulesItem) UnmarshalText(data []byte) error {
+	switch MetricDefDimensionRulesItem(data) {
+	case MetricDefDimensionRulesItemSum:
+		*s = MetricDefDimensionRulesItemSum
+		return nil
+	case MetricDefDimensionRulesItemFirst:
+		*s = MetricDefDimensionRulesItemFirst
+		return nil
+	case MetricDefDimensionRulesItemLast:
+		*s = MetricDefDimensionRulesItemLast
+		return nil
+	case MetricDefDimensionRulesItemNone:
+		*s = MetricDefDimensionRulesItemNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
@@ -22462,6 +22820,52 @@ func (o OptCreateApplicationRequestMode) Or(d CreateApplicationRequestMode) Crea
 	return d
 }
 
+// NewOptCreateDimensionRequestAggRule returns new OptCreateDimensionRequestAggRule with value set to v.
+func NewOptCreateDimensionRequestAggRule(v CreateDimensionRequestAggRule) OptCreateDimensionRequestAggRule {
+	return OptCreateDimensionRequestAggRule{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateDimensionRequestAggRule is optional CreateDimensionRequestAggRule.
+type OptCreateDimensionRequestAggRule struct {
+	Value CreateDimensionRequestAggRule
+	Set   bool
+}
+
+// IsSet returns true if OptCreateDimensionRequestAggRule was set.
+func (o OptCreateDimensionRequestAggRule) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateDimensionRequestAggRule) Reset() {
+	var v CreateDimensionRequestAggRule
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateDimensionRequestAggRule) SetTo(v CreateDimensionRequestAggRule) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateDimensionRequestAggRule) Get() (v CreateDimensionRequestAggRule, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateDimensionRequestAggRule) Or(d CreateDimensionRequestAggRule) CreateDimensionRequestAggRule {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateDimensionRequestDimensionType returns new OptCreateDimensionRequestDimensionType with value set to v.
 func NewOptCreateDimensionRequestDimensionType(v CreateDimensionRequestDimensionType) OptCreateDimensionRequestDimensionType {
 	return OptCreateDimensionRequestDimensionType{
@@ -22640,6 +23044,52 @@ func (o OptCreateFormRequestEditAccess) Get() (v CreateFormRequestEditAccess, ok
 
 // Or returns value if set, or given parameter if does not.
 func (o OptCreateFormRequestEditAccess) Or(d CreateFormRequestEditAccess) CreateFormRequestEditAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateMetricRequestDimensionRules returns new OptCreateMetricRequestDimensionRules with value set to v.
+func NewOptCreateMetricRequestDimensionRules(v CreateMetricRequestDimensionRules) OptCreateMetricRequestDimensionRules {
+	return OptCreateMetricRequestDimensionRules{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateMetricRequestDimensionRules is optional CreateMetricRequestDimensionRules.
+type OptCreateMetricRequestDimensionRules struct {
+	Value CreateMetricRequestDimensionRules
+	Set   bool
+}
+
+// IsSet returns true if OptCreateMetricRequestDimensionRules was set.
+func (o OptCreateMetricRequestDimensionRules) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateMetricRequestDimensionRules) Reset() {
+	var v CreateMetricRequestDimensionRules
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateMetricRequestDimensionRules) SetTo(v CreateMetricRequestDimensionRules) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateMetricRequestDimensionRules) Get() (v CreateMetricRequestDimensionRules, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateMetricRequestDimensionRules) Or(d CreateMetricRequestDimensionRules) CreateMetricRequestDimensionRules {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -24900,6 +25350,52 @@ func (o OptImportUploadRequestImportMode) Or(d ImportUploadRequestImportMode) Im
 	return d
 }
 
+// NewOptInputRules returns new OptInputRules with value set to v.
+func NewOptInputRules(v InputRules) OptInputRules {
+	return OptInputRules{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptInputRules is optional InputRules.
+type OptInputRules struct {
+	Value InputRules
+	Set   bool
+}
+
+// IsSet returns true if OptInputRules was set.
+func (o OptInputRules) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptInputRules) Reset() {
+	var v InputRules
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptInputRules) SetTo(v InputRules) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptInputRules) Get() (v InputRules, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptInputRules) Or(d InputRules) InputRules {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptInt returns new OptInt with value set to v.
 func NewOptInt(v int) OptInt {
 	return OptInt{
@@ -25124,6 +25620,52 @@ func (o OptListedFormEditAccess) Get() (v ListedFormEditAccess, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptListedFormEditAccess) Or(d ListedFormEditAccess) ListedFormEditAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptMetricDefDimensionRules returns new OptMetricDefDimensionRules with value set to v.
+func NewOptMetricDefDimensionRules(v MetricDefDimensionRules) OptMetricDefDimensionRules {
+	return OptMetricDefDimensionRules{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptMetricDefDimensionRules is optional MetricDefDimensionRules.
+type OptMetricDefDimensionRules struct {
+	Value MetricDefDimensionRules
+	Set   bool
+}
+
+// IsSet returns true if OptMetricDefDimensionRules was set.
+func (o OptMetricDefDimensionRules) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptMetricDefDimensionRules) Reset() {
+	var v MetricDefDimensionRules
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptMetricDefDimensionRules) SetTo(v MetricDefDimensionRules) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptMetricDefDimensionRules) Get() (v MetricDefDimensionRules, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptMetricDefDimensionRules) Or(d MetricDefDimensionRules) MetricDefDimensionRules {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -27496,6 +28038,52 @@ func (o OptUUID) Or(d uuid.UUID) uuid.UUID {
 	return d
 }
 
+// NewOptUpdateDimensionRequestAggRule returns new OptUpdateDimensionRequestAggRule with value set to v.
+func NewOptUpdateDimensionRequestAggRule(v UpdateDimensionRequestAggRule) OptUpdateDimensionRequestAggRule {
+	return OptUpdateDimensionRequestAggRule{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateDimensionRequestAggRule is optional UpdateDimensionRequestAggRule.
+type OptUpdateDimensionRequestAggRule struct {
+	Value UpdateDimensionRequestAggRule
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateDimensionRequestAggRule was set.
+func (o OptUpdateDimensionRequestAggRule) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateDimensionRequestAggRule) Reset() {
+	var v UpdateDimensionRequestAggRule
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateDimensionRequestAggRule) SetTo(v UpdateDimensionRequestAggRule) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateDimensionRequestAggRule) Get() (v UpdateDimensionRequestAggRule, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateDimensionRequestAggRule) Or(d UpdateDimensionRequestAggRule) UpdateDimensionRequestAggRule {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateFormMappingRequestDimensionMappings returns new OptUpdateFormMappingRequestDimensionMappings with value set to v.
 func NewOptUpdateFormMappingRequestDimensionMappings(v UpdateFormMappingRequestDimensionMappings) OptUpdateFormMappingRequestDimensionMappings {
 	return OptUpdateFormMappingRequestDimensionMappings{
@@ -27536,6 +28124,52 @@ func (o OptUpdateFormMappingRequestDimensionMappings) Get() (v UpdateFormMapping
 
 // Or returns value if set, or given parameter if does not.
 func (o OptUpdateFormMappingRequestDimensionMappings) Or(d UpdateFormMappingRequestDimensionMappings) UpdateFormMappingRequestDimensionMappings {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptUpdateMetricRequestDimensionRules returns new OptUpdateMetricRequestDimensionRules with value set to v.
+func NewOptUpdateMetricRequestDimensionRules(v UpdateMetricRequestDimensionRules) OptUpdateMetricRequestDimensionRules {
+	return OptUpdateMetricRequestDimensionRules{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateMetricRequestDimensionRules is optional UpdateMetricRequestDimensionRules.
+type OptUpdateMetricRequestDimensionRules struct {
+	Value UpdateMetricRequestDimensionRules
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateMetricRequestDimensionRules was set.
+func (o OptUpdateMetricRequestDimensionRules) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateMetricRequestDimensionRules) Reset() {
+	var v UpdateMetricRequestDimensionRules
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateMetricRequestDimensionRules) SetTo(v UpdateMetricRequestDimensionRules) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateMetricRequestDimensionRules) Get() (v UpdateMetricRequestDimensionRules, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateMetricRequestDimensionRules) Or(d UpdateMetricRequestDimensionRules) UpdateMetricRequestDimensionRules {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -35205,8 +35839,12 @@ type UpdateDimensionRequest struct {
 	Name OptString `json:"name"`
 	// Display name selectors and headers show (formulas keep naming the dimension by name); empty shows
 	// the name again.
-	Label   OptString `json:"label"`
-	AggRule OptString `json:"agg_rule"`
+	Label OptString `json:"label"`
+	// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+	// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+	// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+	// (dimension_rules). A change recalculates the revision.
+	AggRule OptUpdateDimensionRequestAggRule `json:"agg_rule"`
 	// Send null to detach the dimension from its parent.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
 	Tags              []string   `json:"tags"`
@@ -35236,7 +35874,7 @@ func (s *UpdateDimensionRequest) GetLabel() OptString {
 }
 
 // GetAggRule returns the value of AggRule.
-func (s *UpdateDimensionRequest) GetAggRule() OptString {
+func (s *UpdateDimensionRequest) GetAggRule() OptUpdateDimensionRequestAggRule {
 	return s.AggRule
 }
 
@@ -35286,7 +35924,7 @@ func (s *UpdateDimensionRequest) SetLabel(val OptString) {
 }
 
 // SetAggRule sets the value of AggRule.
-func (s *UpdateDimensionRequest) SetAggRule(val OptString) {
+func (s *UpdateDimensionRequest) SetAggRule(val OptUpdateDimensionRequestAggRule) {
 	s.AggRule = val
 }
 
@@ -35323,6 +35961,65 @@ func (s *UpdateDimensionRequest) SetBusinessMaintained(val OptBool) {
 // SetEditorRoles sets the value of EditorRoles.
 func (s *UpdateDimensionRequest) SetEditorRoles(val []string) {
 	s.EditorRoles = val
+}
+
+// How its members total: sum (default) adds them up, each metric by its own agg_rule; first / last
+// read the first / last member (Base of scenarios); none gives no total, a read names a member. A
+// time dimension is sum: its totals are each metric's time_summary. A metric may set its own
+// (dimension_rules). A change recalculates the revision.
+type UpdateDimensionRequestAggRule string
+
+const (
+	UpdateDimensionRequestAggRuleSum   UpdateDimensionRequestAggRule = "sum"
+	UpdateDimensionRequestAggRuleFirst UpdateDimensionRequestAggRule = "first"
+	UpdateDimensionRequestAggRuleLast  UpdateDimensionRequestAggRule = "last"
+	UpdateDimensionRequestAggRuleNone  UpdateDimensionRequestAggRule = "none"
+)
+
+// AllValues returns all UpdateDimensionRequestAggRule values.
+func (UpdateDimensionRequestAggRule) AllValues() []UpdateDimensionRequestAggRule {
+	return []UpdateDimensionRequestAggRule{
+		UpdateDimensionRequestAggRuleSum,
+		UpdateDimensionRequestAggRuleFirst,
+		UpdateDimensionRequestAggRuleLast,
+		UpdateDimensionRequestAggRuleNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateDimensionRequestAggRule) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateDimensionRequestAggRuleSum:
+		return []byte(s), nil
+	case UpdateDimensionRequestAggRuleFirst:
+		return []byte(s), nil
+	case UpdateDimensionRequestAggRuleLast:
+		return []byte(s), nil
+	case UpdateDimensionRequestAggRuleNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateDimensionRequestAggRule) UnmarshalText(data []byte) error {
+	switch UpdateDimensionRequestAggRule(data) {
+	case UpdateDimensionRequestAggRuleSum:
+		*s = UpdateDimensionRequestAggRuleSum
+		return nil
+	case UpdateDimensionRequestAggRuleFirst:
+		*s = UpdateDimensionRequestAggRuleFirst
+		return nil
+	case UpdateDimensionRequestAggRuleLast:
+		*s = UpdateDimensionRequestAggRuleLast
+		return nil
+	case UpdateDimensionRequestAggRuleNone:
+		*s = UpdateDimensionRequestAggRuleNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 type UpdateFolderBadRequest Error
@@ -35911,7 +36608,12 @@ type UpdateMetricRequest struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle OptUpdateMetricRequestRowStyle `json:"row_style"`
+	RowStyle   OptUpdateMetricRequestRowStyle `json:"row_style"`
+	InputRules OptInputRules                  `json:"input_rules"`
+	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+	// dimension takes none: its totals are the metric's time_summary.
+	DimensionRules OptUpdateMetricRequestDimensionRules `json:"dimension_rules"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -35991,6 +36693,16 @@ func (s *UpdateMetricRequest) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *UpdateMetricRequest) GetRowStyle() OptUpdateMetricRequestRowStyle {
 	return s.RowStyle
+}
+
+// GetInputRules returns the value of InputRules.
+func (s *UpdateMetricRequest) GetInputRules() OptInputRules {
+	return s.InputRules
+}
+
+// GetDimensionRules returns the value of DimensionRules.
+func (s *UpdateMetricRequest) GetDimensionRules() OptUpdateMetricRequestDimensionRules {
+	return s.DimensionRules
 }
 
 // GetTimeSummary returns the value of TimeSummary.
@@ -36073,9 +36785,88 @@ func (s *UpdateMetricRequest) SetRowStyle(val OptUpdateMetricRequestRowStyle) {
 	s.RowStyle = val
 }
 
+// SetInputRules sets the value of InputRules.
+func (s *UpdateMetricRequest) SetInputRules(val OptInputRules) {
+	s.InputRules = val
+}
+
+// SetDimensionRules sets the value of DimensionRules.
+func (s *UpdateMetricRequest) SetDimensionRules(val OptUpdateMetricRequestDimensionRules) {
+	s.DimensionRules = val
+}
+
 // SetTimeSummary sets the value of TimeSummary.
 func (s *UpdateMetricRequest) SetTimeSummary(val OptUpdateMetricRequestTimeSummary) {
 	s.TimeSummary = val
+}
+
+// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
+// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
+// dimension takes none: its totals are the metric's time_summary.
+type UpdateMetricRequestDimensionRules map[string]UpdateMetricRequestDimensionRulesItem
+
+func (s *UpdateMetricRequestDimensionRules) init() UpdateMetricRequestDimensionRules {
+	m := *s
+	if m == nil {
+		m = map[string]UpdateMetricRequestDimensionRulesItem{}
+		*s = m
+	}
+	return m
+}
+
+type UpdateMetricRequestDimensionRulesItem string
+
+const (
+	UpdateMetricRequestDimensionRulesItemSum   UpdateMetricRequestDimensionRulesItem = "sum"
+	UpdateMetricRequestDimensionRulesItemFirst UpdateMetricRequestDimensionRulesItem = "first"
+	UpdateMetricRequestDimensionRulesItemLast  UpdateMetricRequestDimensionRulesItem = "last"
+	UpdateMetricRequestDimensionRulesItemNone  UpdateMetricRequestDimensionRulesItem = "none"
+)
+
+// AllValues returns all UpdateMetricRequestDimensionRulesItem values.
+func (UpdateMetricRequestDimensionRulesItem) AllValues() []UpdateMetricRequestDimensionRulesItem {
+	return []UpdateMetricRequestDimensionRulesItem{
+		UpdateMetricRequestDimensionRulesItemSum,
+		UpdateMetricRequestDimensionRulesItemFirst,
+		UpdateMetricRequestDimensionRulesItemLast,
+		UpdateMetricRequestDimensionRulesItemNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateMetricRequestDimensionRulesItem) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateMetricRequestDimensionRulesItemSum:
+		return []byte(s), nil
+	case UpdateMetricRequestDimensionRulesItemFirst:
+		return []byte(s), nil
+	case UpdateMetricRequestDimensionRulesItemLast:
+		return []byte(s), nil
+	case UpdateMetricRequestDimensionRulesItemNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateMetricRequestDimensionRulesItem) UnmarshalText(data []byte) error {
+	switch UpdateMetricRequestDimensionRulesItem(data) {
+	case UpdateMetricRequestDimensionRulesItemSum:
+		*s = UpdateMetricRequestDimensionRulesItemSum
+		return nil
+	case UpdateMetricRequestDimensionRulesItemFirst:
+		*s = UpdateMetricRequestDimensionRulesItemFirst
+		return nil
+	case UpdateMetricRequestDimensionRulesItemLast:
+		*s = UpdateMetricRequestDimensionRulesItemLast
+		return nil
+	case UpdateMetricRequestDimensionRulesItemNone:
+		*s = UpdateMetricRequestDimensionRulesItemNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.

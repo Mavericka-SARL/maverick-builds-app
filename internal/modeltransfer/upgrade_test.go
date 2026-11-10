@@ -52,10 +52,16 @@ func TestVersion1TablesKeepTheirStatus(t *testing.T) {
 		t.Errorf("version 1 records' statuses after upgrade = %q, %q; want draft (the old default) and approved", pkg.FormRecords[0].Status, pkg.FormRecords[1].Status)
 	}
 
-	v2 := Package{Version: 2, Forms: []Form{{Name: "a", Fields: json.RawMessage(`[{"name":"amount","label":"Amount","type":"number"}]`)}}}
+	v2 := Package{Version: 2, Forms: []Form{{Name: "a", Fields: json.RawMessage(`[{"name":"amount","label":"Amount","type":"number"}]`)}},
+		Dimensions: []Dimension{{Name: "scenario", AggRule: "average"}}}
 	v2.upgrade()
 	if string(v2.Forms[0].Fields) != `[{"name":"amount","label":"Amount","type":"number"}]` {
 		t.Errorf("a version 2 table was changed: %s", v2.Forms[0].Fields)
+	}
+	// Before version 3 a dimension's agg_rule meant nothing (migration 174):
+	// it imports as sum, its members adding up as they did.
+	if v2.Dimensions[0].AggRule != "sum" || v2.Version != PackageVersion {
+		t.Errorf("a version 2 dimension's agg_rule = %q (version %d), want sum", v2.Dimensions[0].AggRule, v2.Version)
 	}
 	unversioned := Package{Forms: []Form{{Name: "a", Fields: json.RawMessage(`[]`)}}}
 	unversioned.upgrade()

@@ -68,6 +68,12 @@ type Dimension struct {
 	// Calculated are the dimension's calculated members, kept out of
 	// Members (see CalculatedMember).
 	Calculated []CalculatedMember
+	// TotalRule is how its members total ("" or "sum": they add up; see
+	// totalrules.go), and MetricRules each metric's own rule over it
+	// (metric id → rule), which wins over TotalRule. RevisionTotalRules.
+	// Apply sets both.
+	TotalRule   string
+	MetricRules map[string]string
 
 	idx unsafe.Pointer // *memberIndex, built on first use (index.go)
 }
@@ -246,6 +252,12 @@ func Resolve(
 	combo map[string]string,
 	fetch RawValue,
 ) (float64, bool, error) {
+	// A dimension totalling as a member (first, last) is read there, and
+	// one with no total (none) has no value above its members.
+	combo, ok := RuleCombo(dims, metricID, metricDimIDs, combo)
+	if !ok {
+		return 0, false, nil
+	}
 	if aggRule == AggNone && !leafCombo(dims, metricDimIDs, combo) {
 		return 0, false, nil
 	}
@@ -1057,6 +1069,11 @@ func resolveTime(
 	fetch RawValue,
 	flatSum bool,
 ) (float64, bool, error) {
+	// The dimensions' total rules first, as Resolve applies them.
+	combo, ok := RuleCombo(dims, metricID, metricDimIDs, combo)
+	if !ok {
+		return 0, false, nil
+	}
 	if aggRule == AggNone && !leafCombo(dims, metricDimIDs, combo) {
 		return 0, false, nil
 	}
@@ -1148,8 +1165,14 @@ func resolveTime(
 // dimensions), or time summary none with its time dimension unpinned or at
 // an aggregate period (FY26, Q1). These are ResolveTime's no-value exits.
 // formula and rate never: they are evaluated at the combo or read from its
-// persisted rows.
-func NoValueByRule(dims map[string]*Dimension, metricDimIDs []string, aggRule AggRule, timeSummary TimeSummaryRule, combo map[string]string) bool {
+// persisted rows. And, whatever the metric's rules, a dimension whose total
+// rule is none (totalrules.go) left unpinned or at a member with members
+// under it.
+func NoValueByRule(dims map[string]*Dimension, metricID string, metricDimIDs []string, aggRule AggRule, timeSummary TimeSummaryRule, combo map[string]string) bool {
+	combo, ok := RuleCombo(dims, metricID, metricDimIDs, combo)
+	if !ok {
+		return true
+	}
 	if aggRule == AggFormula || aggRule == AggRate {
 		return false
 	}

@@ -29,7 +29,7 @@ func EvaluateWithDims(expr string, values map[string]float64, dimMembers map[str
 // persisted rows (contract C6), never re-evaluated here. A nil dim behaves
 // like EvaluateWithDims. A blank result is ErrBlankResult: no value there.
 func EvaluateWithDimContext(expr string, values map[string]float64, dimMembers map[string]string, dim *formula.DimEvalContext) (float64, error) {
-	return EvaluateMetricWithDimContext(nil, "", expr, values, nil, dimMembers, dim)
+	return EvaluateMetricWithDimContext(nil, "", expr, values, nil, nil, dimMembers, dim)
 }
 
 // EvaluateMetricWithDimContext is EvaluateWithDimContext for the formula of
@@ -37,8 +37,11 @@ func EvaluateWithDimContext(expr string, values map[string]float64, dimMembers m
 // gives is returned as the key its cell stores (DimMetadata.EncodeResult).
 // A nil meta evaluates exactly as EvaluateWithDimContext. blank names the
 // values (as named in values) that had none at the cell: bound as 0, read
-// blank by ISBLANK and comparisons (formula.EvalContext.Blank).
-func EvaluateMetricWithDimContext(meta *DimMetadata, metric, expr string, values map[string]float64, blank map[string]bool, dimMembers map[string]string, dim *formula.DimEvalContext) (float64, error) {
+// blank by ISBLANK and comparisons (formula.EvalContext.Blank). noValue
+// names those of them whose source has no value at the cell by its own rules
+// (NoValueAt): a result that read one is ErrBlankResult, as the scheduler
+// stores no row for it (formula.EvalContext.NoValue).
+func EvaluateMetricWithDimContext(meta *DimMetadata, metric, expr string, values map[string]float64, blank, noValue map[string]bool, dimMembers map[string]string, dim *formula.DimEvalContext) (float64, error) {
 	vars := make(map[string]formula.Value, len(values)+len(dimMembers))
 	for k, v := range values {
 		vars[k] = formula.NumberVal(v)
@@ -53,9 +56,20 @@ func EvaluateMetricWithDimContext(meta *DimMetadata, metric, expr string, values
 		}
 		upperBlank[strings.ToUpper(k)] = true
 	}
-	result, err := formula.EvalWithContext(expr, &formula.EvalContext{Vars: vars, Blank: upperBlank, Dim: dim})
+	var upperNoValue map[string]bool
+	for k := range noValue {
+		if upperNoValue == nil {
+			upperNoValue = make(map[string]bool, len(noValue))
+		}
+		upperNoValue[strings.ToUpper(k)] = true
+	}
+	ectx := &formula.EvalContext{Vars: vars, Blank: upperBlank, NoValue: upperNoValue, Dim: dim}
+	result, err := formula.EvalWithContext(expr, ectx)
 	if err != nil {
 		return 0, err
+	}
+	if !result.IsError() && ectx.ReadNoValue() {
+		return 0, ErrBlankResult
 	}
 	if metric != "" {
 		result = meta.EncodeResult(metric, result)

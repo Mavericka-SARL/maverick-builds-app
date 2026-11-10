@@ -33,12 +33,12 @@ func TestNoValueByRule(t *testing.T) {
 		{"formula", AggFormula, "none", map[string]string{"r": "US", "t": "FY26"}, false},
 		{"rate", AggRate, "none", map[string]string{"r": "World"}, false},
 	} {
-		if got := NoValueByRule(dims, both, tc.agg, tc.ts, tc.combo); got != tc.noneOK {
+		if got := NoValueByRule(dims, "", both, tc.agg, tc.ts, tc.combo); got != tc.noneOK {
 			t.Errorf("%s: NoValueByRule = %v, want %v", tc.name, got, tc.noneOK)
 		}
 	}
 	// Without a time dimension, time summary none says nothing.
-	if NoValueByRule(dims, []string{"r"}, AggSum, "none", map[string]string{}) {
+	if NoValueByRule(dims, "", []string{"r"}, AggSum, "none", map[string]string{}) {
 		t.Error("no time dimension: time summary none must not mean no value")
 	}
 }

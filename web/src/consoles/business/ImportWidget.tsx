@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
 import { api, type DemoContext, type GridData, type ImportModeParam, type ImportRowError, type ApiError, type ImportJob } from "../../api/client";
+import { useImportKey } from "../../api/useImportKey";
 import { SectionHeader, Button, Field, Select, Textarea, InlineAlert, StatusBadge, type DesignTone, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 
@@ -55,15 +56,19 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
     },
   });
 
+  const importKey = useImportKey();
   const uploadCsv = useMutation({
-    mutationFn: () => api.uploadImport(csv, ctx.revision_id, mode),
-    onSuccess: () => { inv(); setCsv(""); setRowErrors(null); },
+    mutationFn: () => api.uploadImport(csv, ctx.revision_id, mode, undefined, undefined, importKey.keyFor(JSON.stringify([ctx.revision_id, mode, csv]))),
+    onSuccess: () => { importKey.done(); inv(); setCsv(""); setRowErrors(null); },
     onError: (e) => setRowErrors((e as ApiError).body?.errors as ImportRowError[] | undefined ?? null),
   });
 
   const uploadXlsx = useMutation({
-    mutationFn: async (file: File) => api.uploadImportXlsx(await fileToBase64(file), ctx.revision_id, mode),
-    onSuccess: () => inv(),
+    mutationFn: async (file: File) => {
+      const xlsx = await fileToBase64(file);
+      return api.uploadImportXlsx(xlsx, ctx.revision_id, mode, importKey.keyFor(JSON.stringify([ctx.revision_id, mode, xlsx])));
+    },
+    onSuccess: () => { importKey.done(); inv(); },
     onError: (e) => setRowErrors((e as ApiError).body?.errors as ImportRowError[] | undefined ?? null),
     onMutate: () => setRowErrors(null),
   });

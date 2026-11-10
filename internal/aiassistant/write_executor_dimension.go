@@ -94,6 +94,8 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		EditorRoles *[]string `json:"editor_roles"`
 		// Label: the display name selectors and headers show; "" clears it.
 		Label *string `json:"label"`
+		// AggRule: how its members total (migration 174); omitted keeps it.
+		AggRule *string `json:"agg_rule"`
 	}
 	var sent map[string]json.RawMessage
 	if err := decodeParams(raw, &p); err != nil {
@@ -115,6 +117,11 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		FROM model.dimension_def WHERE id=$1::uuid
 	`, dimID).Scan(&modelID, &revisionID, &dimType, &curName); err != nil {
 		return "", "", fmt.Errorf("load dimension: %w", err)
+	}
+	if p.AggRule != nil {
+		if err := metricformula.CheckDimensionTotalRule(*p.AggRule, dimType); err != nil {
+			return "", "", err
+		}
 	}
 
 	// The parent dimension: parent_dimension_id or parent_dimension_name,
@@ -175,9 +182,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
 		return "", "", err
 	}
-	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil && p.EditorRoles == nil {
+	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil && p.EditorRoles == nil && p.AggRule == nil {
 		return "", "", fmt.Errorf("nothing to change: provide name, label, tags, parent_dimension_id, " +
-			"source_dimension_id, source_property, business_maintained, editor_roles or derive_members")
+			"source_dimension_id, source_property, business_maintained, editor_roles, agg_rule or derive_members")
 	}
 	if p.Label != nil && len(strings.TrimSpace(*p.Label)) > 80 {
 		return "", "", fmt.Errorf("label: at most 80 characters")
@@ -196,6 +203,12 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	var newTags []string
 	if p.Tags != nil {
 		newTags = tags.Clean(*p.Tags)
+	}
+	// How its members total (migration 174), once every check passed.
+	if p.AggRule != nil && *p.AggRule != "" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET agg_rule=$2 WHERE id=$1::uuid`, dimID, *p.AggRule); err != nil {
+			return "", "", fmt.Errorf("set the dimension's total rule: %w", err)
+		}
 	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.dimension_def

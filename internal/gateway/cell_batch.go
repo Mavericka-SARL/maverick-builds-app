@@ -316,6 +316,17 @@ func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, 
 	if err != nil {
 		return preparedCell{}, refuseCell(http.StatusBadRequest, "%v", err)
 	}
+	// A number its metric's input rules refuse (migration 173): refused here
+	// so a batch names the cell, as the database would refuse it anyway.
+	if !write.clear && write.text == nil {
+		refusals, err := writeguard.InputRuleRefusals(ctx, h.db.For(ctx), []writeguard.ValueCell{{MetricID: req.MetricID, DimCodes: req.DimCodes, Value: write.value}})
+		if err != nil {
+			return preparedCell{}, refuseCell(http.StatusInternalServerError, "input rules: %v", err)
+		}
+		if refusal, ok := refusals[0]; ok {
+			return preparedCell{}, &cellRefusal{status: http.StatusUnprocessableEntity, code: writeguard.CodeInputRule, message: refusal}
+		}
+	}
 
 	dimMembers := "{}"
 	if len(req.DimCodes) > 0 {

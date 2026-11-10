@@ -1931,6 +1931,24 @@ func (s *CreateDimensionRequest) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		if value, ok := s.AggRule.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "agg_rule",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.DimensionType.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -1998,6 +2016,21 @@ func (s *CreateDimensionRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s CreateDimensionRequestAggRule) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s CreateDimensionRequestDimensionType) Validate() error {
@@ -2173,6 +2206,42 @@ func (s *CreateMetricRequest) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.InputRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "input_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.DimensionRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -2194,6 +2263,43 @@ func (s *CreateMetricRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s CreateMetricRequestDimensionRules) Validate() error {
+	var failures []validate.FieldError
+	for key, elem := range s {
+		if err := func() error {
+			if err := elem.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			failures = append(failures, validate.FieldError{
+				Name:  key,
+				Error: err,
+			})
+		}
+	}
+
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s CreateMetricRequestDimensionRulesItem) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s CreateMetricRequestRowStyle) Validate() error {
@@ -2493,6 +2599,17 @@ func (s *Dimension) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		if err := s.AggRule.Validate(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "agg_rule",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if err := s.DimensionType.Validate(); err != nil {
 			return err
 		}
@@ -2564,6 +2681,21 @@ func (s *Dimension) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s DimensionAggRule) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s DimensionDimensionType) Validate() error {
@@ -5205,6 +5337,54 @@ func (s ImportUploadRequestImportMode) Validate() error {
 	}
 }
 
+func (s *InputRules) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.Min.Get(); ok {
+			if err := func() error {
+				if err := (validate.Float{}).Validate(float64(value)); err != nil {
+					return errors.Wrap(err, "float")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "min",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Max.Get(); ok {
+			if err := func() error {
+				if err := (validate.Float{}).Validate(float64(value)); err != nil {
+					return errors.Wrap(err, "float")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "max",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s *LicenseFeature) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -6321,6 +6501,42 @@ func (s *MetricDef) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.InputRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "input_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.DimensionRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if s.DependsOn == nil {
 			return errors.New("nil is invalid value")
 		}
@@ -6346,6 +6562,43 @@ func (s *MetricDef) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s MetricDefDimensionRules) Validate() error {
+	var failures []validate.FieldError
+	for key, elem := range s {
+		if err := func() error {
+			if err := elem.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			failures = append(failures, validate.FieldError{
+				Name:  key,
+				Error: err,
+			})
+		}
+	}
+
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s MetricDefDimensionRulesItem) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s MetricDefRowStyle) Validate() error {
@@ -8403,10 +8656,43 @@ func (s *UpdateDimensionRequest) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.AggRule.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "agg_rule",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s UpdateDimensionRequestAggRule) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *UpdateFormRecordOK) Validate() error {
@@ -8623,6 +8909,42 @@ func (s *UpdateMetricRequest) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.InputRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "input_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.DimensionRules.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -8644,6 +8966,43 @@ func (s *UpdateMetricRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s UpdateMetricRequestDimensionRules) Validate() error {
+	var failures []validate.FieldError
+	for key, elem := range s {
+		if err := func() error {
+			if err := elem.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			failures = append(failures, validate.FieldError{
+				Name:  key,
+				Error: err,
+			})
+		}
+	}
+
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s UpdateMetricRequestDimensionRulesItem) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s UpdateMetricRequestRowStyle) Validate() error {

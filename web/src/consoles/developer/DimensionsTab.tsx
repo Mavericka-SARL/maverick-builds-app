@@ -345,11 +345,17 @@ function DimHeaderEditor({ dim, onClose, revisionId }: { dim: DevDimension; onCl
   const [label, setLabel] = useState(dim.label ?? "");
   const [tags, setTags] = useState<string[]>(dim.tags ?? []);
   const [businessMaintained, setBusinessMaintained] = useState(!!dim.business_maintained);
+  // How its members total (migration 174); a time dimension's follow each
+  // metric's time summary.
+  const [totalRule, setTotalRule] = useState(dim.agg_rule || "sum");
+  const isTime = dim.dimension_type === "time";
   // A time dimension's periods and a grouping's derived members are not typed.
-  const canOpen = dim.dimension_type !== "time" && !dim.source_dimension_id;
+  const canOpen = !isTime && !dim.source_dimension_id;
   const save = useMutation({
-    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}), ...(rolesChanged ? { editor_roles: editorRoles } : {}) }),
-    onSuccess: () => { void refreshMembers(qc); onClose(); },
+    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}), ...(rolesChanged ? { editor_roles: editorRoles } : {}),
+      ...(!isTime && totalRule !== (dim.agg_rule || "sum") ? { agg_rule: totalRule } : {}) }),
+    // A new total rule moves every total over the dimension.
+    onSuccess: () => { void refreshMembers(qc); invalidateModelData(qc); onClose(); },
   });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -369,6 +375,18 @@ function DimHeaderEditor({ dim, onClose, revisionId }: { dim: DevDimension; onCl
         <span className="mvx-admin-muted">Tags:</span>
         <TagInput value={tags} onChange={setTags} inputWidth={110} />
       </div>
+      {!isTime && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="mvx-admin-muted">Members total:</span>
+          <Select value={totalRule} onChange={(e) => setTotalRule(e.target.value)} aria-label="Members total" style={{ width: 300 }}>
+            <option value="sum">Added up (each metric by its own total)</option>
+            <option value="first">The first member's value (e.g. Base)</option>
+            <option value="last">The last member's value</option>
+            <option value="none">No total (the members are alternatives)</option>
+          </Select>
+          <span className="mvx-admin-muted">scenarios and plan cases are never added up; a metric can set its own</span>
+        </div>
+      )}
       {canOpen && (
         <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <input type="checkbox" checked={businessMaintained} onChange={(e) => setBusinessMaintained(e.target.checked)} />
@@ -864,7 +882,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
                           <Pencil size={13} />
                         </IconButton>
                         <IconButton aria-label={`Delete member ${node.label}`} title="Delete" danger size={26}
-                          onClick={() => confirm({ title: "Delete member?", body: `This removes "${node.code}"${node.descendantCount > 0 ? ` and its ${node.descendantCount} descendant${node.descendantCount !== 1 ? "s" : ""}` : ""}.`, confirmLabel: "Delete member", onConfirm: () => delMember.mutate(node.id) })}>
+                          onClick={() => confirm({ title: "Delete member?", body: `This removes "${node.code}".${node.childCount > 0 ? ` Its ${node.childCount} child member${node.childCount !== 1 ? "s stay and move" : " stays and moves"} to the top level of the dimension, with their own children under them.` : ""}`, confirmLabel: "Delete member", onConfirm: () => delMember.mutate(node.id) })}>
                           <Trash2 size={13} />
                         </IconButton>
                       </div>
@@ -1107,7 +1125,7 @@ function TimeDimensionCard({ dim, activeTag, onTagClick, open, onToggleOpen }: D
                       <Pencil size={13} />
                     </IconButton>
                     <IconButton aria-label={`Delete period ${m.label}`} title="Delete" danger size={26}
-                      onClick={() => confirm({ title: "Delete period?", body: `This removes "${m.code}"${m.descendantCount > 0 ? ` (its ${m.descendantCount} descendant${m.descendantCount !== 1 ? "s" : ""} become roots)` : ""}. Every metric on this dimension is recalculated.`, confirmLabel: "Delete period", onConfirm: () => delMember.mutate(m.id) })}>
+                      onClick={() => confirm({ title: "Delete period?", body: `This removes "${m.code}".${m.childCount > 0 ? ` Its ${m.childCount} child period${m.childCount !== 1 ? "s stay and move" : " stays and moves"} to the top level.` : ""} Every metric on this dimension is recalculated.`, confirmLabel: "Delete period", onConfirm: () => delMember.mutate(m.id) })}>
                       <Trash2 size={13} />
                     </IconButton>
                   </div>

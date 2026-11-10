@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/reporting"
@@ -248,6 +249,18 @@ func (h *handler) checkModelLink(ctx context.Context, a *actor, modelID string, 
 	}
 	if gridID == "" {
 		return fmt.Errorf("model %q has no grid %q in its active revision %q", lm.SourceName, src.Grid, lm.ActiveRevisionName)
+	}
+	// Into a table, a link replaces by a field: each run reads the source's
+	// whole rows (integration.CheckModelLinkTable; the worker checks again
+	// before it writes). A draft may choose the field later.
+	if strict && cfg.TargetType == integration.TargetForm && cfg.TargetID != "" {
+		form, ferr := crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, cfg.TargetID)
+		if ferr != nil {
+			return fmt.Errorf("the link's table: %w", ferr)
+		}
+		if err := integration.CheckModelLinkTable(cfg, form); err != nil {
+			return err
+		}
 	}
 	return nil
 }

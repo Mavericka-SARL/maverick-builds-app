@@ -1,25 +1,13 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Users, UserCog, Sigma, ListTree, GitBranch, Zap, FileText, Table2, LayoutDashboard, Workflow, Plug, Sparkles } from "lucide-react";
 import { api, type AdminTenant, type AdminUser, type ApiError } from "../../api/client";
-import { WorkflowsTab } from "./WorkflowsTab";
-import { AIAssistant } from "./AIAssistant";
-import { UsersPanel } from "../admin/UsersPanel";
 import { computeAssignableRoles, canManageResourceAccess } from "../admin/roles";
-import { DevApplicationsTab } from "./ApplicationsTab";
-import { FormsTab } from "./FormsTab";
-import { AutomationTab } from "./AutomationTab";
-import { GridsTab } from "./GridsTab";
-import { DimensionsView } from "./DimensionsTab";
-import { MetricsTab } from "./MetricsTab";
-import { DepGraph } from "./DependencyGraphTab";
-import { IntegrationsTab } from "./IntegrationsTab";
-import { DashboardsTab } from "./DashboardsTab";
-import { RolesTab } from "../business-admin/BusinessAdminConsole";
 import { PageLayout, LoadingState, ErrorState, SELECTED_APP_KEY, useConfirm } from "../../ui";
 import { setLiveEditGuard } from "../../api/liveEdit";
 import { useModelSwitches } from "../business/modelSelection";
 import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
+import { WorkflowsTab, AIAssistant, DevApplicationsTab, FormsTab, AutomationTab, GridsTab, DimensionsView, MetricsTab, DepGraph, IntegrationsTab, DashboardsTab, UsersPanel, RolesTab } from "./screens";
 
 // ── Section ───────────────────────────────────────────────────────────────────
 
@@ -251,7 +239,9 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         return (
           <div style={{ flex: 1, overflow: "hidden" }}>
             {liveConfirmElement}
-            {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} onSelectRevision={handleSelectRevision} />}
+            <Suspense fallback={<LoadingState />}>
+              {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} onSelectRevision={handleSelectRevision} />}
+            </Suspense>
           </div>
         );
       }
@@ -260,6 +250,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
           {liveConfirmElement}
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
+          <Suspense fallback={<LoadingState />}>
           {cur === "applications" && <DevApplicationsTab revisionId={effectiveRevisionId} revisionName={effectiveRevisionName} defaultRevisionPending={autoRevisionsLoading} canCreate={roles.includes("tenant_admin") || roles.includes("platform_admin")} onSelect={handleSelectRevision} />}
           {!isLoading && !error && cur === "users" && <UsersPanel users={users} tenants={userTenants} assignableRoles={computeAssignableRoles(me?.roles ?? [])} canManageResourceAccess={canManageResourceAccess(me?.roles ?? [])} currentUserId={me?.user_id} rolesLoading={!me} />}
           {!isLoading && !error && cur === "metrics" && model && <MetricsTab model={model} revisionId={effectiveRevisionId || undefined} />}
@@ -271,6 +262,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
           {cur === "dashboards" && <DashboardsTab revisionId={effectiveRevisionId || undefined} />}
           {cur === "roles" && <RolesTab variant="developer" revisionId={effectiveRevisionId || undefined} />}
           {cur === "integrations" && <IntegrationsTab revisionId={effectiveRevisionId || undefined} />}
+          </Suspense>
         </PageLayout>
       );
     },

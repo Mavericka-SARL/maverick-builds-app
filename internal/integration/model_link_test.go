@@ -34,6 +34,13 @@ func TestValidateModelLink(t *testing.T) {
 			t.Errorf("%s: %v, want an error containing %q", c.name, err, c.want)
 		}
 	}
+	// Into a table there is no import mode: the link replaces by a field
+	// (CheckModelLinkTable), whatever the mode the wizard left.
+	table := linkConfig(model, grid)
+	table.TargetType, table.ImportMode, table.ReplaceBy = integration.TargetForm, integration.ModeIncremental, "region"
+	if err := table.Validate(false); err != nil {
+		t.Errorf("a link into a table with the default import mode: %v", err)
+	}
 	// Model settings belong to the model protocol only.
 	https := baseConfig(grid)
 	https.Model = &integration.ModelSource{ModelID: model, Grid: "Sales"}

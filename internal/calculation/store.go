@@ -41,36 +41,96 @@ func NewStoreOn(db dbx.DB) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// lockPasses holds revisionID's pass lock in the database until unlock is
-// called, waiting while another process holds it: the pass queue and
-// revisionLocks are per process, so two gateways recalculated one revision
-// at once, and the pass that read its inputs first could write last.
+// lockPasses holds revisionID's pass lock in the database until the
+// returned lock is released, waiting while another process holds it: the
+// pass queue and revisionLocks are per process, so two gateways
+// recalculated one revision at once, and the pass that read its inputs
+// first could write last.
 //
 // The lock is a transaction's advisory lock (PgBouncer runs in transaction
 // mode, where a session lock would stay on whichever server connection ran
 // it), on a connection of its own rather than one of the pool's: a tenant
 // pool holds five, and five revisions recalculating at once would take them
 // all and leave their passes none.
-func (s *Store) lockPasses(ctx context.Context, revisionID string) (unlock func(), err error) {
+//
+// The lock lasts only as long as that connection: a PgBouncer restart or a
+// network blip ends it while the pass runs on, and another gateway's pass
+// could then start beside it (2026-10-28). The connection is checked every
+// passLockPing; once a check fails the lock's lost channel closes.
+func (s *Store) lockPasses(ctx context.Context, revisionID string) (*passLock, error) {
 	conn, err := pgx.ConnectConfig(ctx, s.pool.Config().ConnConfig.Copy())
 	if err != nil {
 		return nil, fmt.Errorf("pass lock connection: %w", err)
 	}
-	release := func() {
+	closeConn := func() {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = conn.Close(closeCtx) // ends the transaction, and with it the lock
 	}
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		release()
+		closeConn()
 		return nil, fmt.Errorf("pass lock: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('calculation pass'), hashtext($1))`, revisionID); err != nil {
-		release()
+		closeConn()
 		return nil, fmt.Errorf("pass lock: %w", err)
 	}
-	return release, nil
+	// The checks outlive the caller's request: they end with release.
+	pingCtx, stopPing := context.WithCancel(context.WithoutCancel(ctx))
+	l := &passLock{lost: make(chan struct{}), checked: make(chan struct{})}
+	go func() {
+		defer close(l.checked)
+		tick := time.NewTicker(passLockPing)
+		defer tick.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-tick.C:
+			}
+			// A check that takes as long as the interval counts as a lost
+			// connection: pgx closes a connection whose query is cancelled,
+			// so the lock is then gone either way.
+			checkCtx, cancel := context.WithTimeout(pingCtx, passLockPing)
+			err := conn.Ping(checkCtx)
+			cancel()
+			if pingCtx.Err() != nil {
+				return
+			}
+			if err != nil {
+				close(l.lost)
+				return
+			}
+		}
+	}()
+	l.release = func() {
+		stopPing()
+		<-l.checked // the connection serves one caller at a time
+		closeConn()
+	}
+	return l, nil
+}
+
+// passLockPing is how often a held pass lock's connection is checked, and
+// how long a check may take.
+var passLockPing = 5 * time.Second
+
+// passLock is a held pass lock (lockPasses).
+type passLock struct {
+	lost    chan struct{} // closed once the lock's connection is gone
+	checked chan struct{} // closed when the checks have stopped
+	release func()
+}
+
+// isLost reports whether the lock's connection has gone.
+func (l *passLock) isLost() bool {
+	select {
+	case <-l.lost:
+		return true
+	default:
+		return false
+	}
 }
 
 // ── Partition state ───────────────────────────────────────────────────────────
@@ -467,7 +527,57 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 		}
 		dim.Members = append(dim.Members, m)
 	}
-	return dims, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rules, err := LoadTotalRules(ctx, s.db, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	rules.Apply(dims)
+	return dims, nil
+}
+
+// totalRulesQuerier is what LoadTotalRules reads through: a pool or a
+// transaction.
+type totalRulesQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// LoadTotalRules loads a revision's total rules (migration 174): each
+// dimension's rule other than sum, and each metric's own rule over a
+// dimension. Every loader of rollup dimensions applies them, so every
+// reader totals by them (rollup.RuleCombo).
+func LoadTotalRules(ctx context.Context, q totalRulesQuerier, modelID, revisionID string) (rollup.RevisionTotalRules, error) {
+	out := rollup.RevisionTotalRules{Dimension: map[string]string{}, Metric: map[string]map[string]string{}}
+	rows, err := q.Query(ctx, `
+		SELECT d.id::text, '' AS metric_id, d.agg_rule
+		FROM model.dimension_def d
+		WHERE d.model_id = $1::uuid AND (d.revision_id = $2::uuid OR d.revision_id IS NULL) AND d.agg_rule <> 'sum'
+		UNION ALL
+		SELECT r.dimension_id::text, r.metric_id::text, r.rule
+		FROM model.metric_dimension_rule r
+		JOIN model.metric_def m ON m.id = r.metric_id
+		WHERE m.model_id = $1::uuid AND (m.revision_id = $2::uuid OR m.revision_id IS NULL)`, modelID, revisionID)
+	if err != nil {
+		return out, fmt.Errorf("load total rules: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dimID, metricID, rule string
+		if err := rows.Scan(&dimID, &metricID, &rule); err != nil {
+			return out, err
+		}
+		if metricID == "" {
+			out.Dimension[dimID] = rule
+			continue
+		}
+		if out.Metric[dimID] == nil {
+			out.Metric[dimID] = map[string]string{}
+		}
+		out.Metric[dimID][metricID] = rule
+	}
+	return out, rows.Err()
 }
 
 // LoadMetricDimensionIDs returns each metric's own native dimension IDs, via

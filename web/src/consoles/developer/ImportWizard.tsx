@@ -23,6 +23,7 @@ import {
   isEmptyReshape,
   newImportKey,
 } from "../../api/client";
+import { useImportKey } from "../../api/useImportKey";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1179,14 +1180,14 @@ function CommitStep({
       // Back and Commit — go under the key they were first sent with, so the
       // server applies them once. A records import sent again created every
       // record twice (2026-10-15).
-      const content = JSON.stringify([config.targetType, config.targetId, config.revisionId, config.importMode, config.replaceBy ?? "", csv]);
+      const content = JSON.stringify([config.integrationId ?? "", config.targetType, config.targetId, config.revisionId, config.importMode, config.replaceBy ?? "", csv]);
       if (importKeyRef.current?.content !== content) importKeyRef.current = { content, key: newImportKey() };
       const key = importKeyRef.current.key;
       let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number; notices?: string[] };
       if (config.integrationId) {
         // Mapped here, by the Map step the person may have edited: the run
         // applies the saved column map no second time.
-        const res = await api.runIntegration(config.integrationId, csv, rowLines, about, true);
+        const res = await api.runIntegration(config.integrationId, csv, rowLines, about, true, key);
         out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced, notices: res.notices };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
@@ -1821,9 +1822,11 @@ function SavedIntegrationsList({
   // google_sheets integrations run with no input — the server re-fetches the
   // configured sheet — so "Sync Now" completes in place instead of opening
   // the wizard the way a CSV run (which needs a file) does.
+  const syncKey = useImportKey();
   const sync = useMutation({
-    mutationFn: (id: string) => api.runIntegration(id),
+    mutationFn: (id: string) => api.runIntegration(id, undefined, undefined, undefined, undefined, syncKey.keyFor(id)),
     onSuccess: (res, id) => {
+      syncKey.done();
       qc.invalidateQueries({ queryKey: ["import-jobs"] });
       setSyncMsg(prev => ({
         ...prev,
@@ -2046,8 +2049,11 @@ function SavedIntegrationsList({
 function RunReshapedIntegration({ integration }: { integration: IntegrationDef }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const importKey = useImportKey();
   const run = useMutation({
-    mutationFn: (file: { csv?: string; xlsx_base64?: string }) => api.runIntegration(integration.id, file),
+    mutationFn: (file: { csv?: string; xlsx_base64?: string }) =>
+      api.runIntegration(integration.id, file, undefined, undefined, undefined, importKey.keyFor(JSON.stringify([integration.id, file]))),
+    onSuccess: () => importKey.done(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["integration-runs", integration.id] });
       qc.invalidateQueries({ queryKey: ["dev-integrations"] });

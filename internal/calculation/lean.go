@@ -172,7 +172,12 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 	if rule == string(rollup.AggFormula) || rule == string(rollup.AggRate) {
 		const rollupComboCap = 20000
 		for _, combo := range rollup.RollupCombos(allDims, dimIDs, rollupComboCap) {
-			if v, _, err := evalOne(combo); err == nil {
+			// At the member a total rule chooses; none: no row (migration 174).
+			at, _, ok := ruledAt(allDims, def.ID, dimIDs, combo)
+			if !ok {
+				continue
+			}
+			if v, _, err := evalOne(at); err == nil {
 				extra = append(extra, CalcResultRow{DimMembers: combo, Value: v})
 			}
 		}
@@ -201,8 +206,15 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 	if axis != nil && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
 		aggregate, writeAggregate = summarizeOverTime(leaves, axis, rule, def.TimeSummary, nil)
 	}
-	if rule == string(rollup.AggFormula) {
-		total, _, totalErr := evalOne(map[string]string{})
+	// The total rules, as executePartition applies them (migration 174).
+	totalAt, totalChosen, totalOK := ruledAt(allDims, def.ID, dimIDs, map[string]string{})
+	if !totalOK {
+		writeAggregate = false
+	} else if len(totalChosen) > 0 && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
+		aggregate, writeAggregate = ruledTotal(leaves, totalChosen, axis, rule, def.TimeSummary)
+	}
+	if rule == string(rollup.AggFormula) && totalOK {
+		total, _, totalErr := evalOne(totalAt)
 		switch {
 		case errors.Is(totalErr, errBlankResult):
 			writeAggregate = false
@@ -212,20 +224,20 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 			aggregate = total
 		}
 	}
-	if def.AggRule == string(rollup.AggRate) {
+	if def.AggRule == string(rollup.AggRate) && totalOK {
 		total, rateErr := s.rateTotal(ctx, def, modelID, revisionID, allDims, metricDimIDs, allDefs)
 		if rateErr != nil {
 			return fmt.Errorf("ratio total failed for metric %s (agg_rule=rate): %w", def.Name, rateErr)
 		}
 		aggregate = total
 	}
-	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && !rollup.LeafCombo(allDims, dimIDs, map[string]string{}) {
+	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && !rollup.LeafCombo(allDims, dimIDs, totalAt) {
 		writeAggregate = false
 	}
 
 	tail := append([]CalcResultRow{}, extra...)
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	tail = append(tail, oneDimSliceRows(rule, dimConditional, dimIDs, allDims, leaves, evalOne, axis, def.TimeSummary)...)
+	tail = append(tail, oneDimSliceRows(def.ID, rule, dimConditional, dimIDs, allDims, leaves, evalOne, axis, def.TimeSummary)...)
 	tail = append(tail, aggregatePeriodRows(rule, dimIDs, leaves, axis, def.TimeSummary)...)
 	if writeAggregate {
 		tail = append(tail, CalcResultRow{DimMembers: map[string]string{}, Value: aggregate})

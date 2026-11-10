@@ -57,7 +57,8 @@ func TestReorderDimensionMembers(t *testing.T) {
 	}
 
 	// A dimension whose members' parents sit in its parent dimension: the
-	// reordered group takes the positions it held, the others stay put.
+	// reordered group keeps its new order, and the groups follow the parent
+	// dimension's order (Build's, migration 171): EMEA's cities, then APAC's.
 	city := h.scalar(`INSERT INTO model.dimension_def (model_id, revision_id, name, parent_dimension_id)
 		VALUES ($1::uuid, $2::uuid, 'city', $3::uuid) RETURNING id::text`, h.modelID, h.revID, region)
 	for i, c := range []struct{ code, parent string }{{"LON", "EMEA"}, {"TOK", "APAC"}, {"PAR", "EMEA"}, {"BER", "EMEA"}} {
@@ -66,18 +67,19 @@ func TestReorderDimensionMembers(t *testing.T) {
 			city, c.code, region, i+1, c.parent)
 	}
 	h.must("reorder_dimension_members", map[string]any{"dimension_id": "city", "parent_code": "EMEA", "codes": []string{"BER", "PAR", "LON"}})
-	if got := h.scalar(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, city); got != "BER,TOK,PAR,LON" {
-		t.Errorf("cities after reordering EMEA's: %s, want BER,TOK,PAR,LON", got)
+	if got := h.scalar(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, city); got != "BER,PAR,LON,TOK" {
+		t.Errorf("cities after reordering EMEA's: %s, want BER,PAR,LON,TOK", got)
 	}
 
 	// Which side a level's parent sits on follows the members, not the
 	// declared parent dimension, which a developer can clear or set after
 	// the members exist. city's parent dimension cleared: EMEA still parents
-	// LON, PAR and BER.
+	// LON, PAR and BER, which take the positions they held (no longer a
+	// child dimension, its members are not regrouped).
 	h.scalar(`UPDATE model.dimension_def SET parent_dimension_id=NULL WHERE id=$1::uuid RETURNING id::text`, city)
 	h.must("reorder_dimension_members", map[string]any{"dimension_id": city, "parent_code": "EMEA", "codes": []string{"LON", "PAR", "BER"}})
-	if got := h.scalar(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, city); got != "LON,TOK,PAR,BER" {
-		t.Errorf("cities after clearing the parent dimension and reordering EMEA's: %s, want LON,TOK,PAR,BER", got)
+	if got := h.scalar(`SELECT string_agg(code, ',' ORDER BY sort_order, code) FROM model.dimension_member WHERE dimension_id=$1::uuid`, city); got != "LON,PAR,BER,TOK" {
+		t.Errorf("cities after clearing the parent dimension and reordering EMEA's: %s, want LON,PAR,BER,TOK", got)
 	}
 	// team's own hierarchy, then region declared its parent dimension: LEAD
 	// still parents A and B.

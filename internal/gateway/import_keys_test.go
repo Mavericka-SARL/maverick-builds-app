@@ -239,3 +239,125 @@ func TestRecordsImportSentAgainUnderItsKeyIsAppliedOnce(t *testing.T) {
 		t.Errorf("the table holds %d records, want 7", n)
 	}
 }
+
+// A saved integration's run sent again under the same Idempotency-Key — a
+// dashboard Integration button clicked again after a 502 — is answered from
+// the first and loads nothing, into a table or a grid. It took no key
+// (2026-11-09): the run created every record twice and added incremental
+// values twice.
+func TestIntegrationRunSentAgainUnderItsKeyIsAppliedOnce(t *testing.T) {
+	f := setupDevAuthoringFixture(t)
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var s string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return s
+	}
+	grid := q(`INSERT INTO model.grid_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'Revenue') RETURNING id::text`, f.modelID, f.revID)
+	q(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid, $2::uuid) RETURNING metric_id::text`, grid, f.metricID)
+	integration := func(name, targetType, targetID string) string {
+		return q(`INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, target_id, status)
+			VALUES ($1::uuid, $2::uuid, $3, 'csv_import', $4, $5::uuid, 'active') RETURNING id::text`, f.modelID, f.revID, name, targetType, targetID)
+	}
+	tableRun, gridRun := integration("Spend loader", "form", f.formID), integration("Revenue loader", "grid", grid)
+	run := func(id, key, csv string) (int, map[string]any) {
+		t.Helper()
+		buf, _ := json.Marshal(map[string]string{"csv": csv})
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, f.srv.URL+"/api/integrations/"+id+"/run", bytes.NewReader(buf))
+		req.Header.Set("X-Dev-User", "dev-audit-pa")
+		req.Header.Set("X-App-Id", f.appID)
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		var body map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp.StatusCode, body
+	}
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	records := func() int {
+		return count(`SELECT count(*) FROM runtime.form_record WHERE form_id = $1::uuid`, f.formID)
+	}
+	value := func() float64 {
+		t.Helper()
+		var v float64
+		if err := f.pool.QueryRow(ctx, `SELECT value::float8 FROM runtime.fact_input WHERE metric_id = $1::uuid ORDER BY entered_at DESC, id DESC LIMIT 1`, f.metricID).Scan(&v); err != nil {
+			t.Fatalf("read the cell: %v", err)
+		}
+		return v
+	}
+	runs := func(id string) int {
+		return count(`SELECT count(*) FROM model.integration_run WHERE integration_id = $1::uuid`, id)
+	}
+
+	// Into a table.
+	const file = "amount\n10\n20\n"
+	if status, body := run(tableRun, "t-1", file); status != http.StatusOK || body["rows_imported"] != 2.0 {
+		t.Fatalf("first table run: %d %v", status, body)
+	}
+	if status, body := run(tableRun, "t-1", file); status != http.StatusOK || body["replayed"] != true || body["rows_imported"] != 2.0 {
+		t.Errorf("the same table run sent again under its key: %d %v, want the first's answer replayed", status, body)
+	}
+	if n := records(); n != 2 {
+		t.Errorf("the table holds %d records after one run sent twice under one key, want 2", n)
+	}
+	if n := runs(tableRun); n != 1 {
+		t.Errorf("the integration's history holds %d runs, want 1 (a replay is no run)", n)
+	}
+	if status, body := run(tableRun, "t-2", file); status != http.StatusOK || body["replayed"] == true {
+		t.Fatalf("a table run under a new key: %d %v", status, body)
+	}
+	if n := records(); n != 4 {
+		t.Errorf("the table holds %d records after a second run under its own key, want 4", n)
+	}
+	if status, body := run(tableRun, "", file); status != http.StatusOK {
+		t.Fatalf("a table run with no key: %d %v", status, body)
+	}
+	if n := records(); n != 6 {
+		t.Errorf("the table holds %d records after a run with no key, want 6", n)
+	}
+	// One Recent Imports line per run applied, not two for a keyed one.
+	if n := count(`SELECT count(*) FROM import.import_job WHERE model_id = $1::uuid AND target_type = 'table' AND status = 'committed'`, f.modelID); n != 3 {
+		t.Errorf("Recent Imports holds %d committed table loads, want 3", n)
+	}
+
+	// Into a grid, incremental.
+	if status, body := run(gridRun, "g-1", "FixtureRevenue\n100\n"); status != http.StatusOK {
+		t.Fatalf("first grid run: %d %v", status, body)
+	}
+	if status, body := run(gridRun, "g-1", "FixtureRevenue\n100\n"); status != http.StatusOK || body["replayed"] != true {
+		t.Errorf("the same grid run sent again under its key: %d %v, want the first's answer replayed", status, body)
+	}
+	if got := value(); got != 100 {
+		t.Errorf("the cell after one grid run sent twice under one key = %v, want 100", got)
+	}
+	if status, body := run(gridRun, "g-2", "FixtureRevenue\n100\n"); status != http.StatusOK || body["replayed"] == true {
+		t.Fatalf("a grid run under a new key: %d %v", status, body)
+	}
+	if got := value(); got != 200 {
+		t.Errorf("the cell after a second grid run under its own key = %v, want 200", got)
+	}
+
+	// A key the table's run used is not the grid run's answer.
+	if status, body := run(gridRun, "t-1", "FixtureRevenue\n100\n"); status != http.StatusConflict {
+		t.Errorf("a grid run under a table run's key: %d %v, want 409", status, body)
+	}
+	if got := value(); got != 200 {
+		t.Errorf("the cell = %v, want 200", got)
+	}
+}

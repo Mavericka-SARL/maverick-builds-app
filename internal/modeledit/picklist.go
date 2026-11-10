@@ -120,3 +120,19 @@ func rekeyPicklistValues(ctx context.Context, db DB, dimID, oldCode, newCode str
 	}
 	return nil
 }
+
+// CopyMetricDimensionRules gives every metric of revision newRev, a copy of
+// srcRev, its source's own total rules (migration 174) over the copy's
+// dimensions of the same names: a revision copy is self-contained.
+func CopyMetricDimensionRules(ctx context.Context, db DB, modelID, newRev, srcRev string) error {
+	_, err := db.Exec(ctx, `
+		INSERT INTO model.metric_dimension_rule (metric_id, dimension_id, rule)
+		SELECT nm.id, nd.id, r.rule
+		FROM model.metric_dimension_rule r
+		JOIN model.metric_def om ON om.id = r.metric_id AND om.model_id = $1::uuid AND om.revision_id = $3::uuid
+		JOIN model.metric_def nm ON nm.model_id = om.model_id AND nm.revision_id = $2::uuid AND nm.name = om.name
+		JOIN model.dimension_def od ON od.id = r.dimension_id
+		JOIN model.dimension_def nd ON nd.model_id = od.model_id AND nd.revision_id = $2::uuid AND nd.name = od.name
+		ON CONFLICT (metric_id, dimension_id) DO UPDATE SET rule = EXCLUDED.rule`, modelID, newRev, srcRev)
+	return err
+}

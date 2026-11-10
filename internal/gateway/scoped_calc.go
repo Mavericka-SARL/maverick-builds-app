@@ -707,7 +707,7 @@ func scopeOrdinaryMetric(
 	rule := calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)
 	evalCombo := func(combo map[string]string) (float64, error) {
 		values := make(map[string]float64, len(refs))
-		blank := map[string]bool{}
+		blank, noValue := map[string]bool{}, map[string]bool{}
 		for _, ref := range refs {
 			refM, isMetric := byName[ref]
 			if !isMetric {
@@ -747,6 +747,9 @@ func scopeOrdinaryMetric(
 			values[refM.Name] = v
 			if !found {
 				blank[refM.Name] = true
+				if calculation.NoValueAt(rollupDims, refM.ID, metricDimIDs[refM.ID], refM.AggRule, refM.TimeSummary, at) {
+					noValue[refM.Name] = true
+				}
 			}
 		}
 		namedDims := make(map[string]string, len(combo))
@@ -757,7 +760,7 @@ func scopeOrdinaryMetric(
 		}
 		// The member-metadata context (UNFILTERED): dim.property and PARENT
 		// compute exactly as in the scheduler.
-		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, blank, namedDims, sr.cellContext(combo))
+		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, blank, noValue, namedDims, sr.cellContext(combo))
 	}
 	if isFormulaRule(rule) {
 		// Its readers evaluate it above its leaves (see evalCombo); each

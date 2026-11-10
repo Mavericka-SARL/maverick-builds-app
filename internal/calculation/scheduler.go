@@ -237,17 +237,51 @@ func (s *Scheduler) recalcRequest(ctx context.Context, modelID, revisionID strin
 		// on when this caller's request is cancelled, bounded as a
 		// background recalculation is. Another gateway's pass over the
 		// revision is waited for first, and does not count against it.
+		return s.underPassLock(ctx, revisionID, func(passCtx context.Context) error {
+			return s.recalcPass(passCtx, modelID, revisionID, defs, merged)
+		})
+	})
+}
+
+// passLockAttempts bounds how often a pass starts again after losing its
+// database lock.
+const passLockAttempts = 3
+
+// underPassLock runs pass holding revisionID's pass lock in the database
+// (Store.lockPasses), bounded as a background recalculation is. A pass
+// whose lock's connection is lost is cancelled, since another gateway's
+// pass may already run beside it, and runs again once it holds the lock
+// anew: recalculating reads the inputs afresh, so the pass that ends last
+// is a whole one.
+func (s *Scheduler) underPassLock(ctx context.Context, revisionID string, pass func(context.Context) error) error {
+	for attempt := 1; ; attempt++ {
 		lockCtx, cancelLock := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
-		unlock, err := s.store.lockPasses(lockCtx, revisionID)
+		lock, err := s.store.lockPasses(lockCtx, revisionID)
 		cancelLock()
 		if err != nil {
 			return err
 		}
-		defer unlock()
 		passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
-		defer cancel()
-		return s.recalcPass(passCtx, modelID, revisionID, defs, merged)
-	})
+		go func() {
+			select {
+			case <-lock.lost:
+				cancel()
+			case <-passCtx.Done():
+			}
+		}()
+		err = pass(passCtx)
+		cancel()
+		lost := lock.isLost()
+		lock.release()
+		if !lost {
+			return err
+		}
+		if attempt == passLockAttempts {
+			return fmt.Errorf("the pass lost its database lock %d times; the revision is recalculated by its next change", attempt)
+		}
+		s.log.Warn().Str("revision_id", revisionID).Int("attempt", attempt).
+			Msg("the pass's database lock was lost with its connection; the pass runs again")
+	}
 }
 
 // recalcPass is one recalculation pass over req.ids.
@@ -653,7 +687,13 @@ func (s *Scheduler) executePartition(
 				}
 				continue
 			}
-			v, _, evalErr := evalOne(combo)
+			// A dimension totalling as one member is evaluated there; one
+			// with no total has no row (migration 174).
+			at, _, ok := ruledAt(allDims, def.ID, metricDimIDs[def.ID], combo)
+			if !ok {
+				continue
+			}
+			v, _, evalErr := evalOne(at)
 			if evalErr != nil {
 				continue // empty subtree or genuine per-combo error — no row, renders "—"
 			}
@@ -732,8 +772,16 @@ func (s *Scheduler) executePartition(
 	if axis != nil && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
 		aggregate, writeAggregate = summarizeOverTime(resultRows(results), axis, rule, def.TimeSummary, nil)
 	}
-	if rule == string(rollup.AggFormula) {
-		total, _, totalErr := evalOne(map[string]string{})
+	// A dimension totalling as one member (first, last) or not at all
+	// (none; migration 174): the total is that member's, or none.
+	totalAt, totalChosen, totalOK := ruledAt(allDims, def.ID, metricDimIDs[def.ID], map[string]string{})
+	if !totalOK {
+		writeAggregate = false
+	} else if len(totalChosen) > 0 && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
+		aggregate, writeAggregate = ruledTotal(resultRows(results), totalChosen, axis, rule, def.TimeSummary)
+	}
+	if rule == string(rollup.AggFormula) && totalOK {
+		total, _, totalErr := evalOne(totalAt)
 		switch {
 		case errors.Is(totalErr, errBlankResult):
 			writeAggregate = false // blank at the total: no total row
@@ -746,14 +794,14 @@ func (s *Scheduler) executePartition(
 			aggregate = total
 		}
 	}
-	if def.AggRule == string(rollup.AggRate) {
+	if def.AggRule == string(rollup.AggRate) && totalOK {
 		total, rateErr := s.rateTotal(ctx, def, modelID, revisionID, allDims, metricDimIDs, allDefs)
 		if rateErr != nil {
 			return fmt.Errorf("ratio total failed for metric %s (agg_rule=rate): %w", def.Name, rateErr)
 		}
 		aggregate = total
 	}
-	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && !rollup.LeafCombo(allDims, metricDimIDs[def.ID], map[string]string{}) {
+	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && !rollup.LeafCombo(allDims, metricDimIDs[def.ID], totalAt) {
 		// agg_rule none: values at the leaves only. A metric with no
 		// dimensions has one value, its '{}' row, and keeps it; one whose
 		// only dimension is time totals by its time summary (above).
@@ -778,7 +826,7 @@ func (s *Scheduler) executePartition(
 	// leaf: there time still totals by the time summary (a closing balance
 	// typed per scenario has its FY value).
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	perComboRows = append(perComboRows, oneDimSliceRows(rule, dimConditional, metricDimIDs[def.ID], allDims, resultRows(results), evalOne, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, oneDimSliceRows(def.ID, rule, dimConditional, metricDimIDs[def.ID], allDims, resultRows(results), evalOne, axis, def.TimeSummary)...)
 	perComboRows = append(perComboRows, aggregatePeriodRows(rule, metricDimIDs[def.ID], resultRows(results), axis, def.TimeSummary)...)
 
 	// Replace the metric's result set in one transaction: the '{}' total
@@ -825,7 +873,13 @@ func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, re
 	var failures int
 	var firstErr error
 	for _, combo := range combos {
-		text, noData, err := evalText(combo)
+		// A total at the member a total rule chooses; none: no row
+		// (migration 174).
+		at, _, ok := ruledAt(env.allDims, def.ID, dimIDs, combo)
+		if !ok {
+			continue
+		}
+		text, noData, err := evalText(at)
 		if err != nil {
 			if noData || errors.Is(err, errBlankResult) {
 				continue
@@ -880,6 +934,7 @@ func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, re
 // the periods by timeSummary (see summarizeOverTime); the time member's own
 // slice is one period and needs no time reduction.
 func oneDimSliceRows(
+	metricID string,
 	aggRule string,
 	dimConditional bool,
 	dimIDs []string,
@@ -920,11 +975,18 @@ func oneDimSliceRows(
 		}
 		for _, m := range d.Members {
 			slice := map[string]string{dimID: m.Code}
-			if !rollup.Aggregates(rollup.AggRule(aggRule)) && !rollup.LeafCombo(dims, dimIDs, slice) {
+			// The metric's total rules (migration 174): a dimension totalling
+			// as one member reads that member's leaves, one with no total
+			// has no slice.
+			at, chosen, ok := ruledAt(dims, metricID, dimIDs, slice)
+			if !ok {
+				continue
+			}
+			if !rollup.Aggregates(rollup.AggRule(aggRule)) && !rollup.LeafCombo(dims, dimIDs, at) {
 				continue // agg_rule none: no value across members
 			}
 			if useEval {
-				v, _, err := evalOne(slice)
+				v, _, err := evalOne(at)
 				if err != nil {
 					continue // empty subtree / per-combo error — no row, renders "—"
 				}
@@ -955,7 +1017,8 @@ func oneDimSliceRows(
 			if lists > 1 {
 				sort.Ints(picked)
 			}
-			sliceLeaves := subRows{base: leafResults, idx: picked}
+			var sliceLeaves leafRows = subRows{base: leafResults, idx: picked}
+			sliceLeaves = atChosen(sliceLeaves, chosen)
 			if axis != nil && (dimID != axis.dim.ID || !m.IsLeafPeriod()) {
 				// A non-time member reduces time by the summary; so does an
 				// AGGREGATE period (H1 = its quarters reduced). A leaf period
@@ -965,10 +1028,7 @@ func oneDimSliceRows(
 				}
 				continue
 			}
-			vals := make([]float64, 0, sliceLeaves.Len())
-			for k := range sliceLeaves.idx {
-				vals = append(vals, sliceLeaves.Value(k))
-			}
+			vals := rowValues(sliceLeaves)
 			if len(vals) == 0 {
 				continue
 			}

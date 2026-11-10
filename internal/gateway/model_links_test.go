@@ -438,3 +438,48 @@ func TestModelLinkEndToEnd(t *testing.T) {
 		t.Fatalf("a business user's run after re-activation: %+v", run)
 	}
 }
+
+// A model link into a table reads the source's whole rows at every run, so
+// it replaces the table's records by a field: without one each run added
+// them again (2026-11-09). A draft may choose the field later; a test,
+// activation or run without it is refused, saying what to set.
+func TestModelLinkIntoATableReplacesByAField(t *testing.T) {
+	f := setupLinkFixture(t)
+	ctx := context.Background()
+	table := f.ok("POST", "/api/forms?revision_id="+f.tgtRev, linkDev, f.tgtApp, f.tgtRev, map[string]any{
+		"name": "sales_lines", "label": "Sales lines", "fields": []map[string]any{
+			{"name": "region", "label": "Region", "type": "text"},
+			{"name": "revenue", "label": "Revenue", "type": "number"},
+		}})
+	cfg := f.linkConfig(f.srcModel)
+	cfg["target_type"], cfg["target_id"] = "form", table
+	cfg["mapping"] = map[string]any{"fields": []map[string]any{
+		{"source": "$.region", "target": "region"},
+		{"source": "$.revenue", "target": "revenue", "transforms": []map[string]any{{"kind": "to_number"}}},
+	}}
+	id := f.ok("POST", "/api/developer/integrations", linkDev, f.tgtApp, f.tgtRev,
+		map[string]any{"type": "rest_api", "name": "Sales lines", "status": "draft", "config": cfg})
+
+	status, raw := f.req("POST", "/api/developer/integrations/"+id+"/test", linkDev, f.tgtApp, f.tgtRev, nil)
+	f.refused("a test with no field to replace by", status, raw, http.StatusBadRequest, "When a run brings rows again")
+	status, raw = f.req("PATCH", "/api/developer/integrations/"+id, linkDev, f.tgtApp, f.tgtRev, map[string]any{"status": "active"})
+	f.refused("activation with no field to replace by", status, raw, http.StatusBadRequest, "When a run brings rows again")
+
+	cfg["replace_by"] = "region"
+	f.ok("PATCH", "/api/developer/integrations/"+id, linkDev, f.tgtApp, f.tgtRev, map[string]any{"config": cfg})
+	f.ok("POST", "/api/developer/integrations/"+id+"/test", linkDev, f.tgtApp, f.tgtRev, nil)
+	if run := f.runQueued(); run.Status != "success" {
+		t.Fatalf("test run: %+v", run)
+	}
+	f.ok("PATCH", "/api/developer/integrations/"+id, linkDev, f.tgtApp, f.tgtRev, map[string]any{"status": "active"})
+	for i := range 2 {
+		f.ok("POST", "/api/integrations/"+id+"/run", linkDev, f.tgtApp, f.tgtRev, nil)
+		if run := f.runQueued(); run.Status != "success" || run.RecordsWritten != 2 {
+			t.Fatalf("run %d: %+v", i+1, run)
+		}
+	}
+	var n int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, table).Scan(&n); err != nil || n != 2 {
+		t.Errorf("records after two runs of the source's 2 rows = %d (%v), want 2", n, err)
+	}
+}
