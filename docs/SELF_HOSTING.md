@@ -197,7 +197,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.11.10.1        # a release: the newest is on the Releases page
+git checkout 2026.11.10.2        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -282,7 +282,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.11.10.1   # the release you checked out
+MAVERICKS_RELEASE=2026.11.10.2   # the release you checked out
 ```
 
 ```bash
@@ -448,6 +448,15 @@ dumps the platform's database, every tenant database and Keycloak's database
 `BACKUP_RETENTION_DAYS` (14). All dumps of one pass share a timestamp, called
 a *run* below.
 
+After the dump the same container rewrites the large tables that deletes
+left mostly empty (a model, revision or application deleted), so their
+files go back to the data they hold. It uses pg_repack, which the
+`postgres` container's image carries: the table stays readable and
+writable while it is copied, and is locked only for the moment the copy
+is swapped in. A table is rewritten when its files exceed its data by
+`REPACK_MIN_MB` (64) and by `REPACK_MIN_SHARE` (0.2) of their size; the log
+lines start `pg-repack:`.
+
 ```bash
 docker compose exec backup backup-schedule.sh now   # take one now
 ./setup.sh check                                     # lists the newest dumps
@@ -508,7 +517,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.11.10.1
+git fetch --tags && git checkout <new release>       # e.g. 2026.11.10.2
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -525,6 +534,12 @@ KEYCLOAK_URL="https://$(grep '^AUTH_HOST=' .env | cut -d= -f2-)" \
 KEYCLOAK_ADMIN_PASSWORD="$(grep '^KEYCLOAK_ADMIN_PASSWORD=' .env | cut -d= -f2-)" \
   bash ../../scripts/keycloak-invitation-mail.sh
 ```
+
+**The database's image (2026.11.10.2).** The `postgres` service runs the
+release's `postgres-walg` image — PostgreSQL 16 as before, with pg_repack
+and wal-g — instead of `postgres:16-alpine`, for the nightly rewrite
+described under Backups. The data directory is the same; the upgrade
+recreates the container, so the database restarts once.
 
 **Stored deployment packages.** A model exported as a deployment package
 (an export removed in 2026.10.12) left a copy of its definitions and, by
@@ -707,7 +722,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.11.10.1`; set the release you deploy, or, if you built your
+   release `2026.11.10.2`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -889,7 +904,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.10.1   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.10.2   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated
@@ -919,6 +934,13 @@ a restore.
 
 Never deploy `latest`: a pod that restarts for any reason pulls whatever was
 pushed last.
+
+**Nightly rewrite (2026.11.10.2).** The `postgres-repack` CronJob (04:00,
+after the dump) rewrites the tables deletes left mostly empty with
+pg_repack, online; the `postgres` StatefulSet's `postgres-walg` image
+carries the extension, so the release's image must reach the database pod:
+`kubectl rollout restart statefulset/postgres` once, a short restart.
+Until it has, each run logs that the server has no pg_repack and skips.
 
 **Stored deployment packages.** A model exported as a deployment package
 (an export removed in 2026.10.12) left a copy of its definitions and, by

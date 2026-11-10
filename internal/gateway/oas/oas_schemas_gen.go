@@ -10101,6 +10101,9 @@ type DimensionProperty struct {
 	DimensionID uuid.UUID `json:"dimension_id"`
 	Name        string    `json:"name"`
 	DataType    string    `json:"data_type"`
+	// What the console shows (an imported column's header); absent: the name. Formulas name the property
+	// by name.
+	Label OptString `json:"label"`
 }
 
 // GetID returns the value of ID.
@@ -10123,6 +10126,11 @@ func (s *DimensionProperty) GetDataType() string {
 	return s.DataType
 }
 
+// GetLabel returns the value of Label.
+func (s *DimensionProperty) GetLabel() OptString {
+	return s.Label
+}
+
 // SetID sets the value of ID.
 func (s *DimensionProperty) SetID(val uuid.UUID) {
 	s.ID = val
@@ -10141,6 +10149,11 @@ func (s *DimensionProperty) SetName(val string) {
 // SetDataType sets the value of DataType.
 func (s *DimensionProperty) SetDataType(val string) {
 	s.DataType = val
+}
+
+// SetLabel sets the value of Label.
+func (s *DimensionProperty) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // Time dimensions only.
@@ -29949,6 +29962,8 @@ func (s *PromoteAiDraftReq) SetName(val OptString) {
 type PropertyRequest struct {
 	Name     OptString `json:"name"`
 	DataType OptString `json:"data_type"`
+	// What the console shows; empty shows the name. Omitted keeps it on update.
+	Label OptString `json:"label"`
 	// Update only: remove the property's value (under its name in any case) from every member of the
 	// dimension — what a developer asks for when a declaration made again brought back stale values.
 	// Values are never cleared otherwise; deleting a property keeps them.
@@ -29965,6 +29980,11 @@ func (s *PropertyRequest) GetDataType() OptString {
 	return s.DataType
 }
 
+// GetLabel returns the value of Label.
+func (s *PropertyRequest) GetLabel() OptString {
+	return s.Label
+}
+
 // GetClearValues returns the value of ClearValues.
 func (s *PropertyRequest) GetClearValues() OptBool {
 	return s.ClearValues
@@ -29978,6 +29998,11 @@ func (s *PropertyRequest) SetName(val OptString) {
 // SetDataType sets the value of DataType.
 func (s *PropertyRequest) SetDataType(val OptString) {
 	s.DataType = val
+}
+
+// SetLabel sets the value of Label.
+func (s *PropertyRequest) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetClearValues sets the value of ClearValues.

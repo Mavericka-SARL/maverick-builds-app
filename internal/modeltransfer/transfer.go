@@ -86,6 +86,8 @@ type Member struct {
 type DimProperty struct {
 	Name     string `json:"name"`
 	DataType string `json:"data_type"`
+	// Label: what the console shows (migration 175); absent shows the name.
+	Label string `json:"label,omitempty"`
 }
 
 type Dimension struct {
@@ -517,14 +519,14 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 			return nil, err
 		}
 		prows, err := q.Query(ctx,
-			`SELECT name, data_type FROM model.dimension_property WHERE dimension_id=$1::uuid ORDER BY name`,
+			`SELECT name, data_type, COALESCE(label, '') FROM model.dimension_property WHERE dimension_id=$1::uuid ORDER BY name`,
 			pkg.Dimensions[i].ID)
 		if err != nil {
 			return nil, err
 		}
 		for prows.Next() {
 			var p DimProperty
-			if err := prows.Scan(&p.Name, &p.DataType); err != nil {
+			if err := prows.Scan(&p.Name, &p.DataType, &p.Label); err != nil {
 				prows.Close()
 				return nil, err
 			}
@@ -2043,8 +2045,8 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 			kept[strings.ToLower(p.Name)] = p.Name
 			if _, err = tx.Exec(ctx,
-				`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid, $2, COALESCE(NULLIF($3::text,''),'text'))`,
-				newID, p.Name, p.DataType); err != nil {
+				`INSERT INTO model.dimension_property (dimension_id, name, data_type, label) VALUES ($1::uuid, $2, COALESCE(NULLIF($3::text,''),'text'), NULLIF(btrim($4), ''))`,
+				newID, p.Name, p.DataType, p.Label); err != nil {
 				return "", fmt.Errorf("dimension property %q: %w", p.Name, err)
 			}
 		}

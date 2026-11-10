@@ -709,6 +709,8 @@ export interface DimProperty {
   dimension_id: string;
   name: string;
   data_type: string;
+  /** What the console shows (an imported column's header); absent: the name. */
+  label?: string;
 }
 
 export interface DevDimension {
@@ -3023,10 +3025,10 @@ export const api = {
   // existing_values: members that already held a value under the name
   // (kept from a declaration deleted before, or set before) — formulas read
   // them now; notice says so, and the panel offers to clear them.
-  addDimProperty: (dimId: string, body: { name: string; data_type: string }) =>
+  addDimProperty: (dimId: string, body: { name: string; data_type: string; label?: string }) =>
     apiFetch<{ id: string; existing_values?: number; notice?: string }>(`/api/developer/dimensions/${dimId}/properties`, { method: "POST", body: JSON.stringify(body) }),
   // clear_values removes the property's value from every member.
-  updateDimProperty: (dimId: string, propId: string, body: { name?: string; data_type?: string; clear_values?: boolean }) =>
+  updateDimProperty: (dimId: string, propId: string, body: { name?: string; data_type?: string; label?: string; clear_values?: boolean }) =>
     apiFetch<{ status: string; values_cleared?: number }>(`/api/developer/dimensions/${dimId}/properties/${propId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimProperty: (dimId: string, propId: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/properties/${propId}`, { method: "DELETE" }),

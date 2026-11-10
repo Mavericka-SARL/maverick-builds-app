@@ -18,13 +18,16 @@ if [ "${1:-}" = "now" ]; then
 fi
 
 hour="${BACKUP_HOUR:-3}"
-echo "[backup-schedule] daily dump at ${hour}:00 UTC${ALERT_EMAIL:+, alerts to ${ALERT_EMAIL}}"
+echo "[backup-schedule] daily dump and repack at ${hour}:00 UTC${ALERT_EMAIL:+, alerts to ${ALERT_EMAIL}}"
 while :; do
   now="$(date -u +%s)"
   wait=$(( (hour * 3600 - now % 86400 + 86400) % 86400 ))
   [ "$wait" -eq 0 ] && wait=86400
   sleep "$wait"
   pg-backup.sh || echo "[backup-schedule] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup FAILED; next attempt in 24 hours" >&2
+  # Then give back the disk deletes left in large tables, online
+  # (pg-repack.sh; the server needs the postgres-walg image).
+  pg-repack.sh || echo "[backup-schedule] $(date -u +%Y-%m-%dT%H:%M:%SZ) repack left a table as it was; see the lines above" >&2
   if [ -n "${ALERT_EMAIL:-}" ]; then
     # Two hours: this run's objects, not yesterday's.
     BACKUP_MAX_AGE_HOURS=2 backup-watchdog.sh || true

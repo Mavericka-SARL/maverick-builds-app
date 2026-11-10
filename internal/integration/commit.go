@@ -231,7 +231,13 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 	dimID := def.Config.TargetID
 	col := map[string]int{}
 	for i, h := range header {
-		col[strings.ToLower(strings.TrimSpace(h))] = i
+		key := strings.ToLower(strings.TrimSpace(h))
+		// A property column keeps its name as written: the pull makes it
+		// the property's label (metricformula.DeclareImportedProperties).
+		if strings.HasPrefix(key, "property:") {
+			key = "property:" + strings.TrimSpace(strings.TrimSpace(h)[len("property:"):])
+		}
+		col[key] = i
 	}
 	codeIdx, ok := col["code"]
 	if !ok {

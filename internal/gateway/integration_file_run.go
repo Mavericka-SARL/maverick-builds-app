@@ -130,13 +130,20 @@ func rowsCSV(header []string, rows []importpkg.RawRow) (*csv.Reader, map[string]
 // imported every row.
 func fileColumnIndex(header []string) (map[string]int, error) {
 	colIdx := make(map[string]int, len(header))
+	seen := make(map[string]int, len(header)) // by the lower-case key
 	for i, col := range header {
 		key := strings.ToLower(strings.TrimSpace(col))
 		if key == "" {
 			continue
 		}
-		if prev, dup := colIdx[key]; dup {
+		if prev, dup := seen[key]; dup {
 			return nil, fmt.Errorf("columns %d and %d are both named %q — a file names each column once", prev+1, i+1, strings.TrimSpace(col))
+		}
+		seen[key] = i
+		// A property column keeps its name as written: the import makes it
+		// the property's label (metricformula.DeclareImportedProperties).
+		if strings.HasPrefix(key, "property:") {
+			key = "property:" + strings.TrimSpace(strings.TrimSpace(col)[len("property:"):])
 		}
 		colIdx[key] = i
 	}

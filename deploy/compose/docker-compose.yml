@@ -32,7 +32,12 @@ x-app-env: &app-env
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 16 (postgres:16-alpine) with pg_repack, which the backup
+    # service runs each night to give back the disk deletes leave, online
+    # (deploy/docker/pg-backup/pg-repack.sh), and wal-g; the same data
+    # directory as the plain image's.
+    build:
+      context: ../docker/postgres-walg
     restart: unless-stopped
     logging: *logging
     # Parallel work (a VACUUM's index passes) keeps its shared state in

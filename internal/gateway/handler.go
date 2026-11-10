@@ -5227,8 +5227,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// model.dimension_property — distinct from the properties JSONB copied
 	// with dimension_def in Step A).
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO model.dimension_property (dimension_id, name, data_type)
-		SELECT nd.id, p.name, p.data_type
+		INSERT INTO model.dimension_property (dimension_id, name, data_type, label)
+		SELECT nd.id, p.name, p.data_type, p.label
 		FROM model.dimension_property p
 		JOIN model.dimension_def od ON od.id = p.dimension_id
 		JOIN model.dimension_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
@@ -13653,7 +13653,7 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 		switch {
 		case r.Method == http.MethodGet && propID == "":
 			rows, err := h.db.Query(ctx,
-				`SELECT id::text, dimension_id::text, name, data_type FROM model.dimension_property WHERE dimension_id=$1 ORDER BY name`, dimID)
+				`SELECT id::text, dimension_id::text, name, data_type, COALESCE(label, '') FROM model.dimension_property WHERE dimension_id=$1 ORDER BY name`, dimID)
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -13664,11 +13664,14 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				DimensionID string `json:"dimension_id"`
 				Name        string `json:"name"`
 				DataType    string `json:"data_type"`
+				// Label is what the console shows (an imported column's
+				// header, migration 175); "" shows the name.
+				Label string `json:"label,omitempty"`
 			}
 			var props []prop
 			for rows.Next() {
 				var p prop
-				if err := rows.Scan(&p.ID, &p.DimensionID, &p.Name, &p.DataType); err != nil {
+				if err := rows.Scan(&p.ID, &p.DimensionID, &p.Name, &p.DataType, &p.Label); err != nil {
 					jsonErr(w, err, http.StatusInternalServerError)
 					return
 				}
@@ -13683,6 +13686,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			var body struct {
 				Name     string `json:"name"`
 				DataType string `json:"data_type"`
+				// Label: what the console shows; "" shows the name.
+				Label string `json:"label"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -13706,9 +13711,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			}
 			var newID string
 			err := h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_property (dimension_id, name, data_type)
-				VALUES ($1, $2, $3) RETURNING id::text
-			`, dimID, body.Name, body.DataType).Scan(&newID)
+				INSERT INTO model.dimension_property (dimension_id, name, data_type, label)
+				VALUES ($1, $2, $3, NULLIF(btrim($4), '')) RETURNING id::text
+			`, dimID, body.Name, body.DataType, body.Label).Scan(&newID)
 			if err != nil {
 				// Another change declared the name, in some case, at the
 				// same moment: the unique index (migration 170) refused
@@ -13755,6 +13760,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// member of the dimension — what a developer asks for
 				// when a declaration made again brought back stale values.
 				ClearValues bool `json:"clear_values"`
+				// Label: what the console shows; "" shows the name;
+				// omitted keeps it.
+				Label *string `json:"label"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -13831,8 +13839,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					return
 				}
 			}
-			if _, err := tx.Exec(ctx, `UPDATE model.dimension_property SET name=$2, data_type=$3 WHERE id=$1::uuid`,
-				propID, body.Name, body.DataType); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.dimension_property SET name=$2, data_type=$3,
+				    label = CASE WHEN $4::boolean THEN NULLIF(btrim($5), '') ELSE label END WHERE id=$1::uuid`,
+				propID, body.Name, body.DataType, body.Label != nil, deref(body.Label)); err != nil {
 				if err := metricformula.PropertyNameConflict(ctx, h.db.For(ctx), dimID, body.Name, err); metricformula.IsPropertyNameConflict(err) {
 					jsonErr(w, err, http.StatusConflict)
 					return

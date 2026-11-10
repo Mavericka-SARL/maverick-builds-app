@@ -3119,8 +3119,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// developer-console duplicate-revision handler — this AI-draft
 		// path never copied these at all before.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.dimension_property (dimension_id, name, data_type)
-			SELECT nd.id, p.name, p.data_type
+			INSERT INTO model.dimension_property (dimension_id, name, data_type, label)
+			SELECT nd.id, p.name, p.data_type, p.label
 			FROM model.dimension_property p
 			JOIN model.dimension_def od ON od.id = p.dimension_id
 			JOIN model.dimension_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid

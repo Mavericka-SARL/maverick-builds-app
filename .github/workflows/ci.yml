@@ -162,7 +162,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12
-          args: --timeout=5m ./...
+          # 15 minutes: from scratch it takes about 1.5 alone, but a deploy
+          # dispatched beside its push run shares the three runners with the
+          # other run's Go tests, and timed out at 5 with 0 issues found
+          # (2026-11-10, run 42827700241).
+          args: --timeout=15m ./...
           # A restored analysis cache made CI find what a fresh local lint of
           # the same commit did not, and could hide the other way round
           # (2026-11-09): every run analyses from scratch.

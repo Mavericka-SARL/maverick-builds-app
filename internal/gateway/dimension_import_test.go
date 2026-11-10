@@ -184,3 +184,65 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		t.Errorf("%d member(s) of the refused file were kept", kept)
 	}
 }
+
+// An imported property column that is no identifier becomes one, keeping
+// the header as written as its label (migration 175; the owner's decision
+// of 2026-10-06, confirmed 2026-11-10): "Sales Segment" fills
+// sales_segment, labelled "Sales Segment". A column naming a declaration in
+// another case fills it and gives it no label.
+func TestImportedPropertyKeepsItsHeaderAsLabel(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	custID := q(`INSERT INTO core.customer (name) VALUES ('C') RETURNING id::text`)
+	wsID := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'ws') RETURNING id::text`, custID)
+	appID := q(`INSERT INTO core.application (workspace_id, name, mode) VALUES ($1::uuid, 'App', 'planning') RETURNING id::text`, wsID)
+	modelID := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'M') RETURNING id::text`, appID)
+	dimID := q(`INSERT INTO model.dimension_def (model_id, name) VALUES ($1::uuid, 'customers') RETURNING id::text`, modelID)
+	q(`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid, 'Segment', 'text') RETURNING id::text`, dimID)
+
+	h := &handler{db: tenantdb.NewHandle(pool, nil), log: logger.New("test")}
+	cr := csv.NewReader(strings.NewReader("code,label,Property:Sales Segment,property:segment\nC1,Acme,Retail,Large\n"))
+	header, err := cr.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	colIdx, err := fileColumnIndex(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, errs, _, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx); fatal != nil || errs != 0 {
+		t.Fatalf("import: %v (%d row errors)", fatal, errs)
+	}
+
+	labels := map[string]string{}
+	rows, err := pool.Query(ctx, `SELECT name, COALESCE(label, '') FROM model.dimension_property WHERE dimension_id=$1::uuid`, dimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var name, label string
+		if err := rows.Scan(&name, &label); err != nil {
+			t.Fatal(err)
+		}
+		labels[name] = label
+	}
+	rows.Close()
+	if len(labels) != 2 || labels["sales_segment"] != "Sales Segment" || labels["Segment"] != "" {
+		t.Errorf("declarations %v, want sales_segment labelled \"Sales Segment\" and Segment with no label", labels)
+	}
+	var props string
+	if err := pool.QueryRow(ctx, `SELECT properties::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='C1'`, dimID).Scan(&props); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(props, `"sales_segment": "Retail"`) || !strings.Contains(props, `"Segment": "Large"`) {
+		t.Errorf("member properties %s, want sales_segment Retail and Segment Large", props)
+	}
+}

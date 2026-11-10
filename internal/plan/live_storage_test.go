@@ -126,15 +126,19 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 		t.Fatal("the sweep's compaction rewrote runtime.fact_input's partitions")
 	}
 
-	// Compacting gives the deleted model's disk back: the files shrink to
-	// about the data left, and a second pass finds nothing to do.
+	// The forced compaction after a delete vacuums too (owner's decision
+	// I9, 2026-11-10): rewriting a large table locked it for minutes, so the
+	// files go back to the data left with the nightly pg_repack job
+	// (deploy/docker/pg-backup/pg-repack.sh), online. Storage, which counts
+	// live data, fell at the delete already; a second pass finds nothing to
+	// do.
 	freed, err := Compact(ctx, pool, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("compaction gave back %d bytes; data files %d -> %d", freed, filesBefore, dataFiles())
-	if dataFiles() > filesBefore/4 || freed < filesBefore/2 {
-		t.Fatalf("after compaction the data files are %d (were %d), %d given back", dataFiles(), filesBefore, freed)
+	t.Logf("forced compaction gave back %d bytes; data files %d -> %d", freed, filesBefore, dataFiles())
+	if node() != nodeBefore {
+		t.Fatal("the forced compaction rewrote runtime.fact_input's partitions")
 	}
 	if again, err := Compact(ctx, pool, true); err != nil || again != 0 {
 		t.Fatalf("second compaction = %d err=%v, want nothing to do", again, err)

@@ -101,8 +101,11 @@ func TestStorageLimitRefusesTheWriteThatWouldCrossIt(t *testing.T) {
 		t.Fatalf("doubling the facts: %v, want the storage guard", err)
 	}
 
-	// Deleting a model: the figure falls at once, the disk in the
-	// background.
+	// Deleting a model: the figure falls at once. The disk goes back with
+	// the nightly pg_repack job (deploy/docker/pg-backup/pg-repack.sh),
+	// online: the delete's compaction only vacuums, since rewriting here
+	// locked each table for the whole rewrite (owner's decision I9,
+	// 2026-11-10). The files must not grow for the delete.
 	files := func() int64 {
 		var b int64
 		if err := pool.QueryRow(tctx, `SELECT pg_database_size(current_database())`).Scan(&b); err != nil {
@@ -114,20 +117,10 @@ func TestStorageLimitRefusesTheWriteThatWouldCrossIt(t *testing.T) {
 	if code, body := do(t, f.srv, call{persona: "held-pa", tenant: id}, http.MethodDelete, "/api/admin/models/"+deleted, nil); code != http.StatusOK {
 		t.Fatalf("delete: %d %s", code, body)
 	}
-	// The compaction rewrites table after table in the background: wait
-	// while it still gives space back, and stop when it has stalled for a
-	// minute. A busy machine slows it — on 2026-10-18 it was still going
-	// at a fixed 60 s deadline.
-	last, stalled, limit := before, time.Now().Add(time.Minute), time.Now().Add(5*time.Minute)
-	for n := files(); n > before/2 && time.Now().Before(stalled) && time.Now().Before(limit); n = files() {
-		if n < last {
-			last, stalled = n, time.Now().Add(time.Minute)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	time.Sleep(2 * time.Second) // the compaction runs after the answer
 	t.Logf("database files %d MB before the delete, %d MB after", before>>20, files()>>20)
-	if files() > before/2 {
-		t.Fatalf("database files %d after deleting most of the data, were %d: the disk was not given back", files(), before)
+	if after := files(); after > before+1<<20 {
+		t.Fatalf("database files %d after deleting most of the data, were %d: the delete grew them", after, before)
 	}
 
 	// An edition without a limit takes the guard off at once.

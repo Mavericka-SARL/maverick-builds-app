@@ -5,11 +5,14 @@ import (
 	"fmt"
 )
 
-// Compact gives deleted rows' disk back to the server. PostgreSQL keeps a
-// deleted row's space in its table's files for later writes; VACUUM FULL
-// rewrites a table without it. Only in a tenant's own database (the usage
-// sweep and the gateway call it there): a shared database's tables hold
-// every tenant at once.
+// Compact vacuums the tables deleted rows left space in. PostgreSQL keeps a
+// deleted row's space in its table's files for later writes: VACUUM makes
+// it free for the table's next rows and gives back an empty end of its
+// files, and nothing waits for it. Rewriting a table to its live data is
+// the nightly pg_repack job's (deploy/docker/pg-backup/pg-repack.sh), which
+// rewrites online. Only in a tenant's own database (the usage sweep and the
+// gateway call it there): a shared database's tables hold every tenant at
+// once.
 //
 // A table is compacted when rows were deleted or updated in it since it
 // was last compacted (runtime.table_compaction) and its files exceed its
@@ -18,16 +21,15 @@ import (
 // for a small gain.
 //
 // Forced — straight after a model, application, revision or metric is
-// deleted — a table is rewritten (VACUUM FULL), which locks it while it
-// runs: about a second at a Playground workspace's size, longer for a large
-// table. SKIP_LOCKED leaves a table in use at that moment to the next
-// sweep. The sweep itself vacuums (VACUUM): the space becomes free for the
-// table's next rows and an empty end of its files goes back, and nothing
-// waits for it. It used to rewrite as well, and a model in use qualified
-// at almost every sweep — calculated results are rewritten as people type
-// — so every five minutes, and at every start, its grids and recalculations
-// stood still for the five seconds the rewrite of runtime.calc_result took
-// (2026-10-20). Returns the bytes given back.
+// deleted — every changed table qualifies, however small its share. It used
+// to rewrite them (VACUUM FULL), which locks a table for the whole rewrite:
+// about a second at a Playground workspace's size, minutes for a table of
+// several gigabytes, while the workspace's grids and dashboards waited
+// (owner's decision I9, 2026-11-10: the rewrite is pg_repack's). The sweep
+// itself stopped rewriting on 2026-10-20: a model in use qualified at almost
+// every sweep, and its grids stood still for the five seconds the rewrite of
+// runtime.calc_result took. SKIP_LOCKED leaves a table in use at that moment
+// to the next sweep. Returns the bytes given back.
 func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	type table struct {
 		oid            uint32
@@ -76,11 +78,7 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	var freed int64
 	var firstErr error
 	for _, t := range tables {
-		stmt := `VACUUM (SKIP_LOCKED, PARALLEL 0) `
-		if force {
-			stmt = `VACUUM (FULL, SKIP_LOCKED) `
-		}
-		if _, err := db.Exec(ctx, stmt+t.name); err != nil {
+		if _, err := db.Exec(ctx, `VACUUM (SKIP_LOCKED, PARALLEL 0) `+t.name); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("compact %s: %w", t.name, err)
 			}

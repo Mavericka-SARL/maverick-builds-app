@@ -1188,6 +1188,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editType, setEditType] = useState("text");
+  const [editLabel, setEditLabel] = useState("");
 
   const { data: props = [] } = useQuery({
     queryKey: ["dim-props", dimId],
@@ -1211,7 +1212,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
     },
   });
   const update = useMutation({
-    mutationFn: () => api.updateDimProperty(dimId, editId!, { name: editName, data_type: editType }),
+    mutationFn: () => api.updateDimProperty(dimId, editId!, { name: editName, data_type: editType, label: editLabel }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dim-props", dimId] }); setEditId(null); },
   });
   const del = useMutation({
@@ -1233,7 +1234,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
     onConfirm: () => clear.mutate(p),
   });
 
-  const startEdit = (p: DimProperty) => { setEditId(p.id); setEditName(p.name); setEditType(p.data_type); };
+  const startEdit = (p: DimProperty) => { setEditId(p.id); setEditName(p.name); setEditType(p.data_type); setEditLabel(p.label ?? ""); };
 
   return (
     <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface-subtle)" }}>
@@ -1248,7 +1249,9 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
 
       {(props as DimProperty[]).map((p) => editId === p.id ? (
         <div key={p.id} className="mvx-admin-inline-form" style={{ marginBottom: 6 }}>
-          <TextInput value={editName} onChange={(e) => setEditName(e.target.value)} style={{ width: 140 }} />
+          <TextInput value={editName} onChange={(e) => setEditName(e.target.value)} style={{ width: 140 }} aria-label="Property name" />
+          <TextInput value={editLabel} onChange={(e) => setEditLabel(e.target.value)} style={{ width: 160 }} aria-label="Property label"
+            placeholder="label (shown)" maxLength={80} />
           <Select value={editType} onChange={(e) => setEditType(e.target.value)} style={{ width: 90 }} aria-label="Property type">
             <option value="text">text</option>
             <option value="number">number</option>
@@ -1260,6 +1263,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
       ) : (
         <div key={p.id} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
           <code style={{ fontSize: 12, minWidth: 120 }}>{p.name}</code>
+          {p.label && <span title="Label: what the console shows; formulas name the property">{p.label}</span>}
           <StatusBadge>{p.data_type}</StatusBadge>
           <IconButton aria-label={`Edit property ${p.name}`} title="Edit" size={26} onClick={() => startEdit(p)}>
             <Pencil size={13} />

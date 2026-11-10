@@ -284,14 +284,55 @@ func ImportedPropertyNames(ctx context.Context, q Querier, dimensionID string, h
 // DeclareImportedProperties resolves an import's property headers
 // (ImportedPropertyNames) and declares each new name as a text property,
 // moving values members hold under it in another case under the declared
-// spelling (AdoptPropertyValues). It returns the names each header fills
-// and the names it declared, in header order; a name another writer
-// declared meanwhile, in any case, is read back. Run it in the import's
-// transaction, before the member writes.
+// spelling (AdoptPropertyValues). The header, as the person wrote it, is the
+// property's label (migration 175) when it is not the name: on a new
+// declaration, and on one already there that has no label. It returns the
+// names each header fills and the names it declared, in header order; a
+// name another writer declared meanwhile, in any case, is read back. Run it
+// in the import's transaction, before the member writes.
 func DeclareImportedProperties(ctx context.Context, q Querier, dimensionID string, headers []string) (names map[string]string, declared []string, err error) {
 	names, toDeclare, err := ImportedPropertyNames(ctx, q, dimensionID, headers)
-	if err != nil || len(toDeclare) == 0 {
+	if err != nil {
 		return names, nil, err
+	}
+	// A new declaration takes the header as its label whenever the header
+	// is not its name; one already there only when the header differs by
+	// more than case (a developer's Segment filled from a "segment" column
+	// keeps no label of "segment").
+	isNew := make(map[string]bool, len(toDeclare))
+	for _, n := range toDeclare {
+		isNew[n] = true
+	}
+	labelOf := map[string]string{}
+	for _, h := range headers {
+		name := names[h]
+		if name == "" || h == name || (!isNew[name] && strings.EqualFold(h, name)) {
+			continue
+		}
+		if _, set := labelOf[name]; !set {
+			labelOf[name] = h
+		}
+	}
+	defer func() {
+		if err != nil {
+			return
+		}
+		for name, label := range labelOf {
+			rows, lErr := q.Query(ctx, `
+				UPDATE model.dimension_property SET label = $3
+				WHERE dimension_id = $1::uuid AND name = $2 AND label IS NULL`, dimensionID, name, label)
+			if lErr == nil {
+				rows.Close()
+				lErr = rows.Err()
+			}
+			if lErr != nil {
+				err = fmt.Errorf("label property %q: %w", name, lErr)
+				return
+			}
+		}
+	}()
+	if len(toDeclare) == 0 {
+		return names, nil, nil
 	}
 	for _, name := range toDeclare {
 		var id string

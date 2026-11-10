@@ -1078,6 +1078,7 @@ components:
         dimension_id: { type: string, format: uuid }
         name:         { type: string }
         data_type:    { type: string }
+        label:        { type: string, description: "What the console shows (an imported column's header); absent: the name. Formulas name the property by name." }
 
     DevRevision:
       type: object
@@ -1280,6 +1281,7 @@ components:
       properties:
         name:      { type: string }
         data_type: { type: string, default: text }
+        label:     { type: string, maxLength: 80, description: "What the console shows; empty shows the name. Omitted keeps it on update." }
         clear_values:
           type: boolean
           description: >-

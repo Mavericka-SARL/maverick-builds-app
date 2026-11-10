@@ -45,14 +45,33 @@ RUN mkdir -p /out/licenses \
       "Mavericka does not modify mc." \
       > /out/licenses/SOURCE.txt
 
+# pg_repack, built from its tagged source against this same base image, so
+# the extension (in the server's image, deploy/docker/postgres-walg) and the
+# client (in the backup image, deploy/docker/pg-backup, which runs
+# pg-repack.sh) are one version and match the server's PostgreSQL. It
+# rewrites a table online, where VACUUM FULL locked it for the whole rewrite
+# (owner's decision I9, 2026-11-10). BSD-licensed; its licence ships in
+# /licenses/pg_repack. with_llvm=no: no JIT bitcode, so no clang.
+FROM postgres:16-alpine AS repack
+ARG PG_REPACK_VERSION=1.5.2
+RUN apk add --no-cache build-base gawk git lz4-dev zstd-dev zlib-dev readline-dev openssl-dev
+RUN git clone --depth 1 --branch ver_${PG_REPACK_VERSION} https://github.com/reorg/pg_repack.git /src
+WORKDIR /src
+RUN make with_llvm=no && make with_llvm=no install DESTDIR=/out \
+ && mkdir -p /out/licenses && cp COPYRIGHT /out/licenses/ \
+ && echo "pg_repack ${PG_REPACK_VERSION} - https://github.com/reorg/pg_repack, tag ver_${PG_REPACK_VERSION}, unmodified" > /out/licenses/SOURCE.txt
+
 FROM postgres:16-alpine
+
+COPY --from=repack /out/usr/local/ /usr/local/
+COPY --from=repack /out/licenses/ /licenses/pg_repack/
 
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
 COPY --from=mc /out/licenses/ /licenses/mc/
 COPY Dockerfile /licenses/mc/build.Dockerfile
-COPY pg-backup.sh pg-restore.sh backup-watchdog.sh disk-watchdog.sh node-stats.sh alert-mail.sh /usr/local/bin/
+COPY pg-backup.sh pg-restore.sh backup-watchdog.sh disk-watchdog.sh node-stats.sh pg-repack.sh alert-mail.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh \
-    /usr/local/bin/backup-watchdog.sh /usr/local/bin/disk-watchdog.sh /usr/local/bin/node-stats.sh \
+    /usr/local/bin/backup-watchdog.sh /usr/local/bin/disk-watchdog.sh /usr/local/bin/node-stats.sh /usr/local/bin/pg-repack.sh \
     # curl is the watchdog's SMTP client: it is the one thing in this image
     # that has to reach a mail relay, and adding a Go binary or a Python
     # runtime for six lines of message would be worse.

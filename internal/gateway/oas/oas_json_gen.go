@@ -26601,13 +26601,20 @@ func (s *DimensionProperty) encodeFields(e *jx.Encoder) {
 		e.FieldStart("data_type")
 		e.Str(s.DataType)
 	}
+	{
+		if s.Label.Set {
+			e.FieldStart("label")
+			s.Label.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfDimensionProperty = [4]string{
+var jsonFieldsNameOfDimensionProperty = [5]string{
 	0: "id",
 	1: "dimension_id",
 	2: "name",
 	3: "data_type",
+	4: "label",
 }
 
 // Decode decodes DimensionProperty from json.
@@ -26666,6 +26673,16 @@ func (s *DimensionProperty) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"data_type\"")
+			}
+		case "label":
+			if err := func() error {
+				s.Label.Reset()
+				if err := s.Label.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"label\"")
 			}
 		default:
 			return d.Skip()
@@ -61203,6 +61220,12 @@ func (s *PropertyRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Label.Set {
+			e.FieldStart("label")
+			s.Label.Encode(e)
+		}
+	}
+	{
 		if s.ClearValues.Set {
 			e.FieldStart("clear_values")
 			s.ClearValues.Encode(e)
@@ -61210,10 +61233,11 @@ func (s *PropertyRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfPropertyRequest = [3]string{
+var jsonFieldsNameOfPropertyRequest = [4]string{
 	0: "name",
 	1: "data_type",
-	2: "clear_values",
+	2: "label",
+	3: "clear_values",
 }
 
 // Decode decodes PropertyRequest from json.
@@ -61244,6 +61268,16 @@ func (s *PropertyRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"data_type\"")
+			}
+		case "label":
+			if err := func() error {
+				s.Label.Reset()
+				if err := s.Label.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"label\"")
 			}
 		case "clear_values":
 			if err := func() error {
