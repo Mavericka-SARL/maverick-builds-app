@@ -91,6 +91,8 @@ obs-up:
 	@echo "    Tempo       → http://localhost:3200"
 	@echo "    OTel        → localhost:4317 (gRPC)  localhost:4318 (HTTP)"
 	@echo ""
+	@echo "  Start the gateway with OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 to send it traces and metrics."
+	@echo ""
 
 obs-down:
 	$(COMPOSE) --profile observability stop otel-collector prometheus loki tempo grafana

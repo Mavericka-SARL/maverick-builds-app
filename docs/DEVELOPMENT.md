@@ -169,7 +169,10 @@ Common environment variables come from `pkg/config.BaseConfig`:
 - `LOG_LEVEL`
 
 Gateway-specific variables include `HTTP_PORT`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_VERSION`, and `DEV_MODE`. With
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_VERSION`, and `DEV_MODE`. The gateway
+exports traces and metrics only when `OTEL_EXPORTER_OTLP_ENDPOINT` names a
+collector: `localhost:4317` for the stack `make obs-up` starts; unset, it
+exports nothing. With
 `DEV_MODE=false` the gateway needs `KEYCLOAK_URL`, `KEYCLOAK_REALM` and
 `KEYCLOAK_ISSUER` (the issuer the tokens carry, when it differs from the URL
 the gateway fetches keys from) and exits if it cannot build its JWKS

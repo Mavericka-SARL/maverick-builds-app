@@ -173,17 +173,18 @@ func main() {
 	if c.DatabaseURL == "" {
 		c.DatabaseURL = "postgres://mavericks:mavericks@localhost:5432/mavericks?sslmode=disable"
 	}
+	// OpenTelemetry exports traces and metrics to the collector at
+	// OTEL_EXPORTER_OTLP_ENDPOINT, and only when one is named: it used to
+	// default to localhost:4317, where no deployment runs a collector, and
+	// every gateway logged a failed export every few seconds (2026-11-10).
+	// The development stack's collector (make obs-up) is localhost:4317.
 	if c.OTelEndpoint == "" {
-		c.OTelEndpoint = "localhost:4317"
-	}
-
-	// Initialise OpenTelemetry (no-ops gracefully if collector is unreachable)
-	shutdown, err := telemetry.Setup(ctx, telemetry.Config{
+		log.Info().Msg("OpenTelemetry export off: OTEL_EXPORTER_OTLP_ENDPOINT is not set")
+	} else if shutdown, err := telemetry.Setup(ctx, telemetry.Config{
 		ServiceName:       "gateway",
 		ServiceVersion:    c.ServiceVersion,
 		CollectorEndpoint: c.OTelEndpoint,
-	})
-	if err != nil {
+	}); err != nil {
 		log.Warn().Err(err).Msg("telemetry setup failed — continuing without OTel")
 	} else {
 		defer func() {
