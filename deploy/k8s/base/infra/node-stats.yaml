@@ -35,7 +35,9 @@ spec:
       containers:
         - name: node-stats
           image: registry.example.com/mavericks/postgres-backup:latest
-          imagePullPolicy: IfNotPresent
+          # Always: under a "latest" tag a node keeps the copy it has, and an
+          # older one has no node-stats.sh (the command below).
+          imagePullPolicy: Always
           envFrom:
             - secretRef:
                 name: mavericks-secrets
