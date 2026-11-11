@@ -80,8 +80,13 @@ spec:
                 runAsGroup: 70
 
 ---
-# The weekly online rewrite (owner's decisions I9, 2026-11-10: pg_repack;
-# the same day: on Sundays only, until deletes stop leaving space behind):
+# The online rewrite (owner's decisions I9, 2026-11-10: pg_repack; 2026-11-11:
+# no schedule, run by hand when the daily check names a table — PostgreSQL
+# reuses a deleted row's space for the table's next rows, storage limits
+# count live data, and a deleted revision's results give their disk back at
+# once since migration 176). Suspended: the job stays defined, so a rewrite
+# is one command:
+#   kubectl -n mavericks create job --from=cronjob/postgres-repack repack-$(date +%Y%m%d%H%M)
 # pg-repack.sh
 # gives back the disk deletes leave in large tables with pg_repack, which
 # locks a table only for a moment, where VACUUM FULL locked it for the whole
@@ -98,6 +103,7 @@ metadata:
     app.kubernetes.io/component: job
     app.kubernetes.io/part-of: mavericks-engine
 spec:
+  suspend: true
   schedule: "0 4 * * 0"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

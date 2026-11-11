@@ -8,6 +8,10 @@
 # sample (ops.node_stat), so a missing mail is itself the alarm, and a node
 # whose watcher stopped sampling is named in the subject.
 #
+# It also names the tables a rewrite would shrink (pg-repack.sh --report:
+# dead space of REPACK_MIN_MB and REPACK_MIN_SHARE of a table's files), with
+# the command that rewrites them: the rewrite has no schedule (2026-11-11).
+#
 # Env vars:
 #   DATABASE_URL            the control database (required)
 #   SAMPLE_MAX_AGE_MINUTES  default: 15 (node-stats samples every 5)
@@ -15,6 +19,7 @@
 #   ALERT_WHERE             names the deployment in the subject, e.g. the
 #                           namespace; empty for none
 #   ALERT_EMAIL, SMTP_*     as alert-mail.sh
+#   REPACK_*                as pg-repack.sh
 #
 # Exits 1 when a node is silent or past the disk line, or the samples
 # cannot be read — after mailing.
@@ -102,10 +107,32 @@ done <<EOF
 $rows
 EOF
 
-if [ -n "$problems" ]; then
-  subject="[mavericks] daily check: ${problems}${where}"
+# The tables a rewrite would shrink. Not a problem: PostgreSQL reuses the
+# space for the table's next rows; the rewrite hands it back to the server.
+if report="$("$(dirname "$0")/pg-repack.sh" --report 2>/tmp/daily-check.out)"; then
+  if [ -n "$report" ]; then
+    n=$(echo "$report" | wc -l | tr -d ' ')
+    rewrite_note="; ${n} table(s) worth a rewrite"
+    dead="Tables whose dead space a rewrite would give back (at least ${REPACK_MIN_MB:-64} MB, and ${REPACK_MIN_SHARE:-0.2} of their files):
+
+$(echo "$report" | awk '{printf "  %-44s %-50s %6s MB dead of %s MB\n", $1, $2, $3, $4}')
+
+The rewrite runs online (pg_repack: a moment's lock per table):
+  kubectl -n ${ALERT_WHERE:-mavericks} create job --from=cronjob/postgres-repack repack-\$(date +%Y%m%d%H%M)"
+  else
+    rewrite_note=""
+    dead="No table has dead space worth a rewrite."
+  fi
 else
-  subject="[mavericks] daily check: all well, disks ${disks}${where}"
+  rewrite_note="; dead space not measured"
+  dead="The dead space could not be measured: $(tr '\n' ' ' </tmp/daily-check.out)"
+fi
+rm -f /tmp/daily-check.out
+
+if [ -n "$problems" ]; then
+  subject="[mavericks] daily check: ${problems}${rewrite_note}${where}"
+else
+  subject="[mavericks] daily check: all well, disks ${disks}${rewrite_note}${where}"
 fi
 log "$subject"
 send_alert_mail "$subject" "Each node's latest sample (node-stats, every 5 minutes):
@@ -113,6 +140,8 @@ send_alert_mail "$subject" "Each node's latest sample (node-stats, every 5 minut
 ${lines}
 A node is silent when its latest sample is older than ${SAMPLE_MAX_AGE_MINUTES} minutes:
 its node-stats pod is not running, or the node is down.
+
+${dead}
 
 ${footer}"
 [ -z "$problems" ]

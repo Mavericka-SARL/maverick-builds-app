@@ -18,18 +18,20 @@ if [ "${1:-}" = "now" ]; then
 fi
 
 hour="${BACKUP_HOUR:-3}"
-echo "[backup-schedule] daily dump at ${hour}:00 UTC (and the repack on Sundays)${ALERT_EMAIL:+, alerts to ${ALERT_EMAIL}}"
+echo "[backup-schedule] daily dump at ${hour}:00 UTC${ALERT_EMAIL:+, alerts to ${ALERT_EMAIL}}"
 while :; do
   now="$(date -u +%s)"
   wait=$(( (hour * 3600 - now % 86400 + 86400) % 86400 ))
   [ "$wait" -eq 0 ] && wait=86400
   sleep "$wait"
   pg-backup.sh || echo "[backup-schedule] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup FAILED; next attempt in 24 hours" >&2
-  # On Sundays, then give back the disk deletes left in large tables,
-  # online (pg-repack.sh; the server needs the postgres-walg image).
-  if [ "$(date -u +%u)" = 7 ]; then
-    pg-repack.sh || echo "[backup-schedule] $(date -u +%Y-%m-%dT%H:%M:%SZ) repack left a table as it was; see the lines above" >&2
-  fi
+  # The tables a rewrite would shrink, named in the log: the rewrite runs
+  # by hand (docker compose exec backup pg-repack.sh), online — PostgreSQL
+  # reuses a deleted row's space, and the rewrite only hands it back to the
+  # server (2026-11-11: no schedule).
+  pg-repack.sh --report 2>/dev/null | while read -r db table dead files; do
+    echo "[backup-schedule] ${db} ${table}: ${dead} MB of its ${files} MB is dead space; to give it back: docker compose exec backup pg-repack.sh"
+  done
   if [ -n "${ALERT_EMAIL:-}" ]; then
     # Two hours: this run's objects, not yesterday's.
     BACKUP_MAX_AGE_HOURS=2 backup-watchdog.sh || true

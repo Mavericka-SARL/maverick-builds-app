@@ -448,18 +448,22 @@ dumps the platform's database, every tenant database and Keycloak's database
 `BACKUP_RETENTION_DAYS` (14). All dumps of one pass share a timestamp, called
 a *run* below.
 
-On Sundays, after the dump, the same container rewrites the large tables that deletes
-left mostly empty, so their files go back to the data they hold. A deleted
-revision's calculated results need no rewrite: they are kept one table
-part per revision, and a revision's delete (or its model's or
-application's) gives their disk back at once. Its inputs and their history,
-and whatever is deleted inside a revision (a metric, a member), still wait
-for the rewrite. It uses pg_repack, which the
-`postgres` container's image carries: the table stays readable and
-writable while it is copied, and is locked only for the moment the copy
-is swapped in. A table is rewritten when its files exceed its data by
-`REPACK_MIN_MB` (64) and by `REPACK_MIN_SHARE` (0.2) of their size; the log
-lines start `pg-repack:`.
+Deleted data leaves free space in its table's files, which PostgreSQL
+reuses for the table's next rows; storage limits count the data, not the
+files. A deleted revision's calculated results give their disk back at
+once: they are kept one table part per revision. After each dump the same
+container names, in its log, any table whose files exceed its data by
+`REPACK_MIN_MB` (64) and by `REPACK_MIN_SHARE` (0.2) of their size. To give
+that space back to the server, rewrite those tables by hand:
+
+```bash
+docker compose exec backup pg-repack.sh
+```
+
+It uses pg_repack, which the `postgres` container's image carries: the
+table stays readable and writable while it is copied, and is locked only
+for the moment the copy is swapped in; its log lines start `pg-repack:`.
+Nothing rewrites on a schedule.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # take one now
@@ -544,6 +548,11 @@ release's `postgres-walg` image — PostgreSQL 16 as before, with pg_repack
 and wal-g — instead of `postgres:16-alpine`, for the weekly rewrite
 described under Backups. The data directory is the same; the upgrade
 recreates the container, so the database restarts once.
+
+**No scheduled rewrite (2026.11.11.1).** The backup service no longer
+rewrites tables on Sundays: free space is reused, and after each dump its
+log names the tables worth a rewrite, which `docker compose exec backup
+pg-repack.sh` does by hand (see Backups).
 
 **Calculated results by revision (2026.11.11).** The gateway's first
 start copies every calculated result into one table part per revision
@@ -952,6 +961,13 @@ pg_repack, online; the `postgres` StatefulSet's `postgres-walg` image
 carries the extension, so the release's image must reach the database pod:
 `kubectl rollout restart statefulset/postgres` once, a short restart.
 Until it has, each run logs that the server has no pg_repack and skips.
+
+**No scheduled rewrite (2026.11.11.1).** The `postgres-repack` CronJob is
+suspended: free space is reused, and `pg-repack.sh --report` names the
+tables worth a rewrite — each morning in the mail of the `daily-check`
+CronJob (`infra/node-stats.yaml`, applied on its own). Rewrite them by hand
+with
+`kubectl create job --from=cronjob/postgres-repack repack-$(date +%Y%m%d%H%M)`.
 
 **Calculated results by revision (2026.11.11).** The gateway's first
 start copies every calculated result into one table part per revision
