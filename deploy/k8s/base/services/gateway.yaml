@@ -215,6 +215,19 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          # The gateway serves /healthz only once its start-up has migrated
+          # the control plane and every tenant database. A migration that
+          # moves data (176 copies every calculated result into one part per
+          # revision: minutes on a workspace of millions of results) would
+          # outlast the liveness probe's minute and be killed, rolled back
+          # and started again, for ever. Up to 20 minutes to start; liveness
+          # and readiness begin once it has.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 120
           readinessProbe:
             httpGet:
               path: /healthz

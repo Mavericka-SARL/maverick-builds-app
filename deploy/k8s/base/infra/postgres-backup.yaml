@@ -80,7 +80,9 @@ spec:
                 runAsGroup: 70
 
 ---
-# The nightly online rewrite (owner's decision I9, 2026-11-10): pg-repack.sh
+# The weekly online rewrite (owner's decisions I9, 2026-11-10: pg_repack;
+# the same day: on Sundays only, until deletes stop leaving space behind):
+# pg-repack.sh
 # gives back the disk deletes leave in large tables with pg_repack, which
 # locks a table only for a moment, where VACUUM FULL locked it for the whole
 # rewrite. The server needs the extension: postgres-walg carries it. After
@@ -96,7 +98,7 @@ metadata:
     app.kubernetes.io/component: job
     app.kubernetes.io/part-of: mavericks-engine
 spec:
-  schedule: "0 4 * * *"
+  schedule: "0 4 * * 0"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

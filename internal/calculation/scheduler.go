@@ -287,6 +287,7 @@ func (s *Scheduler) underPassLock(ctx context.Context, revisionID string, pass f
 // recalcPass is one recalculation pass over req.ids.
 func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, req passRequest) error {
 	defer lockRevision(modelID, revisionID)()
+	s.store.EnsureRevisionParts(ctx, revisionID)
 	ctx = withPassCache(ctx)
 	affectedIDs := req.ids
 	// Definitions were loaded before the lock; reload so a pass that queued

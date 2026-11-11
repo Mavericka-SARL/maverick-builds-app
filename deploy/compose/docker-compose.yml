@@ -33,7 +33,7 @@ x-app-env: &app-env
 services:
   postgres:
     # PostgreSQL 16 (postgres:16-alpine) with pg_repack, which the backup
-    # service runs each night to give back the disk deletes leave, online
+    # service runs on Sundays to give back the disk deletes leave, online
     # (deploy/docker/pg-backup/pg-repack.sh), and wal-g; the same data
     # directory as the plain image's.
     build:

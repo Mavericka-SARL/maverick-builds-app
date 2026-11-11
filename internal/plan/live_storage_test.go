@@ -12,10 +12,12 @@ import (
 
 // Storage counts the data a tenant holds, not the files it sits in: the
 // figure is close to what the tables take once rewritten, and it falls as
-// soon as a model is deleted, while the files keep their size until
-// PostgreSQL reuses the space. Each model's share is in proportion to its
-// rows, and deleting a model or revision leaves no cell history behind
-// (migration 133).
+// soon as a model is deleted, while the inputs' files keep their size until
+// PostgreSQL reuses the space. The results' files go at the delete: they are
+// kept one part per revision, emptied when the revision goes and dropped at
+// the next compaction (migration 176). Each model's share is in proportion
+// to its rows, and deleting a model or revision leaves no cell history
+// behind (migration 133).
 func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.New(t, migrationfs.FS, ".")
@@ -43,6 +45,11 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 		metric := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, 'Amount', true, 'sum') RETURNING id::text`, m.id, m.rev)
 		exec(`INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value)
 			SELECT $1::uuid, $2::uuid, jsonb_build_object('region', 'r' || (i % 50), 'i', i), $3::uuid, i FROM generate_series(1, $4::int) i`, m.id, m.rev, metric, facts)
+		// The calculation makes a revision's parts before it writes its
+		// results; until then they would sit in the default part (migration 177).
+		if missing, err := EnsureRevisionParts(ctx, pool); err != nil || missing != 0 {
+			t.Fatalf("revision parts: %d missing, err %v", missing, err)
+		}
 		exec(`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value)
 			SELECT $1::uuid, $2::uuid, jsonb_build_object('region', 'r' || (i % 50), 'i', i), $3::uuid, i * 2 FROM generate_series(1, $4::int) i`, m.id, m.rev, metric, facts)
 		return m
@@ -53,14 +60,19 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 
 	// Compared with the data tables as VACUUM FULL would leave them (their
 	// files right after a bulk load, nothing deleted yet).
-	dataFiles := func() int64 {
+	sizeOf := func(where string) int64 {
 		var b int64
-		if err := pool.QueryRow(ctx, `SELECT sum(pg_total_relation_size(relid))::bigint FROM pg_stat_user_tables
-			WHERE relname LIKE 'fact_input_default' OR relname LIKE 'calc_result_default'`).Scan(&b); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(pg_total_relation_size(relid)), 0)::bigint FROM pg_stat_user_tables WHERE `+where).Scan(&b); err != nil {
 			t.Fatal(err)
 		}
 		return b
 	}
+	inputFiles := func() int64 { return sizeOf(`relname = 'fact_input_default'`) }
+	// Results are kept one part per revision (migration 176).
+	resultFiles := func() int64 {
+		return sizeOf(`relid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent = 'runtime.calc_result'::regclass)`)
+	}
+	dataFiles := func() int64 { return inputFiles() + resultFiles() }
 	sizes, err := ModelStorage(ctx, pool, cust)
 	if err != nil {
 		t.Fatal(err)
@@ -79,10 +91,11 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filesBefore := dataFiles()
+	filesBefore, inputsBefore, resultsBefore := dataFiles(), inputFiles(), resultFiles()
 
 	// Deleting the big model: the figure falls at once — no vacuum, no
-	// rewrite — while the files have not moved.
+	// rewrite — while the inputs' files have not moved, and its results'
+	// part is emptied with it.
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +117,11 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 	if before-after < sizes[big.id]*8/10 {
 		t.Fatalf("storage fell by %d after deleting a model of %d", before-after, sizes[big.id])
 	}
-	if dataFiles() < filesBefore*9/10 {
-		t.Fatalf("the files shrank by themselves; the test no longer shows the difference")
+	if inputFiles() < inputsBefore*9/10 {
+		t.Fatalf("the inputs' files shrank by themselves; the test no longer shows the difference")
+	}
+	if resultFiles() > resultsBefore/5 {
+		t.Fatalf("the results' files went from %d to %d: deleting the model kept its results' disk", resultsBefore, resultFiles())
 	}
 	if n := q(`SELECT count(*)::text FROM runtime.fact_input_history`); n != "0" {
 		t.Fatalf("cell history after deleting the model = %s, want 0", n)
@@ -128,7 +144,7 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 
 	// The forced compaction after a delete vacuums too (owner's decision
 	// I9, 2026-11-10): rewriting a large table locked it for minutes, so the
-	// files go back to the data left with the nightly pg_repack job
+	// files go back to the data left with the weekly pg_repack job
 	// (deploy/docker/pg-backup/pg-repack.sh), online. Storage, which counts
 	// live data, fell at the delete already; a second pass finds nothing to
 	// do.
@@ -139,6 +155,9 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 	t.Logf("forced compaction gave back %d bytes; data files %d -> %d", freed, filesBefore, dataFiles())
 	if node() != nodeBefore {
 		t.Fatal("the forced compaction rewrote runtime.fact_input's partitions")
+	}
+	if n := q(`SELECT count(*)::text FROM runtime.gone_revision_parts()`); n != "0" {
+		t.Fatalf("%s parts of deleted revisions left after the forced compaction, want 0", n)
 	}
 	if again, err := Compact(ctx, pool, true); err != nil || again != 0 {
 		t.Fatalf("second compaction = %d err=%v, want nothing to do", again, err)

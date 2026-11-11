@@ -69,9 +69,9 @@ COPY --from=repack /out/licenses/ /licenses/pg_repack/
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
 COPY --from=mc /out/licenses/ /licenses/mc/
 COPY Dockerfile /licenses/mc/build.Dockerfile
-COPY pg-backup.sh pg-restore.sh backup-watchdog.sh disk-watchdog.sh node-stats.sh pg-repack.sh alert-mail.sh /usr/local/bin/
+COPY pg-backup.sh pg-restore.sh backup-watchdog.sh disk-watchdog.sh node-stats.sh daily-check.sh pg-repack.sh alert-mail.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh \
-    /usr/local/bin/backup-watchdog.sh /usr/local/bin/disk-watchdog.sh /usr/local/bin/node-stats.sh /usr/local/bin/pg-repack.sh \
+    /usr/local/bin/backup-watchdog.sh /usr/local/bin/disk-watchdog.sh /usr/local/bin/node-stats.sh /usr/local/bin/daily-check.sh /usr/local/bin/pg-repack.sh \
     # curl is the watchdog's SMTP client: it is the one thing in this image
     # that has to reach a mail relay, and adding a Go binary or a Python
     # runtime for six lines of message would be worse.

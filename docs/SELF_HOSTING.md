@@ -448,9 +448,13 @@ dumps the platform's database, every tenant database and Keycloak's database
 `BACKUP_RETENTION_DAYS` (14). All dumps of one pass share a timestamp, called
 a *run* below.
 
-After the dump the same container rewrites the large tables that deletes
-left mostly empty (a model, revision or application deleted), so their
-files go back to the data they hold. It uses pg_repack, which the
+On Sundays, after the dump, the same container rewrites the large tables that deletes
+left mostly empty, so their files go back to the data they hold. A deleted
+revision's calculated results need no rewrite: they are kept one table
+part per revision, and a revision's delete (or its model's or
+application's) gives their disk back at once. Its inputs and their history,
+and whatever is deleted inside a revision (a metric, a member), still wait
+for the rewrite. It uses pg_repack, which the
 `postgres` container's image carries: the table stays readable and
 writable while it is copied, and is locked only for the moment the copy
 is swapped in. A table is rewritten when its files exceed its data by
@@ -537,9 +541,16 @@ KEYCLOAK_ADMIN_PASSWORD="$(grep '^KEYCLOAK_ADMIN_PASSWORD=' .env | cut -d= -f2-)
 
 **The database's image (2026.11.10.2).** The `postgres` service runs the
 release's `postgres-walg` image — PostgreSQL 16 as before, with pg_repack
-and wal-g — instead of `postgres:16-alpine`, for the nightly rewrite
+and wal-g — instead of `postgres:16-alpine`, for the weekly rewrite
 described under Backups. The data directory is the same; the upgrade
 recreates the container, so the database restarts once.
+
+**Calculated results by revision (2026.11.11).** The gateway's first
+start copies every calculated result into one table part per revision
+(migrations 176 and 177), and serves nothing until it has: about a minute per five
+million results on a fast server, several on a small one. During the copy
+the database needs free disk about the size of `runtime.calc_result` with
+its indexes. Take the dump first, as for any upgrade.
 
 **Stored deployment packages.** A model exported as a deployment package
 (an export removed in 2026.10.12) left a copy of its definitions and, by
@@ -935,12 +946,21 @@ a restore.
 Never deploy `latest`: a pod that restarts for any reason pulls whatever was
 pushed last.
 
-**Nightly rewrite (2026.11.10.2).** The `postgres-repack` CronJob (04:00,
-after the dump) rewrites the tables deletes left mostly empty with
+**Weekly rewrite (2026.11.10.2).** The `postgres-repack` CronJob (Sundays at
+04:00, after the dump) rewrites the tables deletes left mostly empty with
 pg_repack, online; the `postgres` StatefulSet's `postgres-walg` image
 carries the extension, so the release's image must reach the database pod:
 `kubectl rollout restart statefulset/postgres` once, a short restart.
 Until it has, each run logs that the server has no pg_repack and skips.
+
+**Calculated results by revision (2026.11.11).** The gateway's first
+start copies every calculated result into one table part per revision
+(migrations 176 and 177), and answers its probes only once it has: about a minute
+per five million results on a fast server, several on a small one. The
+release's gateway Deployment adds a `startupProbe` that allows 20 minutes;
+apply the manifests with the image, or a long copy outlasts the liveness
+probe and is killed and started again. During the copy the database needs
+free disk about the size of `runtime.calc_result` with its indexes.
 
 **Stored deployment packages.** A model exported as a deployment package
 (an export removed in 2026.10.12) left a copy of its definitions and, by

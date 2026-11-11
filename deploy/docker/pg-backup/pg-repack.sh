@@ -11,7 +11,8 @@
 # copies the table and its indexes while reads and writes go on, and holds
 # an exclusive lock only for the moment it swaps the copy in.
 #
-# For the control-plane database and every tenant_* database on the server:
+# Run weekly (Sundays: the CronJob, Compose's backup service). For the
+# control-plane database and every tenant_* database on the server:
 # creates the pg_repack extension (when the server has it: the
 # postgres-walg image), then repacks each table whose files exceed its live
 # data (runtime.live_tables(), migration 135) by REPACK_MIN_MB and by

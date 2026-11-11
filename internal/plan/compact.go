@@ -9,7 +9,7 @@ import (
 // deleted row's space in its table's files for later writes: VACUUM makes
 // it free for the table's next rows and gives back an empty end of its
 // files, and nothing waits for it. Rewriting a table to its live data is
-// the nightly pg_repack job's (deploy/docker/pg-backup/pg-repack.sh), which
+// the weekly pg_repack job's (deploy/docker/pg-backup/pg-repack.sh), which
 // rewrites online. Only in a tenant's own database (the usage sweep and the
 // gateway call it there): a shared database's tables hold every tenant at
 // once.
@@ -37,6 +37,7 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 		changed, files int64
 		filenode       uint32
 	}
+	freed, firstErr := reclaimGarbage(ctx, db)
 	minShare := 0.2
 	if force {
 		minShare = 0
@@ -61,13 +62,13 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 		var t table
 		if err := rows.Scan(&t.oid, &t.name, &t.changed, &t.files, &t.filenode); err != nil {
 			rows.Close()
-			return 0, err
+			return freed, err
 		}
 		tables = append(tables, t)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, err
+		return freed, err
 	}
 	// The sweep's VACUUM runs without parallel workers: they share their
 	// work through /dev/shm, which a container gets at 64 MB, and a VACUUM
@@ -75,8 +76,6 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	// on the Playground calc_result was not vacuumed, and the sweep stopped
 	// at it, for days (2026-10-25). A table that fails no longer stops the
 	// sweep: the others are still compacted, and the first error returned.
-	var freed int64
-	var firstErr error
 	for _, t := range tables {
 		if _, err := db.Exec(ctx, `VACUUM (SKIP_LOCKED, PARALLEL 0) `+t.name); err != nil {
 			if firstErr == nil {
@@ -109,12 +108,38 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	return freed, firstErr
 }
 
-// CompactTenant is Compact for customerID's own database, and nothing in a
-// shared one.
+// reclaimGarbage puts each revision's rows in its own parts
+// (EnsureRevisionParts) and removes what nothing will read again, before
+// the tables are vacuumed: the parts of deleted revisions
+// (DropGoneRevisionParts) and the staged rows of imports no longer in
+// progress (ReclaimImportStaging). Returns the bytes the dropped parts held
+// and the first error.
+func reclaimGarbage(ctx context.Context, db DB) (int64, error) {
+	_, err := EnsureRevisionParts(ctx, db)
+	freed, derr := DropGoneRevisionParts(ctx, db)
+	if err == nil {
+		err = derr
+	}
+	if _, serr := ReclaimImportStaging(ctx, db); err == nil {
+		err = serr
+	}
+	return freed, err
+}
+
+// CompactTenant is Compact for customerID's own database; in a shared one
+// it only removes what nothing will read again (reclaimGarbage): a shared
+// database's tables hold every tenant at once.
 func CompactTenant(ctx context.Context, db DB, customerID string, force bool) (int64, error) {
 	dedicated, err := dedicatedTo(ctx, db, customerID)
-	if err != nil || !dedicated {
+	if err != nil {
 		return 0, err
+	}
+	if !dedicated {
+		freed, err := reclaimGarbage(ctx, db)
+		if err != nil {
+			return freed, fmt.Errorf("compact tenant %s: %w", customerID, err)
+		}
+		return freed, nil
 	}
 	freed, err := Compact(ctx, db, force)
 	if err != nil {

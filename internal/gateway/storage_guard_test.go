@@ -102,7 +102,7 @@ func TestStorageLimitRefusesTheWriteThatWouldCrossIt(t *testing.T) {
 	}
 
 	// Deleting a model: the figure falls at once. The disk goes back with
-	// the nightly pg_repack job (deploy/docker/pg-backup/pg-repack.sh),
+	// the weekly pg_repack job (deploy/docker/pg-backup/pg-repack.sh),
 	// online: the delete's compaction only vacuums, since rewriting here
 	// locked each table for the whole rewrite (owner's decision I9,
 	// 2026-11-10). The files must not grow for the delete.
