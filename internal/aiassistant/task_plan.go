@@ -24,6 +24,52 @@ type TaskPlan struct {
 	// CarriedFrom is the earlier session this plan was carried over from
 	// (CarryTaskPlan): a session ends at its call limit, the goal does not.
 	CarriedFrom string `json:"carried_from,omitempty"`
+	// CarriedChecked: the carried plan's stages were checked against the
+	// model on the session's first turn (the gateway's carried-plan check).
+	CarriedChecked bool `json:"carried_checked,omitempty"`
+	// Decisions are what the developer decided in answer to the AI — "store
+	// percentages in percent units", "an opening balance is the last
+	// closing" — kept for every later turn and session, never asked again.
+	// Session 2 of the High-Tech build asked the percent question answered
+	// in session 1, and redid the inputs as fractions (2026-11-11).
+	Decisions []string `json:"decisions,omitempty"`
+}
+
+// maxDecisions bounds the decisions a plan keeps (the oldest go first).
+const maxDecisions = 30
+
+// AddDecision keeps decision (trimmed, at most 500 characters) unless the
+// plan holds it already; it reports whether the plan changed.
+func (p *TaskPlan) AddDecision(decision string) bool {
+	d := strings.Join(strings.Fields(decision), " ")
+	if d == "" {
+		return false
+	}
+	if r := []rune(d); len(r) > 500 {
+		d = string(r[:500]) + "…"
+	}
+	for _, have := range p.Decisions {
+		if strings.EqualFold(have, d) {
+			return false
+		}
+	}
+	p.Decisions = append(p.Decisions, d)
+	if len(p.Decisions) > maxDecisions {
+		p.Decisions = p.Decisions[len(p.Decisions)-maxDecisions:]
+	}
+	return true
+}
+
+// MarkCovered notes that proposalID does every item of the current stage
+// (the coverage check found none missing): confirmed whole, it finishes
+// the stage (RecordConfirmed).
+func (p *TaskPlan) MarkCovered(proposalID string) bool {
+	cur := p.Current()
+	if cur < 0 || proposalID == "" || len(p.Stages[cur].Items) == 0 {
+		return false
+	}
+	p.Stages[cur].CoveredBy = proposalID
+	return true
 }
 
 // TaskStage is one stage: what it delivers (named, so a plan for it can be
@@ -38,6 +84,9 @@ type TaskStage struct {
 	// was current, and their steps (RecordConfirmed).
 	Confirmed      int `json:"confirmed,omitempty"`
 	ConfirmedSteps int `json:"confirmed_steps,omitempty"`
+	// CoveredBy is the proposal the coverage check found doing every item
+	// of the stage (MarkCovered).
+	CoveredBy string `json:"covered_by,omitempty"`
 }
 
 // Stage statuses.
@@ -63,7 +112,28 @@ func (p *TaskPlan) Current() int {
 
 // Render is the plan as the AI and the developer read it.
 func (p *TaskPlan) Render() string {
-	if p == nil || len(p.Stages) == 0 {
+	if p == nil || (len(p.Stages) == 0 && len(p.Decisions) == 0) {
+		return ""
+	}
+	return p.renderStages() + p.renderDecisions()
+}
+
+// renderDecisions is the decisions part of Render.
+func (p *TaskPlan) renderDecisions() string {
+	if len(p.Decisions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Decisions the developer made (in this or an earlier session) — they stand; never ask them again:\n")
+	for _, d := range p.Decisions {
+		b.WriteString("- " + d + "\n")
+	}
+	return b.String()
+}
+
+// renderStages is the stages part of Render.
+func (p *TaskPlan) renderStages() string {
+	if len(p.Stages) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -135,7 +205,12 @@ func (s *ChatStore) SetTaskPlan(ctx context.Context, sessionID string, p *TaskPl
 // stages were confirmed (2026-11-08): the AI marks a stage done, but the
 // server knows a plan for it was confirmed. It reports whether the plan
 // changed.
-func (p *TaskPlan) RecordConfirmed(steps int) bool {
+//
+// A plan the coverage check found doing every item of the stage
+// (MarkCovered), confirmed with every step run, finishes it: stages were
+// left "pending" for 29 turns and ~210 executed steps because only the AI
+// marked them (2026-11-11), and the next session redid finished work.
+func (p *TaskPlan) RecordConfirmed(proposalID string, steps int, whole bool) bool {
 	cur := p.Current()
 	if cur < 0 {
 		return false
@@ -146,7 +221,51 @@ func (p *TaskPlan) RecordConfirmed(steps int) bool {
 	}
 	st.Confirmed++
 	st.ConfirmedSteps += steps
+	if whole && proposalID != "" && st.CoveredBy == proposalID {
+		st.Status = StageDone
+		if st.Note == "" {
+			st.Note = "done by the server: a confirmed plan did every item"
+		}
+	}
 	return true
+}
+
+// MarkFound marks the stages whose items the model already holds — the
+// carried-plan check's answer, by 0-based stage: done when every item is
+// found, with a note naming the ones found otherwise.
+func (p *TaskPlan) MarkFound(found map[int][]string) bool {
+	changed := false
+	for i, items := range found {
+		if i < 0 || i >= len(p.Stages) || len(items) == 0 {
+			continue
+		}
+		st := &p.Stages[i]
+		if st.Status == StageDone || st.Status == StageSkipped {
+			continue
+		}
+		if len(items) >= len(st.Items) {
+			st.Status = StageDone
+			st.Note = "done: the model already holds every item (checked when the plan was carried)"
+		} else {
+			st.Note = "already in the model: " + strings.Join(items, "; ")
+		}
+		changed = true
+	}
+	return changed
+}
+
+// Append adds stages after the plan's own, for a new goal given while a
+// carried plan is unfinished: the carried stages and decisions stay (owner,
+// 2026-11-11: a new session must read the earlier sessions' plan, never
+// lose it).
+func (p *TaskPlan) Append(goal string, stages []TaskStage) {
+	if g := strings.TrimSpace(goal); g != "" && !strings.Contains(p.Goal, g) {
+		p.Goal = strings.TrimSpace(p.Goal + "; then: " + g)
+	}
+	for _, st := range stages {
+		st.Status, st.Note, st.CoveredBy = StagePending, "", ""
+		p.Stages = append(p.Stages, st)
+	}
 }
 
 // Finished reports whether every stage is done or skipped.
@@ -175,10 +294,18 @@ func (s *ChatStore) CarryTaskPlan(ctx context.Context, sessionID, modelID, userI
 		return nil, err
 	}
 	var p TaskPlan
-	if json.Unmarshal(raw, &p) != nil || p.Finished() || (!sameDraft && !promoted) {
+	if json.Unmarshal(raw, &p) != nil || (!sameDraft && !promoted) {
 		return nil, nil
 	}
+	if p.Finished() || len(p.Stages) == 0 {
+		// A finished goal is not carried; its decisions are.
+		if len(p.Decisions) == 0 {
+			return nil, nil
+		}
+		p = TaskPlan{Decisions: p.Decisions}
+	}
 	p.CarriedFrom = from
+	p.CarriedChecked = false
 	if err := s.SetTaskPlan(ctx, sessionID, &p); err != nil {
 		return nil, err
 	}

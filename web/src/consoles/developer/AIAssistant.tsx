@@ -17,9 +17,11 @@ import {
 import { parsePastedTable } from "./pastedTable";
 
 // ── Settings panel ────────────────────────────────────────────────────────────
-// The model is free text, with no suggestion list: providers ship new models
-// faster than a list here could follow. Blank means the gateway's default for
-// the provider (providerDefaultModels in internal/gateway/ai_handler.go).
+// The model is free text, offered the models the key reaches (asked from the
+// provider, so a new model appears the day it ships): a name the key cannot
+// use otherwise failed only on the first call. Blank means the gateway's
+// default for the provider (providerDefaultModels in
+// internal/gateway/ai_handler.go).
 
 function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; initialSettings?: AISettings }) {
   const qc = useQueryClient();
@@ -29,6 +31,16 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   const [model, setModel]       = useState(initialSettings?.model ?? "");
   const [apiKey, setApiKey]     = useState("");
   const [saved, setSaved]       = useState(false);
+  const [effort, setEffort]     = useState(initialSettings?.reasoning_effort ?? "");
+  // The models the key reaches: asked for the saved key when the panel opens
+  // or the provider changes, and for a typed key on "List models".
+  const [typedKeyAsked, setTypedKeyAsked] = useState("");
+  const models = useQuery({
+    queryKey: ["ai-models", provider, typedKeyAsked],
+    queryFn: () => api.aiListModels({ provider, api_key: typedKeyAsked || undefined }),
+    staleTime: 5 * 60_000,
+  });
+  const offered = Array.isArray(models.data?.models) ? models.data.models : [];
 
   // A model name belongs to one provider, so switching provider clears it
   // (blank = that provider's default) — inline in the handler, not an effect.
@@ -38,7 +50,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   };
 
   const save = useMutation({
-    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined }),
+    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-settings"] });
       setSaved(true);
@@ -47,7 +59,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   });
 
   const test = useMutation({
-    mutationFn: () => api.aiTestSettings({ provider, model, api_key: apiKey || undefined }),
+    mutationFn: () => api.aiTestSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
   });
 
   return (
@@ -84,15 +96,43 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           </Select>
         </Field>
 
-        <Field label="Model" description="Any model ID your provider offers, including ones released after this screen was built.">
+        <Field
+          label="Model"
+          description={offered.length
+            ? `Any model ID your provider offers; the list holds the ${offered.length} your key reaches.`
+            : models.data?.error
+              ? `Any model ID your provider offers (the key's models could not be listed: ${models.data.error}).`
+              : "Any model ID your provider offers, including ones released after this screen was built."}
+        >
           <TextInput
             value={model}
             onChange={e => setModel(e.target.value)}
             placeholder={initialSettings?.default_models?.[provider] ? `Blank runs ${initialSettings.default_models[provider]}` : "Leave blank for the provider's default"}
             aria-label="Model"
             autoComplete="off"
+            list="ai-model-options"
           />
+          <datalist id="ai-model-options">
+            {offered.map(m => <option key={m} value={m} />)}
+          </datalist>
         </Field>
+
+        {provider === "openai" && (
+          <Field
+            label="Reasoning effort"
+            description="Sent with every call to a reasoning model. Some models take tools only with None; a lower effort makes long build turns shorter."
+          >
+            <Select value={effort} onChange={e => setEffort(e.target.value)} aria-label="Reasoning effort">
+              <option value="">Model default</option>
+              <option value="none">None</option>
+              <option value="minimal">Minimal</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">Extra high</option>
+            </Select>
+          </Field>
+        )}
 
         <Field
           label={initialSettings?.has_key ? "API Key — key saved" : "API Key"}
@@ -120,6 +160,11 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           <Button loading={test.isPending} loadingLabel="Testing…" onClick={() => test.mutate()}>
             Test connection
           </Button>
+          {apiKey && apiKey !== typedKeyAsked && (
+            <Button loading={models.isFetching} loadingLabel="Listing…" onClick={() => setTypedKeyAsked(apiKey)}>
+              List models
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
         </div>
 
@@ -677,6 +722,94 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
         </ol>
       )}
     </div>
+  );
+}
+
+// DecisionsCard lists what the developer decided in answer to the AI — kept
+// with the plan for every later turn and session, and never asked again.
+function DecisionsCard({ decisions }: { decisions: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)" }}>
+        <Txt>{`Decisions kept: ${decisions.length}`}</Txt>
+      </button>
+      {open && (
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          {decisions.map((d, i) => <li key={i}><Txt>{d}</Txt></li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// WorkbookMapCard shows which workbook rows became which metrics, what
+// differs, and what is not mapped yet — the AI reads the same map every turn.
+function WorkbookMapCard({ sessionId, turns }: { sessionId: string; turns: number }) {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["ai-workbook-map", sessionId, turns],
+    queryFn: () => api.aiWorkbookMap(sessionId),
+  });
+  const sheets = Array.isArray(data?.sheets) ? data.sheets : [];
+  if (sheets.length === 0) return null;
+  const mapped = sheets.reduce((n, s) => n + s.mapped, 0);
+  const match = sheets.reduce((n, s) => n + s.match, 0);
+  const differ = sheets.reduce((n, s) => n + s.differ.length, 0);
+  const notMapped = sheets.reduce((n, s) => n + s.not_mapped.length, 0);
+  return (
+    <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)" }}>
+        <Txt>{`Workbook map: ${mapped} rows mapped, ${match} match, ${differ} differ, ${notMapped} with numbers not mapped`}</Txt>
+      </button>
+      {open && (
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          {sheets.map(s => (
+            <li key={`${s.file}/${s.sheet}`}>
+              <Txt>{`${s.sheet} (${s.file}): ${s.mapped} mapped, ${s.match} match`}</Txt>
+              {s.differ.length > 0 && <span style={{ color: "var(--color-danger)" }}><Txt>{` — differ: rows ${s.differ.join(", ")}`}</Txt></span>}
+              {s.not_mapped.length > 0 && <span className="mvx-admin-muted"><Txt>{` — not mapped: rows ${s.not_mapped.join(", ")}`}</Txt></span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// fmtUSD writes an estimated cost in US dollars: "USD 3.42".
+function fmtUSD(n: number): string {
+  return `USD ${n.toFixed(2)}`;
+}
+
+// CallBudgetControl sets the session's own cap on provider calls: a task
+// stops there instead of at the deployment's per-session cap.
+function CallBudgetControl({ sessionId, budget, onChange }: { sessionId: string; budget?: number; onChange: (b: number | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(budget ? String(budget) : "");
+  const save = useMutation({
+    mutationFn: (n: number | null) => api.aiSetCallBudget(sessionId, n),
+    onSuccess: (r) => { onChange(r.call_budget ?? null); setEditing(false); },
+  });
+  if (!editing) {
+    return (
+      <button type="button" className="mvx-admin-muted" onClick={() => { setValue(budget ? String(budget) : ""); setEditing(true); }}
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontSize: "inherit", textDecoration: "underline dotted" }}>
+        <Txt>{budget ? `· budget ${budget} calls` : "· set a call budget"}</Txt>
+      </button>
+    );
+  }
+  const n = Number.parseInt(value, 10);
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <TextInput value={value} onChange={e => setValue(e.target.value)} aria-label="Call budget" placeholder="calls" style={{ width: 70 }} inputMode="numeric" />
+      <Button size="sm" disabled={!(n > 0)} loading={save.isPending} onClick={() => save.mutate(n)}>Set</Button>
+      {budget != null && <Button size="sm" variant="ghost" onClick={() => save.mutate(null)}>Clear</Button>}
+      <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+      {save.error && <span className="mvx-admin-error">{(save.error as Error).message}</span>}
+    </span>
   );
 }
 
@@ -1277,13 +1410,20 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             {currentSession?.draft_revision_id && <span>· writes go to your AI draft revision</span>}
             {usage && usage.llm_calls > 0 && (
               <span title={`Input ${usage.input_tokens.toLocaleString()}, read from cache ${usage.cache_read_tokens.toLocaleString()}, written to cache ${usage.cache_write_tokens.toLocaleString()}, output ${usage.output_tokens.toLocaleString()}`}>
-                <Txt>{`· ${usage.llm_calls} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in, ${fmtTokens(usage.output_tokens)} out`}</Txt>
+                <Txt>{`· ${usage.llm_calls}${currentSession?.call_budget ? ` of ${currentSession.call_budget}` : ""} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in, ${fmtTokens(usage.output_tokens)} out`}</Txt>
+                {usage.estimated_cost_usd != null && <Txt>{` · about ${fmtUSD(usage.estimated_cost_usd)}`}</Txt>}
               </span>
+            )}
+            {sessionId && (
+              <CallBudgetControl sessionId={sessionId} budget={currentSession?.call_budget}
+                onChange={b => setCurrentSession(s => (s ? { ...s, call_budget: b ?? undefined } : s))} />
             )}
           </div>
         )}
 
         {taskPlan && taskPlan.stages.length > 0 && <TaskPlanCard plan={taskPlan} />}
+        {taskPlan && (taskPlan.decisions?.length ?? 0) > 0 && <DecisionsCard decisions={taskPlan.decisions ?? []} />}
+        {sessionId && <WorkbookMapCard sessionId={sessionId} turns={messages.length} />}
 
         {showActivity && sessionId && (
           <ActivityPanel sessionId={sessionId} onClose={() => setShowActivity(false)} />

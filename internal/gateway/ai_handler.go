@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -209,6 +211,10 @@ func (h *handler) buildProviderForRequest(r *http.Request, act *actor) (provider
 	if err != nil {
 		return nil, "", "", err
 	}
+	// The developer's reasoning effort, for their own provider's models.
+	if provider == settings.Provider || (settings.Provider == "" && provider == "openai") {
+		p = withEffort(p, settings.ReasoningEffort)
+	}
 	if model == "" {
 		model = defaultModel(provider)
 	}
@@ -340,7 +346,7 @@ func (h *handler) aiGetSession(w http.ResponseWriter, r *http.Request) {
 	// What the session's calls were billed for (migration 160).
 	usage, _ := store.Usage(ctx, sessionID)
 	plan, _ := store.TaskPlan(ctx, sessionID)
-	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": usage, "task_plan": plan})
+	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": withCost(usage, sess.LLMModel), "task_plan": plan})
 }
 
 // ── POST /api/ai/sessions/{id}/messages ─────────────────────────────────────
@@ -419,6 +425,10 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxLLMCallsPerSession, maxLLMCallsPerUserPerDay := llmCallCaps()
+	// The developer's own budget for this session, when they set one.
+	if sess.CallBudget != nil && *sess.CallBudget > 0 && *sess.CallBudget < maxLLMCallsPerSession {
+		maxLLMCallsPerSession = *sess.CallBudget
+	}
 	if sessionCalls >= maxLLMCallsPerSession {
 		jsonErr(w, fmt.Errorf("%s", sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)), http.StatusTooManyRequests)
 		return
@@ -519,16 +529,24 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// The message read as a direct order, a delegated goal or a question,
 	// with the playbooks of its tasks and the session's plan (ai_task.go).
 	taskPlan, _ := store.TaskPlan(ctx, sessionID)
+	// Carried context made right (ai_plan_carry.go): the developer's answer
+	// to the AI's question is kept as a decision, and a carried plan's open
+	// stages are checked against the model once.
+	taskPlan = recordDecision(ctx, store, sessionID, taskPlan, history, req.Content)
+	h.checkCarriedPlan(ctx, store, llmProvider, llmModel, sessionID, revID, taskPlan)
 	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
 	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
+	// The workbook map: which row became which metric, what differs and what
+	// is not mapped yet (ai_workbook_map.go).
+	systemPrompt += h.workbookMapBrief(ctx, sessionID, modelID, revID)
 	systemPrompt += sessionLengthNote(sessionCalls, maxLLMCallsPerSession)
 
 	// 4. Tool executors.
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
-	tools := aiassistant.AllTools()
+	tools := aiassistant.TurnTools(reqMode, req.Content)
 
 	// 5. From here on, respond over SSE so the frontend can render the final
 	//    reply token-by-token instead of waiting for the whole thing. Every
@@ -559,7 +577,17 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Loop to handle read tool calls. propose_actions (write gateway) breaks
 	// the loop and sends a "proposal" event to the frontend.
-	provMessages := aiassistant.MessagesToProviderHistory(aiassistant.CompactHistory(history))
+	// Tool exchanges older than the last confirmed plan are settled: the
+	// plan, its decisions and the workbook map carry what they found.
+	var settled time.Time
+	if props, pErr := aiassistant.NewProposalStore(h.db.For(ctx)).ListProposals(ctx, sessionID); pErr == nil {
+		for _, p := range props {
+			if p.ExecutedAt != nil && p.ExecutedAt.After(settled) {
+				settled = *p.ExecutedAt
+			}
+		}
+	}
+	provMessages := aiassistant.MessagesToProviderHistory(aiassistant.CompactHistory(aiassistant.SettleHistory(history, settled)))
 	var finalReply string
 
 	// Repeat-call breaker: gpt-4o-mini has been observed calling the SAME
@@ -608,6 +636,20 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
 		}
 	}
+	// And with the results of the plans confirmed since the last reply: blank
+	// metrics, failing calculations, IFERROR fallbacks (ai_after_confirm.go).
+	if note := h.afterConfirmCheck(turnCtx, proposalStore, sessionID, modelID, revID, history,
+		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }); note != "" {
+		_, _ = store.SaveMessage(saveCtx, sessionID, "assistant", note, nil, "", "")
+		if n := len(provMessages); n > 0 && provMessages[n-1].Role == "user" {
+			provMessages[n-1].Content += "\n\n" + note
+		} else {
+			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
+		}
+	}
+	// stageCovered: the turn's coverage check found every item of the task
+	// plan's current stage in the plan.
+	stageCovered := false
 	// sentBack: a plan of this turn went back to be fixed. A model that then
 	// ends the turn asking leave to propose ("confirm and I will post it" —
 	// gpt-5-mini did, stage after stage) is told once to propose instead.
@@ -675,12 +717,14 @@ turn:
 			Tools:        tools,
 			OnToolArgs:   progress.onArgs,
 		}
-		// A call that sends nothing for aiCallIdleLimit is stopped and asked
-		// once more; the second silence ends the turn with an error.
+		// A call that sends nothing for aiCallIdleLimit, runs past
+		// aiCallMaxDuration or loses its connection is stopped and asked
+		// once more; the second such end finishes the turn with an error.
 		var llmResp providers.ChatResponse
 		for attempt := 1; ; attempt++ {
 			var stalled bool
-			stalled, err = watchedAICall(turnCtx, aiCallIdleLimit(), func(callCtx context.Context, touch func()) error {
+			callStart := time.Now()
+			stalled, err = watchedAICall(turnCtx, aiCallIdleLimit(), aiCallMaxDuration(), func(callCtx context.Context, touch func()) error {
 				req := chatReq
 				req.OnToolArgs = func(name string, args []byte) {
 					touch()
@@ -699,15 +743,27 @@ turn:
 				}
 				return cErr
 			})
-			if !stalled {
+			took := time.Since(callStart).Round(time.Second)
+			if took > time.Minute {
+				log.Printf("AI call: session=%s main call took %s (attempt %d, err=%v)", sessionID, took, attempt, err)
+			}
+			dropped := !stalled && turnCtx.Err() == nil && transientAICallError(err)
+			if !stalled && !dropped {
 				break
+			}
+			why := fmt.Sprintf("sent nothing for %s", aiCallIdleLimit())
+			switch {
+			case dropped:
+				why = "dropped the connection"
+			case took >= aiCallMaxDuration():
+				why = fmt.Sprintf("did not finish in %s", aiCallMaxDuration())
 			}
 			if attempt == 2 {
-				err = fmt.Errorf("the AI provider sent nothing for %s, twice: %w", aiCallIdleLimit(), errAICallStalled)
+				err = fmt.Errorf("the AI provider %s, twice: %w", why, err)
 				break
 			}
-			log.Printf("AI call: session=%s sent nothing for %s, asked again", sessionID, aiCallIdleLimit())
-			sendSSE("tool_status", map[string]string{"tool": fmt.Sprintf("the AI provider sent nothing for %s — asking again", aiCallIdleLimit())})
+			log.Printf("AI call: session=%s %s after %s, asked again", sessionID, why, took)
+			sendSSE("tool_status", map[string]string{"tool": "the AI provider " + why + " — asking again"})
 		}
 		if err != nil && stopTurn() {
 			return
@@ -758,6 +814,22 @@ turn:
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: proposeNudge})
 				continue
+			}
+			// A permission question with no choice in it is answered by the
+			// server: the developer's request is the leave (2026-11-11).
+			if !nudged && reqMode.Mode != aiassistant.ModeQuestion && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksPermission(llmResp.Message.Content) {
+				nudged = true
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: permissionNudge})
+				continue
+			}
+			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && pointsAtPlan.MatchString(llmResp.Message.Content) {
+				if pending, _ := proposalStore.ListPendingProposals(ctx, sessionID); len(pending) == 0 {
+					nudged = true
+					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
+					continue
+				}
 			}
 			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && claimsUnproposedChange(llmResp.Message.Content) {
 				nudged = true
@@ -877,8 +949,44 @@ turn:
 				return
 			}
 			if cErr == nil {
+				// The plan as the server left it: layout steps that fail
+				// left out, missing grid placements added (proposalCheck).
+				args.Steps = check.planSteps(args.Steps)
 				check.warnings = append(check.warnings, inputOverwriteWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
 				check.warnings = append(check.warnings, calcToInputWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
+				if probs, failed := formulaReplacedProblems(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content); len(probs) > 0 {
+					check.problems = append(check.problems, probs...)
+					if check.failed == nil {
+						check.failed = map[int]bool{}
+					}
+					for _, i := range failed {
+						check.failed[i] = true
+					}
+				}
+				if docs, dErr := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocuments(turnCtx, sessionID); dErr == nil {
+					names := make([]string, 0, len(docs))
+					for _, d := range docs {
+						names = append(names, d.Filename)
+					}
+					if probs, failed := missingFileProblems(args.Steps, req.Content, names); len(probs) > 0 {
+						check.problems = append(check.problems, probs...)
+						if check.failed == nil {
+							check.failed = map[int]bool{}
+						}
+						for _, i := range failed {
+							check.failed[i] = true
+						}
+					}
+				}
+				if probs, failed := sourceFilterProblems(args.Steps, req.Content); len(probs) > 0 {
+					check.problems = append(check.problems, probs...)
+					if check.failed == nil {
+						check.failed = map[int]bool{}
+					}
+					for _, i := range failed {
+						check.failed[i] = true
+					}
+				}
 			}
 			// A plan that runs goes back once more when it leaves out part
 			// of a request naming several things (ai_coverage.go).
@@ -891,11 +999,22 @@ turn:
 				}
 				missing, extra, usage := planCoverage(turnCtx, llmProvider, llmModel, req.Content, stageItems, reqMode.Mode == aiassistant.ModeDirect, args.Steps,
 					modelInventory(turnCtx, h.db.For(ctx), revID))
+				// Every item of the current stage has a step: confirmed
+				// whole, this plan finishes the stage (TaskPlan.MarkCovered).
+				stageCovered = len(stageItems) > 0 && len(missing) == 0 && usage.InputTokens+usage.CacheReadTokens > 0
 				if usage.InputTokens+usage.CacheReadTokens > 0 {
 					_ = store.AddUsage(context.WithoutCancel(ctx), sessionID, usage)
 				}
 				if len(missing) > 0 {
 					check.warnings = append(check.warnings, coverageWarning(missing))
+				}
+				if drop, notes, rest := unaskedChanges(extra, args.Steps); len(drop) > 0 {
+					kept, _ := aiassistant.DropSteps(args.Steps, drop)
+					if len(kept) > 0 {
+						args.Steps = kept
+						check.notes = append(check.notes, notes...)
+						extra = rest
+					}
 				}
 				if len(extra) > 0 {
 					check.warnings = append(check.warnings, extraWarning(extra))
@@ -907,10 +1026,12 @@ turn:
 			if warnBack {
 				warnedPlan, warnedWarnings = args.Steps, check.warnings
 			}
+			serverPartial := false
+			planResult := ""
 			if cErr != nil {
 				log.Printf("AI proposal check: %v", cErr)
 			} else if len(check.problems) > 0 || warnBack {
-				planResult := warningResult(check.warnings)
+				planResult = warningResult(check.warnings)
 				sentBack = true
 				if len(check.problems) > 0 {
 					mode := retries.next(len(check.problems))
@@ -921,7 +1042,20 @@ turn:
 					if mode == retryFix {
 						retries.warnedBefore(check.warnings)
 					}
-					if mode == retryPartial {
+					if mode == retryPartial || mode == retryStop {
+						// The server makes the plan of the steps that pass
+						// itself: asked for it, models re-sent the failing
+						// step or claimed a plan they never proposed
+						// (2026-11-11, five rounds over one reorder step).
+						if kept, _ := aiassistant.DropSteps(args.Steps, check.failed); len(kept) > 0 && len(check.failed) > 0 {
+							retries.leftOut, retries.partialOf = check.problems, args.Steps
+							retries.partialAsked = true
+							args.Steps = kept
+							serverPartial = true
+							sentBack = false
+						}
+					}
+					if mode == retryPartial && !serverPartial {
 						retries.leftOut, retries.partialOf = check.problems, args.Steps
 					}
 					if mode == retryStop {
@@ -929,6 +1063,8 @@ turn:
 					}
 					planResult = check.rejection(mode)
 				}
+			}
+			if cErr == nil && !serverPartial && (len(check.problems) > 0 || warnBack) {
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, llmResp.Message.ToolCalls, "", "")
 				provMessages = append(provMessages, llmResp.Message)
 				for _, call := range llmResp.Message.ToolCalls {
@@ -945,7 +1081,10 @@ turn:
 				sendSSE("tool_status", map[string]string{"tool": "checking the plan"})
 				continue turn
 			}
-			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps, check.warnings)
+			// What the server changed in the plan is shown beside it, as
+			// the warnings are, and told to the model.
+			shownWarnings := append(append([]string{}, check.notes...), check.warnings...)
+			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps, shownWarnings)
 			if pErr != nil {
 				sendSSE("error", map[string]string{"error": fmt.Sprintf("save proposal: %v", pErr)})
 				return
@@ -954,8 +1093,21 @@ turn:
 			_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content,
 				llmResp.Message.ToolCalls, "", "")
 			created := fmt.Sprintf("Proposal created (%d step(s)) — awaiting developer confirmation.", len(args.Steps))
+			if serverPartial {
+				created = fmt.Sprintf("Proposal created by the server with the %d step(s) that pass — awaiting developer confirmation. "+
+					"Left out (they fail, or need a step that fails): %s. In your reply, say plainly what was left out and why; do not propose again in this turn.",
+					len(args.Steps), strings.Join(check.problems, " | "))
+			}
+			if len(check.notes) > 0 {
+				created += " The server changed the plan: " + strings.Join(check.notes, " | ")
+			}
 			if len(check.warnings) > 0 {
 				created += " Shown with the plan check's warnings: " + strings.Join(check.warnings, " | ")
+			}
+			if stageCovered {
+				if plan, pErr := store.TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.MarkCovered(proposal.ID) {
+					_ = store.SetTaskPlan(ctx, sessionID, plan)
+				}
 			}
 			_, replacedSteps, _ := proposalStore.WithdrawPending(ctx, sessionID, proposal.ID)
 			if replacedSteps > 0 {
@@ -996,7 +1148,7 @@ turn:
 				"proposal": proposal,
 				"messages": allMsgs,
 				"session":  sess,
-				"warnings": check.warnings,
+				"warnings": shownWarnings,
 			})
 			_ = writeExecutor // suppress unused warning until confirm path uses it
 			return
@@ -1043,7 +1195,7 @@ turn:
 				allMsgs = []aiassistant.ChatMessage{}
 			}
 			usage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
-			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings, "usage": usage})
+			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings, "usage": withCost(usage, llmModel)})
 			return
 		}
 	}
@@ -1068,7 +1220,7 @@ turn:
 		"reply":     saved,
 		"messages":  allMsgs,
 		"session":   sess,
-		"usage":     doneUsage,
+		"usage":     withCost(doneUsage, llmModel),
 		"task_plan": func() *aiassistant.TaskPlan { p, _ := store.TaskPlan(ctx, sessionID); return p }(),
 	})
 }
@@ -1289,7 +1441,7 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	_ = pStore.SetStatus(ctx, proposalID, finalStatus)
 	// The task plan's current stage records the confirmed plan.
 	if ran := countRan(steps); ran > 0 {
-		if plan, pErr := h.aiChatStore(ctx).TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.RecordConfirmed(ran) {
+		if plan, pErr := h.aiChatStore(ctx).TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.RecordConfirmed(proposalID, ran, !anyFailed) {
 			_ = h.aiChatStore(ctx).SetTaskPlan(ctx, sessionID, plan)
 		}
 	}
@@ -1794,6 +1946,24 @@ type aiSettingsReq struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	APIKey   string `json:"api_key"` // optional; omit to keep existing key
+	// ReasoningEffort: omitted keeps the saved one; "" clears it.
+	ReasoningEffort *string `json:"reasoning_effort"`
+}
+
+// validReasoningEffort refuses an effort OpenAI does not take.
+func validReasoningEffort(e *string) error {
+	if e == nil || slices.Contains(aiassistant.ReasoningEfforts, strings.TrimSpace(*e)) {
+		return nil
+	}
+	return fmt.Errorf("reasoning_effort %q is not one of none, minimal, low, medium, high, xhigh (or blank for the model's default)", *e)
+}
+
+// withEffort gives an OpenAI provider the developer's reasoning effort.
+func withEffort(p providers.Provider, effort string) providers.Provider {
+	if op, ok := p.(*providers.OpenAIProvider); ok && strings.TrimSpace(effort) != "" {
+		return op.WithReasoningEffort(effort)
+	}
+	return p
 }
 
 func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
@@ -1822,7 +1992,15 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
-	if err := h.aiChatStore(personalCtx(ctx, a)).SaveSettings(personalCtx(ctx, a), a.UserID, req.Provider, req.Model, req.APIKey); err != nil {
+	if err := validReasoningEffort(req.ReasoningEffort); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if req.ReasoningEffort != nil {
+		e := strings.TrimSpace(*req.ReasoningEffort)
+		req.ReasoningEffort = &e
+	}
+	if err := h.aiChatStore(personalCtx(ctx, a)).SaveSettingsWithEffort(personalCtx(ctx, a), a.UserID, req.Provider, req.Model, req.APIKey, req.ReasoningEffort); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -2001,9 +2179,10 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		APIKey   string `json:"api_key"`
+		Provider        string  `json:"provider"`
+		Model           string  `json:"model"`
+		APIKey          string  `json:"api_key"`
+		ReasoningEffort *string `json:"reasoning_effort"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -2011,6 +2190,14 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 	pctx := personalCtx(ctx, a)
 	store := h.aiChatStore(pctx)
 	settings, _ := store.GetSettings(pctx, a.UserID)
+	effort := settings.ReasoningEffort
+	if req.ReasoningEffort != nil {
+		if err := validReasoningEffort(req.ReasoningEffort); err != nil {
+			jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		effort = strings.TrimSpace(*req.ReasoningEffort)
+	}
 	provider := req.Provider
 	if provider == "" {
 		provider = settings.Provider
@@ -2044,7 +2231,67 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonOK(w, probeProviderKey(ctx, provider, model, apiKey))
+	jsonOK(w, probeProviderKeyEffort(ctx, provider, model, apiKey, effort))
+}
+
+// ── POST /api/ai/settings/models ─────────────────────────────────────────────
+
+// aiListModels answers the models the developer's key (the one typed, else
+// the saved one, else the deployment's) reaches at provider, for the
+// settings screen to offer: the model setting was free text, and a name the
+// key cannot use failed only on the first call (2026-11-11).
+func (h *handler) aiListModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Provider string `json:"provider"`
+		APIKey   string `json:"api_key"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	pctx := personalCtx(ctx, a)
+	store := h.aiChatStore(pctx)
+	settings, _ := store.GetSettings(pctx, a.UserID)
+	provider := cmp.Or(req.Provider, settings.Provider, "openai")
+	apiKey := req.APIKey
+	if apiKey == "" && (settings.Provider == provider || (settings.Provider == "" && provider == "openai")) {
+		apiKey, _ = store.GetDecryptedAPIKey(pctx, a.UserID)
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv(providerEnvKeys[provider])
+	}
+	if apiKey == "" {
+		jsonOK(w, map[string]any{"provider": provider, "models": []string{}, "error": fmt.Sprintf("no API key available for %s", provider)})
+		return
+	}
+	p, err := buildProvider(provider, apiKey)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	lister, ok := p.(providers.ModelLister)
+	if !ok {
+		jsonOK(w, map[string]any{"provider": provider, "models": []string{}, "error": provider + " does not list its models"})
+		return
+	}
+	lctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	models, err := lister.ListModels(lctx)
+	if err != nil {
+		jsonOK(w, map[string]any{"provider": provider, "models": []string{}, "error": err.Error()})
+		return
+	}
+	if models == nil {
+		models = []string{}
+	}
+	jsonOK(w, map[string]any{"provider": provider, "models": models})
 }
 
 // probeProviderKey verifies one (provider, model, key) combination with a
@@ -2052,10 +2299,17 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 // per-user and the tenant settings screens render inline. Shared so the two
 // screens cannot drift on what "the key works" means.
 func probeProviderKey(ctx context.Context, provider, model, apiKey string) map[string]any {
+	return probeProviderKeyEffort(ctx, provider, model, apiKey, "")
+}
+
+// probeProviderKeyEffort is probeProviderKey with the reasoning effort the
+// calls would send, so a model that needs one is tested as it will run.
+func probeProviderKeyEffort(ctx context.Context, provider, model, apiKey, effort string) map[string]any {
 	p, err := buildProvider(provider, apiKey)
 	if err != nil {
 		return map[string]any{"ok": false, "provider": provider, "model": model, "error": err.Error()}
 	}
+	p = withEffort(p, effort)
 
 	testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -2220,8 +2474,34 @@ func (h *handler) aiRenameSession(w http.ResponseWriter, r *http.Request, sessio
 	}
 	var req struct {
 		Title string `json:"title"`
+		// CallBudget: a number caps the session's provider calls; null
+		// clears it (the deployment's cap). Absent leaves it.
+		CallBudget json.RawMessage `json:"call_budget"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Title) == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
+		return
+	}
+	if len(req.CallBudget) > 0 {
+		var n *int
+		if string(req.CallBudget) != "null" {
+			var v int
+			if json.Unmarshal(req.CallBudget, &v) != nil || v <= 0 {
+				jsonErr(w, fmt.Errorf("call_budget is a positive whole number, or null"), http.StatusBadRequest)
+				return
+			}
+			n = &v
+		}
+		if err := h.aiChatStore(ctx).SetCallBudget(ctx, sessionID, a.UserID, n); err != nil {
+			jsonErr(w, err, http.StatusNotFound)
+			return
+		}
+		if strings.TrimSpace(req.Title) == "" {
+			jsonOK(w, map[string]any{"id": sessionID, "call_budget": n})
+			return
+		}
+	}
+	if strings.TrimSpace(req.Title) == "" {
 		jsonErr(w, fmt.Errorf("title is required"), http.StatusBadRequest)
 		return
 	}
@@ -2394,4 +2674,41 @@ func aiTurnWriteDeadline() time.Duration {
 // writer that cannot take a deadline (a test recorder) is left as it is.
 func extendAIWriteDeadline(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiTurnWriteDeadline()))
+}
+
+// usageWithCost is a session's usage with, when the deployment prices its
+// model (AI_MODEL_PRICES), what it cost — the developer sees what a build
+// spends as it goes (2026-11-11: 1,769 calls before anyone priced them).
+type usageWithCost struct {
+	aiassistant.SessionUsage
+	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
+}
+
+// withCost prices u at model's AI_MODEL_PRICES entry, if any.
+func withCost(u aiassistant.SessionUsage, model string) usageWithCost {
+	out := usageWithCost{SessionUsage: u}
+	if p, ok := modelPrices()[strings.ToLower(strings.TrimSpace(model))]; ok {
+		c := u.EstimatedCost(p)
+		out.EstimatedCostUSD = &c
+	}
+	return out
+}
+
+// modelPrices reads AI_MODEL_PRICES: {"<model>": {"input": $/M tokens,
+// "cached": …, "output": …}, …}. Prices change and differ by contract, so the
+// deployment states them; none set, no cost is shown.
+func modelPrices() map[string]aiassistant.ModelPrice {
+	raw := strings.TrimSpace(os.Getenv("AI_MODEL_PRICES"))
+	if raw == "" {
+		return nil
+	}
+	var in map[string]aiassistant.ModelPrice
+	if json.Unmarshal([]byte(raw), &in) != nil {
+		return nil
+	}
+	out := make(map[string]aiassistant.ModelPrice, len(in))
+	for k, v := range in {
+		out[strings.ToLower(strings.TrimSpace(k))] = v
+	}
+	return out
 }

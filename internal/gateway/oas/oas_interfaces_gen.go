@@ -237,6 +237,10 @@ type DeleteIntegrationTemplateRes interface {
 	deleteIntegrationTemplateRes()
 }
 
+type DeleteMetricRes interface {
+	deleteMetricRes()
+}
+
 type DeleteNotificationRes interface {
 	deleteNotificationRes()
 }
@@ -311,6 +315,10 @@ type GetAdminBrandingRes interface {
 
 type GetAiSessionRes interface {
 	getAiSessionRes()
+}
+
+type GetAiWorkbookMapRes interface {
+	getAiWorkbookMapRes()
 }
 
 type GetAuditSettingsRes interface {

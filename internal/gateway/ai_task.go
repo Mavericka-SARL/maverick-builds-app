@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
@@ -74,17 +75,34 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if err != nil {
 			return "", err
 		}
+		// A plan already under way — carried from earlier sessions, or
+		// this session's own — is kept: the new stages follow it, and its
+		// decisions stay (owner, 2026-11-11: carried context is never
+		// dropped).
+		prev, _ := store.TaskPlan(ctx, sessionID)
+		appended := false
+		if prev != nil && prev.Current() >= 0 {
+			prev.Append(a.Goal, plan.Stages)
+			plan, appended = prev, true
+		} else if prev != nil && len(prev.Decisions) > 0 {
+			plan.Decisions, plan.CarriedFrom, plan.CarriedChecked = prev.Decisions, prev.CarriedFrom, true
+		}
 		if err := store.SetTaskPlan(ctx, sessionID, plan); err != nil {
 			return "", err
 		}
-		log.Printf("AI task plan: session=%s stages=%d", sessionID, len(plan.Stages))
+		log.Printf("AI task plan: session=%s stages=%d appended=%v", sessionID, len(plan.Stages), appended)
+		if appended {
+			return "The session's plan was under way, so these stages were added after its own (nothing earlier is dropped); the developer sees it.\n" + plan.Render() +
+				"Mark with update_task_plan any earlier stage the new goal replaces as skipped (a note saying why), then propose the CURRENT stage.", nil
+		}
 		return "Plan saved; the developer sees it.\n" + plan.Render() +
 			"Now propose stage 1 (mark it in_progress with update_task_plan as you do), and say in your reply what the stages are.", nil
 	case aiassistant.UpdateTaskPlanTool:
 		var a struct {
-			Stage  int    `json:"stage"`
-			Status string `json:"status"`
-			Note   string `json:"note"`
+			Stage    int    `json:"stage"`
+			Status   string `json:"status"`
+			Note     string `json:"note"`
+			Decision string `json:"decision"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", fmt.Errorf("update_task_plan: %w", err)
@@ -93,11 +111,17 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if err != nil {
 			return "", err
 		}
+		if plan == nil && strings.TrimSpace(a.Decision) != "" && a.Stage == 0 {
+			plan = &aiassistant.TaskPlan{}
+		}
 		if plan == nil {
 			return "", fmt.Errorf("update_task_plan: the session has no plan — plan_task first")
 		}
-		if err := plan.UpdateStage(a.Stage, a.Status, a.Note); err != nil {
-			return "", err
+		plan.AddDecision(a.Decision)
+		if a.Stage != 0 || a.Status != "" {
+			if err := plan.UpdateStage(a.Stage, a.Status, a.Note); err != nil {
+				return "", err
+			}
 		}
 		if err := store.SetTaskPlan(ctx, sessionID, plan); err != nil {
 			return "", err

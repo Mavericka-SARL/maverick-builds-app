@@ -582,10 +582,11 @@ type Invoker interface {
 	DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (DeleteIntegrationTemplateRes, error)
 	// DeleteMetric invokes deleteMetric operation.
 	//
-	// Delete a metric definition.
+	// Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics
+	// that read each other are deleted together by naming them in "with".
 	//
 	// DELETE /api/developer/metrics/{id}
-	DeleteMetric(ctx context.Context, params DeleteMetricParams) (*DeleteMetricOK, error)
+	DeleteMetric(ctx context.Context, params DeleteMetricParams) (DeleteMetricRes, error)
 	// DeleteNotification invokes deleteNotification operation.
 	//
 	// Delete one of the caller's own notifications from their bell.
@@ -737,6 +738,14 @@ type Invoker interface {
 	//
 	// GET /api/ai/settings
 	GetAiSettings(ctx context.Context) (*AiLLMSettings, error)
+	// GetAiWorkbookMap invokes getAiWorkbookMap operation.
+	//
+	// Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest
+	// other revision of the model, and per sheet the rows that match, differ, and hold numbers but were
+	// never mapped (read from the workbooks attached to the session).
+	//
+	// GET /api/ai/sessions/{id}/workbook-map
+	GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (GetAiWorkbookMapRes, error)
 	// GetAuditSettings invokes getAuditSettings operation.
 	//
 	// The audit retention policy (administrators; enterprise).
@@ -1125,6 +1134,13 @@ type Invoker interface {
 	//
 	// GET /api/ai/sessions/{id}/conversions
 	ListAiConversions(ctx context.Context, params ListAiConversionsParams) (ListAiConversionsRes, error)
+	// ListAiModels invokes listAiModels operation.
+	//
+	// The key typed (api_key), else the caller's saved key for that provider, else the deployment's.
+	// Always 200; a key that cannot list answers an error beside an empty list.
+	//
+	// POST /api/ai/settings/models
+	ListAiModels(ctx context.Context, request OptListAiModelsReq) (*ListAiModelsOK, error)
 	// ListAiProposals invokes listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -1472,7 +1488,8 @@ type Invoker interface {
 	PromoteAiDraft(ctx context.Context, request OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
 	// PublishWorkflow invokes publishWorkflow operation.
 	//
-	// Publish a workflow definition (rejected if it fails validation).
+	// Publishing a workflow that is already published changes nothing and answers it as it is; an
+	// archived workflow is refused (409).
 	//
 	// POST /api/developer/workflows/{id}/publish
 	PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (PublishWorkflowRes, error)
@@ -1565,7 +1582,7 @@ type Invoker interface {
 	RemoveSso(ctx context.Context) (RemoveSsoRes, error)
 	// RenameAiSession invokes renameAiSession operation.
 	//
-	// Rename a session (an explicit rename always wins over auto-naming).
+	// Rename a session (an explicit rename always wins over auto-naming), or set its call budget.
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, request *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
@@ -11824,15 +11841,16 @@ func (c *Client) sendDeleteIntegrationTemplate(ctx context.Context, params Delet
 
 // DeleteMetric invokes deleteMetric operation.
 //
-// Delete a metric definition.
+// Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics
+// that read each other are deleted together by naming them in "with".
 //
 // DELETE /api/developer/metrics/{id}
-func (c *Client) DeleteMetric(ctx context.Context, params DeleteMetricParams) (*DeleteMetricOK, error) {
+func (c *Client) DeleteMetric(ctx context.Context, params DeleteMetricParams) (DeleteMetricRes, error) {
 	res, err := c.sendDeleteMetric(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteMetric(ctx context.Context, params DeleteMetricParams) (res *DeleteMetricOK, err error) {
+func (c *Client) sendDeleteMetric(ctx context.Context, params DeleteMetricParams) (res DeleteMetricRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteMetric"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -11890,6 +11908,27 @@ func (c *Client) sendDeleteMetric(ctx context.Context, params DeleteMetricParams
 		pathParts[1] = encoded
 	}
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "with" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "with",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.With.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "DELETE", u)
@@ -15034,6 +15073,134 @@ func (c *Client) sendGetAiSettings(ctx context.Context) (res *AiLLMSettings, err
 
 	stage = "DecodeResponse"
 	result, err := decodeGetAiSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetAiWorkbookMap invokes getAiWorkbookMap operation.
+//
+// Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest
+// other revision of the model, and per sheet the rows that match, differ, and hold numbers but were
+// never mapped (read from the workbooks attached to the session).
+//
+// GET /api/ai/sessions/{id}/workbook-map
+func (c *Client) GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (GetAiWorkbookMapRes, error) {
+	res, err := c.sendGetAiWorkbookMap(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (res GetAiWorkbookMapRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getAiWorkbookMap"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/workbook-map"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetAiWorkbookMapOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/workbook-map"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetAiWorkbookMapOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetAiWorkbookMapResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -21480,6 +21647,117 @@ func (c *Client) sendListAiConversions(ctx context.Context, params ListAiConvers
 	return result, nil
 }
 
+// ListAiModels invokes listAiModels operation.
+//
+// The key typed (api_key), else the caller's saved key for that provider, else the deployment's.
+// Always 200; a key that cannot list answers an error beside an empty list.
+//
+// POST /api/ai/settings/models
+func (c *Client) ListAiModels(ctx context.Context, request OptListAiModelsReq) (*ListAiModelsOK, error) {
+	res, err := c.sendListAiModels(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendListAiModels(ctx context.Context, request OptListAiModelsReq) (res *ListAiModelsOK, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAiModels"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/ai/settings/models"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListAiModelsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/ai/settings/models"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeListAiModelsRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListAiModelsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListAiModelsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListAiProposals invokes listAiProposals operation.
 //
 // List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -27821,7 +28099,8 @@ func (c *Client) sendPromoteAiDraft(ctx context.Context, request OptPromoteAiDra
 
 // PublishWorkflow invokes publishWorkflow operation.
 //
-// Publish a workflow definition (rejected if it fails validation).
+// Publishing a workflow that is already published changes nothing and answers it as it is; an
+// archived workflow is refused (409).
 //
 // POST /api/developer/workflows/{id}/publish
 func (c *Client) PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (PublishWorkflowRes, error) {
@@ -29415,7 +29694,7 @@ func (c *Client) sendRemoveSso(ctx context.Context) (res RemoveSsoRes, err error
 
 // RenameAiSession invokes renameAiSession operation.
 //
-// Rename a session (an explicit rename always wins over auto-naming).
+// Rename a session (an explicit rename always wins over auto-naming), or set its call budget.
 //
 // PATCH /api/ai/sessions/{id}
 func (c *Client) RenameAiSession(ctx context.Context, request *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error) {

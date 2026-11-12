@@ -2,6 +2,7 @@ package aiassistant
 
 import (
 	"context"
+	"math"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 )
@@ -14,6 +15,20 @@ type SessionUsage struct {
 	OutputTokens     int64 `json:"output_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
+}
+
+// ModelPrice is what a model costs per million tokens, in US dollars.
+type ModelPrice struct {
+	Input  float64 `json:"input"`
+	Cached float64 `json:"cached"`
+	Output float64 `json:"output"`
+}
+
+// EstimatedCost is the usage priced at p (cache writes as input), rounded
+// to the cent.
+func (u SessionUsage) EstimatedCost(p ModelPrice) float64 {
+	c := (float64(u.InputTokens+u.CacheWriteTokens)*p.Input + float64(u.CacheReadTokens)*p.Cached + float64(u.OutputTokens)*p.Output) / 1e6
+	return math.Round(c*100) / 100
 }
 
 // Total is every token billed: input, cached and written to the cache,

@@ -59,4 +59,29 @@ func TestCompareWithSheetNamesEveryDifference(t *testing.T) {
 			t.Errorf("answer %q lacks %q", out, want)
 		}
 	}
+	// The comparison is kept in the workbook map, with the row's label.
+	mapped, err := aiassistant.LoadWorkbookMap(ctx, pool, modelID, revID, nil)
+	if err != nil || len(mapped) != 1 || mapped[0].Metric != "net_sales" || mapped[0].Label != "Net sales" || mapped[0].Matched != 1 || mapped[0].Compared != 3 || mapped[0].Members["scenario"] != "BASE" {
+		t.Fatalf("workbook map: %+v %v", mapped, err)
+	}
+	// A session with no draft yet reads the model's map too.
+	if rows, err := aiassistant.LoadWorkbookMap(ctx, pool, modelID, "", nil); err != nil || len(rows) != 1 {
+		t.Fatalf("workbook map with no revision: %+v %v", rows, err)
+	}
+	// A row of one number — an event list's line — is not compared period by
+	// period: it is said to be no row of periods.
+	e = aiassistant.NewToolExecutor(pool, modelID, revID).WithReadHooks(aiassistant.ReadHooks{
+		AttachedFile: func(context.Context, string) (string, []byte, error) {
+			return "hires.csv", []byte("Function,Month,FTE\nEngineering,2026-02,2\n"), nil
+		},
+	})
+	out, err = e.Execute(ctx, "compare_with_sheet", mustJSON(t, map[string]any{
+		"file": "hires.csv", "row": 2, "first_column": "C", "metric": "net_sales", "members": map[string]string{"scenario": "BASE"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, aiassistant.NotPeriodRow) || strings.Contains(out, "periods match") {
+		t.Errorf("an event row was compared by period: %q", out)
+	}
 }

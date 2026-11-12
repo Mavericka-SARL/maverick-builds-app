@@ -307,8 +307,14 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       }
     },
   });
+  // The metrics reading this one, when every one of them is known: they can
+  // be deleted together with it (refused only while a metric outside them
+  // reads one — a cycle of copies goes in one delete).
+  const readerIds = m.depended_by
+    .map(name => allMetrics.find(o => o.name === name)?.id)
+    .filter((id): id is string => !!id);
   const del = useMutation({
-    mutationFn: () => api.deleteMetric(m.id),
+    mutationFn: (withIds: string[]) => api.deleteMetric(m.id, withIds),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-model"] }),
   });
   const { confirm, confirmElement } = useConfirm();
@@ -524,14 +530,19 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               <Pencil size={13} />
             </IconButton>
             <IconButton aria-label={`Delete metric ${m.name}`} title="Delete" danger size={26} disabled={del.isPending}
-              onClick={() => confirm({
+              onClick={() => confirm(m.depended_by.length && readerIds.length === m.depended_by.length ? {
                 title: "Delete metric?",
-                // The server refuses the delete while another metric reads
-                // this one (METRIC_IN_USE), in a formula or as a Rate operand.
+                // The server refuses the delete while a metric outside the
+                // ones deleted reads one (METRIC_IN_USE): deleting the readers
+                // too goes through when nothing else reads them.
+                body: `"${m.name}" is read by ${m.depended_by.join(", ")}. Delete them together with it — refused if a metric outside them reads one — or change those formulas first.`,
+                confirmLabel: `Delete with ${m.depended_by.length} reader(s)`, onConfirm: () => del.mutate(readerIds),
+              } : {
+                title: "Delete metric?",
                 body: m.depended_by.length
                   ? `"${m.name}" is read by ${m.depended_by.join(", ")}. The delete is refused until no metric reads it: change those formulas first.`
                   : `This permanently removes "${m.name}".`,
-                confirmLabel: "Delete metric", onConfirm: () => del.mutate(),
+                confirmLabel: "Delete metric", onConfirm: () => del.mutate([]),
               })}>
               <Trash2 size={13} />
             </IconButton>

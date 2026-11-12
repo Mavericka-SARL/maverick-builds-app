@@ -127,6 +127,12 @@ const unproposedNudge = "(Sent by the server, not the developer.) You ended this
 // nothing; the fixed phrases below had no send, submit or post.
 var announcesProposal = regexp.MustCompile(`(?i)\b(i'?ll|i will|i am going to|i'm going to|let me)\s+(now\s+)?(send|submit|post|prepare|propose|resubmit|re-?propose|re-?send|put together)\b[^.?!\n]{0,80}\b(proposal|plan|steps)\b`)
 
+// pointsAtPlan: a reply sending the developer to a plan — "I've prepared
+// the plan — please confirm above", "the plan is ready for your review" —
+// which gpt-5-mini and gpt-5.4-mini ended turns with after refusals,
+// proposing nothing (2026-11-11). Nudged only when no proposal is pending.
+var pointsAtPlan = regexp.MustCompile(`(?i)(\b(i'?ve|i have)\s+(now\s+)?prepared\b|\b(plan|proposal)\s+(is\s+)?(prepared|ready)\b|\bprepared\s+(the|a|your)\s+(corrected\s+|updated\s+|new\s+)?(plan|proposal)\b|\bconfirm\s+(it\s+|the\s+(plan|proposal)\s+)?above\b|\breview\s+and\s+confirm\b|\b(plan|proposal)\s+above\b)`)
+
 // claimsUnproposedChange reports whether a reply, ending a turn that
 // proposed nothing, says the model was changed or announces a proposal.
 func claimsUnproposedChange(reply string) bool {
@@ -168,6 +174,30 @@ func asksToPropose(reply string) bool {
 	}
 	return false
 }
+
+// asksPermission reports a reply asking leave for work the developer asked
+// for, or for a step that changes nothing in the model — "Shall I split it
+// into parts?", "run compare_with_sheet now, or continue?" (2026-11-11, six
+// times in one build) — rather than a choice that changes the model, which
+// it lays out as options and the developer answers.
+func asksPermission(reply string) bool {
+	if presentsChoices(reply) {
+		return false
+	}
+	if asksToPropose(reply) {
+		return true
+	}
+	return permissionAsk.MatchString(reply)
+}
+
+// permissionAsk: questions about going on, not about the model.
+var permissionAsk = regexp.MustCompile(`(?i)(\b(now|first)\s*,?\s+or\s+(continue|go on|proceed|wait|later)\b[^?]{0,60}\?|\b(shall|should|can|may)\s+(i|we)\s+(split|continue|proceed|go on|go ahead|start|run|check|re-?run|break)\b[^?]{0,120}\?|\b(proceed|continue|go ahead|go on)\s*(with[^?]{0,80})?\?\s*$|\bok(ay)?\s+to\s+(proceed|continue|go ahead|run)\b)`)
+
+// permissionNudge answers such a question for the developer: the request
+// is the leave.
+const permissionNudge = "(Sent by the server, not the developer.) Do not ask the developer's leave to go on — their request is the leave, and checks you can run (compare_with_sheet, list_*) need none. " +
+	"Go on with the request now: call propose_actions with the plan; if it is too large for one proposal, propose the first part now and say what comes next. " +
+	"Ask only where the request or the source leaves a choice that changes the model, and then lay the options out."
 
 // leaveToPropose: a reply holding back a plan the developer asked for, for
 // leave or for a yes to defaults it named itself (2026-11-08: "Reply 'Yes' to

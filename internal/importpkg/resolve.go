@@ -24,6 +24,7 @@ package importpkg
 import (
 	"context"
 	"fmt"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"regexp"
 	"strconv"
 	"strings"
@@ -174,6 +175,16 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 				  AND (SELECT count(*) FROM model.dimension_member o WHERE o.dimension_id=$1::uuid
 				       AND o.period_start IS NOT NULL AND EXTRACT(MONTH FROM o.period_start) = $2) = 1`,
 				dimID, month).Scan(&info.id, &info.code, &hasChildren, &info.calc) == nil
+		}
+		// A date (a workbook's month column read as days): the leaf period
+		// of a time dimension that holds it.
+		if day, ok := timedim.DayOf(value); !found && ok {
+			found = pool.QueryRow(ctx, pick+`JOIN model.dimension_def d ON d.id = m.dimension_id
+				WHERE m.dimension_id=$1::uuid AND d.dimension_type='time'
+				  AND m.period_start IS NOT NULL AND m.period_end IS NOT NULL AND $2::date BETWEEN m.period_start AND m.period_end
+				  AND NOT EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
+				ORDER BY m.period_end - m.period_start LIMIT 1`,
+				dimID, day.Format("2006-01-02")).Scan(&info.id, &info.code, &hasChildren, &info.calc) == nil
 		}
 		if found {
 			info.isLeaf = !hasChildren

@@ -3,6 +3,7 @@ package metricformula
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -32,6 +33,48 @@ const CodeMetricInUse = "METRIC_IN_USE"
 // into an error, the condition parked its step for a person and the export
 // silently dropped the column.
 func CheckMetricNotInUse(ctx context.Context, q Querier, metricID string) error {
+	return checkMetricNotInUse(ctx, q, metricID, nil)
+}
+
+// CheckMetricsNotInUse refuses deleting the metrics metricIDs together while
+// a metric OUTSIDE them reads one: metrics that read each other — a cycle of
+// copies, a helper and its only reader — go in one delete. Nine stray
+// metrics in a LAG cycle could only be deleted by first patching each
+// formula, since each refused while another of them read it (2026-11-11).
+func CheckMetricsNotInUse(ctx context.Context, q Querier, metricIDs []string) error {
+	together := map[string]bool{}
+	if len(metricIDs) > 1 {
+		rows, err := q.Query(ctx, `SELECT lower(name) FROM model.metric_def WHERE id::text = ANY($1)`, metricIDs)
+		if err != nil {
+			return err
+		}
+		names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, n := range names {
+			together[n] = true
+		}
+	}
+	var refusals []string
+	for _, id := range metricIDs {
+		if err := checkMetricNotInUse(ctx, q, id, together); err != nil {
+			var ve *ValidationError
+			if !errors.As(err, &ve) {
+				return err
+			}
+			refusals = append(refusals, strings.TrimSuffix(ve.Message, "; change those first, then delete it"))
+		}
+	}
+	if len(refusals) > 0 {
+		return invalidCode(CodeMetricInUse, "%s; change those first, or delete them in the same delete", strings.Join(refusals, "; "))
+	}
+	return nil
+}
+
+// checkMetricNotInUse is CheckMetricNotInUse with the (lower-cased) names
+// of metrics deleted together, whose reading does not count.
+func checkMetricNotInUse(ctx context.Context, q Querier, metricID string, together map[string]bool) error {
 	var modelID, revisionID, name string
 	if err := q.QueryRow(ctx, `
 		SELECT model_id::text, COALESCE(revision_id::text, ''), name
@@ -73,6 +116,9 @@ func CheckMetricNotInUse(ctx context.Context, q Querier, metricID string) error 
 	}
 	var readers []string
 	for _, m := range metrics {
+		if together[strings.ToLower(m.name)] {
+			continue // deleted in the same delete
+		}
 		switch {
 		case !m.shadowed && m.text != "" && FormulaReadsMetric(m.text, name):
 			readers = append(readers, m.name)

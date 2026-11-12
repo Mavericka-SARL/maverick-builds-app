@@ -36,6 +36,29 @@ type proposalCheck struct {
 	// warnings: formulas that run but look wrong (planWarnings) — only
 	// looked for once nothing fails.
 	warnings []string
+	// failed: the 0-based steps that failed (a step left out with them is
+	// found by DropSteps), for the plan of the steps that pass.
+	failed map[int]bool
+	// dropped: failing layout steps (aiassistant.PresentationTool) the
+	// server leaves out instead of refusing the plan around them.
+	dropped map[int]bool
+	// autoSteps: steps the server adds where the fix is certain — a metric
+	// the plan leaves off every grid, read by a metric on a grid.
+	autoSteps []aiassistant.InsertedStep
+	// notes: what the server changed in the plan, told to the developer
+	// beside it and to the model in its tool result; they never send the
+	// plan back.
+	notes []string
+	// steps: the plan as the server left it (nil: as proposed).
+	steps []aiassistant.ProposalStep
+}
+
+// planSteps is the plan to propose: as the server edited it, or as given.
+func (c proposalCheck) planSteps(given []aiassistant.ProposalStep) []aiassistant.ProposalStep {
+	if c.steps != nil {
+		return c.steps
+	}
+	return given
 }
 
 // aiCheckProposal runs steps on modelID/revID as confirming them would, in
@@ -44,6 +67,25 @@ type proposalCheck struct {
 // the transaction). A step that fails is a problem, and a step using its
 // result is not run; a step that panics is left to the confirmation.
 func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID, userID string, steps []aiassistant.ProposalStep) (proposalCheck, error) {
+	check, err := h.checkProposalOnce(ctx, sessionID, modelID, revID, userID, steps)
+	if err == nil && len(check.autoSteps) > 0 {
+		// Placements the server adds: checked again with them in.
+		edited := aiassistant.InsertSteps(steps, check.autoSteps)
+		if again, aErr := h.checkProposalOnce(ctx, sessionID, modelID, revID, userID, edited); aErr == nil {
+			again.notes = append(check.notes, again.notes...)
+			again.steps = edited
+			check = again
+		}
+	}
+	if err == nil && len(check.problems) == 0 && len(check.dropped) > 0 {
+		kept, _ := aiassistant.DropSteps(check.planSteps(steps), check.dropped)
+		check.steps = kept
+	}
+	return check, err
+}
+
+// checkProposalOnce is one dry run of steps with its findings.
+func (h *handler) checkProposalOnce(ctx context.Context, sessionID, modelID, revID, userID string, steps []aiassistant.ProposalStep) (proposalCheck, error) {
 	tx, err := h.db.For(ctx).Begin(ctx)
 	if err != nil {
 		return proposalCheck{}, err
@@ -57,7 +99,13 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 			resolved[i] = s
 		}
 		out.problems = append(out.problems, aiassistant.PlanWorkflowProblems(ctx, tx, modelID, revID, resolved)...)
-		out.problems = append(out.problems, offGridReadProblems(ctx, tx, modelID, revID, resolved, created)...)
+		out.problems = append(out.problems, aiassistant.PlanRecordWorkflowProblems(ctx, tx, modelID, revID, resolved)...)
+		offGrid, auto := offGridReadProblems(ctx, tx, modelID, revID, resolved, created)
+		out.problems = append(out.problems, offGrid...)
+		for _, a := range auto {
+			out.autoSteps = append(out.autoSteps, a.step)
+			out.notes = append(out.notes, a.note)
+		}
 		out.problems = append(out.problems, unorderedPagesProblems(ctx, tx, revID, resolved)...)
 		out.problems = append(out.problems, dashboardLayoutProblems(ctx, tx, revID, resolved, created)...)
 	}
@@ -80,6 +128,9 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 			s.Params = resolveParamRefs(storedParams(s.Params), created)
 			resolved[i] = s
 		}
+		out.warnings = append(out.warnings, unplacedMetricWarnings(ctx, tx, modelID, revID, resolved, created)...)
+		out.warnings = append(out.warnings, aiassistant.PlanConditionTotalWarnings(ctx, tx, modelID, revID, resolved)...)
+		out.warnings = append(out.warnings, aiassistant.ScenarioTotalWarnings(resolved)...)
 		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, dashboardLayoutWarnings(ctx, tx, revID, resolved, created)...)
 		out.warnings = append(out.warnings, otherDashboardsWarnings(ctx, tx, revID, resolved, created)...)
@@ -152,9 +203,20 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 	// time dimension" errors, each listing names, and the model chased those
 	// (2026-11-07).
 	failedNames := map[string]int{}
+	out.failed = map[int]bool{}
 	fail := func(i int, step aiassistant.ProposalStep, err error) {
 		blocked[i] = true
 		msg := err.Error()
+		if aiassistant.PresentationTool(step.Tool) {
+			if out.dropped == nil {
+				out.dropped = map[int]bool{}
+			}
+			out.dropped[i] = true
+			out.notes = append(out.notes, fmt.Sprintf("Left out by the server: step %d (%s — %s), a layout step that fails: %s. Everything else in the plan runs without it; propose it again on its own once it is fixed.",
+				i+1, step.Tool, step.Description, msg))
+			return
+		}
+		out.failed[i] = true
 		low := strings.ToLower(msg)
 		for name, root := range failedNames {
 			if strings.Contains(low, `"`+name+`"`) || strings.Contains(low, `'`+name+`'`) {

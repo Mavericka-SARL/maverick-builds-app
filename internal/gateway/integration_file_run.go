@@ -54,7 +54,7 @@ const maxRunBodyBytes = 24 << 20
 // nor (the caller's part) the saved column map applies again: applied twice,
 // the map read the model's names as source columns and dropped a renamed
 // one (2026-10-19). Only csv can be mapped; a workbook is the person's file.
-func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, mapped bool, err error) {
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, mapped bool, stats importpkg.ShapeStats, err error) {
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
@@ -67,32 +67,32 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 		Mapped   bool   `json:"mapped"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBodyBytes)).Decode(&body); err != nil {
-		return nil, nil, "", false, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
+		return nil, nil, "", false, stats, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
 	}
 	switch {
 	case body.XLSXBase64 != "":
 		if body.Mapped {
-			return nil, nil, "", false, fmt.Errorf("\"mapped\" applies to csv the Import Wizard wrote, not to a workbook: send the workbook without it, and the integration's saved mapping applies")
+			return nil, nil, "", false, stats, fmt.Errorf("\"mapped\" applies to csv the Import Wizard wrote, not to a workbook: send the workbook without it, and the integration's saved mapping applies")
 		}
 		raw, err := base64.StdEncoding.DecodeString(body.XLSXBase64)
 		if err != nil {
-			return nil, nil, "", false, fmt.Errorf("xlsx_base64: %w", err)
+			return nil, nil, "", false, stats, fmt.Errorf("xlsx_base64: %w", err)
 		}
 		sheet := body.Sheet
 		if sheet == "" {
 			sheet = savedSheet
 		}
-		header, rows, err = importpkg.ReadShaped("run.xlsx", raw, sheet, reshape)
-		return header, rows, body.FileName, false, err
+		header, rows, stats, err = importpkg.ReadShapedStats("run.xlsx", raw, sheet, reshape)
+		return header, rows, body.FileName, false, stats, err
 	case body.CSV != "":
 		if body.Mapped {
 			reshape = nil
 		}
-		header, rows, err = importpkg.ShapeCSV([]byte(body.CSV), reshape)
+		header, rows, stats, err = importpkg.ReadShapedStats("file.csv", []byte(body.CSV), "", reshape)
 		importpkg.RenumberRows(rows, body.RowLines)
-		return header, rows, body.FileName, body.Mapped, err
+		return header, rows, body.FileName, body.Mapped, stats, err
 	}
-	return nil, nil, "", false, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)")
+	return nil, nil, "", false, stats, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)")
 }
 
 // rowsCSV re-serializes mapped rows for the form and dimension importers,
@@ -301,4 +301,22 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		"rows_imported": okRows, "values_imported": len(staged),
 		"error_rows": 0, "errors": []any{},
 	})
+}
+
+// skippedNoteKey carries, on a run's context, the line saying which rows
+// of its file the loader's skip_rows dropped (importpkg.ShapeStats.Note):
+// recordIntegrationRun adds it to the run's history, whatever path records
+// the run.
+type skippedNoteKey struct{}
+
+func withSkippedNote(ctx context.Context, st importpkg.ShapeStats) context.Context {
+	if note := st.Note(); note != "" {
+		return context.WithValue(ctx, skippedNoteKey{}, note)
+	}
+	return ctx
+}
+
+func skippedNote(ctx context.Context) string {
+	note, _ := ctx.Value(skippedNoteKey{}).(string)
+	return note
 }

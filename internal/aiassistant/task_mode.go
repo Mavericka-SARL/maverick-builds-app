@@ -11,6 +11,7 @@ package aiassistant
 
 import (
 	"encoding/json"
+	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"regexp"
 	"slices"
 	"strings"
@@ -123,9 +124,15 @@ func TurnBrief(m RequestMode, plan *TaskPlan) string {
 	if r := plan.Render(); r != "" {
 		b.WriteString("\n### Your task plan (plan_task, update_task_plan)\n")
 		b.WriteString(r)
-		if plan.Current() >= 0 {
-			b.WriteString("Work on the CURRENT stage: one proposal for it (or for its next part), then check it and mark it with update_task_plan. A message that changes the goal: re-plan with plan_task.\n")
-		} else {
+		switch {
+		case len(plan.Stages) == 0:
+			// Decisions only: they say all there is.
+		case plan.Current() >= 0 && m.Mode == ModeDirect:
+			b.WriteString("The developer's order comes first: do exactly what it asks now, whether or not it is the CURRENT stage, and never argue it with the plan or add the plan's work to it. " +
+				"The plan stays as it is and goes on after; mark a stage the order finishes with update_task_plan.\n")
+		case plan.Current() >= 0:
+			b.WriteString("Work on the CURRENT stage: one proposal for it (or for its next part), then check it and mark it with update_task_plan. A new goal: plan_task adds its stages after these.\n")
+		default:
 			b.WriteString("Every stage is done or skipped: report what was built and checked, and what the developer has to do (a business admin's access rules, values to type); " +
 				"for another goal, suggest a new session.\n")
 		}
@@ -210,4 +217,40 @@ var playbooks = map[string]string{
 2. Which inputs each role may change (role access rules) is a business admin's to set: list them per role, as
    the workbook's Guide names the owners, for the business admin.
 `,
+}
+
+// connectorTools are read tools only a request about connectors, exports or
+// outside sources needs.
+var connectorTools = map[string]bool{
+	"test_integration": true, "list_connections": true, "list_model_link_sources": true,
+	"attach_google_sheet": true, "preview_export": true,
+}
+
+// connectorWords: a request naming a connector, an export or an outside
+// source keeps every tool.
+var connectorWords = regexp.MustCompile(`(?i)\b(api|rest|connector|connection|oauth|google|sheets?\s+url|export|link(ed)?\s+model|sftp|webhook|endpoint)\b`)
+
+// TurnTools are the tools a turn offers: every one, except the connector
+// tools when the request is about building, fixing, pages, workflows or
+// access and names no connector — each call re-sends the tool list, and a
+// build never used them (2026-11-11). A question keeps every tool.
+func TurnTools(m RequestMode, request string) []providers.ToolDef {
+	all := AllTools()
+	if m.Mode == ModeQuestion || len(m.Tasks) == 0 || connectorWords.MatchString(request) {
+		return all
+	}
+	for _, t := range m.Tasks {
+		switch t {
+		case "workbook_build", "workbook_fix", "pages", "workflows", "access":
+		default:
+			return all
+		}
+	}
+	out := make([]providers.ToolDef, 0, len(all))
+	for _, t := range all {
+		if !connectorTools[t.Name] {
+			out = append(out, t)
+		}
+	}
+	return out
 }

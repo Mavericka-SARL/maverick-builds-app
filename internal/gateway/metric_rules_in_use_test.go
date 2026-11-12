@@ -86,3 +86,45 @@ func TestMetricRenameCarriesIntoRules(t *testing.T) {
 		t.Errorf("a write to plan_pct after the rename: %d %s, want 200", status, raw)
 	}
 }
+
+// Metrics that read each other are deleted together (?with=), refused only
+// while a metric outside them reads one; a grid name the revision has is
+// refused (409 GRID_NAME_TAKEN), on create and on rename; publishing a
+// published workflow answers it as it is, an archived one 409.
+func TestDeleteTogetherGridNamesAndRepublish(t *testing.T) {
+	f := metricRulesFixture(t)
+	for name, text := range map[string]string{"copy_a": "revenue * 1", "copy_b": "copy_a + 1", "copy_c": "copy_b * 2"} {
+		f.metric[name] = f.call("POST", "/api/developer/metrics", f.metricBody(name, text))
+		f.call("POST", "/api/developer/grids/"+f.gridID+"/metrics/"+f.metric[name], nil)
+	}
+	status, raw := f.req("DELETE", "/api/developer/metrics/"+f.metric["copy_a"]+"?with="+f.metric["copy_b"], nil)
+	if status != http.StatusConflict || !strings.Contains(string(raw), "copy_c") || strings.Contains(string(raw), "copy_a is read by copy_b") {
+		t.Fatalf("delete copy_a with copy_b while copy_c reads copy_b: %d %s", status, raw)
+	}
+	if status, raw := f.req("DELETE", "/api/developer/metrics/"+f.metric["copy_a"]+"?with="+f.metric["copy_b"]+","+f.metric["copy_c"], nil); status != http.StatusOK {
+		t.Fatalf("delete together: %d %s", status, raw)
+	}
+	var left int
+	_ = f.pool.QueryRow(context.Background(), `SELECT count(*) FROM model.metric_def WHERE name LIKE 'copy_%'`).Scan(&left)
+	if left != 0 {
+		t.Fatalf("%d copies left", left)
+	}
+
+	if status, raw := f.req("POST", "/api/developer/grids", map[string]any{"name": "plan", "revision_id": f.revID}); status != http.StatusConflict || !strings.Contains(string(raw), "GRID_NAME_TAKEN") {
+		t.Fatalf("a second grid named plan: %d %s", status, raw)
+	}
+	other := f.call("POST", "/api/developer/grids", map[string]any{"name": "Other", "revision_id": f.revID})
+	if status, raw := f.req("PATCH", "/api/developer/grids/"+other, map[string]any{"name": "Plan"}); status != http.StatusConflict || !strings.Contains(string(raw), "GRID_NAME_TAKEN") {
+		t.Fatalf("renaming a grid to Plan: %d %s", status, raw)
+	}
+
+	var gate string
+	_ = f.pool.QueryRow(context.Background(), `SELECT id::text FROM workflow.workflow_def WHERE name = 'Gate'`).Scan(&gate)
+	if status, raw := f.req("POST", "/api/developer/workflows/"+gate+"/publish", nil); status != http.StatusOK || !strings.Contains(string(raw), `"published"`) {
+		t.Fatalf("publishing the published Gate: %d %s", status, raw)
+	}
+	_, _ = f.pool.Exec(context.Background(), `UPDATE workflow.workflow_def SET status = 'archived' WHERE id = $1::uuid`, gate)
+	if status, raw := f.req("POST", "/api/developer/workflows/"+gate+"/publish", nil); status != http.StatusConflict {
+		t.Fatalf("publishing an archived workflow: %d %s", status, raw)
+	}
+}

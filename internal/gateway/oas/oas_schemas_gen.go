@@ -2039,6 +2039,9 @@ type AiLLMSettings struct {
 	Model    string `json:"model"`
 	// True when an API key is stored; the key itself is never returned.
 	HasKey bool `json:"has_key"`
+	// Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the
+	// model's default). Some models refuse tools unless it is none.
+	ReasoningEffort OptAiLLMSettingsReasoningEffort `json:"reasoning_effort"`
 }
 
 // GetProvider returns the value of Provider.
@@ -2056,6 +2059,11 @@ func (s *AiLLMSettings) GetHasKey() bool {
 	return s.HasKey
 }
 
+// GetReasoningEffort returns the value of ReasoningEffort.
+func (s *AiLLMSettings) GetReasoningEffort() OptAiLLMSettingsReasoningEffort {
+	return s.ReasoningEffort
+}
+
 // SetProvider sets the value of Provider.
 func (s *AiLLMSettings) SetProvider(val string) {
 	s.Provider = val
@@ -2069,6 +2077,89 @@ func (s *AiLLMSettings) SetModel(val string) {
 // SetHasKey sets the value of HasKey.
 func (s *AiLLMSettings) SetHasKey(val bool) {
 	s.HasKey = val
+}
+
+// SetReasoningEffort sets the value of ReasoningEffort.
+func (s *AiLLMSettings) SetReasoningEffort(val OptAiLLMSettingsReasoningEffort) {
+	s.ReasoningEffort = val
+}
+
+// Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the
+// model's default). Some models refuse tools unless it is none.
+type AiLLMSettingsReasoningEffort string
+
+const (
+	AiLLMSettingsReasoningEffortEmpty   AiLLMSettingsReasoningEffort = ""
+	AiLLMSettingsReasoningEffortNone    AiLLMSettingsReasoningEffort = "none"
+	AiLLMSettingsReasoningEffortMinimal AiLLMSettingsReasoningEffort = "minimal"
+	AiLLMSettingsReasoningEffortLow     AiLLMSettingsReasoningEffort = "low"
+	AiLLMSettingsReasoningEffortMedium  AiLLMSettingsReasoningEffort = "medium"
+	AiLLMSettingsReasoningEffortHigh    AiLLMSettingsReasoningEffort = "high"
+	AiLLMSettingsReasoningEffortXhigh   AiLLMSettingsReasoningEffort = "xhigh"
+)
+
+// AllValues returns all AiLLMSettingsReasoningEffort values.
+func (AiLLMSettingsReasoningEffort) AllValues() []AiLLMSettingsReasoningEffort {
+	return []AiLLMSettingsReasoningEffort{
+		AiLLMSettingsReasoningEffortEmpty,
+		AiLLMSettingsReasoningEffortNone,
+		AiLLMSettingsReasoningEffortMinimal,
+		AiLLMSettingsReasoningEffortLow,
+		AiLLMSettingsReasoningEffortMedium,
+		AiLLMSettingsReasoningEffortHigh,
+		AiLLMSettingsReasoningEffortXhigh,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiLLMSettingsReasoningEffort) MarshalText() ([]byte, error) {
+	switch s {
+	case AiLLMSettingsReasoningEffortEmpty:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortNone:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortMinimal:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortLow:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortMedium:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortHigh:
+		return []byte(s), nil
+	case AiLLMSettingsReasoningEffortXhigh:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiLLMSettingsReasoningEffort) UnmarshalText(data []byte) error {
+	switch AiLLMSettingsReasoningEffort(data) {
+	case AiLLMSettingsReasoningEffortEmpty:
+		*s = AiLLMSettingsReasoningEffortEmpty
+		return nil
+	case AiLLMSettingsReasoningEffortNone:
+		*s = AiLLMSettingsReasoningEffortNone
+		return nil
+	case AiLLMSettingsReasoningEffortMinimal:
+		*s = AiLLMSettingsReasoningEffortMinimal
+		return nil
+	case AiLLMSettingsReasoningEffortLow:
+		*s = AiLLMSettingsReasoningEffortLow
+		return nil
+	case AiLLMSettingsReasoningEffortMedium:
+		*s = AiLLMSettingsReasoningEffortMedium
+		return nil
+	case AiLLMSettingsReasoningEffortHigh:
+		*s = AiLLMSettingsReasoningEffortHigh
+		return nil
+	case AiLLMSettingsReasoningEffortXhigh:
+		*s = AiLLMSettingsReasoningEffortXhigh
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/AiProposal
@@ -2488,6 +2579,8 @@ type AiSaveSettingsRequest struct {
 	Model OptString `json:"model"`
 	// Omit to keep the existing stored key.
 	APIKey OptString `json:"api_key"`
+	// Omit to keep the saved one; blank clears it.
+	ReasoningEffort OptAiSaveSettingsRequestReasoningEffort `json:"reasoning_effort"`
 }
 
 // GetProvider returns the value of Provider.
@@ -2505,6 +2598,11 @@ func (s *AiSaveSettingsRequest) GetAPIKey() OptString {
 	return s.APIKey
 }
 
+// GetReasoningEffort returns the value of ReasoningEffort.
+func (s *AiSaveSettingsRequest) GetReasoningEffort() OptAiSaveSettingsRequestReasoningEffort {
+	return s.ReasoningEffort
+}
+
 // SetProvider sets the value of Provider.
 func (s *AiSaveSettingsRequest) SetProvider(val OptString) {
 	s.Provider = val
@@ -2518,6 +2616,88 @@ func (s *AiSaveSettingsRequest) SetModel(val OptString) {
 // SetAPIKey sets the value of APIKey.
 func (s *AiSaveSettingsRequest) SetAPIKey(val OptString) {
 	s.APIKey = val
+}
+
+// SetReasoningEffort sets the value of ReasoningEffort.
+func (s *AiSaveSettingsRequest) SetReasoningEffort(val OptAiSaveSettingsRequestReasoningEffort) {
+	s.ReasoningEffort = val
+}
+
+// Omit to keep the saved one; blank clears it.
+type AiSaveSettingsRequestReasoningEffort string
+
+const (
+	AiSaveSettingsRequestReasoningEffortEmpty   AiSaveSettingsRequestReasoningEffort = ""
+	AiSaveSettingsRequestReasoningEffortNone    AiSaveSettingsRequestReasoningEffort = "none"
+	AiSaveSettingsRequestReasoningEffortMinimal AiSaveSettingsRequestReasoningEffort = "minimal"
+	AiSaveSettingsRequestReasoningEffortLow     AiSaveSettingsRequestReasoningEffort = "low"
+	AiSaveSettingsRequestReasoningEffortMedium  AiSaveSettingsRequestReasoningEffort = "medium"
+	AiSaveSettingsRequestReasoningEffortHigh    AiSaveSettingsRequestReasoningEffort = "high"
+	AiSaveSettingsRequestReasoningEffortXhigh   AiSaveSettingsRequestReasoningEffort = "xhigh"
+)
+
+// AllValues returns all AiSaveSettingsRequestReasoningEffort values.
+func (AiSaveSettingsRequestReasoningEffort) AllValues() []AiSaveSettingsRequestReasoningEffort {
+	return []AiSaveSettingsRequestReasoningEffort{
+		AiSaveSettingsRequestReasoningEffortEmpty,
+		AiSaveSettingsRequestReasoningEffortNone,
+		AiSaveSettingsRequestReasoningEffortMinimal,
+		AiSaveSettingsRequestReasoningEffortLow,
+		AiSaveSettingsRequestReasoningEffortMedium,
+		AiSaveSettingsRequestReasoningEffortHigh,
+		AiSaveSettingsRequestReasoningEffortXhigh,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiSaveSettingsRequestReasoningEffort) MarshalText() ([]byte, error) {
+	switch s {
+	case AiSaveSettingsRequestReasoningEffortEmpty:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortNone:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortMinimal:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortLow:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortMedium:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortHigh:
+		return []byte(s), nil
+	case AiSaveSettingsRequestReasoningEffortXhigh:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiSaveSettingsRequestReasoningEffort) UnmarshalText(data []byte) error {
+	switch AiSaveSettingsRequestReasoningEffort(data) {
+	case AiSaveSettingsRequestReasoningEffortEmpty:
+		*s = AiSaveSettingsRequestReasoningEffortEmpty
+		return nil
+	case AiSaveSettingsRequestReasoningEffortNone:
+		*s = AiSaveSettingsRequestReasoningEffortNone
+		return nil
+	case AiSaveSettingsRequestReasoningEffortMinimal:
+		*s = AiSaveSettingsRequestReasoningEffortMinimal
+		return nil
+	case AiSaveSettingsRequestReasoningEffortLow:
+		*s = AiSaveSettingsRequestReasoningEffortLow
+		return nil
+	case AiSaveSettingsRequestReasoningEffortMedium:
+		*s = AiSaveSettingsRequestReasoningEffortMedium
+		return nil
+	case AiSaveSettingsRequestReasoningEffortHigh:
+		*s = AiSaveSettingsRequestReasoningEffortHigh
+		return nil
+	case AiSaveSettingsRequestReasoningEffortXhigh:
+		*s = AiSaveSettingsRequestReasoningEffortXhigh
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/AiSendMessageRequest
@@ -2553,6 +2733,8 @@ type AiSession struct {
 	// Set once its draft was promoted: the session is finished and refuses messages (409
 	// SESSION_PROMOTED).
 	PromotedAt OptDateTime `json:"promoted_at"`
+	// The developer's cap on the session's provider calls; absent = the deployment's per-session cap.
+	CallBudget OptInt `json:"call_budget"`
 }
 
 // GetID returns the value of ID.
@@ -2605,6 +2787,11 @@ func (s *AiSession) GetPromotedAt() OptDateTime {
 	return s.PromotedAt
 }
 
+// GetCallBudget returns the value of CallBudget.
+func (s *AiSession) GetCallBudget() OptInt {
+	return s.CallBudget
+}
+
 // SetID sets the value of ID.
 func (s *AiSession) SetID(val uuid.UUID) {
 	s.ID = val
@@ -2655,6 +2842,11 @@ func (s *AiSession) SetPromotedAt(val OptDateTime) {
 	s.PromotedAt = val
 }
 
+// SetCallBudget sets the value of CallBudget.
+func (s *AiSession) SetCallBudget(val OptInt) {
+	s.CallBudget = val
+}
+
 // Ref: #/components/schemas/AiTestSettingsRequest
 type AiTestSettingsRequest struct {
 	// Falls back to the caller's stored settings, then "openai".
@@ -2663,6 +2855,8 @@ type AiTestSettingsRequest struct {
 	Model OptString `json:"model"`
 	// Falls back to the caller's stored (decrypted) key, then a provider-specific env var.
 	APIKey OptString `json:"api_key"`
+	// Falls back to the caller's stored setting.
+	ReasoningEffort OptAiTestSettingsRequestReasoningEffort `json:"reasoning_effort"`
 }
 
 // GetProvider returns the value of Provider.
@@ -2680,6 +2874,11 @@ func (s *AiTestSettingsRequest) GetAPIKey() OptString {
 	return s.APIKey
 }
 
+// GetReasoningEffort returns the value of ReasoningEffort.
+func (s *AiTestSettingsRequest) GetReasoningEffort() OptAiTestSettingsRequestReasoningEffort {
+	return s.ReasoningEffort
+}
+
 // SetProvider sets the value of Provider.
 func (s *AiTestSettingsRequest) SetProvider(val OptString) {
 	s.Provider = val
@@ -2693,6 +2892,88 @@ func (s *AiTestSettingsRequest) SetModel(val OptString) {
 // SetAPIKey sets the value of APIKey.
 func (s *AiTestSettingsRequest) SetAPIKey(val OptString) {
 	s.APIKey = val
+}
+
+// SetReasoningEffort sets the value of ReasoningEffort.
+func (s *AiTestSettingsRequest) SetReasoningEffort(val OptAiTestSettingsRequestReasoningEffort) {
+	s.ReasoningEffort = val
+}
+
+// Falls back to the caller's stored setting.
+type AiTestSettingsRequestReasoningEffort string
+
+const (
+	AiTestSettingsRequestReasoningEffortEmpty   AiTestSettingsRequestReasoningEffort = ""
+	AiTestSettingsRequestReasoningEffortNone    AiTestSettingsRequestReasoningEffort = "none"
+	AiTestSettingsRequestReasoningEffortMinimal AiTestSettingsRequestReasoningEffort = "minimal"
+	AiTestSettingsRequestReasoningEffortLow     AiTestSettingsRequestReasoningEffort = "low"
+	AiTestSettingsRequestReasoningEffortMedium  AiTestSettingsRequestReasoningEffort = "medium"
+	AiTestSettingsRequestReasoningEffortHigh    AiTestSettingsRequestReasoningEffort = "high"
+	AiTestSettingsRequestReasoningEffortXhigh   AiTestSettingsRequestReasoningEffort = "xhigh"
+)
+
+// AllValues returns all AiTestSettingsRequestReasoningEffort values.
+func (AiTestSettingsRequestReasoningEffort) AllValues() []AiTestSettingsRequestReasoningEffort {
+	return []AiTestSettingsRequestReasoningEffort{
+		AiTestSettingsRequestReasoningEffortEmpty,
+		AiTestSettingsRequestReasoningEffortNone,
+		AiTestSettingsRequestReasoningEffortMinimal,
+		AiTestSettingsRequestReasoningEffortLow,
+		AiTestSettingsRequestReasoningEffortMedium,
+		AiTestSettingsRequestReasoningEffortHigh,
+		AiTestSettingsRequestReasoningEffortXhigh,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiTestSettingsRequestReasoningEffort) MarshalText() ([]byte, error) {
+	switch s {
+	case AiTestSettingsRequestReasoningEffortEmpty:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortNone:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortMinimal:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortLow:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortMedium:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortHigh:
+		return []byte(s), nil
+	case AiTestSettingsRequestReasoningEffortXhigh:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiTestSettingsRequestReasoningEffort) UnmarshalText(data []byte) error {
+	switch AiTestSettingsRequestReasoningEffort(data) {
+	case AiTestSettingsRequestReasoningEffortEmpty:
+		*s = AiTestSettingsRequestReasoningEffortEmpty
+		return nil
+	case AiTestSettingsRequestReasoningEffortNone:
+		*s = AiTestSettingsRequestReasoningEffortNone
+		return nil
+	case AiTestSettingsRequestReasoningEffortMinimal:
+		*s = AiTestSettingsRequestReasoningEffortMinimal
+		return nil
+	case AiTestSettingsRequestReasoningEffortLow:
+		*s = AiTestSettingsRequestReasoningEffortLow
+		return nil
+	case AiTestSettingsRequestReasoningEffortMedium:
+		*s = AiTestSettingsRequestReasoningEffortMedium
+		return nil
+	case AiTestSettingsRequestReasoningEffortHigh:
+		*s = AiTestSettingsRequestReasoningEffortHigh
+		return nil
+	case AiTestSettingsRequestReasoningEffortXhigh:
+		*s = AiTestSettingsRequestReasoningEffortXhigh
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/AiToolCall
@@ -9412,6 +9693,11 @@ func (s *DeleteIntegrationTemplateOK) SetStatus(val OptString) {
 
 func (*DeleteIntegrationTemplateOK) deleteIntegrationTemplateRes() {}
 
+// DeleteMetricConflict is response for DeleteMetric operation.
+type DeleteMetricConflict struct{}
+
+func (*DeleteMetricConflict) deleteMetricRes() {}
+
 type DeleteMetricOK struct {
 	Status OptString `json:"status"`
 }
@@ -9425,6 +9711,8 @@ func (s *DeleteMetricOK) GetStatus() OptString {
 func (s *DeleteMetricOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*DeleteMetricOK) deleteMetricRes() {}
 
 type DeleteNotificationOK struct {
 	Deleted OptInt `json:"deleted"`
@@ -10601,6 +10889,7 @@ func (*Error) disconnectIntegrationOAuthRes()  {}
 func (*Error) duplicateIntegrationRes()        {}
 func (*Error) generateDimensionPeriodsRes()    {}
 func (*Error) getAiSessionRes()                {}
+func (*Error) getAiWorkbookMapRes()            {}
 func (*Error) getBusinessDashboardRes()        {}
 func (*Error) getDemoRes()                     {}
 func (*Error) getFormRecordRes()               {}
@@ -10641,7 +10930,6 @@ func (*Error) previewExportIntegrationRes()    {}
 func (*Error) previewImportReshapeRes()        {}
 func (*Error) removeAdminUserRoleRes()         {}
 func (*Error) removeGridDimensionRes()         {}
-func (*Error) renameAiSessionRes()             {}
 func (*Error) restoreWorkflowRes()             {}
 func (*Error) revokeAdminUserAppAccessRes()    {}
 func (*Error) revokeAdminUserModelAccessRes()  {}
@@ -13193,6 +13481,8 @@ type GetAiSessionOKUsage struct {
 	OutputTokens     OptInt64 `json:"output_tokens"`
 	CacheReadTokens  OptInt64 `json:"cache_read_tokens"`
 	CacheWriteTokens OptInt64 `json:"cache_write_tokens"`
+	// What the calls cost in US dollars, when the deployment prices the session's model (AI_MODEL_PRICES).
+	EstimatedCostUsd OptFloat64 `json:"estimated_cost_usd"`
 }
 
 // GetLlmCalls returns the value of LlmCalls.
@@ -13220,6 +13510,11 @@ func (s *GetAiSessionOKUsage) GetCacheWriteTokens() OptInt64 {
 	return s.CacheWriteTokens
 }
 
+// GetEstimatedCostUsd returns the value of EstimatedCostUsd.
+func (s *GetAiSessionOKUsage) GetEstimatedCostUsd() OptFloat64 {
+	return s.EstimatedCostUsd
+}
+
 // SetLlmCalls sets the value of LlmCalls.
 func (s *GetAiSessionOKUsage) SetLlmCalls(val OptInt) {
 	s.LlmCalls = val
@@ -13243,6 +13538,253 @@ func (s *GetAiSessionOKUsage) SetCacheReadTokens(val OptInt64) {
 // SetCacheWriteTokens sets the value of CacheWriteTokens.
 func (s *GetAiSessionOKUsage) SetCacheWriteTokens(val OptInt64) {
 	s.CacheWriteTokens = val
+}
+
+// SetEstimatedCostUsd sets the value of EstimatedCostUsd.
+func (s *GetAiSessionOKUsage) SetEstimatedCostUsd(val OptFloat64) {
+	s.EstimatedCostUsd = val
+}
+
+type GetAiWorkbookMapOK struct {
+	Sheets []GetAiWorkbookMapOKSheetsItem `json:"sheets"`
+	Rows   []GetAiWorkbookMapOKRowsItem   `json:"rows"`
+}
+
+// GetSheets returns the value of Sheets.
+func (s *GetAiWorkbookMapOK) GetSheets() []GetAiWorkbookMapOKSheetsItem {
+	return s.Sheets
+}
+
+// GetRows returns the value of Rows.
+func (s *GetAiWorkbookMapOK) GetRows() []GetAiWorkbookMapOKRowsItem {
+	return s.Rows
+}
+
+// SetSheets sets the value of Sheets.
+func (s *GetAiWorkbookMapOK) SetSheets(val []GetAiWorkbookMapOKSheetsItem) {
+	s.Sheets = val
+}
+
+// SetRows sets the value of Rows.
+func (s *GetAiWorkbookMapOK) SetRows(val []GetAiWorkbookMapOKRowsItem) {
+	s.Rows = val
+}
+
+func (*GetAiWorkbookMapOK) getAiWorkbookMapRes() {}
+
+type GetAiWorkbookMapOKRowsItem struct {
+	File        OptString                            `json:"file"`
+	Sheet       OptString                            `json:"sheet"`
+	Row         OptInt                               `json:"row"`
+	Label       OptString                            `json:"label"`
+	Metric      OptString                            `json:"metric"`
+	Members     OptGetAiWorkbookMapOKRowsItemMembers `json:"members"`
+	FirstColumn OptString                            `json:"first_column"`
+	Matched     OptInt                               `json:"matched"`
+	Compared    OptInt                               `json:"compared"`
+	RevisionID  OptString                            `json:"revision_id"`
+}
+
+// GetFile returns the value of File.
+func (s *GetAiWorkbookMapOKRowsItem) GetFile() OptString {
+	return s.File
+}
+
+// GetSheet returns the value of Sheet.
+func (s *GetAiWorkbookMapOKRowsItem) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetRow returns the value of Row.
+func (s *GetAiWorkbookMapOKRowsItem) GetRow() OptInt {
+	return s.Row
+}
+
+// GetLabel returns the value of Label.
+func (s *GetAiWorkbookMapOKRowsItem) GetLabel() OptString {
+	return s.Label
+}
+
+// GetMetric returns the value of Metric.
+func (s *GetAiWorkbookMapOKRowsItem) GetMetric() OptString {
+	return s.Metric
+}
+
+// GetMembers returns the value of Members.
+func (s *GetAiWorkbookMapOKRowsItem) GetMembers() OptGetAiWorkbookMapOKRowsItemMembers {
+	return s.Members
+}
+
+// GetFirstColumn returns the value of FirstColumn.
+func (s *GetAiWorkbookMapOKRowsItem) GetFirstColumn() OptString {
+	return s.FirstColumn
+}
+
+// GetMatched returns the value of Matched.
+func (s *GetAiWorkbookMapOKRowsItem) GetMatched() OptInt {
+	return s.Matched
+}
+
+// GetCompared returns the value of Compared.
+func (s *GetAiWorkbookMapOKRowsItem) GetCompared() OptInt {
+	return s.Compared
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *GetAiWorkbookMapOKRowsItem) GetRevisionID() OptString {
+	return s.RevisionID
+}
+
+// SetFile sets the value of File.
+func (s *GetAiWorkbookMapOKRowsItem) SetFile(val OptString) {
+	s.File = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *GetAiWorkbookMapOKRowsItem) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetRow sets the value of Row.
+func (s *GetAiWorkbookMapOKRowsItem) SetRow(val OptInt) {
+	s.Row = val
+}
+
+// SetLabel sets the value of Label.
+func (s *GetAiWorkbookMapOKRowsItem) SetLabel(val OptString) {
+	s.Label = val
+}
+
+// SetMetric sets the value of Metric.
+func (s *GetAiWorkbookMapOKRowsItem) SetMetric(val OptString) {
+	s.Metric = val
+}
+
+// SetMembers sets the value of Members.
+func (s *GetAiWorkbookMapOKRowsItem) SetMembers(val OptGetAiWorkbookMapOKRowsItemMembers) {
+	s.Members = val
+}
+
+// SetFirstColumn sets the value of FirstColumn.
+func (s *GetAiWorkbookMapOKRowsItem) SetFirstColumn(val OptString) {
+	s.FirstColumn = val
+}
+
+// SetMatched sets the value of Matched.
+func (s *GetAiWorkbookMapOKRowsItem) SetMatched(val OptInt) {
+	s.Matched = val
+}
+
+// SetCompared sets the value of Compared.
+func (s *GetAiWorkbookMapOKRowsItem) SetCompared(val OptInt) {
+	s.Compared = val
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *GetAiWorkbookMapOKRowsItem) SetRevisionID(val OptString) {
+	s.RevisionID = val
+}
+
+type GetAiWorkbookMapOKRowsItemMembers map[string]string
+
+func (s *GetAiWorkbookMapOKRowsItemMembers) init() GetAiWorkbookMapOKRowsItemMembers {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetAiWorkbookMapOKSheetsItem struct {
+	File            OptString                                      `json:"file"`
+	Sheet           OptString                                      `json:"sheet"`
+	Mapped          OptInt                                         `json:"mapped"`
+	Match           OptInt                                         `json:"match"`
+	Differ          []int                                          `json:"differ"`
+	NotMapped       []int                                          `json:"not_mapped"`
+	NotMappedLabels OptGetAiWorkbookMapOKSheetsItemNotMappedLabels `json:"not_mapped_labels"`
+}
+
+// GetFile returns the value of File.
+func (s *GetAiWorkbookMapOKSheetsItem) GetFile() OptString {
+	return s.File
+}
+
+// GetSheet returns the value of Sheet.
+func (s *GetAiWorkbookMapOKSheetsItem) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetMapped returns the value of Mapped.
+func (s *GetAiWorkbookMapOKSheetsItem) GetMapped() OptInt {
+	return s.Mapped
+}
+
+// GetMatch returns the value of Match.
+func (s *GetAiWorkbookMapOKSheetsItem) GetMatch() OptInt {
+	return s.Match
+}
+
+// GetDiffer returns the value of Differ.
+func (s *GetAiWorkbookMapOKSheetsItem) GetDiffer() []int {
+	return s.Differ
+}
+
+// GetNotMapped returns the value of NotMapped.
+func (s *GetAiWorkbookMapOKSheetsItem) GetNotMapped() []int {
+	return s.NotMapped
+}
+
+// GetNotMappedLabels returns the value of NotMappedLabels.
+func (s *GetAiWorkbookMapOKSheetsItem) GetNotMappedLabels() OptGetAiWorkbookMapOKSheetsItemNotMappedLabels {
+	return s.NotMappedLabels
+}
+
+// SetFile sets the value of File.
+func (s *GetAiWorkbookMapOKSheetsItem) SetFile(val OptString) {
+	s.File = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *GetAiWorkbookMapOKSheetsItem) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetMapped sets the value of Mapped.
+func (s *GetAiWorkbookMapOKSheetsItem) SetMapped(val OptInt) {
+	s.Mapped = val
+}
+
+// SetMatch sets the value of Match.
+func (s *GetAiWorkbookMapOKSheetsItem) SetMatch(val OptInt) {
+	s.Match = val
+}
+
+// SetDiffer sets the value of Differ.
+func (s *GetAiWorkbookMapOKSheetsItem) SetDiffer(val []int) {
+	s.Differ = val
+}
+
+// SetNotMapped sets the value of NotMapped.
+func (s *GetAiWorkbookMapOKSheetsItem) SetNotMapped(val []int) {
+	s.NotMapped = val
+}
+
+// SetNotMappedLabels sets the value of NotMappedLabels.
+func (s *GetAiWorkbookMapOKSheetsItem) SetNotMappedLabels(val OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) {
+	s.NotMappedLabels = val
+}
+
+type GetAiWorkbookMapOKSheetsItemNotMappedLabels map[string]string
+
+func (s *GetAiWorkbookMapOKSheetsItemNotMappedLabels) init() GetAiWorkbookMapOKSheetsItemNotMappedLabels {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
 }
 
 // GetAuditSettingsForbidden is response for GetAuditSettings operation.
@@ -18534,6 +19076,68 @@ type ListAiConversionsOKApplicationJSON []AiConversion
 
 func (*ListAiConversionsOKApplicationJSON) listAiConversionsRes() {}
 
+type ListAiModelsOK struct {
+	Provider string    `json:"provider"`
+	Models   []string  `json:"models"`
+	Error    OptString `json:"error"`
+}
+
+// GetProvider returns the value of Provider.
+func (s *ListAiModelsOK) GetProvider() string {
+	return s.Provider
+}
+
+// GetModels returns the value of Models.
+func (s *ListAiModelsOK) GetModels() []string {
+	return s.Models
+}
+
+// GetError returns the value of Error.
+func (s *ListAiModelsOK) GetError() OptString {
+	return s.Error
+}
+
+// SetProvider sets the value of Provider.
+func (s *ListAiModelsOK) SetProvider(val string) {
+	s.Provider = val
+}
+
+// SetModels sets the value of Models.
+func (s *ListAiModelsOK) SetModels(val []string) {
+	s.Models = val
+}
+
+// SetError sets the value of Error.
+func (s *ListAiModelsOK) SetError(val OptString) {
+	s.Error = val
+}
+
+type ListAiModelsReq struct {
+	// Falls back to the caller's stored settings, then "openai".
+	Provider OptString `json:"provider"`
+	APIKey   OptString `json:"api_key"`
+}
+
+// GetProvider returns the value of Provider.
+func (s *ListAiModelsReq) GetProvider() OptString {
+	return s.Provider
+}
+
+// GetAPIKey returns the value of APIKey.
+func (s *ListAiModelsReq) GetAPIKey() OptString {
+	return s.APIKey
+}
+
+// SetProvider sets the value of Provider.
+func (s *ListAiModelsReq) SetProvider(val OptString) {
+	s.Provider = val
+}
+
+// SetAPIKey sets the value of APIKey.
+func (s *ListAiModelsReq) SetAPIKey(val OptString) {
+	s.APIKey = val
+}
+
 type ListAiProposalsOKApplicationJSON []AiProposalWithSummary
 
 func (*ListAiProposalsOKApplicationJSON) listAiProposalsRes() {}
@@ -21821,6 +22425,52 @@ func (o OptAiConversionReshape) Or(d AiConversionReshape) AiConversionReshape {
 	return d
 }
 
+// NewOptAiLLMSettingsReasoningEffort returns new OptAiLLMSettingsReasoningEffort with value set to v.
+func NewOptAiLLMSettingsReasoningEffort(v AiLLMSettingsReasoningEffort) OptAiLLMSettingsReasoningEffort {
+	return OptAiLLMSettingsReasoningEffort{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiLLMSettingsReasoningEffort is optional AiLLMSettingsReasoningEffort.
+type OptAiLLMSettingsReasoningEffort struct {
+	Value AiLLMSettingsReasoningEffort
+	Set   bool
+}
+
+// IsSet returns true if OptAiLLMSettingsReasoningEffort was set.
+func (o OptAiLLMSettingsReasoningEffort) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiLLMSettingsReasoningEffort) Reset() {
+	var v AiLLMSettingsReasoningEffort
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiLLMSettingsReasoningEffort) SetTo(v AiLLMSettingsReasoningEffort) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiLLMSettingsReasoningEffort) Get() (v AiLLMSettingsReasoningEffort, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiLLMSettingsReasoningEffort) Or(d AiLLMSettingsReasoningEffort) AiLLMSettingsReasoningEffort {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiProposal returns new OptAiProposal with value set to v.
 func NewOptAiProposal(v AiProposal) OptAiProposal {
 	return OptAiProposal{
@@ -21913,6 +22563,52 @@ func (o OptAiProposalStepStatus) Or(d AiProposalStepStatus) AiProposalStepStatus
 	return d
 }
 
+// NewOptAiSaveSettingsRequestReasoningEffort returns new OptAiSaveSettingsRequestReasoningEffort with value set to v.
+func NewOptAiSaveSettingsRequestReasoningEffort(v AiSaveSettingsRequestReasoningEffort) OptAiSaveSettingsRequestReasoningEffort {
+	return OptAiSaveSettingsRequestReasoningEffort{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiSaveSettingsRequestReasoningEffort is optional AiSaveSettingsRequestReasoningEffort.
+type OptAiSaveSettingsRequestReasoningEffort struct {
+	Value AiSaveSettingsRequestReasoningEffort
+	Set   bool
+}
+
+// IsSet returns true if OptAiSaveSettingsRequestReasoningEffort was set.
+func (o OptAiSaveSettingsRequestReasoningEffort) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiSaveSettingsRequestReasoningEffort) Reset() {
+	var v AiSaveSettingsRequestReasoningEffort
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiSaveSettingsRequestReasoningEffort) SetTo(v AiSaveSettingsRequestReasoningEffort) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiSaveSettingsRequestReasoningEffort) Get() (v AiSaveSettingsRequestReasoningEffort, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiSaveSettingsRequestReasoningEffort) Or(d AiSaveSettingsRequestReasoningEffort) AiSaveSettingsRequestReasoningEffort {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiSession returns new OptAiSession with value set to v.
 func NewOptAiSession(v AiSession) OptAiSession {
 	return OptAiSession{
@@ -21999,6 +22695,52 @@ func (o OptAiTestSettingsRequest) Get() (v AiTestSettingsRequest, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptAiTestSettingsRequest) Or(d AiTestSettingsRequest) AiTestSettingsRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAiTestSettingsRequestReasoningEffort returns new OptAiTestSettingsRequestReasoningEffort with value set to v.
+func NewOptAiTestSettingsRequestReasoningEffort(v AiTestSettingsRequestReasoningEffort) OptAiTestSettingsRequestReasoningEffort {
+	return OptAiTestSettingsRequestReasoningEffort{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiTestSettingsRequestReasoningEffort is optional AiTestSettingsRequestReasoningEffort.
+type OptAiTestSettingsRequestReasoningEffort struct {
+	Value AiTestSettingsRequestReasoningEffort
+	Set   bool
+}
+
+// IsSet returns true if OptAiTestSettingsRequestReasoningEffort was set.
+func (o OptAiTestSettingsRequestReasoningEffort) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiTestSettingsRequestReasoningEffort) Reset() {
+	var v AiTestSettingsRequestReasoningEffort
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiTestSettingsRequestReasoningEffort) SetTo(v AiTestSettingsRequestReasoningEffort) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiTestSettingsRequestReasoningEffort) Get() (v AiTestSettingsRequestReasoningEffort, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiTestSettingsRequestReasoningEffort) Or(d AiTestSettingsRequestReasoningEffort) AiTestSettingsRequestReasoningEffort {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -24535,6 +25277,98 @@ func (o OptGetAiSessionOKUsage) Or(d GetAiSessionOKUsage) GetAiSessionOKUsage {
 	return d
 }
 
+// NewOptGetAiWorkbookMapOKRowsItemMembers returns new OptGetAiWorkbookMapOKRowsItemMembers with value set to v.
+func NewOptGetAiWorkbookMapOKRowsItemMembers(v GetAiWorkbookMapOKRowsItemMembers) OptGetAiWorkbookMapOKRowsItemMembers {
+	return OptGetAiWorkbookMapOKRowsItemMembers{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiWorkbookMapOKRowsItemMembers is optional GetAiWorkbookMapOKRowsItemMembers.
+type OptGetAiWorkbookMapOKRowsItemMembers struct {
+	Value GetAiWorkbookMapOKRowsItemMembers
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiWorkbookMapOKRowsItemMembers was set.
+func (o OptGetAiWorkbookMapOKRowsItemMembers) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiWorkbookMapOKRowsItemMembers) Reset() {
+	var v GetAiWorkbookMapOKRowsItemMembers
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiWorkbookMapOKRowsItemMembers) SetTo(v GetAiWorkbookMapOKRowsItemMembers) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiWorkbookMapOKRowsItemMembers) Get() (v GetAiWorkbookMapOKRowsItemMembers, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiWorkbookMapOKRowsItemMembers) Or(d GetAiWorkbookMapOKRowsItemMembers) GetAiWorkbookMapOKRowsItemMembers {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetAiWorkbookMapOKSheetsItemNotMappedLabels returns new OptGetAiWorkbookMapOKSheetsItemNotMappedLabels with value set to v.
+func NewOptGetAiWorkbookMapOKSheetsItemNotMappedLabels(v GetAiWorkbookMapOKSheetsItemNotMappedLabels) OptGetAiWorkbookMapOKSheetsItemNotMappedLabels {
+	return OptGetAiWorkbookMapOKSheetsItemNotMappedLabels{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiWorkbookMapOKSheetsItemNotMappedLabels is optional GetAiWorkbookMapOKSheetsItemNotMappedLabels.
+type OptGetAiWorkbookMapOKSheetsItemNotMappedLabels struct {
+	Value GetAiWorkbookMapOKSheetsItemNotMappedLabels
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiWorkbookMapOKSheetsItemNotMappedLabels was set.
+func (o OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Reset() {
+	var v GetAiWorkbookMapOKSheetsItemNotMappedLabels
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) SetTo(v GetAiWorkbookMapOKSheetsItemNotMappedLabels) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Get() (v GetAiWorkbookMapOKSheetsItemNotMappedLabels, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Or(d GetAiWorkbookMapOKSheetsItemNotMappedLabels) GetAiWorkbookMapOKSheetsItemNotMappedLabels {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGetGridMetaOnly returns new OptGetGridMetaOnly with value set to v.
 func NewOptGetGridMetaOnly(v GetGridMetaOnly) OptGetGridMetaOnly {
 	return OptGetGridMetaOnly{
@@ -25495,6 +26329,52 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptListAiModelsReq returns new OptListAiModelsReq with value set to v.
+func NewOptListAiModelsReq(v ListAiModelsReq) OptListAiModelsReq {
+	return OptListAiModelsReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptListAiModelsReq is optional ListAiModelsReq.
+type OptListAiModelsReq struct {
+	Value ListAiModelsReq
+	Set   bool
+}
+
+// IsSet returns true if OptListAiModelsReq was set.
+func (o OptListAiModelsReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptListAiModelsReq) Reset() {
+	var v ListAiModelsReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptListAiModelsReq) SetTo(v ListAiModelsReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptListAiModelsReq) Get() (v ListAiModelsReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptListAiModelsReq) Or(d ListAiModelsReq) ListAiModelsReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -30107,6 +30987,11 @@ type PublishWorkflowBadRequest Error
 
 func (*PublishWorkflowBadRequest) publishWorkflowRes() {}
 
+// PublishWorkflowConflict is response for PublishWorkflow operation.
+type PublishWorkflowConflict struct{}
+
+func (*PublishWorkflowConflict) publishWorkflowRes() {}
+
 type PublishWorkflowNotFound Error
 
 func (*PublishWorkflowNotFound) publishWorkflowRes() {}
@@ -31458,9 +32343,18 @@ type RemoveSsoForbidden struct{}
 
 func (*RemoveSsoForbidden) removeSsoRes() {}
 
+type RenameAiSessionBadRequest Error
+
+func (*RenameAiSessionBadRequest) renameAiSessionRes() {}
+
+type RenameAiSessionNotFound Error
+
+func (*RenameAiSessionNotFound) renameAiSessionRes() {}
+
 type RenameAiSessionOK struct {
-	ID    OptString `json:"id"`
-	Title OptString `json:"title"`
+	ID         OptString `json:"id"`
+	Title      OptString `json:"title"`
+	CallBudget OptNilInt `json:"call_budget"`
 }
 
 // GetID returns the value of ID.
@@ -31473,6 +32367,11 @@ func (s *RenameAiSessionOK) GetTitle() OptString {
 	return s.Title
 }
 
+// GetCallBudget returns the value of CallBudget.
+func (s *RenameAiSessionOK) GetCallBudget() OptNilInt {
+	return s.CallBudget
+}
+
 // SetID sets the value of ID.
 func (s *RenameAiSessionOK) SetID(val OptString) {
 	s.ID = val
@@ -31483,20 +32382,37 @@ func (s *RenameAiSessionOK) SetTitle(val OptString) {
 	s.Title = val
 }
 
+// SetCallBudget sets the value of CallBudget.
+func (s *RenameAiSessionOK) SetCallBudget(val OptNilInt) {
+	s.CallBudget = val
+}
+
 func (*RenameAiSessionOK) renameAiSessionRes() {}
 
 type RenameAiSessionReq struct {
-	Title string `json:"title"`
+	Title OptString `json:"title"`
+	// Caps the session's provider calls below the deployment's per-session cap; null clears it.
+	CallBudget OptNilInt `json:"call_budget"`
 }
 
 // GetTitle returns the value of Title.
-func (s *RenameAiSessionReq) GetTitle() string {
+func (s *RenameAiSessionReq) GetTitle() OptString {
 	return s.Title
 }
 
+// GetCallBudget returns the value of CallBudget.
+func (s *RenameAiSessionReq) GetCallBudget() OptNilInt {
+	return s.CallBudget
+}
+
 // SetTitle sets the value of Title.
-func (s *RenameAiSessionReq) SetTitle(val string) {
+func (s *RenameAiSessionReq) SetTitle(val OptString) {
 	s.Title = val
+}
+
+// SetCallBudget sets the value of CallBudget.
+func (s *RenameAiSessionReq) SetCallBudget(val OptNilInt) {
+	s.CallBudget = val
 }
 
 type RenameRevisionBadRequest Error

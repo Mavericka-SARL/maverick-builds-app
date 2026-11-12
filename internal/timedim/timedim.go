@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -518,4 +520,33 @@ func ValidateAndReindex(ctx context.Context, tx Querier, dimensionID string) err
 		FROM ordered o WHERE o.id = m.id AND m.time_index IS DISTINCT FROM o.idx
 	`, dimensionID)
 	return err
+}
+
+// DayOf reads a cell holding a day — "2027-01-01", "2027-01-01 00:00:00",
+// "2027-01-01T00:00:00Z", or an Excel serial day number ("46388") — as UTC
+// midnight. A table's month field and a grid file's time column take the
+// period containing it: a time-dimension field refused "2027-01-01 is not a
+// member of Month", and every monthly loader carried a hand-made map of
+// dates to months — the AI's mapped January to June only, so July's file
+// would have been refused (2026-11-11).
+func DayOf(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02", "2006-01-02 15:04:05", "2006-01-02T15:04:05", time.RFC3339, "2006-01-02T15:04:05.000Z"} {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			y, m, d := t.Date()
+			return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+		}
+	}
+	// An Excel serial day: 1 is 1900-01-01, counted from 1899-12-30 for
+	// Excel's leap-year slip; only five digits (1954-11 … 2173-10), so a
+	// year or an amount is not read as a day.
+	if len(s) == 5 && strings.Trim(s, "0123456789") == "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 20000 {
+			return time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, n), true
+		}
+	}
+	return time.Time{}, false
 }

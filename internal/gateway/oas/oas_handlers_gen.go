@@ -14617,7 +14617,8 @@ func (s *Server) handleDeleteIntegrationTemplateRequest(args [1]string, argsEsca
 
 // handleDeleteMetricRequest handles deleteMetric operation.
 //
-// Delete a metric definition.
+// Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics
+// that read each other are deleted together by naming them in "with".
 //
 // DELETE /api/developer/metrics/{id}
 func (s *Server) handleDeleteMetricRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -14748,12 +14749,12 @@ func (s *Server) handleDeleteMetricRequest(args [1]string, argsEscaped bool, w h
 
 	var rawBody []byte
 
-	var response *DeleteMetricOK
+	var response DeleteMetricRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteMetricOperation,
-			OperationSummary: "Delete a metric definition",
+			OperationSummary: "Delete a metric definition (and, with \"with\", the metrics deleted together with it)",
 			OperationID:      "deleteMetric",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -14762,6 +14763,10 @@ func (s *Server) handleDeleteMetricRequest(args [1]string, argsEscaped bool, w h
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "with",
+					In:   "query",
+				}: params.With,
 			},
 			Raw: r,
 		}
@@ -14769,7 +14774,7 @@ func (s *Server) handleDeleteMetricRequest(args [1]string, argsEscaped bool, w h
 		type (
 			Request  = struct{}
 			Params   = DeleteMetricParams
-			Response = *DeleteMetricOK
+			Response = DeleteMetricRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -19164,6 +19169,195 @@ func (s *Server) handleGetAiSettingsRequest(args [0]string, argsEscaped bool, w 
 	}
 
 	if err := encodeGetAiSettingsResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleGetAiWorkbookMapRequest handles getAiWorkbookMap operation.
+//
+// Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest
+// other revision of the model, and per sheet the rows that match, differ, and hold numbers but were
+// never mapped (read from the workbooks attached to the session).
+//
+// GET /api/ai/sessions/{id}/workbook-map
+func (s *Server) handleGetAiWorkbookMapRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getAiWorkbookMap"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.HTTPRouteKey.String("/api/ai/sessions/{id}/workbook-map"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), GetAiWorkbookMapOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: GetAiWorkbookMapOperation,
+			ID:   "getAiWorkbookMap",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, GetAiWorkbookMapOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeGetAiWorkbookMapParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+
+	var response GetAiWorkbookMapRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    GetAiWorkbookMapOperation,
+			OperationSummary: "The workbook map of the session's model — which metric each compared workbook row became, by sheet",
+			OperationID:      "getAiWorkbookMap",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = GetAiWorkbookMapParams
+			Response = GetAiWorkbookMapRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackGetAiWorkbookMapParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.GetAiWorkbookMap(ctx, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.GetAiWorkbookMap(ctx, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeGetAiWorkbookMapResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -28582,6 +28776,194 @@ func (s *Server) handleListAiConversionsRequest(args [1]string, argsEscaped bool
 	}
 
 	if err := encodeListAiConversionsResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleListAiModelsRequest handles listAiModels operation.
+//
+// The key typed (api_key), else the caller's saved key for that provider, else the deployment's.
+// Always 200; a key that cannot list answers an error beside an empty list.
+//
+// POST /api/ai/settings/models
+func (s *Server) handleListAiModelsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAiModels"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.HTTPRouteKey.String("/api/ai/settings/models"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), ListAiModelsOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: ListAiModelsOperation,
+			ID:   "listAiModels",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, ListAiModelsOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+
+	var rawBody []byte
+	request, rawBody, close, err := s.decodeListAiModelsRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
+
+	var response *ListAiModelsOK
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    ListAiModelsOperation,
+			OperationSummary: "The models a provider key reaches (OpenAI chat models, Anthropic models, OpenAI-compatible endpoints)",
+			OperationID:      "listAiModels",
+			Body:             request,
+			RawBody:          rawBody,
+			Params:           middleware.Parameters{},
+			Raw:              r,
+		}
+
+		type (
+			Request  = OptListAiModelsReq
+			Params   = struct{}
+			Response = *ListAiModelsOK
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			nil,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.ListAiModels(ctx, request)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.ListAiModels(ctx, request)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeListAiModelsResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -38129,7 +38511,8 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 
 // handlePublishWorkflowRequest handles publishWorkflow operation.
 //
-// Publish a workflow definition (rejected if it fails validation).
+// Publishing a workflow that is already published changes nothing and answers it as it is; an
+// archived workflow is refused (409).
 //
 // POST /api/developer/workflows/{id}/publish
 func (s *Server) handlePublishWorkflowRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -40403,7 +40786,7 @@ func (s *Server) handleRemoveSsoRequest(args [0]string, argsEscaped bool, w http
 
 // handleRenameAiSessionRequest handles renameAiSession operation.
 //
-// Rename a session (an explicit rename always wins over auto-naming).
+// Rename a session (an explicit rename always wins over auto-naming), or set its call budget.
 //
 // PATCH /api/ai/sessions/{id}
 func (s *Server) handleRenameAiSessionRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -40554,7 +40937,7 @@ func (s *Server) handleRenameAiSessionRequest(args [1]string, argsEscaped bool, 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    RenameAiSessionOperation,
-			OperationSummary: "Rename a session (an explicit rename always wins over auto-naming)",
+			OperationSummary: "Rename a session (an explicit rename always wins over auto-naming), or set its call budget",
 			OperationID:      "renameAiSession",
 			Body:             request,
 			RawBody:          rawBody,

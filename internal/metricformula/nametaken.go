@@ -172,3 +172,49 @@ func CheckRenameFreeOfOtherKind(ctx context.Context, q Querier, id, name, kind s
 	}
 	return CheckNameFreeOfOtherKind(ctx, q, modelID, revisionID, name, kind)
 }
+
+// CodeGridNameTaken refuses a grid name its revision already has. Grids had
+// no such rule: the AI Developer made "SaaS calculated", "Sites Logistics
+// calculated" and "Headcount totals" twice each in one draft (2026-11-11),
+// and every reference by name then picked one of a pair. Existing pairs are
+// left alone (revision copies and model imports keep what they copy); a new
+// grid or a rename may not make one.
+const CodeGridNameTaken = "GRID_NAME_TAKEN"
+
+// CheckGridNameFree refuses name for a new grid (exceptID "") or for
+// renaming grid exceptID, when another grid of the revision (or, with no
+// revision, of the model's revision-less grids) has it, compared without
+// regard to case.
+func CheckGridNameFree(ctx context.Context, q Querier, modelID, revisionID, name, exceptID string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	var taken bool
+	if err := q.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM model.grid_def
+		               WHERE model_id = $1::uuid AND lower(btrim(name)) = lower($2)
+		                 AND revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		                 AND id::text <> $4)`,
+		modelID, name, revisionID, exceptID).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		return invalidCode(CodeGridNameTaken,
+			"the revision already has a grid named %q (grid names are compared without regard to case); choose another name, or add to that grid", name)
+	}
+	return nil
+}
+
+// CheckGridRenameFree is CheckGridNameFree for renaming grid id.
+func CheckGridRenameFree(ctx context.Context, q Querier, id, name string) error {
+	var modelID, revisionID, current string
+	if err := q.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,''), name FROM model.grid_def WHERE id=$1::uuid`, id).
+		Scan(&modelID, &revisionID, &current); err != nil {
+		return nil // the caller's own lookup reports a missing grid
+	}
+	if strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(name)) {
+		return nil
+	}
+	return CheckGridNameFree(ctx, q, modelID, revisionID, name, id)
+}

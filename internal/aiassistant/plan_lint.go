@@ -37,14 +37,23 @@ func LintProposalStep(tool string, params json.RawMessage) error {
 	}
 	text := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(p.Formula), "="))
 	calculated := text != "" && (p.IsInput == nil || !*p.IsInput)
-	if tool == "create_metric" && p.IsInput != nil && *p.IsInput && p.Format == "percentage" &&
-		(p.AggRule == nil || *p.AggRule == "" || *p.AggRule == "sum") {
+	// A percentage input needs both totals set; the two used to be refused
+	// one at a time, and gpt-5-mini fixed one, then the other, then the first
+	// again for four turns (2026-11-11) — one message names every field.
+	inputSummed := tool == "create_metric" && p.IsInput != nil && *p.IsInput && p.Format == "percentage" &&
+		(p.AggRule == nil || *p.AggRule == "" || *p.AggRule == "sum")
+	timeSummed := tool == "create_metric" && p.Format == "percentage" && percentSummedOverTime(p.IsInput != nil && *p.IsInput, p.AggRule, p.TimeSummary)
+	switch {
+	case inputSummed && timeSummed:
+		return fmt.Errorf("metric %q is a percentage input totalled by sum, over its dimensions and over time: a region or a year would show the percentages added up "+
+			"(6%% a month reads 72%% for the year). Set BOTH fields in this step: agg_rule \"average\" and time_summary \"average\" "+
+			"(or time_summary \"last\" or \"none\" when that is what the source shows)", p.Name)
+	case inputSummed:
 		return fmt.Errorf("metric %q is a percentage input totalled by sum: a year or a region would show the percentages added up. "+
-			"Use agg_rule \"average\" (an input has no formula to re-evaluate)", p.Name)
-	}
-	if tool == "create_metric" && p.Format == "percentage" && percentSummedOverTime(p.IsInput != nil && *p.IsInput, p.AggRule, p.TimeSummary) {
+			"Use agg_rule \"average\" (an input has no formula to re-evaluate); keep its time_summary as it is", p.Name)
+	case timeSummed:
 		return fmt.Errorf("metric %q is a percentage totalled over time by sum (the default): a year would show its months' percentages added up "+
-			"(6%% a month reads 72%%). Use time_summary \"average\" — a year is its months' sum / 12 — or \"last\" or \"none\" when that is what the source shows", p.Name)
+			"(6%% a month reads 72%%). Use time_summary \"average\" — a year is its months' sum / 12 — or \"last\" or \"none\" when that is what the source shows; keep its agg_rule as it is", p.Name)
 	}
 	if !calculated {
 		return nil

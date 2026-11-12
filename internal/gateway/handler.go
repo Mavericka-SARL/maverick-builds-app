@@ -542,6 +542,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/ai/sessions/{id}/proposals", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/documents", "developer", dev(h.aiSessionDetail))
 	register("DELETE", "/api/ai/sessions/{id}/documents/{docId}", "developer", dev(h.aiSessionDetail))
+	register("GET", "/api/ai/sessions/{id}/workbook-map", "developer", dev(h.aiWorkbookMap))
 	register("GET", "/api/ai/sessions/{id}/conversions", "developer", dev(h.aiConversions))
 	register("GET", "/api/ai/sessions/{id}/conversions/{cid}", "developer", dev(h.aiConversions))
 	register("POST", "/api/ai/sessions/{id}/proposals/{pid}/confirm", "developer", dev(h.aiSessionDetail))
@@ -552,6 +553,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/ai/settings", "developer", dev(h.aiSettings))
 	register("PUT", "/api/ai/settings", "developer", dev(h.aiSettings))
 	register("POST", "/api/ai/settings/test", "developer", dev(h.aiTestSettings))
+	register("POST", "/api/ai/settings/models", "developer", dev(h.aiListModels))
 
 	// Admin endpoints. User-management routes are shared with developers; the
 	// remaining admin routes stay restricted to platform/tenant admins.
@@ -10244,8 +10246,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// which is what makes "run" a sync. See integration_file_run.go.
 	var header []string
 	var rows []importpkg.RawRow
-	var fileName string // the person's file, for Recent Imports; a sheet has none
-	var mapped bool     // the Import Wizard mapped the file already
+	var fileName string                 // the person's file, for Recent Imports; a sheet has none
+	var mapped bool                     // the Import Wizard mapped the file already
+	var shapeStats importpkg.ShapeStats // what the saved reshape left out
 	if intg.Type == "google_sheets" {
 		if strings.TrimSpace(cfg.SheetURL) == "" {
 			jsonErr(w, fmt.Errorf("integration has no sheet_url configured"), http.StatusBadRequest)
@@ -10261,9 +10264,13 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonSheetErr(w, ferr)
 			return
 		}
-		header, rows, err = importpkg.ShapeCSV(data, cfg.Reshape)
+		header, rows, shapeStats, err = importpkg.ReadShapedStats("file.csv", data, "", cfg.Reshape)
 	} else {
-		header, rows, fileName, mapped, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
+		header, rows, fileName, mapped, shapeStats, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
+	}
+	ctx = withSkippedNote(ctx, shapeStats)
+	if note := shapeStats.Note(); note != "" {
+		w.Header().Set("X-Rows-Skipped", strconv.Itoa(shapeStats.SkippedRows))
 	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
@@ -10434,6 +10441,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 // (model.integration_run) — best-effort: a history write must never fail
 // the run whose outcome it records.
 func (h *handler) recordIntegrationRun(ctx context.Context, intID, userID string, imported, errRows int, status, message string) {
+	if note := skippedNote(ctx); note != "" {
+		message = strings.TrimPrefix(strings.TrimSpace(message+"; "+note), "; ")
+	}
 	if _, err := h.db.Exec(ctx, `
 		INSERT INTO model.integration_run (integration_id, run_by, rows_imported, error_rows, status, message)
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6)
@@ -12818,11 +12828,29 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			FROM model.metric_def md JOIN core.model m ON m.id = md.model_id
 			WHERE md.id=$1::uuid`, metricID).Scan(&modelID, &metricRevisionID, &metricAppID)
 
+		// ?with=<id>,<id>: metrics deleted together with this one — metrics
+		// that read each other go in one delete, refused only while a metric
+		// outside them reads one (2026-11-11: nine stray copies in a LAG
+		// cycle each refused while another of them read it).
+		together := []string{metricID}
+		for _, id := range strings.Split(r.URL.Query().Get("with"), ",") {
+			if id = strings.TrimSpace(id); id != "" && id != metricID {
+				var sameModel bool
+				_ = h.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM model.metric_def WHERE id::text=$1 AND model_id::text=$2 AND COALESCE(revision_id::text,'')=$3)`,
+					id, modelID, metricRevisionID).Scan(&sameModel)
+				if !sameModel {
+					jsonErr(w, fmt.Errorf("with: %s is no metric of this metric's model and revision", id), http.StatusBadRequest)
+					return
+				}
+				together = append(together, id)
+			}
+		}
+
 		// Refused while another metric reads it — its formula, or its Rate
 		// total's operands — (409 names them), as a property, dimension or
 		// member delete is refused: those metrics would fail at every cell
 		// and keep serving their last values.
-		if err := metricformula.CheckMetricNotInUse(ctx, h.db.For(ctx), metricID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		if err := metricformula.CheckMetricsNotInUse(ctx, h.db.For(ctx), together); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			if metricformula.IsValidationError(err) {
 				jsonErr(w, err, http.StatusConflict)
 				return
@@ -12844,11 +12872,11 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		var dependentIDs []string
 		if depRows, depErr := h.db.Query(ctx, `
 			WITH RECURSIVE deps AS (
-				SELECT metric_id FROM model.calc_dependency WHERE depends_on_metric_id = $1::uuid
+				SELECT metric_id FROM model.calc_dependency WHERE depends_on_metric_id = ANY($1::uuid[])
 				UNION
 				SELECT cd.metric_id FROM model.calc_dependency cd JOIN deps d ON cd.depends_on_metric_id = d.metric_id
 			)
-			SELECT metric_id::text FROM deps`, metricID); depErr == nil {
+			SELECT metric_id::text FROM deps WHERE NOT (metric_id::text = ANY($1))`, together); depErr == nil {
 			for depRows.Next() {
 				var id string
 				if depRows.Scan(&id) == nil {
@@ -12858,8 +12886,10 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			depRows.Close()
 		}
 
-		h.dropWidgetsReferencing(ctx, metricID)
-		if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, modelID), `DELETE FROM model.metric_def WHERE id=$1::uuid`, metricID); err != nil {
+		for _, id := range together {
+			h.dropWidgetsReferencing(ctx, id)
+		}
+		if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, modelID), `DELETE FROM model.metric_def WHERE id = ANY($1::uuid[])`, together); err != nil {
 			jsonErr(w, err, deleteStatus(err))
 			return
 		}
@@ -12875,11 +12905,13 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-				Category: auditlog.CategoryModelChange, EventType: auditlog.EventMetricDeleted,
-				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-				ApplicationID: metricAppID, ResourceType: "metric", ResourceID: metricID, RevisionID: metricRevisionID,
-			})
+			for _, id := range together {
+				auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+					Category: auditlog.CategoryModelChange, EventType: auditlog.EventMetricDeleted,
+					ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+					ApplicationID: metricAppID, ResourceType: "metric", ResourceID: id, RevisionID: metricRevisionID,
+				})
+			}
 		}
 		jsonOK(w, map[string]string{"status": "deleted"})
 
@@ -16233,6 +16265,10 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		if body.RevisionID == "" {
 			body.RevisionID = revisionID
 		}
+		if err := metricformula.CheckGridNameFree(ctx, h.db.For(ctx), modelID, body.RevisionID, body.Name, ""); err != nil {
+			jsonErr(w, err, gridNameStatus(err))
+			return
+		}
 		var newID string
 		var gridErr error
 		if body.RevisionID != "" {
@@ -16341,6 +16377,12 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 					} else {
 						jsonErr(w, err, http.StatusInternalServerError)
 					}
+					return
+				}
+			}
+			if body.Name != nil {
+				if err := metricformula.CheckGridRenameFree(ctx, h.db.For(ctx), gridID, *body.Name); err != nil {
+					jsonErr(w, err, gridNameStatus(err))
 					return
 				}
 			}
@@ -19475,13 +19517,23 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 			jsonErr(w, err, http.StatusNotFound)
 			return
 		}
+		// Publishing a published workflow changes nothing and says so; it
+		// answered 500 "not found or not in publishable state" (2026-11-11).
+		switch def.Status {
+		case "published":
+			jsonOK(w, def)
+			return
+		case "archived":
+			jsonErr(w, fmt.Errorf("workflow %q is archived: an archived workflow is not published again — duplicate it to make a new one", def.Name), http.StatusConflict)
+			return
+		}
 		if verrs := append(workflow.ValidateDef(def), ws.CheckConditionNames(ctx, def)...); len(verrs) > 0 {
 			jsonErr(w, fmt.Errorf("workflow has validation errors: %s", strings.Join(verrs, "; ")), http.StatusBadRequest)
 			return
 		}
 		published, err := ws.PublishWorkflowDef(ctx, defID, a.UserID)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, http.StatusConflict)
 			return
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -20518,4 +20570,14 @@ func rowFilterJSON(filter []crudapp.RowCondition) string {
 	}
 	b, _ := json.Marshal(filter)
 	return string(b)
+}
+
+// gridNameStatus is the status of a grid-name check's error: 409 for
+// GRID_NAME_TAKEN, 500 for a failed query.
+func gridNameStatus(err error) int {
+	var invalid *metricformula.ValidationError
+	if errors.As(err, &invalid) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }

@@ -273,3 +273,53 @@ func TestImportNamesMembersByLabel(t *testing.T) {
 		}
 	}
 }
+
+// A table's month field takes a date: the leaf period holding it. A GL
+// loader's dates were refused ("2027-01-01 is not a member of Month") and
+// the AI kept a hand-made map of dates to months (2026-11-11).
+func TestImportReadsADateAsItsPeriod(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	var modelID, revID string
+	if err := f.pool.QueryRow(ctx, `SELECT model_id::text, revision_id::text FROM model.form_def WHERE id=$1::uuid`, f.form.ID).Scan(&modelID, &revID); err != nil {
+		t.Fatal(err)
+	}
+	var month, formID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type, time_granularity, fiscal_year_start_month)
+		VALUES ($1::uuid,$2::uuid,'Month','time','month',1) RETURNING id::text`, modelID, revID).Scan(&month); err != nil {
+		t.Fatal(err)
+	}
+	for i, code := range []string{"2027-01", "2027-02"} {
+		if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index)
+			VALUES ($1::uuid, $2, $2, ($2 || '-01')::date, (($2 || '-01')::date + interval '1 month' - interval '1 day')::date, $3)`, month, code, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.form_def (model_id, revision_id, name, label, fields) VALUES ($1::uuid,$2::uuid,'gl','GL',
+		jsonb_build_array(
+			jsonb_build_object('name','month','label','Month','type','dimension','dimension_id',$3::text),
+			jsonb_build_object('name','amount','label','Amount','type','number'))) RETURNING id::text`, modelID, revID, month).Scan(&formID); err != nil {
+		t.Fatal(err)
+	}
+	form, err := crudapp.NewStore(f.pool).GetForm(ctx, formID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := recordpost.OnPool(f.pool, logger.New("test"))
+	rows := []importpkg.RawRow{
+		{RowNumber: 2, Cells: map[string]string{"month": "2027-02-01", "amount": "10"}},
+		{RowNumber: 3, Cells: map[string]string{"month": "2027-01-31 00:00:00", "amount": "5"}},
+	}
+	created, errs, err := ps.ImportRows(ctx, recordpost.ImportRequest{Form: form, CreatorID: f.userID, Header: []string{"month", "amount"}, Rows: rows, Inline: true})
+	if err != nil || len(errs) != 0 || created != 2 {
+		t.Fatalf("import by date: created=%d errs=%v err=%v", created, errs, err)
+	}
+	if got := f.count(t, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid AND data->>'month' IN ('2027-01','2027-02')`, formID); got != 2 {
+		t.Errorf("records holding their month: %v, want 2", got)
+	}
+	_, errs, _ = ps.ImportRows(ctx, recordpost.ImportRequest{Form: form, CreatorID: f.userID, Header: []string{"month", "amount"},
+		Rows: []importpkg.RawRow{{RowNumber: 2, Cells: map[string]string{"month": "2028-05-01", "amount": "1"}}}, Inline: true})
+	if len(errs) != 1 {
+		t.Errorf("a date outside every period: errs=%v, want the row refused", errs)
+	}
+}

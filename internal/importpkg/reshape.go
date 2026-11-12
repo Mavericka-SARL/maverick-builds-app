@@ -317,11 +317,73 @@ func readXLSXSheetGrid(data []byte, sheet string, rawValues bool) (sheets []stri
 // the header, so the first row under a header on line 3 was "row 1" in an
 // error while the sheet and the wizard said 4 (2026-10-21).
 func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err error) {
+	header, rows, _, err = ShapeGridStats(grid, r)
+	return header, rows, err
+}
+
+// ShapeStats is what a reshape left out of a file: the data rows its
+// skip_rows dropped, and by which filter. A saved loader filtering out one
+// GL account reported 70 of 70 rows imported for a file of 71, and the
+// model's unmapped-account check never fired (2026-11-11): a run says so.
+type ShapeStats struct {
+	SkippedRows int
+	// SkippedBy is each filter that dropped rows, with how many.
+	SkippedBy map[string]int
+}
+
+// Note is the line a run's history carries: "" when nothing was skipped.
+func (st ShapeStats) Note() string {
+	if st.SkippedRows == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(st.SkippedBy))
+	for k := range st.SkippedBy {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s: %d", k, st.SkippedBy[k])
+	}
+	return fmt.Sprintf("%d row(s) of the file skipped by the loader's skip_rows (%s)", st.SkippedRows, strings.Join(parts, "; "))
+}
+
+// Describe names a filter as a person reads it: `GL code = "6450"`.
+func (f RowFilter) Describe() string {
+	col := f.Column
+	if strings.TrimSpace(col) == "" {
+		col = "any column"
+	}
+	switch {
+	case f.Blank:
+		return col + " blank"
+	case f.Equals != "":
+		return fmt.Sprintf("%s = %q", col, f.Equals)
+	default:
+		return fmt.Sprintf("%s contains %q", col, f.Contains)
+	}
+}
+
+// ReadShapedStats is ReadShaped with what the reshape left out.
+func ReadShapedStats(filename string, data []byte, sheet string, r *Reshape) (header []string, rows []RawRow, st ShapeStats, err error) {
+	if err := r.Validate(); err != nil {
+		return nil, nil, st, err
+	}
+	delim, _ := r.Comma()
+	grid, err := ReadGrid(filename, data, sheet, delim)
+	if err != nil {
+		return nil, nil, st, err
+	}
+	return ShapeGridStats(grid, r)
+}
+
+// ShapeGridStats is ShapeGrid with what the reshape left out.
+func ShapeGridStats(grid [][]string, r *Reshape) (header []string, rows []RawRow, st ShapeStats, err error) {
 	if r == nil {
 		r = &Reshape{}
 	}
 	if err := r.Validate(); err != nil {
-		return nil, nil, err
+		return nil, nil, st, err
 	}
 	h := r.HeaderRow
 	if h == 0 {
@@ -333,7 +395,7 @@ func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err
 		}
 	}
 	if h > len(grid) {
-		return nil, nil, fmt.Errorf("the sheet has %d row(s); reshape.header_row is %d", len(grid), h)
+		return nil, nil, st, fmt.Errorf("the sheet has %d row(s); reshape.header_row is %d", len(grid), h)
 	}
 	header = append([]string(nil), grid[h-1]...)
 	rowNum := 0
@@ -348,15 +410,16 @@ func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err
 	steps := []func(*Reshape) error{s.fillDown, s.skipRows, s.unpivot, s.constants, s.valueMap, s.numbers}
 	for _, step := range steps {
 		if err := step(r); err != nil {
-			return nil, nil, err
+			return nil, nil, st, err
 		}
 	}
-	return s.header, s.rows, nil
+	return s.header, s.rows, s.stats, nil
 }
 
 type shaper struct {
 	header []string
 	rows   []RawRow
+	stats  ShapeStats
 }
 
 // col finds a column by name, ignoring case and surrounding spaces, and
@@ -428,7 +491,9 @@ func (s *shaper) skipRows(r *Reshape) error {
 	kept := s.rows[:0]
 	for _, row := range s.rows {
 		skip := false
+		by := ""
 		for _, f := range filters {
+			by = f.Describe()
 			if f.col != "" {
 				skip = matches(f, row.Cells[f.col])
 			} else {
@@ -445,7 +510,13 @@ func (s *shaper) skipRows(r *Reshape) error {
 		}
 		if !skip {
 			kept = append(kept, row)
+			continue
 		}
+		s.stats.SkippedRows++
+		if s.stats.SkippedBy == nil {
+			s.stats.SkippedBy = map[string]int{}
+		}
+		s.stats.SkippedBy[by]++
 	}
 	s.rows = kept
 	return nil

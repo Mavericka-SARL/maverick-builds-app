@@ -562,10 +562,11 @@ type Handler interface {
 	DeleteIntegrationTemplate(ctx context.Context, params DeleteIntegrationTemplateParams) (DeleteIntegrationTemplateRes, error)
 	// DeleteMetric implements deleteMetric operation.
 	//
-	// Delete a metric definition.
+	// Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics
+	// that read each other are deleted together by naming them in "with".
 	//
 	// DELETE /api/developer/metrics/{id}
-	DeleteMetric(ctx context.Context, params DeleteMetricParams) (*DeleteMetricOK, error)
+	DeleteMetric(ctx context.Context, params DeleteMetricParams) (DeleteMetricRes, error)
 	// DeleteNotification implements deleteNotification operation.
 	//
 	// Delete one of the caller's own notifications from their bell.
@@ -717,6 +718,14 @@ type Handler interface {
 	//
 	// GET /api/ai/settings
 	GetAiSettings(ctx context.Context) (*AiLLMSettings, error)
+	// GetAiWorkbookMap implements getAiWorkbookMap operation.
+	//
+	// Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest
+	// other revision of the model, and per sheet the rows that match, differ, and hold numbers but were
+	// never mapped (read from the workbooks attached to the session).
+	//
+	// GET /api/ai/sessions/{id}/workbook-map
+	GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (GetAiWorkbookMapRes, error)
 	// GetAuditSettings implements getAuditSettings operation.
 	//
 	// The audit retention policy (administrators; enterprise).
@@ -1105,6 +1114,13 @@ type Handler interface {
 	//
 	// GET /api/ai/sessions/{id}/conversions
 	ListAiConversions(ctx context.Context, params ListAiConversionsParams) (ListAiConversionsRes, error)
+	// ListAiModels implements listAiModels operation.
+	//
+	// The key typed (api_key), else the caller's saved key for that provider, else the deployment's.
+	// Always 200; a key that cannot list answers an error beside an empty list.
+	//
+	// POST /api/ai/settings/models
+	ListAiModels(ctx context.Context, req OptListAiModelsReq) (*ListAiModelsOK, error)
 	// ListAiProposals implements listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -1452,7 +1468,8 @@ type Handler interface {
 	PromoteAiDraft(ctx context.Context, req OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
 	// PublishWorkflow implements publishWorkflow operation.
 	//
-	// Publish a workflow definition (rejected if it fails validation).
+	// Publishing a workflow that is already published changes nothing and answers it as it is; an
+	// archived workflow is refused (409).
 	//
 	// POST /api/developer/workflows/{id}/publish
 	PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (PublishWorkflowRes, error)
@@ -1545,7 +1562,7 @@ type Handler interface {
 	RemoveSso(ctx context.Context) (RemoveSsoRes, error)
 	// RenameAiSession implements renameAiSession operation.
 	//
-	// Rename a session (an explicit rename always wins over auto-naming).
+	// Rename a session (an explicit rename always wins over auto-naming), or set its call budget.
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)

@@ -152,3 +152,67 @@ func TestTheRequestNamesTheInput(t *testing.T) {
 		t.Error("an input the request does not name is heard")
 	}
 }
+
+func TestSourceFilterProblems(t *testing.T) {
+	step := func(filter string) aiassistant.ProposalStep {
+		return aiassistant.ProposalStep{Tool: "update_integration", Params: json.RawMessage(`{"integration_id":"x","reshape":{"skip_rows":[` + filter + `]}}`)}
+	}
+	for _, c := range []struct {
+		filter, request string
+		refused         bool
+	}{
+		{`{"column":"GL code","equals":"6450"}`, "load the April GL file", true},
+		{`{"column":"GL code","equals":"6450"}`, "skip account 6450 in the loader", false},
+		{`{"column":"Account","contains":"Total"}`, "load it", false},
+		{`{"column":"Account","equals":"Account"}`, "load it", false},
+		{`{"column":"Account","blank":true}`, "load it", false},
+		{`{"column":"Region","equals":"EMEA"}`, "load it", true},
+	} {
+		probs, failed := sourceFilterProblems([]aiassistant.ProposalStep{step(c.filter)}, c.request)
+		if got := len(probs) > 0; got != c.refused || (c.refused && len(failed) != 1) {
+			t.Errorf("filter %s, request %q: refused=%v (%q), want %v", c.filter, c.request, got, probs, c.refused)
+		}
+	}
+}
+
+func TestMissingFileProblems(t *testing.T) {
+	steps := []aiassistant.ProposalStep{{Tool: "import_file_data", Params: json.RawMessage(`{"file":"model.xlsx","sheet":"Import BS"}`)}}
+	probs, failed := missingFileProblems(steps, "Load hightech-actuals-2027-01-06.xlsx into the actuals tables", []string{"model.xlsx"})
+	if len(probs) != 1 || len(failed) != 1 || !strings.Contains(probs[0], "hightech-actuals-2027-01-06.xlsx, which is not attached") {
+		t.Fatalf("problems %q", probs)
+	}
+	if probs, _ := missingFileProblems(steps, "Load hightech-actuals-2027-01-06.xlsx", []string{"model.xlsx", "hightech-actuals-2027-01-06.xlsx"}); len(probs) != 0 {
+		t.Fatalf("an attached file was called missing: %q", probs)
+	}
+	if probs, _ := missingFileProblems(steps, "Load the BS sheet", []string{"model.xlsx"}); len(probs) != 0 {
+		t.Fatalf("a request naming no file: %q", probs)
+	}
+}
+
+func TestAnsweredDecision(t *testing.T) {
+	hist := func(reply, msg string) []aiassistant.ChatMessage {
+		return []aiassistant.ChatMessage{{Role: "user", Content: "build the inputs"}, {Role: "assistant", Content: reply}, {Role: "user", Content: msg}}
+	}
+	for _, c := range []struct {
+		reply, msg, want string
+	}{
+		{"Inputs are built. Should percentages be stored as percent units (2.5) or fractions (0.025)?", "percent units, 2.5 means 2.5%",
+			"Asked: Should percentages be stored as percent units (2.5) or fractions (0.025)? — the developer answered: percent units, 2.5 means 2.5%"},
+		{"Shall I continue with the Cash Flow?", "yes", ""},
+		{"Shall I continue with the Cash Flow?", "yes, and use the indirect method", ""}, // leave asked: no decision
+		{"The P&L is built.", "now the balance sheet", ""},
+		{"Which month starts the fiscal year?", "April", "Asked: Which month starts the fiscal year? — the developer answered: April"},
+	} {
+		if got := answeredDecision(hist(c.reply, c.msg), c.msg); got != c.want {
+			t.Errorf("reply %q, msg %q: got %q, want %q", c.reply, c.msg, got, c.want)
+		}
+	}
+}
+
+func TestParseFoundStages(t *testing.T) {
+	plan := &aiassistant.TaskPlan{Stages: []aiassistant.TaskStage{{Title: "A", Items: []string{"revenue", "costs"}}, {Title: "B", Items: []string{"P&L page"}}}}
+	got := parseFoundStages("ok ```{\"found\": {\"1\": [\"Revenue\", \"invented\"], \"3\": [\"x\"]}}```", plan)
+	if len(got) != 1 || len(got[0]) != 1 || got[0][0] != "revenue" {
+		t.Fatalf("found = %v", got)
+	}
+}

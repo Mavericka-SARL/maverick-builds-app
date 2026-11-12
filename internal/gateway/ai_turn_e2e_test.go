@@ -145,16 +145,14 @@ func TestSendMessage_RetriesWhileFailuresFallThenPassingStepsThenStop(t *testing
 		proposeResp("c1", good, bad(1), bad(2), bad(3)), // 3 fail
 		proposeResp("c2", good, bad(1), bad(2)),         // 2: falling
 		proposeResp("c3", good, bad(1)),                 // 1: falling, past the 3 always allowed
-		proposeResp("c4", good, bad(1)),                 // 1: not falling → the passing steps
-		proposeResp("c5", good, bad(2)),                 // 1 again → stop
-		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "bad1 fails: no_such_metric does not exist."}},
+		proposeResp("c4", good, bad(1)),                 // 1: not falling → the server proposes the passing steps
 	}}
 	env := newAITurnEnv(t, fake)
-	if status, sse := env.send("build stage 4"); status != http.StatusOK || !strings.Contains(sse, "event: done") {
+	if status, sse := env.send("build stage 4"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
 		t.Fatalf("send: %d\n%s", status, sse)
 	}
 	results := toolResults(t, env)
-	want := []string{"Fix every failing step", "Fix every failing step", "Fix every failing step", "ONLY the steps that pass", "Do not propose again"}
+	want := []string{"Fix every failing step", "Fix every failing step", "Fix every failing step", "Proposal created by the server with the 1 step(s) that pass"}
 	if len(results) != len(want) {
 		t.Fatalf("%d tool results, want %d: %q", len(results), len(want), results)
 	}
@@ -350,6 +348,30 @@ func TestClaimsUnproposedChange(t *testing.T) {
 	}
 }
 
+func TestAsksPermissionAndPointsAtPlan(t *testing.T) {
+	for reply, want := range map[string]bool{
+		"The stage is too large for one proposal (>100 steps). Shall I split it into parts?":                    true,
+		"Rows 4-9 are built. Should I run compare_with_sheet now, or continue? This does not change the model.": true,
+		"Do you want me to continue with the Cash Flow?":                                                        true,
+		"Which month does the fiscal year start in?":                                                            false,
+		"Two readings:\n1) Opening = last closing\n2) Opening = the input\nWhich one?":                          false,
+	} {
+		if got := asksPermission(reply); got != want {
+			t.Errorf("asksPermission(%q) = %v, want %v", reply, got, want)
+		}
+	}
+	for reply, want := range map[string]bool{
+		"I've prepared the corrected plan — please confirm above.": true,
+		"The plan is ready for your review.":                       true,
+		"Please review and confirm.":                               true,
+		"Revenue reads the price input.":                           false,
+	} {
+		if got := pointsAtPlan.MatchString(reply); got != want {
+			t.Errorf("pointsAtPlan(%q) = %v, want %v", reply, got, want)
+		}
+	}
+}
+
 func TestAsksToPropose(t *testing.T) {
 	for reply, want := range map[string]bool{
 		"I'm ready to propose the full plan. Confirm and I will post it.":                      true,
@@ -468,19 +490,34 @@ func TestSendMessage_RefusesReadOfMetricOnNoGrid(t *testing.T) {
 			{"tool": "write_input_values", "description": "Events", "params": map[string]any{"metric_id": "seas_event", "values": ones}},
 		}
 	}
-	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan(false)...), proposeResp("c2", plan(true)...), proposeResp("c3", plan(true)...)}}
+	// gross_profit is made by the plan and read by ebitda on PnL: the server
+	// places it there itself instead of refusing the plan for a turn.
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan(false)...), proposeResp("c2", plan(false)...)}}
 	env := newAITurnEnv(t, fake)
 	if status, sse := env.send("build it"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
 		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
 	}
 	results := toolResults(t, env)
-	if len(results) < 1 || !strings.Contains(results[0], "ebitda reads gross_profit, which is on no grid") {
-		t.Fatalf("the first plan was not refused for reading a metric on no grid:\n%q", results)
+	if len(results) < 1 || !strings.Contains(results[len(results)-1], "Added by the server: gross_profit placed on the grid PnL") {
+		t.Fatalf("the plan was not given gross_profit's placement:\n%q", results)
 	}
-	for _, r := range results[1:] {
-		if strings.Contains(r, "on no grid") || strings.Contains(r, "seas_event is 1") || strings.Contains(r, "opening_capex looks like a level") {
-			t.Errorf("the placed plan was refused or warned of: %s", r)
+	for _, r := range results {
+		if strings.Contains(r, "which is on no grid") {
+			t.Errorf("the plan was refused for a placement the server can add: %s", r)
 		}
+	}
+	props, err := env.proposals.ListProposals(context.Background(), env.session)
+	if err != nil || len(props) == 0 {
+		t.Fatalf("proposals: %v, %d", err, len(props))
+	}
+	placed := false
+	for _, st := range props[len(props)-1].Steps {
+		if st.Tool == "add_grid_metric" && strings.Contains(st.Description, "gross_profit") {
+			placed = true
+		}
+	}
+	if !placed {
+		t.Errorf("the proposal has no add_grid_metric step for gross_profit: %+v", props[len(props)-1].Steps)
 	}
 }
 
@@ -598,5 +635,29 @@ func TestSendMessage_SheetCalledDoneIsCheckedFirst(t *testing.T) {
 	msgs, _ := env.chat.ListMessages(context.Background(), env.session)
 	if len(msgs) < 2 || !strings.Contains(msgs[len(msgs)-1].Content, "not done") {
 		t.Errorf("the turn does not end on the checked answer: %+v", msgs[len(msgs)-1])
+	}
+}
+
+// A failing layout step does not hold the plan back: the server leaves it
+// out and says so (2026-11-11: a 38-step plan went back five times over one
+// reorder_grid_metrics naming a metric not on the grid).
+func TestSendMessage_FailingLayoutStepIsLeftOut(t *testing.T) {
+	plan := []map[string]any{
+		turnMetricStep("units", map[string]any{"is_input": true}),
+		{"tool": "create_grid", "description": "Sales", "params": map[string]any{"name": "Sales", "metrics": []string{"units"}}},
+		{"tool": "reorder_grid_metrics", "description": "Order Sales", "params": map[string]any{"grid_id": "Sales", "metrics": []string{"units", "not_on_the_grid"}}},
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan...)}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("build it"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
+		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
+	}
+	results := toolResults(t, env)
+	if len(results) != 1 || !strings.Contains(results[0], "Left out by the server: step 3 (reorder_grid_metrics") {
+		t.Fatalf("tool results: %q", results)
+	}
+	props, err := env.proposals.ListProposals(context.Background(), env.session)
+	if err != nil || len(props) != 1 || len(props[0].Steps) != 2 {
+		t.Fatalf("proposals: %v %+v", err, props)
 	}
 }

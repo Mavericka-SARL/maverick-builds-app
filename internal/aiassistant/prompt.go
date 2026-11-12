@@ -417,7 +417,8 @@ placed on a grid that has region — always add the add_grid_metric step.
 Every change below is the console's own action for it, with the same checks; ids come from the list tools, and most
 references also accept the exact name. A step that fails leaves the rest of the proposal to run, so order dependent
 steps carefully.
-- Metrics: delete_metric {"metric_id"} — refused while another metric reads it, in its formula or as the numerator or
+- Metrics: delete_metric {"metric_id"} (or {"metric_ids": [...]}: metrics that read each other — a cycle, a helper and
+  its only reader — deleted together in one step) — refused while another metric reads it, in its formula or as the numerator or
   denominator of its "rate" total, or a highlight rule, closed rule, workflow condition or data export of the
   revision names it (METRIC_IN_USE names them): propose the change of each of them first, then the delete, in that
   order in one proposal. Renaming a metric (update_metric "name") renames it in all of those itself.
@@ -552,6 +553,25 @@ reshape "scale": {"<value column>": 100}, read them as pct / 100, and write a ra
 with agg_rule "formula". List create_grid's "metrics" in the order the grid should show them (a statement reads top
 to bottom); reorder_grid_metrics fixes an order later. A chart plots only the metrics of its own grid: to draw
 series from two grids, put a metric reading each (formula = the other metric) on one grid and chart that grid.
+Answer from the source, ask only what it leaves open:
+- Percentages are stored in percent units (5.6 = 5.6%) — the platform's rule, never a question for the developer.
+- A rule the attached workbook's formula states (a depreciation life, an opening balance = last closing, a growth
+  base) is read from the formula (read_attached_sheet shows it), never asked.
+- A driver the workbook keeps per member of a dimension (a price per channel, a salary per function, per scenario)
+  is ONE input metric on a grid with that dimension, never one metric per member.
+- The workbook's month counter (1, 2, … 36 across the plan) is (YEAR(START()) - <first year>) * 12 + MONTH(START())
+  - <first month> + 1 — not MONTH(START()), which restarts every January.
+- A value a source reports as 0 is a value: test a reported figure with ISBLANK(x), never x = 0, when you mean
+  "no figure reported" (a month with 0 subscribers is not a month without a report).
+- Two forms of one status (a text "PASS"/"CHECK" and a 1/0 flag) are one formula and its reading: the flag is
+  IF(status_text = "PASS", 1, 0), so they never disagree when a check is added later.
+- A dimension of alternatives (scenarios, versions, cases) gets agg_rule "first" (or "none") when you create it:
+  added up, every total over it — a KPI tile, a summary, a workflow condition — reads Base + Downside + Upside.
+- Who may change which inputs (read-only metrics per role) is the business admin's to set, in Business Admin ›
+  Roles › Access rules: set_user_access_rules writes member rules only. Say so, and list which inputs each role
+  owns; never stall asking for member codes for it.
+- To add a term to a formula, keep the formula and add to it: replacing it drops what it read (refused unless the
+  request asks for a replacement).
 Keep what the workbook shows, not only what it computes:
 - Each row's "label" is the workbook's row text, word for word ("Rent & occupancy", "EBITDA margin %"), never a
   name turned into words: the people using the model know the workbook's lines.
@@ -827,12 +847,16 @@ see the layout. Steps (all optional, applied in this order, each naming the colu
 - "fill_down": ["Region"] — a label written once over its group fills the blank cells below it.
 - "skip_rows": [{"column": "Account", "contains": "total"}, {"column": "Region", "equals": "Total"},
   {"column": "Amount", "blank": true}] — drop subtotal, total and empty rows; omit column to test every cell.
+  Never to drop data: a row naming an account, member or code the model lacks is added (add_dimension_member, a
+  mapping row) or asked about — filtered out of a saved loader, every later file loses it and the model's checks
+  never see it. A saved loader filtering out a data value is refused unless the developer's request names it.
 - "unpivot": {"from": "Jan", "to": "Dec", "name_column": "Month", "value_column": "Revenue"} (or "columns":
   [...]) — values across columns become rows: name_column gets each column's header (map it to a dimension),
   value_column its cell (a metric name, or "value" beside a "metric" column). Blank cells make no row.
 - "constants": {"Scenario": "Budget", "Year": "FY2026"} — what the file means but does not say.
 - "value_map": {"Month": {"Jan": "2026-01"}, "Region": {"EMEA": "Europe"}} — rewrite values into the model's
-  member codes. Map only what is certain (list_dimensions shows every member's code and label; months named after their
+  member codes. A date (2027-01-01, an Excel day number) needs no map: a time-dimension column or table field
+  takes the leaf period that holds it, for every month the dimension has. Map only what is certain (list_dimensions shows every member's code and label; months named after their
   period are certain); when a mapping is a guess, ask the developer and show them the mapping you propose.
 - "number_columns": [...] with "decimal_comma": true for "1.234,5"; "scale": {"Revenue": 1000} for a file in
   thousands. "(123)", "12%", thousands separators and currency signs are read; the unpivot's value column and
@@ -1281,6 +1305,7 @@ Example — developer says "add a Finance Review approval for expense requests o
         "tool": "update_workflow_def",
         "description": "Add the steps to 'Expense Approval'",
         "params": {"workflow_def_id": "<created in step 2>", "single_active_instance": false,
+          "subject_type": "form_record", "subject_config": {"form_id": "<expense table id>"},
           "context_schema": [{"key": "amount", "label": "Amount", "data_type": "Number", "required": true}],
           "steps": [
             {"id": "check-amount", "name": "Over 1000?", "type": "condition", "condition": {"left": "amount", "operator": "greater_than", "right": 1000}, "routes": {"true": "finance-review", "false": "notify-done"}},

@@ -133,6 +133,15 @@ func integrationToolDefs() []toolDef {
 			Parameters:  compareWithSheetSchema,
 		},
 		{
+			Name: "workbook_map",
+			Description: "The workbook map: each row of an attached workbook and the metric it became (with its members), and whether it matched when last compared — kept by compare_with_sheet across turns, sessions and drafts — plus each mapped sheet's rows with numbers that no metric was compared with yet. " +
+				"Read it instead of re-listing metrics or re-reading sheets to learn what a row became or what is left; one call.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"An attached file's name; omit for every file of the model's map"},
+				"sheet":{"type":"string","description":"One sheet only"}
+			},"required":[]}`,
+		},
+		{
 			Name:        "prepare_converted_file",
 			Description: "Saves an attached spreadsheet converted to the import layout — reshaped and column-mapped exactly as preview_file_import would, so the developer can download it as CSV or Excel from the chat (the Converted files strip). Nothing is imported. Use it when the developer asks for the file in the right format, or wants to check the conversion before importing; preview first.",
 			Parameters: `{"type":"object","properties":{
@@ -1050,4 +1059,37 @@ func reshapeKeysChecked(raw json.RawMessage) error {
 		return nil
 	}
 	return importpkg.CheckReshapeKeys(p.Reshape)
+}
+
+// workbookMap answers the workbook_map tool.
+func (e *ToolExecutor) workbookMap(ctx context.Context, raw json.RawMessage) (string, error) {
+	var p struct {
+		File  string `json:"file"`
+		Sheet string `json:"sheet"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	var files []string
+	if strings.TrimSpace(p.File) != "" {
+		files = []string{p.File}
+	}
+	rows, err := LoadWorkbookMap(ctx, e.pool, e.modelID, e.revID, files)
+	if err != nil {
+		return "", err
+	}
+	books := map[string][]byte{}
+	if e.hooks.AttachedFile != nil {
+		seen := map[string]bool{}
+		for _, r := range rows {
+			if seen[strings.ToLower(r.File)] {
+				continue
+			}
+			seen[strings.ToLower(r.File)] = true
+			if name, data, err := e.hooks.AttachedFile(ctx, r.File); err == nil {
+				books[name] = data
+			}
+		}
+	}
+	return RenderWorkbookMap(rows, Coverage(rows, books), strings.TrimSpace(p.Sheet)), nil
 }

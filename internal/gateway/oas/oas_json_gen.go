@@ -5180,12 +5180,19 @@ func (s *AiLLMSettings) encodeFields(e *jx.Encoder) {
 		e.FieldStart("has_key")
 		e.Bool(s.HasKey)
 	}
+	{
+		if s.ReasoningEffort.Set {
+			e.FieldStart("reasoning_effort")
+			s.ReasoningEffort.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiLLMSettings = [3]string{
+var jsonFieldsNameOfAiLLMSettings = [4]string{
 	0: "provider",
 	1: "model",
 	2: "has_key",
+	3: "reasoning_effort",
 }
 
 // Decode decodes AiLLMSettings from json.
@@ -5232,6 +5239,16 @@ func (s *AiLLMSettings) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"has_key\"")
+			}
+		case "reasoning_effort":
+			if err := func() error {
+				s.ReasoningEffort.Reset()
+				if err := s.ReasoningEffort.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reasoning_effort\"")
 			}
 		default:
 			return d.Skip()
@@ -5285,6 +5302,56 @@ func (s *AiLLMSettings) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *AiLLMSettings) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiLLMSettingsReasoningEffort as json.
+func (s AiLLMSettingsReasoningEffort) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes AiLLMSettingsReasoningEffort from json.
+func (s *AiLLMSettingsReasoningEffort) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AiLLMSettingsReasoningEffort to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch AiLLMSettingsReasoningEffort(v) {
+	case AiLLMSettingsReasoningEffortEmpty:
+		*s = AiLLMSettingsReasoningEffortEmpty
+	case AiLLMSettingsReasoningEffortNone:
+		*s = AiLLMSettingsReasoningEffortNone
+	case AiLLMSettingsReasoningEffortMinimal:
+		*s = AiLLMSettingsReasoningEffortMinimal
+	case AiLLMSettingsReasoningEffortLow:
+		*s = AiLLMSettingsReasoningEffortLow
+	case AiLLMSettingsReasoningEffortMedium:
+		*s = AiLLMSettingsReasoningEffortMedium
+	case AiLLMSettingsReasoningEffortHigh:
+		*s = AiLLMSettingsReasoningEffortHigh
+	case AiLLMSettingsReasoningEffortXhigh:
+		*s = AiLLMSettingsReasoningEffortXhigh
+	default:
+		*s = AiLLMSettingsReasoningEffort(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AiLLMSettingsReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AiLLMSettingsReasoningEffort) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -6082,12 +6149,19 @@ func (s *AiSaveSettingsRequest) encodeFields(e *jx.Encoder) {
 			s.APIKey.Encode(e)
 		}
 	}
+	{
+		if s.ReasoningEffort.Set {
+			e.FieldStart("reasoning_effort")
+			s.ReasoningEffort.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiSaveSettingsRequest = [3]string{
+var jsonFieldsNameOfAiSaveSettingsRequest = [4]string{
 	0: "provider",
 	1: "model",
 	2: "api_key",
+	3: "reasoning_effort",
 }
 
 // Decode decodes AiSaveSettingsRequest from json.
@@ -6129,6 +6203,16 @@ func (s *AiSaveSettingsRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"api_key\"")
 			}
+		case "reasoning_effort":
+			if err := func() error {
+				s.ReasoningEffort.Reset()
+				if err := s.ReasoningEffort.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reasoning_effort\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -6149,6 +6233,56 @@ func (s *AiSaveSettingsRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *AiSaveSettingsRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiSaveSettingsRequestReasoningEffort as json.
+func (s AiSaveSettingsRequestReasoningEffort) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes AiSaveSettingsRequestReasoningEffort from json.
+func (s *AiSaveSettingsRequestReasoningEffort) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AiSaveSettingsRequestReasoningEffort to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch AiSaveSettingsRequestReasoningEffort(v) {
+	case AiSaveSettingsRequestReasoningEffortEmpty:
+		*s = AiSaveSettingsRequestReasoningEffortEmpty
+	case AiSaveSettingsRequestReasoningEffortNone:
+		*s = AiSaveSettingsRequestReasoningEffortNone
+	case AiSaveSettingsRequestReasoningEffortMinimal:
+		*s = AiSaveSettingsRequestReasoningEffortMinimal
+	case AiSaveSettingsRequestReasoningEffortLow:
+		*s = AiSaveSettingsRequestReasoningEffortLow
+	case AiSaveSettingsRequestReasoningEffortMedium:
+		*s = AiSaveSettingsRequestReasoningEffortMedium
+	case AiSaveSettingsRequestReasoningEffortHigh:
+		*s = AiSaveSettingsRequestReasoningEffortHigh
+	case AiSaveSettingsRequestReasoningEffortXhigh:
+		*s = AiSaveSettingsRequestReasoningEffortXhigh
+	default:
+		*s = AiSaveSettingsRequestReasoningEffort(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AiSaveSettingsRequestReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AiSaveSettingsRequestReasoningEffort) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -6304,19 +6438,26 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 			s.PromotedAt.Encode(e, json.EncodeDateTime)
 		}
 	}
+	{
+		if s.CallBudget.Set {
+			e.FieldStart("call_budget")
+			s.CallBudget.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiSession = [10]string{
-	0: "id",
-	1: "app_id",
-	2: "model_id",
-	3: "user_id",
-	4: "llm_provider",
-	5: "llm_model",
-	6: "title",
-	7: "draft_revision_id",
-	8: "created_at",
-	9: "promoted_at",
+var jsonFieldsNameOfAiSession = [11]string{
+	0:  "id",
+	1:  "app_id",
+	2:  "model_id",
+	3:  "user_id",
+	4:  "llm_provider",
+	5:  "llm_model",
+	6:  "title",
+	7:  "draft_revision_id",
+	8:  "created_at",
+	9:  "promoted_at",
+	10: "call_budget",
 }
 
 // Decode decodes AiSession from json.
@@ -6442,6 +6583,16 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"promoted_at\"")
 			}
+		case "call_budget":
+			if err := func() error {
+				s.CallBudget.Reset()
+				if err := s.CallBudget.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"call_budget\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -6526,12 +6677,19 @@ func (s *AiTestSettingsRequest) encodeFields(e *jx.Encoder) {
 			s.APIKey.Encode(e)
 		}
 	}
+	{
+		if s.ReasoningEffort.Set {
+			e.FieldStart("reasoning_effort")
+			s.ReasoningEffort.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiTestSettingsRequest = [3]string{
+var jsonFieldsNameOfAiTestSettingsRequest = [4]string{
 	0: "provider",
 	1: "model",
 	2: "api_key",
+	3: "reasoning_effort",
 }
 
 // Decode decodes AiTestSettingsRequest from json.
@@ -6572,6 +6730,16 @@ func (s *AiTestSettingsRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"api_key\"")
 			}
+		case "reasoning_effort":
+			if err := func() error {
+				s.ReasoningEffort.Reset()
+				if err := s.ReasoningEffort.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reasoning_effort\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -6592,6 +6760,56 @@ func (s *AiTestSettingsRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *AiTestSettingsRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiTestSettingsRequestReasoningEffort as json.
+func (s AiTestSettingsRequestReasoningEffort) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes AiTestSettingsRequestReasoningEffort from json.
+func (s *AiTestSettingsRequestReasoningEffort) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AiTestSettingsRequestReasoningEffort to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch AiTestSettingsRequestReasoningEffort(v) {
+	case AiTestSettingsRequestReasoningEffortEmpty:
+		*s = AiTestSettingsRequestReasoningEffortEmpty
+	case AiTestSettingsRequestReasoningEffortNone:
+		*s = AiTestSettingsRequestReasoningEffortNone
+	case AiTestSettingsRequestReasoningEffortMinimal:
+		*s = AiTestSettingsRequestReasoningEffortMinimal
+	case AiTestSettingsRequestReasoningEffortLow:
+		*s = AiTestSettingsRequestReasoningEffortLow
+	case AiTestSettingsRequestReasoningEffortMedium:
+		*s = AiTestSettingsRequestReasoningEffortMedium
+	case AiTestSettingsRequestReasoningEffortHigh:
+		*s = AiTestSettingsRequestReasoningEffortHigh
+	case AiTestSettingsRequestReasoningEffortXhigh:
+		*s = AiTestSettingsRequestReasoningEffortXhigh
+	default:
+		*s = AiTestSettingsRequestReasoningEffort(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AiTestSettingsRequestReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AiTestSettingsRequestReasoningEffort) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -32831,14 +33049,21 @@ func (s *GetAiSessionOKUsage) encodeFields(e *jx.Encoder) {
 			s.CacheWriteTokens.Encode(e)
 		}
 	}
+	{
+		if s.EstimatedCostUsd.Set {
+			e.FieldStart("estimated_cost_usd")
+			s.EstimatedCostUsd.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfGetAiSessionOKUsage = [5]string{
+var jsonFieldsNameOfGetAiSessionOKUsage = [6]string{
 	0: "llm_calls",
 	1: "input_tokens",
 	2: "output_tokens",
 	3: "cache_read_tokens",
 	4: "cache_write_tokens",
+	5: "estimated_cost_usd",
 }
 
 // Decode decodes GetAiSessionOKUsage from json.
@@ -32899,6 +33124,16 @@ func (s *GetAiSessionOKUsage) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"cache_write_tokens\"")
 			}
+		case "estimated_cost_usd":
+			if err := func() error {
+				s.EstimatedCostUsd.Reset()
+				if err := s.EstimatedCostUsd.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"estimated_cost_usd\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -32919,6 +33154,658 @@ func (s *GetAiSessionOKUsage) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *GetAiSessionOKUsage) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GetAiWorkbookMapOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetAiWorkbookMapOK) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("sheets")
+		e.ArrStart()
+		for _, elem := range s.Sheets {
+			elem.Encode(e)
+		}
+		e.ArrEnd()
+	}
+	{
+		e.FieldStart("rows")
+		e.ArrStart()
+		for _, elem := range s.Rows {
+			elem.Encode(e)
+		}
+		e.ArrEnd()
+	}
+}
+
+var jsonFieldsNameOfGetAiWorkbookMapOK = [2]string{
+	0: "sheets",
+	1: "rows",
+}
+
+// Decode decodes GetAiWorkbookMapOK from json.
+func (s *GetAiWorkbookMapOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiWorkbookMapOK to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "sheets":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				s.Sheets = make([]GetAiWorkbookMapOKSheetsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GetAiWorkbookMapOKSheetsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Sheets = append(s.Sheets, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheets\"")
+			}
+		case "rows":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				s.Rows = make([]GetAiWorkbookMapOKRowsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GetAiWorkbookMapOKRowsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Rows = append(s.Rows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiWorkbookMapOK")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000011,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfGetAiWorkbookMapOK) {
+					name = jsonFieldsNameOfGetAiWorkbookMapOK[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetAiWorkbookMapOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiWorkbookMapOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GetAiWorkbookMapOKRowsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetAiWorkbookMapOKRowsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.File.Set {
+			e.FieldStart("file")
+			s.File.Encode(e)
+		}
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+	{
+		if s.Row.Set {
+			e.FieldStart("row")
+			s.Row.Encode(e)
+		}
+	}
+	{
+		if s.Label.Set {
+			e.FieldStart("label")
+			s.Label.Encode(e)
+		}
+	}
+	{
+		if s.Metric.Set {
+			e.FieldStart("metric")
+			s.Metric.Encode(e)
+		}
+	}
+	{
+		if s.Members.Set {
+			e.FieldStart("members")
+			s.Members.Encode(e)
+		}
+	}
+	{
+		if s.FirstColumn.Set {
+			e.FieldStart("first_column")
+			s.FirstColumn.Encode(e)
+		}
+	}
+	{
+		if s.Matched.Set {
+			e.FieldStart("matched")
+			s.Matched.Encode(e)
+		}
+	}
+	{
+		if s.Compared.Set {
+			e.FieldStart("compared")
+			s.Compared.Encode(e)
+		}
+	}
+	{
+		if s.RevisionID.Set {
+			e.FieldStart("revision_id")
+			s.RevisionID.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfGetAiWorkbookMapOKRowsItem = [10]string{
+	0: "file",
+	1: "sheet",
+	2: "row",
+	3: "label",
+	4: "metric",
+	5: "members",
+	6: "first_column",
+	7: "matched",
+	8: "compared",
+	9: "revision_id",
+}
+
+// Decode decodes GetAiWorkbookMapOKRowsItem from json.
+func (s *GetAiWorkbookMapOKRowsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiWorkbookMapOKRowsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "file":
+			if err := func() error {
+				s.File.Reset()
+				if err := s.File.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		case "row":
+			if err := func() error {
+				s.Row.Reset()
+				if err := s.Row.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row\"")
+			}
+		case "label":
+			if err := func() error {
+				s.Label.Reset()
+				if err := s.Label.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"label\"")
+			}
+		case "metric":
+			if err := func() error {
+				s.Metric.Reset()
+				if err := s.Metric.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"metric\"")
+			}
+		case "members":
+			if err := func() error {
+				s.Members.Reset()
+				if err := s.Members.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"members\"")
+			}
+		case "first_column":
+			if err := func() error {
+				s.FirstColumn.Reset()
+				if err := s.FirstColumn.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"first_column\"")
+			}
+		case "matched":
+			if err := func() error {
+				s.Matched.Reset()
+				if err := s.Matched.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"matched\"")
+			}
+		case "compared":
+			if err := func() error {
+				s.Compared.Reset()
+				if err := s.Compared.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"compared\"")
+			}
+		case "revision_id":
+			if err := func() error {
+				s.RevisionID.Reset()
+				if err := s.RevisionID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revision_id\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiWorkbookMapOKRowsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetAiWorkbookMapOKRowsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiWorkbookMapOKRowsItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GetAiWorkbookMapOKRowsItemMembers) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GetAiWorkbookMapOKRowsItemMembers) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes GetAiWorkbookMapOKRowsItemMembers from json.
+func (s *GetAiWorkbookMapOKRowsItemMembers) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiWorkbookMapOKRowsItemMembers to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiWorkbookMapOKRowsItemMembers")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GetAiWorkbookMapOKRowsItemMembers) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiWorkbookMapOKRowsItemMembers) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GetAiWorkbookMapOKSheetsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetAiWorkbookMapOKSheetsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.File.Set {
+			e.FieldStart("file")
+			s.File.Encode(e)
+		}
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+	{
+		if s.Mapped.Set {
+			e.FieldStart("mapped")
+			s.Mapped.Encode(e)
+		}
+	}
+	{
+		if s.Match.Set {
+			e.FieldStart("match")
+			s.Match.Encode(e)
+		}
+	}
+	{
+		if s.Differ != nil {
+			e.FieldStart("differ")
+			e.ArrStart()
+			for _, elem := range s.Differ {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.NotMapped != nil {
+			e.FieldStart("not_mapped")
+			e.ArrStart()
+			for _, elem := range s.NotMapped {
+				e.Int(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.NotMappedLabels.Set {
+			e.FieldStart("not_mapped_labels")
+			s.NotMappedLabels.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfGetAiWorkbookMapOKSheetsItem = [7]string{
+	0: "file",
+	1: "sheet",
+	2: "mapped",
+	3: "match",
+	4: "differ",
+	5: "not_mapped",
+	6: "not_mapped_labels",
+}
+
+// Decode decodes GetAiWorkbookMapOKSheetsItem from json.
+func (s *GetAiWorkbookMapOKSheetsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiWorkbookMapOKSheetsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "file":
+			if err := func() error {
+				s.File.Reset()
+				if err := s.File.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		case "mapped":
+			if err := func() error {
+				s.Mapped.Reset()
+				if err := s.Mapped.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"mapped\"")
+			}
+		case "match":
+			if err := func() error {
+				s.Match.Reset()
+				if err := s.Match.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"match\"")
+			}
+		case "differ":
+			if err := func() error {
+				s.Differ = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.Differ = append(s.Differ, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"differ\"")
+			}
+		case "not_mapped":
+			if err := func() error {
+				s.NotMapped = make([]int, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem int
+					v, err := d.Int()
+					elem = int(v)
+					if err != nil {
+						return err
+					}
+					s.NotMapped = append(s.NotMapped, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"not_mapped\"")
+			}
+		case "not_mapped_labels":
+			if err := func() error {
+				s.NotMappedLabels.Reset()
+				if err := s.NotMappedLabels.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"not_mapped_labels\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiWorkbookMapOKSheetsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetAiWorkbookMapOKSheetsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiWorkbookMapOKSheetsItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GetAiWorkbookMapOKSheetsItemNotMappedLabels) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GetAiWorkbookMapOKSheetsItemNotMappedLabels) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes GetAiWorkbookMapOKSheetsItemNotMappedLabels from json.
+func (s *GetAiWorkbookMapOKSheetsItemNotMappedLabels) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetAiWorkbookMapOKSheetsItemNotMappedLabels to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetAiWorkbookMapOKSheetsItemNotMappedLabels")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GetAiWorkbookMapOKSheetsItemNotMappedLabels) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetAiWorkbookMapOKSheetsItemNotMappedLabels) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -45225,6 +46112,228 @@ func (s *ListAiConversionsOKApplicationJSON) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode implements json.Marshaler.
+func (s *ListAiModelsOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ListAiModelsOK) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("provider")
+		e.Str(s.Provider)
+	}
+	{
+		e.FieldStart("models")
+		e.ArrStart()
+		for _, elem := range s.Models {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+	{
+		if s.Error.Set {
+			e.FieldStart("error")
+			s.Error.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfListAiModelsOK = [3]string{
+	0: "provider",
+	1: "models",
+	2: "error",
+}
+
+// Decode decodes ListAiModelsOK from json.
+func (s *ListAiModelsOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ListAiModelsOK to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "provider":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.Provider = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"provider\"")
+			}
+		case "models":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				s.Models = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Models = append(s.Models, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"models\"")
+			}
+		case "error":
+			if err := func() error {
+				s.Error.Reset()
+				if err := s.Error.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ListAiModelsOK")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000011,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfListAiModelsOK) {
+					name = jsonFieldsNameOfListAiModelsOK[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ListAiModelsOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ListAiModelsOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ListAiModelsReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ListAiModelsReq) encodeFields(e *jx.Encoder) {
+	{
+		if s.Provider.Set {
+			e.FieldStart("provider")
+			s.Provider.Encode(e)
+		}
+	}
+	{
+		if s.APIKey.Set {
+			e.FieldStart("api_key")
+			s.APIKey.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfListAiModelsReq = [2]string{
+	0: "provider",
+	1: "api_key",
+}
+
+// Decode decodes ListAiModelsReq from json.
+func (s *ListAiModelsReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ListAiModelsReq to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "provider":
+			if err := func() error {
+				s.Provider.Reset()
+				if err := s.Provider.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"provider\"")
+			}
+		case "api_key":
+			if err := func() error {
+				s.APIKey.Reset()
+				if err := s.APIKey.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"api_key\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ListAiModelsReq")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ListAiModelsReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ListAiModelsReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ListAiProposalsOKApplicationJSON as json.
 func (s ListAiProposalsOKApplicationJSON) Encode(e *jx.Encoder) {
 	unwrapped := []AiProposalWithSummary(s)
@@ -53665,6 +54774,39 @@ func (s *OptAiConversionReshape) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes AiLLMSettingsReasoningEffort as json.
+func (o OptAiLLMSettingsReasoningEffort) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes AiLLMSettingsReasoningEffort from json.
+func (o *OptAiLLMSettingsReasoningEffort) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptAiLLMSettingsReasoningEffort to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptAiLLMSettingsReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptAiLLMSettingsReasoningEffort) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes AiProposal as json.
 func (o OptAiProposal) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -53731,6 +54873,39 @@ func (s *OptAiProposalStepStatus) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes AiSaveSettingsRequestReasoningEffort as json.
+func (o OptAiSaveSettingsRequestReasoningEffort) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes AiSaveSettingsRequestReasoningEffort from json.
+func (o *OptAiSaveSettingsRequestReasoningEffort) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptAiSaveSettingsRequestReasoningEffort to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptAiSaveSettingsRequestReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptAiSaveSettingsRequestReasoningEffort) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes AiSession as json.
 func (o OptAiSession) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -53793,6 +54968,39 @@ func (s OptAiTestSettingsRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptAiTestSettingsRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiTestSettingsRequestReasoningEffort as json.
+func (o OptAiTestSettingsRequestReasoningEffort) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes AiTestSettingsRequestReasoningEffort from json.
+func (o *OptAiTestSettingsRequestReasoningEffort) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptAiTestSettingsRequestReasoningEffort to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptAiTestSettingsRequestReasoningEffort) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptAiTestSettingsRequestReasoningEffort) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -55469,6 +56677,74 @@ func (s *OptGetAiSessionOKUsage) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes GetAiWorkbookMapOKRowsItemMembers as json.
+func (o OptGetAiWorkbookMapOKRowsItemMembers) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes GetAiWorkbookMapOKRowsItemMembers from json.
+func (o *OptGetAiWorkbookMapOKRowsItemMembers) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGetAiWorkbookMapOKRowsItemMembers to nil")
+	}
+	o.Set = true
+	o.Value = make(GetAiWorkbookMapOKRowsItemMembers)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGetAiWorkbookMapOKRowsItemMembers) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGetAiWorkbookMapOKRowsItemMembers) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes GetAiWorkbookMapOKSheetsItemNotMappedLabels as json.
+func (o OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes GetAiWorkbookMapOKSheetsItemNotMappedLabels from json.
+func (o *OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGetAiWorkbookMapOKSheetsItemNotMappedLabels to nil")
+	}
+	o.Set = true
+	o.Value = make(GetAiWorkbookMapOKSheetsItemNotMappedLabels)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes GetRelatedRecordsOKRelatedItemTable as json.
 func (o OptGetRelatedRecordsOKRelatedItemTable) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -56035,6 +57311,39 @@ func (s OptInt64) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptInt64) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ListAiModelsReq as json.
+func (o OptListAiModelsReq) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes ListAiModelsReq from json.
+func (o *OptListAiModelsReq) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptListAiModelsReq to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptListAiModelsReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptListAiModelsReq) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -64790,6 +66099,82 @@ func (s *RemoveGridMetricOK) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes RenameAiSessionBadRequest as json.
+func (s *RenameAiSessionBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes RenameAiSessionBadRequest from json.
+func (s *RenameAiSessionBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RenameAiSessionBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = RenameAiSessionBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RenameAiSessionBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RenameAiSessionBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes RenameAiSessionNotFound as json.
+func (s *RenameAiSessionNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes RenameAiSessionNotFound from json.
+func (s *RenameAiSessionNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RenameAiSessionNotFound to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = RenameAiSessionNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RenameAiSessionNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RenameAiSessionNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode implements json.Marshaler.
 func (s *RenameAiSessionOK) Encode(e *jx.Encoder) {
 	e.ObjStart()
@@ -64811,11 +66196,18 @@ func (s *RenameAiSessionOK) encodeFields(e *jx.Encoder) {
 			s.Title.Encode(e)
 		}
 	}
+	{
+		if s.CallBudget.Set {
+			e.FieldStart("call_budget")
+			s.CallBudget.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfRenameAiSessionOK = [2]string{
+var jsonFieldsNameOfRenameAiSessionOK = [3]string{
 	0: "id",
 	1: "title",
+	2: "call_budget",
 }
 
 // Decode decodes RenameAiSessionOK from json.
@@ -64845,6 +66237,16 @@ func (s *RenameAiSessionOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"title\"")
+			}
+		case "call_budget":
+			if err := func() error {
+				s.CallBudget.Reset()
+				if err := s.CallBudget.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"call_budget\"")
 			}
 		default:
 			return d.Skip()
@@ -64880,13 +66282,22 @@ func (s *RenameAiSessionReq) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *RenameAiSessionReq) encodeFields(e *jx.Encoder) {
 	{
-		e.FieldStart("title")
-		e.Str(s.Title)
+		if s.Title.Set {
+			e.FieldStart("title")
+			s.Title.Encode(e)
+		}
+	}
+	{
+		if s.CallBudget.Set {
+			e.FieldStart("call_budget")
+			s.CallBudget.Encode(e)
+		}
 	}
 }
 
-var jsonFieldsNameOfRenameAiSessionReq = [1]string{
+var jsonFieldsNameOfRenameAiSessionReq = [2]string{
 	0: "title",
+	1: "call_budget",
 }
 
 // Decode decodes RenameAiSessionReq from json.
@@ -64894,21 +66305,28 @@ func (s *RenameAiSessionReq) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode RenameAiSessionReq to nil")
 	}
-	var requiredBitSet [1]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
 		case "title":
-			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := d.Str()
-				s.Title = string(v)
-				if err != nil {
+				s.Title.Reset()
+				if err := s.Title.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"title\"")
+			}
+		case "call_budget":
+			if err := func() error {
+				s.CallBudget.Reset()
+				if err := s.CallBudget.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"call_budget\"")
 			}
 		default:
 			return d.Skip()
@@ -64916,38 +66334,6 @@ func (s *RenameAiSessionReq) Decode(d *jx.Decoder) error {
 		return nil
 	}); err != nil {
 		return errors.Wrap(err, "decode RenameAiSessionReq")
-	}
-	// Validate required fields.
-	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b00000001,
-	} {
-		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
-			// Mask only required fields and check equality to mask using XOR.
-			//
-			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
-			// Bits of fields which would be set are actually bits of missed fields.
-			missed := bits.OnesCount8(result)
-			for bitN := 0; bitN < missed; bitN++ {
-				bitIdx := bits.TrailingZeros8(result)
-				fieldIdx := i*8 + bitIdx
-				var name string
-				if fieldIdx < len(jsonFieldsNameOfRenameAiSessionReq) {
-					name = jsonFieldsNameOfRenameAiSessionReq[fieldIdx]
-				} else {
-					name = strconv.Itoa(fieldIdx)
-				}
-				failures = append(failures, validate.FieldError{
-					Name:  name,
-					Error: validate.ErrFieldRequired,
-				})
-				// Reset bit.
-				result &^= 1 << bitIdx
-			}
-		}
-	}
-	if len(failures) > 0 {
-		return &validate.Error{Fields: failures}
 	}
 
 	return nil

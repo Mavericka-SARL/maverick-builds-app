@@ -73,6 +73,101 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 			}
 		}
 		out = append(out, emptyPropertyWarnings(ctx, tx, revID, at, p.Formula)...)
+		out = append(out, shadowedPropertyWarnings(ctx, tx, modelID, revID, at, p.Formula)...)
+		out = append(out, noneTotalWarnings(ctx, tx, modelID, revID, at, metricID, p.Formula)...)
+	}
+	return out
+}
+
+// noneTotalWarnings names each metric a formula reads over a dimension the
+// reader's grid lacks — so it reads that metric's total there — where the
+// metric totals by none: that total is never computed, and the reader gets
+// no value at all, with no error. A Checks row read the unmapped-posting
+// flag (agg_rule none) over the GL accounts and stayed blank (2026-11-11).
+func noneTotalWarnings(ctx context.Context, tx pgx.Tx, modelID, revID, at, readerID, text string) []string {
+	idents := map[string]bool{}
+	for _, id := range formulaIdent.FindAllString(formulaQuoted.ReplaceAllString(text, `""`), -1) {
+		idents[strings.ToLower(id)] = true
+	}
+	if len(idents) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(idents))
+	for n := range idents {
+		names = append(names, n)
+	}
+	rows, err := tx.Query(ctx, `
+		WITH reader_dims AS (
+		    SELECT gd.dimension_id FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+		    WHERE gm.metric_id = $3::uuid)
+		SELECT m.name, d.name
+		FROM model.metric_def m
+		JOIN model.grid_metric gm ON gm.metric_id = m.id
+		JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+		JOIN model.dimension_def d ON d.id = gd.dimension_id
+		LEFT JOIN model.metric_dimension_rule r ON r.metric_id = m.id AND r.dimension_id = d.id
+		WHERE m.model_id = $1::uuid AND m.revision_id = $2::uuid AND lower(m.name) = ANY($4) AND m.id <> $3::uuid
+		  AND COALESCE(d.dimension_type, '') <> 'time'
+		  AND gd.dimension_id NOT IN (SELECT dimension_id FROM reader_dims)
+		  AND EXISTS (SELECT 1 FROM model.grid_metric rg WHERE rg.metric_id = $3::uuid)
+		  AND COALESCE(r.rule, CASE WHEN m.agg_rule = 'none' THEN 'none' ELSE d.agg_rule END) = 'none'
+		ORDER BY m.name, d.name`, modelID, revID, readerID, names)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var m, d string
+		if rows.Scan(&m, &d) != nil || idents[strings.ToLower(d)] {
+			continue // the formula names the dimension: it picks a member itself
+		}
+		out = append(out, fmt.Sprintf("%s: the formula reads %s over %s, which this metric's grid does not have — that is %s's total over %s, and %s totals over %s by none, so the total is never computed and this metric gets no value at all. "+
+			"Give %s a total over %s (agg_rule \"sum\", or a rule for that dimension), or read one member with LOOKUP(%s, %s, \"<member>\")",
+			at, m, d, m, d, m, d, m, d, m, d))
+	}
+	return out
+}
+
+// shadowedPropertyWarnings names each dim.property a formula reads that has
+// the name of an input metric: a property holds one value per member, the
+// same in every scenario and month, while the input may vary by them. Payroll
+// read Function.salary_per_fte — a property the AI had made — instead of the
+// input salary_per_fte (Function × Scenario): Base matched the workbook
+// exactly, Downside and Upside did not (2026-11-11).
+func shadowedPropertyWarnings(ctx context.Context, tx pgx.Tx, modelID, revID, at, text string) []string {
+	an, err := formula.Analyze(text)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, ref := range an.PropertyRefs {
+		key := strings.ToLower(ref.Property)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var name, dims string
+		if tx.QueryRow(ctx, `
+			SELECT m.name,
+			       COALESCE((SELECT string_agg(DISTINCT d.name, ' × ' ORDER BY d.name)
+			         FROM model.grid_metric gm
+			         JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+			         JOIN model.dimension_def d ON d.id = gd.dimension_id
+			         WHERE gm.metric_id = m.id), '')
+			FROM model.metric_def m
+			WHERE m.model_id = $1::uuid AND m.revision_id = $2::uuid AND m.is_input AND lower(m.name) = lower($3)`,
+			modelID, revID, ref.Property).Scan(&name, &dims) != nil {
+			continue
+		}
+		by := ""
+		if dims != "" {
+			by = " by " + dims
+		}
+		out = append(out, fmt.Sprintf("%s: the formula reads the property %s.%s, and an input metric %s holds values%s — a property has one value per %s member, the same in every scenario and month, so a scenario's own values are never read. "+
+			"Read the input %s instead, unless the property is what is meant",
+			at, ref.Dim, ref.Property, name, by, ref.Dim, name))
 	}
 	return out
 }
@@ -442,18 +537,27 @@ func unorderedPagesProblems(ctx context.Context, tx pgx.Tx, revID string, steps 
 // total over every month, scenario and member. gross_profit left on no grid
 // made ebitda and income tax read the model's total in every month
 // (15,019,051 instead of 19,512; 2026-10-31). Nothing else refuses it.
-func offGridReadProblems(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+func offGridReadProblems(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string) ([]string, []autoPlacement) {
 	var refs []string
+	createdAt := map[string]int{} // lower-cased name or id of a metric or grid -> its 0-based creating step
 	for i, step := range steps {
-		if step.Tool != "create_metric" && step.Tool != "update_metric" {
-			continue
-		}
 		var p struct {
 			Name     string `json:"name"`
 			MetricID string `json:"metric_id"`
 			Formula  string `json:"formula"`
 		}
-		if json.Unmarshal(step.Params, &p) != nil || strings.TrimSpace(p.Formula) == "" {
+		if json.Unmarshal(step.Params, &p) != nil {
+			continue
+		}
+		if step.Tool == "create_metric" || step.Tool == "create_grid" {
+			if p.Name != "" {
+				createdAt[strings.ToLower(p.Name)] = i
+			}
+			if i < len(created) && created[i] != "" {
+				createdAt[created[i]] = i
+			}
+		}
+		if (step.Tool != "create_metric" && step.Tool != "update_metric") || strings.TrimSpace(p.Formula) == "" {
 			continue
 		}
 		refs = append(refs, strings.ToLower(p.Name), strings.ToLower(p.MetricID))
@@ -462,10 +566,14 @@ func offGridReadProblems(ctx context.Context, tx pgx.Tx, modelID, revID string, 
 		}
 	}
 	if len(refs) == 0 {
-		return nil
+		return nil, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT r.name, d.name
+		SELECT r.name, d.name, d.id::text,
+		       (SELECT g.id::text FROM model.grid_metric gm JOIN model.grid_def g ON g.id = gm.grid_id
+		         WHERE gm.metric_id = r.id ORDER BY g.name LIMIT 1),
+		       (SELECT g.name FROM model.grid_metric gm JOIN model.grid_def g ON g.id = gm.grid_id
+		         WHERE gm.metric_id = r.id ORDER BY g.name LIMIT 1)
 		FROM model.metric_def r
 		JOIN model.calc_dependency cd ON cd.metric_id = r.id
 		JOIN model.metric_def d ON d.id = cd.depends_on_metric_id AND d.id <> r.id
@@ -475,16 +583,92 @@ func offGridReadProblems(ctx context.Context, tx pgx.Tx, modelID, revID string, 
 		  AND NOT EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = d.id)
 		ORDER BY r.name, d.name`, modelID, revID, refs)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer rows.Close()
 	var out []string
+	var auto []autoPlacement
+	placed := map[string]bool{}
 	for rows.Next() {
-		var reader, offGrid string
-		if rows.Scan(&reader, &offGrid) == nil {
-			out = append(out, fmt.Sprintf("%s reads %s, which is on no grid: a metric on no grid has no dimensions, so every cell of %s would read its one total over the whole model — add %s to the grid %s is on (add_grid_metric) in this plan",
-				reader, offGrid, reader, offGrid, reader))
+		var reader, offGrid, offGridID, gridID, gridName string
+		if rows.Scan(&reader, &offGrid, &offGridID, &gridID, &gridName) != nil {
+			continue
 		}
+		// A metric this plan creates is placed by the server on its
+		// reader's grid: certain, and a refusal cost a turn each time
+		// (2026-11-11, findings 28).
+		mStep, made := createdAt[offGridID]
+		if !made {
+			mStep, made = createdAt[strings.ToLower(offGrid)]
+		}
+		if made && gridID != "" {
+			if placed[offGridID] {
+				continue
+			}
+			placed[offGridID] = true
+			gridRef, after := gridID, mStep
+			if gStep, ok := createdAt[gridID]; ok {
+				gridRef = fmt.Sprintf("<created in step %d>", gStep+1)
+				after = max(after, gStep)
+			}
+			params, _ := json.Marshal(map[string]string{"grid_id": gridRef, "metric_id": fmt.Sprintf("<created in step %d>", mStep+1)})
+			auto = append(auto, autoPlacement{
+				step: aiassistant.InsertedStep{After: after, Step: aiassistant.ProposalStep{
+					Tool:        "add_grid_metric",
+					Description: fmt.Sprintf("Place %s on %s (added by the server: %s reads it)", offGrid, gridName, reader),
+					Params:      params,
+				}},
+				note: fmt.Sprintf("Added by the server: %s placed on the grid %s, where %s, which reads it, is — a metric on no grid has no dimensions.", offGrid, gridName, reader),
+			})
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s reads %s, which is on no grid: a metric on no grid has no dimensions, so every cell of %s would read its one total over the whole model — add %s to the grid %s is on (add_grid_metric) in this plan",
+			reader, offGrid, reader, offGrid, reader))
+	}
+	return out, auto
+}
+
+// autoPlacement is a grid placement the server adds to a plan, with the
+// note that tells the developer and the model.
+type autoPlacement struct {
+	step aiassistant.InsertedStep
+	note string
+}
+
+// unplacedMetricWarnings names each metric a plan creates and leaves on no
+// grid that nothing reads: it has no cells, shows nowhere and is never
+// computed. Two year figures of the High-Tech build stayed missing that way
+// (2026-11-11) — the reader check only fires when another metric reads one.
+func unplacedMetricWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+	// Only in a plan that places what it makes on grids: one that left a
+	// metric out forgot it.
+	places := false
+	for _, step := range steps {
+		if step.Tool == "create_grid" || step.Tool == "add_grid_metric" {
+			places = true
+			break
+		}
+	}
+	if !places {
+		return nil
+	}
+	var out []string
+	for i, step := range steps {
+		if step.Tool != "create_metric" || i >= len(created) || created[i] == "" {
+			continue
+		}
+		var name string
+		var onGrid, read bool
+		if tx.QueryRow(ctx, `
+			SELECT m.name,
+			       EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = m.id),
+			       EXISTS (SELECT 1 FROM model.calc_dependency cd WHERE cd.depends_on_metric_id = m.id AND cd.metric_id <> m.id)
+			FROM model.metric_def m WHERE m.id::text = $1 AND m.model_id = $2::uuid AND m.revision_id = $3::uuid`,
+			created[i], modelID, revID).Scan(&name, &onGrid, &read) != nil || onGrid || read {
+			continue
+		}
+		out = append(out, fmt.Sprintf("step %d (create_metric %s): %s is on no grid and nothing reads it, so it has no cells, shows nowhere and is never computed — add it to the grid it belongs on (add_grid_metric) in this plan, or leave it out",
+			i+1, name, name))
 	}
 	return out
 }

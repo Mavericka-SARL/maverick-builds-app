@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -21,6 +22,16 @@ const emptyToolResult = "(no output)"
 type OpenAIProvider struct {
 	client *openai.Client
 	label  string // provider name used in error messages ("openai", "mistral", ...)
+	// effort is the reasoning_effort sent with every OpenAI call
+	// (WithReasoningEffort); "" falls back to AI_OPENAI_REASONING_EFFORT.
+	effort string
+}
+
+// WithReasoningEffort sets the reasoning_effort every OpenAI call sends (""
+// leaves it to the deployment's AI_OPENAI_REASONING_EFFORT, then the model).
+func (p *OpenAIProvider) WithReasoningEffort(effort string) *OpenAIProvider {
+	p.effort = strings.TrimSpace(effort)
+	return p
 }
 
 func NewOpenAI(apiKey string) *OpenAIProvider {
@@ -116,6 +127,18 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 	creq := openai.ChatCompletionRequest{
 		Model:    req.Model,
 		Messages: msgs,
+	}
+	// The reasoning effort — the developer's setting, else the deployment's
+	// AI_OPENAI_REASONING_EFFORT — is sent with every OpenAI call when set:
+	// some models refuse function tools on chat completions unless it is
+	// "none" (gpt-6-luna answered 400, 2026-11-11), and a lower effort
+	// shortens long build turns.
+	e := p.effort
+	if e == "" {
+		e = strings.TrimSpace(os.Getenv("AI_OPENAI_REASONING_EFFORT"))
+	}
+	if e != "" && p.label == "openai" {
+		creq.ReasoningEffort = e
 	}
 	if len(tools) > 0 {
 		creq.Tools = tools

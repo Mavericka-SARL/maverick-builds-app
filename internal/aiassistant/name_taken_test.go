@@ -3,6 +3,7 @@ package aiassistant_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
@@ -128,5 +129,58 @@ func TestAIAddDimensionMemberCodeTaken(t *testing.T) {
 	_, _, err = exec.Execute(ctx, "add_dimension_member", mustJSON(t, jan))
 	if codeOf(err) != metricformula.CodeMemberCodeTaken {
 		t.Errorf("second add_dimension_member 2026-01: %v; want %s", err, metricformula.CodeMemberCodeTaken)
+	}
+}
+
+// A grid name the revision has is refused (GRID_NAME_TAKEN), by any case.
+func TestAIGridNameTaken(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	if _, _, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{"name": "SaaS calculated"})); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{"name": "saas Calculated"}))
+	var ve *metricformula.ValidationError
+	if !errors.As(err, &ve) || ve.Code != metricformula.CodeGridNameTaken {
+		t.Fatalf("second grid: %v; want %s", err, metricformula.CodeGridNameTaken)
+	}
+	if _, _, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{"name": "Headcount"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Metrics that read each other are deleted together; a reader outside the
+// ones deleted still refuses it (METRIC_IN_USE names it).
+func TestAIDeleteMetricsTogether(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	for _, m := range []map[string]any{
+		{"name": "base_in", "is_input": true},
+		{"name": "copy_a", "formula": "base_in * 1"},
+		{"name": "copy_b", "formula": "copy_a + 1"},
+		{"name": "kept", "formula": "copy_b * 2"},
+	} {
+		if _, _, err := exec.Execute(ctx, "create_metric", mustJSON(t, m)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, err := exec.Execute(ctx, "delete_metric", mustJSON(t, map[string]any{"metric_ids": []string{"copy_a", "copy_b"}}))
+	var ve *metricformula.ValidationError
+	if !errors.As(err, &ve) || ve.Code != metricformula.CodeMetricInUse || !strings.Contains(ve.Message, "kept") || strings.Contains(ve.Message, "copy_b is read by copy_a") {
+		t.Fatalf("delete of copy_a+copy_b while kept reads copy_b: %v", err)
+	}
+	if _, _, err := exec.Execute(ctx, "delete_metric", mustJSON(t, map[string]any{"metric_ids": []string{"copy_a", "copy_b", "kept"}})); err != nil {
+		t.Fatalf("delete together: %v", err)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE revision_id=$1::uuid`, revID).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d metrics left, want base_in only", n)
 	}
 }

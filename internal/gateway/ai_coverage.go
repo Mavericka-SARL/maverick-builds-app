@@ -97,6 +97,51 @@ Not extra: a step the order needs to work (a grid for a metric it orders, placin
 helper metric its formula reads, an ordering step), and a step for a row or item inside a range or group the order
 names ("rows 6-39", "the P&L lines").`
 
+// extraStepNum reads the step number of an "extra" item ("step 7: …").
+var extraStepNum = regexp.MustCompile(`(?i)^\s*step\s*(\d+)`)
+
+// unaskedChanges splits a direct order's extra steps: those that change what
+// the model already holds — a formula rewritten, something deleted, values
+// written or cleared — are left out by the server (0-based, with notes); the
+// rest stay warnings. Inside a loader-only order, gpt-5.4-mini proposed five
+// formula rewrites the order never asked for, and a busy developer confirms
+// a warned plan (2026-11-11).
+func unaskedChanges(extra []string, steps []aiassistant.ProposalStep) (drop map[int]bool, notes, rest []string) {
+	for _, e := range extra {
+		m := extraStepNum.FindStringSubmatch(e)
+		n := 0
+		if m != nil {
+			_, _ = fmt.Sscanf(m[1], "%d", &n)
+		}
+		if n < 1 || n > len(steps) || !changesWhatExists(steps[n-1]) {
+			rest = append(rest, e)
+			continue
+		}
+		if drop == nil {
+			drop = map[int]bool{}
+		}
+		drop[n-1] = true
+		notes = append(notes, fmt.Sprintf("Left out by the server: %s — the order did not ask for it, and it changes what the model holds. Ask for it on its own if it is wanted.", strings.TrimSpace(e)))
+	}
+	return drop, notes, rest
+}
+
+// changesWhatExists reports a step that rewrites or removes what the model
+// already holds.
+func changesWhatExists(s aiassistant.ProposalStep) bool {
+	switch {
+	case s.Tool == "update_metric":
+		var p struct {
+			Formula *string `json:"formula"`
+			IsInput *bool   `json:"is_input"`
+		}
+		return json.Unmarshal(s.Params, &p) == nil && (p.Formula != nil || p.IsInput != nil)
+	case strings.HasPrefix(s.Tool, "delete_"), s.Tool == "write_input_values", s.Tool == "clear_input_values", s.Tool == "remove_grid_metric":
+		return true
+	}
+	return false
+}
+
 // extraWarning is the plan's send-back for steps a direct order did not ask for.
 func extraWarning(extra []string) string {
 	return fmt.Sprintf("the developer gave a direct order, and the plan also does what it did not ask: %s — drop those steps, or say in your reply why the order needs them",

@@ -522,6 +522,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
       return ok({ ...notificationSettings, scope });
     }
     if (path === "/api/admin/ai-settings") return ok(overrides.tenantAI ?? tenantAISettings);
+    if (path === "/api/ai/settings/models") return ok({ provider: "openai", models: [] });
     if (path === "/api/developer/integrations/google-service-account") return ok({ configured: false });
     if (path === "/api/demo") return ok(demoContextFor(route.request().headers()["x-dev-user"] ?? "dept_head"));
     // Every console's shell asks who is signed in. Without this the catch-all

@@ -2126,6 +2126,7 @@ components:
         draft_revision_id: { type: string, format: uuid, description: "The developer's AI draft the session works in: set at creation when they have one open in the model, else by the first confirmed proposal; a start_new_draft step moves it to a new one" }
         created_at:        { type: string, format: date-time }
         promoted_at:       { type: string, format: date-time, description: "Set once its draft was promoted: the session is finished and refuses messages (409 SESSION_PROMOTED)" }
+        call_budget:       { type: integer, description: "The developer's cap on the session's provider calls; absent = the deployment's per-session cap" }
 
     AiConversion:
       type: object
@@ -2218,6 +2219,7 @@ components:
         provider: { type: string }
         model:    { type: string }
         has_key:  { type: boolean, description: "True when an API key is stored; the key itself is never returned" }
+        reasoning_effort: { type: string, enum: ["", none, minimal, low, medium, high, xhigh], description: "Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the model's default). Some models refuse tools unless it is none." }
 
     AiSaveSettingsRequest:
       type: object
@@ -2225,6 +2227,7 @@ components:
         provider: { type: string, default: openai, description: "openai, anthropic, google, mistral or deepseek; anything else is refused" }
         model:    { type: string, description: "Any model ID the provider offers; empty means the provider's default model" }
         api_key:  { type: string, description: "Omit to keep the existing stored key" }
+        reasoning_effort: { type: string, enum: ["", none, minimal, low, medium, high, xhigh], description: "Omit to keep the saved one; blank clears it" }
 
     AiTestSettingsRequest:
       type: object
@@ -2232,6 +2235,7 @@ components:
         provider: { type: string, description: "Falls back to the caller's stored settings, then \"openai\"" }
         model:    { type: string, description: "Falls back to the caller's stored settings, then the provider's default model" }
         api_key:  { type: string, description: "Falls back to the caller's stored (decrypted) key, then a provider-specific env var" }
+        reasoning_effort: { type: string, enum: ["", none, minimal, low, medium, high, xhigh], description: "Falls back to the caller's stored setting" }
 
     ClearValuesRequest:
       type: object
@@ -5135,12 +5139,18 @@ paths:
     delete:
       operationId: deleteMetric
       tags: [Developer Console]
-      summary: Delete a metric definition
+      summary: Delete a metric definition (and, with "with", the metrics deleted together with it)
+      description: Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics that read each other are deleted together by naming them in "with".
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: with
+          in: query
+          required: false
+          description: Comma-separated ids of metrics of the same model and revision deleted in the same delete
+          schema: { type: string }
       responses:
         "200":
           description: Metric deleted
@@ -5150,6 +5160,7 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "409": { description: A metric outside the ones deleted reads one of them (METRIC_IN_USE) }
 
   /api/developer/dimensions:
     get:
@@ -7129,6 +7140,7 @@ paths:
       operationId: publishWorkflow
       tags: [Developer Console]
       summary: Publish a workflow definition (rejected if it fails validation)
+      description: Publishing a workflow that is already published changes nothing and answers it as it is; an archived workflow is refused (409).
       parameters:
         - name: id
           in: path
@@ -7136,12 +7148,13 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Workflow published
+          description: Workflow published (or already published)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WorkflowDefFull" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: The workflow is archived }
 
   /api/developer/workflows/{id}/archive:
     post:
@@ -9086,6 +9099,7 @@ paths:
                       output_tokens:      { type: integer, format: int64 }
                       cache_read_tokens:  { type: integer, format: int64 }
                       cache_write_tokens: { type: integer, format: int64 }
+                      estimated_cost_usd: { type: number, description: "What the calls cost in US dollars, when the deployment prices the session's model (AI_MODEL_PRICES)" }
                   task_plan:
                     type: object
                     nullable: true
@@ -9107,7 +9121,7 @@ paths:
     patch:
       operationId: renameAiSession
       tags: [AI Assistant]
-      summary: Rename a session (an explicit rename always wins over auto-naming)
+      summary: Rename a session (an explicit rename always wins over auto-naming), or set its call budget
       parameters:
         - name: id
           in: path
@@ -9119,15 +9133,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [title]
               properties:
                 title: { type: string, maxLength: 120 }
+                call_budget: { type: integer, nullable: true, minimum: 1, description: "Caps the session's provider calls below the deployment's per-session cap; null clears it" }
       responses:
         "200":
-          description: Session renamed
+          description: Session renamed, or its budget set
           content:
             application/json:
-              schema: { type: object, properties: { id: { type: string }, title: { type: string } } }
+              schema: { type: object, properties: { id: { type: string }, title: { type: string }, call_budget: { type: integer, nullable: true } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteAiSession
@@ -9341,6 +9356,55 @@ paths:
               schema: { type: object, properties: { status: { type: string } } }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/ai/sessions/{id}/workbook-map:
+    get:
+      operationId: getAiWorkbookMap
+      tags: [AI Assistant]
+      summary: The workbook map of the session's model — which metric each compared workbook row became, by sheet
+      description: Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest other revision of the model, and per sheet the rows that match, differ, and hold numbers but were never mapped (read from the workbooks attached to the session).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The map
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sheets, rows]
+                properties:
+                  sheets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        file: { type: string }
+                        sheet: { type: string }
+                        mapped: { type: integer }
+                        match: { type: integer }
+                        differ: { type: array, items: { type: integer } }
+                        not_mapped: { type: array, items: { type: integer } }
+                        not_mapped_labels: { type: object, additionalProperties: { type: string } }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        file: { type: string }
+                        sheet: { type: string }
+                        row: { type: integer }
+                        label: { type: string }
+                        metric: { type: string }
+                        members: { type: object, additionalProperties: { type: string } }
+                        first_column: { type: string }
+                        matched: { type: integer }
+                        compared: { type: integer }
+                        revision_id: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/ai/sessions/{id}/conversions:
     get:
       operationId: listAiConversions
@@ -9528,6 +9592,33 @@ paths:
                   provider: { type: string }
                   model:    { type: string }
                   reply:    { type: string }
+                  error:    { type: string }
+
+  /api/ai/settings/models:
+    post:
+      operationId: listAiModels
+      tags: [AI Assistant]
+      summary: The models a provider key reaches (OpenAI chat models, Anthropic models, OpenAI-compatible endpoints)
+      description: The key typed (api_key), else the caller's saved key for that provider, else the deployment's. Always 200; a key that cannot list answers an error beside an empty list.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider: { type: string, description: "Falls back to the caller's stored settings, then \"openai\"" }
+                api_key:  { type: string }
+      responses:
+        "200":
+          description: Models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider, models]
+                properties:
+                  provider: { type: string }
+                  models:   { type: array, items: { type: string } }
                   error:    { type: string }
 
   /api/import/dimension-members:

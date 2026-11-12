@@ -191,3 +191,19 @@ func TestValidateHierarchy(t *testing.T) {
 		t.Error("gap between leaves must be rejected")
 	}
 }
+
+func TestDayOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"2027-01-01": "2027-01-01", "2027-03-15 00:00:00": "2027-03-15", "2027-06-30T00:00:00Z": "2027-06-30", "46388": "2027-01-01",
+	} {
+		got, ok := DayOf(in)
+		if !ok || got.Format("2006-01-02") != want {
+			t.Errorf("DayOf(%q) = %v %v, want %s", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"", "2027", "Jan 2027", "123", "1234567"} {
+		if _, ok := DayOf(in); ok {
+			t.Errorf("DayOf(%q) read a day", in)
+		}
+	}
+}

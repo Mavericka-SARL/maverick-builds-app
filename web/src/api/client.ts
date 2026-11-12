@@ -2108,6 +2108,8 @@ export interface AISessionUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  /** What the calls cost, when the deployment prices the model (AI_MODEL_PRICES). */
+  estimated_cost_usd?: number;
 }
 
 export interface AISession {
@@ -2126,6 +2128,8 @@ export interface AISession {
   // Set once its draft was promoted: the session is finished (a new one
   // works on the promoted revision).
   promoted_at?: string;
+  /** The developer's cap on this session's provider calls; absent = the deployment's. */
+  call_budget?: number;
 }
 
 export interface AIMessage {
@@ -2162,6 +2166,8 @@ export interface AISettings {
   tenant_provider?: string;
   /** The model each provider runs when the model setting is blank. */
   default_models?: Record<string, string>;
+  /** Sent with every OpenAI call when set: "", none, minimal, low, medium, high, xhigh. */
+  reasoning_effort?: string;
 }
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
@@ -2316,6 +2322,14 @@ export interface AITaskPlan {
   goal: string;
   stages: AITaskStage[];
   updated_at?: string;
+  /** What the developer decided in answer to the AI, kept for every later turn and session. */
+  decisions?: string[];
+}
+
+/** The workbook map: which metric each compared workbook row became. */
+export interface AIWorkbookMap {
+  sheets: { file: string; sheet: string; mapped: number; match: number; differ: number[]; not_mapped: number[]; not_mapped_labels?: Record<string, string> }[];
+  rows: { file: string; sheet: string; row: number; label?: string; metric: string; members?: Record<string, string>; first_column: string; matched: number; compared: number }[];
 }
 
 export interface AISendMessageEvent {
@@ -2985,8 +2999,9 @@ export const api = {
       body: JSON.stringify({ xlsx_base64: xlsxBase64 }),
     }),
 
-  deleteMetric: (id: string) =>
-    apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
+  /** withIds: metrics deleted together with this one (they may read each other). */
+  deleteMetric: (id: string, withIds: string[] = []) =>
+    apiFetch<{ status: string }>(`/api/developer/metrics/${id}${withIds.length ? `?with=${encodeURIComponent(withIds.join(","))}` : ""}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
     closed_when?: ClosedRule[]; input_rules?: InputRules; dimension_rules?: Record<string, TotalRule>; row_style?: RowStyle; is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
@@ -3406,6 +3421,9 @@ export const api = {
   },
   aiDeleteSession: (id: string) =>
     apiFetch<{ status: string }>(`/api/ai/sessions/${id}`, { method: "DELETE" }),
+  /** n caps the session's provider calls; null returns it to the deployment's cap. */
+  aiSetCallBudget: (id: string, n: number | null) =>
+    apiFetch<{ id: string; call_budget: number | null }>(`/api/ai/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ call_budget: n }) }),
   aiRenameSession: (id: string, title: string) =>
     apiFetch<{ id: string; title: string }>(`/api/ai/sessions/${id}`, {
       method: "PATCH",
@@ -3438,8 +3456,11 @@ export const api = {
   },
   aiDeleteDocument: (sessionId: string, documentId: string) =>
     apiFetch<{ status: string }>(`/api/ai/sessions/${sessionId}/documents/${documentId}`, { method: "DELETE" }),
-  aiTestSettings: (body: { provider?: string; model?: string; api_key?: string }) =>
+  aiTestSettings: (body: { provider?: string; model?: string; api_key?: string; reasoning_effort?: string }) =>
     apiFetch<AITestResult>("/api/ai/settings/test", { method: "POST", body: JSON.stringify(body) }),
+  /** The models the typed (else saved, else deployment) key reaches at the provider. */
+  aiListModels: (body: { provider?: string; api_key?: string }) =>
+    apiFetch<{ provider: string; models: string[]; error?: string }>("/api/ai/settings/models", { method: "POST", body: JSON.stringify(body) }),
   // Streams the assistant's reply: onEvent fires for each SSE frame ("delta"
   // while text is generated, "tool_status" while a read tool runs, then a
   // terminal "proposal", "done", or "error"). Resolves once the stream ends.
@@ -3479,8 +3500,9 @@ export const api = {
   aiListProposals: (sessionId: string) =>
     apiFetch<AIProposalWithSummary[]>(`/api/ai/sessions/${sessionId}/proposals`),
   aiGetSettings: () => apiFetch<AISettings>("/api/ai/settings"),
+  aiWorkbookMap: (sessionId: string) => apiFetch<AIWorkbookMap>(`/api/ai/sessions/${sessionId}/workbook-map`),
   getConnectorInfo: () => apiFetch<ConnectorInfo>("/api/connector"),
-  aiSaveSettings: (body: { provider: string; model: string; api_key?: string }) =>
+  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string }) =>
     apiFetch<{ status: string }>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
 
 };

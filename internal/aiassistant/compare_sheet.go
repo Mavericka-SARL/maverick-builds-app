@@ -42,6 +42,10 @@ type compareRow struct {
 }
 
 // compareWithSheet is compare_with_sheet: one row, or several ("rows").
+// NotPeriodRow marks a compared row that is not laid out by period: the
+// server's value check leaves it out (it is never comparable row by row).
+const NotPeriodRow = "not a row of periods"
+
 func (e *ToolExecutor) compareWithSheet(ctx context.Context, raw json.RawMessage) (string, error) {
 	if e.hooks.AttachedFile == nil {
 		return "", fmt.Errorf("comparing with an attached file is not available here")
@@ -236,6 +240,29 @@ func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte,
 	if compared == 0 {
 		return fmt.Sprintf("%s against %s row %d: no number from column %s on — check the row and first_column", m.Name, where, r.Row, r.FirstColumn), false, nil
 	}
+	// One number where the metric runs over many periods: the row is not a
+	// month series but a record — a hiring event, a funding round — and
+	// comparing it period by period reports a difference that is not there.
+	// The server's check after every plan fed "new_fte against sheet Hiring
+	// Plan row 10: 0 of 1 periods match" back, and the AI rewrote a correct
+	// metric four times (2026-11-11).
+	if compared == 1 && len(periods) > 1 {
+		return fmt.Sprintf("%s against %s row %d: %s — one number from column %s, while %s runs over %d periods. "+
+			"An event list (one row per hire, round or order) is checked by what it adds up to in the periods it falls in, not row by row",
+			m.Name, where, r.Row, NotPeriodRow, r.FirstColumn, m.Name, len(periods)), false, nil
+	}
+	// The workbook map keeps what this row became and how it matched.
+	label := ""
+	for c := 0; c < col-1 && c < len(cells); c++ {
+		if v := strings.TrimSpace(cells[c]); v != "" {
+			if _, err := strconv.ParseFloat(v, 64); err != nil {
+				label = v
+				break
+			}
+		}
+	}
+	RecordWorkbookRow(ctx, e.pool, e.modelID, e.revID, MapRow{File: name, Sheet: strings.TrimSpace(sheet), Row: r.Row, Label: label,
+		Metric: m.Name, Members: r.Members, FirstColumn: r.FirstColumn, Matched: matched, Compared: compared})
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s against %s row %d: %d of %d periods match", m.Name, where, r.Row, matched, compared)
 	if percent {

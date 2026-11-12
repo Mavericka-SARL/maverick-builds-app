@@ -527,6 +527,9 @@ func (e *WriteExecutor) updateGrid(ctx context.Context, raw json.RawMessage) (st
 		}
 	}
 	if strings.TrimSpace(p.Name) != "" {
+		if err := metricformula.CheckGridRenameFree(ctx, e.pool, gridID, p.Name); err != nil {
+			return "", "", err
+		}
 		if _, err := e.pool.Exec(ctx, `UPDATE model.grid_def SET name=$2 WHERE id=$1::uuid`, gridID, p.Name); err != nil {
 			return "", "", fmt.Errorf("rename grid: %w", err)
 		}

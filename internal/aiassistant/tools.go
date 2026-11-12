@@ -137,7 +137,7 @@ var taskPlanTools = []providers.ToolDef{
 		Name: PlanTaskTool,
 		Description: "Plans a goal the developer delegated (build a model from this workbook, add the pages people need, make the numbers match) before building it: " +
 			"stages in build order, each one proposal of at most a few dozen steps, each naming the items it delivers and how you will check it. " +
-			"Replaces the session's plan; the developer sees it. Not for a direct order or a goal one proposal does.",
+			"A plan already under way is kept and the new stages follow it; the developer sees it. Not for a direct order or a goal one proposal does.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"goal":{"type":"string","description":"the goal, in the developer's words"},
 			"stages":{"type":"array","items":{"type":"object","properties":{
@@ -148,13 +148,15 @@ var taskPlanTools = []providers.ToolDef{
 			"required":["goal","stages"]}`),
 	},
 	{
-		Name:        UpdateTaskPlanTool,
-		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. The note says what the check showed.",
+		Name: UpdateTaskPlanTool,
+		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. The note says what the check showed. " +
+			"\"decision\" records a convention the developer decided (\"percentages are stored in percent units\") so that no later turn or session asks it again; it may come alone (no stage).",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
-			"stage":{"type":"integer","description":"1-based"},
+			"stage":{"type":"integer","description":"1-based; omit to record only a decision"},
 			"status":{"type":"string","enum":["pending","in_progress","done","skipped"]},
-			"note":{"type":"string"}},
-			"required":["stage","status"]}`),
+			"note":{"type":"string"},
+			"decision":{"type":"string","description":"a convention the developer decided, in one sentence"}},
+			"required":[]}`),
 	},
 }
 
@@ -315,6 +317,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.previewFileImport(ctx, args)
 	case "prepare_converted_file":
 		return e.prepareConvertedFile(ctx, args)
+	case "workbook_map":
+		return e.workbookMap(ctx, args)
 	case "read_attached_sheet":
 		return e.readAttachedSheet(ctx, args)
 	case "compare_with_sheet":

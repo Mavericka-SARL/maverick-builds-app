@@ -4117,6 +4117,8 @@ func decodeDeleteIntegrationTemplateParams(args [1]string, argsEscaped bool, r *
 // DeleteMetricParams is parameters of deleteMetric operation.
 type DeleteMetricParams struct {
 	ID uuid.UUID
+	// Comma-separated ids of metrics of the same model and revision deleted in the same delete.
+	With OptString `json:",omitempty,omitzero"`
 }
 
 func unpackDeleteMetricParams(packed middleware.Parameters) (params DeleteMetricParams) {
@@ -4127,10 +4129,20 @@ func unpackDeleteMetricParams(packed middleware.Parameters) (params DeleteMetric
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "with",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.With = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeDeleteMetricParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteMetricParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -4173,6 +4185,47 @@ func decodeDeleteMetricParams(args [1]string, argsEscaped bool, r *http.Request)
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: with.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "with",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotWithVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotWithVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.With.SetTo(paramsDotWithVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "with",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -6165,6 +6218,71 @@ func unpackGetAiSessionParams(packed middleware.Parameters) (params GetAiSession
 }
 
 func decodeGetAiSessionParams(args [1]string, argsEscaped bool, r *http.Request) (params GetAiSessionParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetAiWorkbookMapParams is parameters of getAiWorkbookMap operation.
+type GetAiWorkbookMapParams struct {
+	ID uuid.UUID
+}
+
+func unpackGetAiWorkbookMapParams(packed middleware.Parameters) (params GetAiWorkbookMapParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGetAiWorkbookMapParams(args [1]string, argsEscaped bool, r *http.Request) (params GetAiWorkbookMapParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

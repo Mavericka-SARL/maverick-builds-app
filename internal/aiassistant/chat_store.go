@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,21 @@ type Session struct {
 	// PromotedAt is set once the session's draft was promoted: the session
 	// is finished, and its next message is refused (start a new session).
 	PromotedAt *time.Time `json:"promoted_at,omitempty"`
+	// CallBudget caps the session's provider calls (migration 180); nil is
+	// the deployment's per-session cap.
+	CallBudget *int `json:"call_budget,omitempty"`
+}
+
+// SetCallBudget sets (n > 0) or clears (nil) a session's call budget.
+func (s *ChatStore) SetCallBudget(ctx context.Context, sessionID, userID string, n *int) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE ai_assistant.session SET call_budget = $3 WHERE id = $1::uuid AND user_id = $2::uuid`, sessionID, userID, n)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("session not found")
+	}
+	return nil
 }
 
 // CreateSession starts a session in modelID, a model of appID — a model of
@@ -92,9 +108,9 @@ func (s *ChatStore) GetSession(ctx context.Context, sessionID string) (Session, 
 	var sess Session
 	var draftRevID *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at, call_budget
 		FROM ai_assistant.session WHERE id=$1::uuid
-	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt)
+	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt, &sess.CallBudget)
 	if err != nil {
 		return Session{}, fmt.Errorf("session not found: %w", err)
 	}
@@ -421,15 +437,21 @@ type LLMSettings struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	HasKey   bool   `json:"has_key"` // true when api_key_enc is set; key itself is never returned
+	// ReasoningEffort is sent with every OpenAI call when set (migration
+	// 178): "", none, minimal, low, medium, high or xhigh.
+	ReasoningEffort string `json:"reasoning_effort"`
 }
+
+// ReasoningEfforts are the values ReasoningEffort may hold.
+var ReasoningEfforts = []string{"", "none", "minimal", "low", "medium", "high", "xhigh"}
 
 func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings, error) {
 	var ls LLMSettings
 	var apiKeyEnc *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, model, api_key_enc
+		SELECT provider, model, api_key_enc, reasoning_effort
 		FROM ai_assistant.llm_settings WHERE user_id=$1::uuid
-	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc)
+	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// No model: the gateway runs the provider's default.
@@ -442,6 +464,12 @@ func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings
 }
 
 func (s *ChatStore) SaveSettings(ctx context.Context, userID, provider, model, apiKey string) error {
+	return s.SaveSettingsWithEffort(ctx, userID, provider, model, apiKey, nil)
+}
+
+// SaveSettingsWithEffort is SaveSettings that also sets the reasoning effort
+// (nil keeps the saved one).
+func (s *ChatStore) SaveSettingsWithEffort(ctx context.Context, userID, provider, model, apiKey string, effort *string) error {
 	var keyParam *string
 	if apiKey != "" {
 		enc, err := EncryptAPIKey(apiKey)
@@ -451,13 +479,14 @@ func (s *ChatStore) SaveSettings(ctx context.Context, userID, provider, model, a
 		keyParam = &enc
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO ai_assistant.llm_settings (user_id, provider, model, api_key_enc, updated_at)
-		VALUES ($1::uuid, $2, $3, $4, now())
+		INSERT INTO ai_assistant.llm_settings (user_id, provider, model, api_key_enc, reasoning_effort, updated_at)
+		VALUES ($1::uuid, $2, $3, $4, COALESCE($5, ''), now())
 		ON CONFLICT (user_id) DO UPDATE
 		  SET provider=EXCLUDED.provider, model=EXCLUDED.model,
 		      api_key_enc=COALESCE(EXCLUDED.api_key_enc, ai_assistant.llm_settings.api_key_enc),
+		      reasoning_effort=COALESCE($5, ai_assistant.llm_settings.reasoning_effort),
 		      updated_at=now()
-	`, userID, provider, model, keyParam)
+	`, userID, provider, model, keyParam, effort)
 	return err
 }
 
@@ -480,4 +509,54 @@ func nullStr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// SettleHistory drops, from the turns before the last keptTurns, the tool
+// calls and results made before settled — the moment the session's last
+// plan was confirmed: what they read is decided, and the task plan, its
+// decisions and the workbook map carry what is still needed. Each call of a
+// session replays its history; in the High-Tech build every call re-sent
+// 60–100k tokens, most of them old reads (2026-11-11). Text the AI and the
+// developer wrote stays, and so do the server's notes.
+func SettleHistory(msgs []ChatMessage, settled time.Time) []ChatMessage {
+	if settled.IsZero() {
+		return msgs
+	}
+	turnsSeen, cut := 0, -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			turnsSeen++
+			if turnsSeen == keptTurns {
+				cut = i
+				break
+			}
+		}
+	}
+	if cut <= 0 {
+		return msgs
+	}
+	out := make([]ChatMessage, 0, len(msgs))
+	dropped := 0
+	for i, m := range msgs {
+		if i >= cut || !m.CreatedAt.Before(settled) {
+			out = append(out, m)
+			continue
+		}
+		switch {
+		case m.Role == "tool":
+			dropped++
+			continue
+		case len(m.ToolCalls) > 0:
+			dropped += len(m.ToolCalls)
+			if strings.TrimSpace(m.Content) == "" {
+				continue
+			}
+			m.ToolCalls = nil
+		}
+		out = append(out, m)
+	}
+	if dropped == 0 {
+		return msgs
+	}
+	return out
 }

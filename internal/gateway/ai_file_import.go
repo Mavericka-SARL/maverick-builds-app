@@ -47,6 +47,7 @@ type attachedFile struct {
 	header   []string // after the reshape (the file's own when there is none)
 	mapped   []string // after the column map
 	rows     []importpkg.RawRow
+	shape    importpkg.ShapeStats // what the reshape left out
 }
 
 func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req aiassistant.FileImportRequest) (*attachedFile, error) {
@@ -89,10 +90,11 @@ func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req ai
 		return nil, err
 	}
 	f.reshaped = !req.Reshape.IsZero()
-	header, rows, err := importpkg.ShapeGrid(f.grid, req.Reshape)
+	header, rows, shape, err := importpkg.ShapeGridStats(f.grid, req.Reshape)
 	if err != nil {
 		return nil, err
 	}
+	f.shape = shape
 	f.header = append([]string(nil), header...)
 	if missing := importpkg.UnmatchedColumnMapKeys(header, req.ColumnMap); len(missing) > 0 {
 		sort.Strings(missing)
@@ -164,10 +166,14 @@ func (f *attachedFile) mappedSample(n int) [][]string {
 }
 
 func (f *attachedFile) describe() string {
+	name := f.filename
 	if f.sheet != "" {
-		return fmt.Sprintf("%s (sheet %q)", f.filename, f.sheet)
+		name = fmt.Sprintf("%s (sheet %q)", f.filename, f.sheet)
 	}
-	return f.filename
+	if note := f.shape.Note(); note != "" {
+		name += " — " + note
+	}
+	return name
 }
 
 func (h *handler) modelOfRevision(ctx context.Context, revisionID string) (string, error) {
@@ -618,7 +624,22 @@ func (h *handler) aiReadAttachedSheet(ctx context.Context, sessionID, file, shee
 	if strings.TrimSpace(sheet) == "" {
 		return "", fmt.Errorf("sheet is required for a workbook — the worksheet's name")
 	}
-	return aiassistant.ExtractXLSXSheet(raw, sheet, fromRow, toRow)
+	out, err := aiassistant.ExtractXLSXSheet(raw, sheet, fromRow, toRow)
+	if err != nil {
+		return "", err
+	}
+	// Each formula also in the model's names, where the workbook map knows
+	// the rows it reads (aiassistant.AnnotateFormulas).
+	var modelID, revID string
+	if sess, sErr := h.aiChatStore(ctx).GetSession(ctx, sessionID); sErr == nil {
+		modelID, revID = sess.ModelID, sess.DraftRevisionID
+	}
+	if modelID != "" {
+		if rows, lErr := aiassistant.LoadWorkbookMap(ctx, h.db.For(ctx), modelID, revID, []string{doc.Filename}); lErr == nil {
+			out = aiassistant.AnnotateFormulas(out, sheet, rows)
+		}
+	}
+	return out, nil
 }
 
 // percentFractionWarning names the Percentage metrics whose every staged

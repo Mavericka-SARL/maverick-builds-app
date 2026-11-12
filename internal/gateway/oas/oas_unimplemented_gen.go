@@ -796,10 +796,11 @@ func (UnimplementedHandler) DeleteIntegrationTemplate(ctx context.Context, param
 
 // DeleteMetric implements deleteMetric operation.
 //
-// Delete a metric definition.
+// Refused (409 METRIC_IN_USE) while a metric outside the ones deleted reads one of them; metrics
+// that read each other are deleted together by naming them in "with".
 //
 // DELETE /api/developer/metrics/{id}
-func (UnimplementedHandler) DeleteMetric(ctx context.Context, params DeleteMetricParams) (r *DeleteMetricOK, _ error) {
+func (UnimplementedHandler) DeleteMetric(ctx context.Context, params DeleteMetricParams) (r DeleteMetricRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1020,6 +1021,17 @@ func (UnimplementedHandler) GetAiSession(ctx context.Context, params GetAiSessio
 //
 // GET /api/ai/settings
 func (UnimplementedHandler) GetAiSettings(ctx context.Context) (r *AiLLMSettings, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetAiWorkbookMap implements getAiWorkbookMap operation.
+//
+// Rows compared with compare_with_sheet, in this revision or (for rows it never compared) the latest
+// other revision of the model, and per sheet the rows that match, differ, and hold numbers but were
+// never mapped (read from the workbooks attached to the session).
+//
+// GET /api/ai/sessions/{id}/workbook-map
+func (UnimplementedHandler) GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (r GetAiWorkbookMapRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1576,6 +1588,16 @@ func (UnimplementedHandler) ListAiConversions(ctx context.Context, params ListAi
 	return r, ht.ErrNotImplemented
 }
 
+// ListAiModels implements listAiModels operation.
+//
+// The key typed (api_key), else the caller's saved key for that provider, else the deployment's.
+// Always 200; a key that cannot list answers an error beside an empty list.
+//
+// POST /api/ai/settings/models
+func (UnimplementedHandler) ListAiModels(ctx context.Context, req OptListAiModelsReq) (r *ListAiModelsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ListAiProposals implements listAiProposals operation.
 //
 // List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -2079,7 +2101,8 @@ func (UnimplementedHandler) PromoteAiDraft(ctx context.Context, req OptPromoteAi
 
 // PublishWorkflow implements publishWorkflow operation.
 //
-// Publish a workflow definition (rejected if it fails validation).
+// Publishing a workflow that is already published changes nothing and answers it as it is; an
+// archived workflow is refused (409).
 //
 // POST /api/developer/workflows/{id}/publish
 func (UnimplementedHandler) PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (r PublishWorkflowRes, _ error) {
@@ -2208,7 +2231,7 @@ func (UnimplementedHandler) RemoveSso(ctx context.Context) (r RemoveSsoRes, _ er
 
 // RenameAiSession implements renameAiSession operation.
 //
-// Rename a session (an explicit rename always wins over auto-naming).
+// Rename a session (an explicit rename always wins over auto-naming), or set its call budget.
 //
 // PATCH /api/ai/sessions/{id}
 func (UnimplementedHandler) RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (r RenameAiSessionRes, _ error) {

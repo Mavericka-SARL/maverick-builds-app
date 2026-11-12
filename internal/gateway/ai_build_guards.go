@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/importpkg"
 )
 
 // inputOverwriteWarnings names each write_input_values step that changes
@@ -353,6 +355,15 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	}
 
 	specs := sessionCompareRows(all)
+	before := sheetComparisons(all)
+	// The workbook map's rows of every sheet the confirmed plans' metrics
+	// were mapped on: rows compared in earlier sessions or drafts, and rows
+	// on the same sheet the plans may have broken.
+	if modelID, mErr := h.modelOfRevision(ctx, revID); mErr == nil {
+		if mapRows, lErr := aiassistant.LoadWorkbookMap(ctx, h.db.For(ctx), modelID, revID, nil); lErr == nil {
+			specs = append(specs, mapSpecsForPlans(mapRows, planMetricNames(fresh), specs, before)...)
+		}
+	}
 	compared := map[string]bool{}
 	for _, s := range specs {
 		compared[strings.ToLower(s.Metric)] = true
@@ -361,7 +372,6 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	if len(specs) > maxStageCheckRows {
 		specs = specs[len(specs)-maxStageCheckRows:]
 	}
-	before := sheetComparisons(all)
 
 	var differNow, broke, notCompared []string
 	matched, total := 0, 0
@@ -381,7 +391,7 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 			continue
 		}
 		for _, line := range joinDiffLines(res) {
-			if strings.Contains(line, "has no time dimension to run along the row") {
+			if strings.Contains(line, "has no time dimension to run along the row") || strings.Contains(line, aiassistant.NotPeriodRow) {
 				continue // never comparable: not news
 			}
 			if strings.Contains(line, ": not compared — ") || strings.Contains(line, ": no number from column") {
@@ -583,4 +593,202 @@ func countRan(steps []aiassistant.ProposalStep) int {
 		}
 	}
 	return n
+}
+
+// sourceFilterProblems refuses a saved loader whose reshape.skip_rows drops
+// data rows by a value — an account, a code, a member — unless the
+// developer's request names that value. Refused account 6450 by the GL
+// loader, gpt-5.2 saved skip_rows "GL code = 6450" into the monthly loader:
+// every run reported all rows imported, and the model's unmapped-account
+// check could never fire (2026-11-11). skip_rows is for rows that are not
+// data: totals, subtotals, notes, a repeated header, blank lines.
+func sourceFilterProblems(steps []aiassistant.ProposalStep, request string) (problems []string, failed []int) {
+	low := strings.ToLower(request)
+	for i, step := range steps {
+		if step.Tool != "create_file_integration" && step.Tool != "update_integration" {
+			continue
+		}
+		var p struct {
+			Name    string `json:"name"`
+			Reshape *struct {
+				SkipRows []importpkg.RowFilter `json:"skip_rows"`
+			} `json:"reshape"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil || p.Reshape == nil {
+			continue
+		}
+		for _, f := range p.Reshape.SkipRows {
+			v := strings.TrimSpace(f.Equals)
+			if v == "" {
+				v = strings.TrimSpace(f.Contains)
+			}
+			if f.Blank || v == "" || notDataValue(v, f.Column) || strings.Contains(low, strings.ToLower(v)) {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf("step %d (%s %s): reshape.skip_rows drops every row where %s, in every file this loader runs — that hides source data. "+
+				"A value the model lacks (an account, a member, a code) is added (add_dimension_member, or a mapping row) or asked about, never filtered out of a saved loader: "+
+				"the model's checks must see it. skip_rows is for rows that are not data — totals, subtotals, notes, a repeated header, blank lines. Leave this filter out",
+				i+1, step.Tool, p.Name, f.Describe()))
+			failed = append(failed, i)
+			break
+		}
+	}
+	return problems, failed
+}
+
+// notDataValue reports a skip_rows value naming rows that are not data: a
+// total, a note, a repeated header (the column's own name), a dash.
+func notDataValue(v, column string) bool {
+	l := strings.ToLower(strings.TrimSpace(v))
+	if l == strings.ToLower(strings.TrimSpace(column)) || strings.Trim(l, "-–—_ .*=") == "" {
+		return true
+	}
+	for _, w := range []string{"total", "subtotal", "sum", "grand", "header", "heading", "title", "note", "comment", "memo", "blank", "empty", "n/a", "page"} {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// additionAsk: a request asking to add to what a formula does — "add the
+// approved requests to the formula", "include", "plus", "also".
+var additionAsk = regexp.MustCompile(`(?i)\b(add|adds|adding|include|including|plus|extend|also|as well|on top of|in addition)\b`)
+
+// replaceAsk: a request or step saying a formula is to be replaced whole.
+var replaceAsk = regexp.MustCompile(`(?i)\b(replace|replaces|replacing|rewrite|rewrites|new formula|instead of|from scratch|redo)\b`)
+
+// formulaIdent finds the names a formula reads (quoted text left out).
+var (
+	formulaIdent  = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+	formulaQuoted = regexp.MustCompile(`"[^"]*"`)
+)
+
+// formulaReplacedProblems refuses an update_metric whose new formula keeps
+// none of the metrics its formula reads now, unless the request names the
+// metric without asking to add to it, or asks for a replacement. Asked to
+// "add the approved requests" to hc_new_fte_joined, gpt-5.4-mini replaced
+// the formula with the requests term alone: every FTE read 0 and 49 rows
+// went wrong, in a plan that also built the requests table (2026-11-11).
+// Read before the plan runs, on q.
+func formulaReplacedProblems(ctx context.Context, q *pgxpool.Pool, modelID, revID string, steps []aiassistant.ProposalStep, request string) (problems []string, failed []int) {
+	low := strings.ToLower(request)
+	type def struct{ name, label, formula string }
+	var names map[string]bool
+	for i, step := range steps {
+		if step.Tool != "update_metric" {
+			continue
+		}
+		var p struct {
+			MetricID string  `json:"metric_id"`
+			Formula  *string `json:"formula"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil || p.Formula == nil || strings.TrimSpace(*p.Formula) == "" {
+			continue
+		}
+		var d def
+		if q.QueryRow(ctx, `
+			SELECT name, COALESCE(label,''), COALESCE(formula,'') FROM model.metric_def
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND (id::text=$3 OR lower(name)=lower($3))`,
+			modelID, revID, p.MetricID).Scan(&d.name, &d.label, &d.formula) != nil || strings.TrimSpace(d.formula) == "" {
+			continue
+		}
+		if names == nil {
+			names = map[string]bool{}
+			if rows, err := q.Query(ctx, `SELECT lower(name) FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid`, modelID, revID); err == nil {
+				for rows.Next() {
+					var n string
+					if rows.Scan(&n) == nil {
+						names[n] = true
+					}
+				}
+				rows.Close()
+			}
+		}
+		reads := func(f string) map[string]bool {
+			out := map[string]bool{}
+			for _, id := range formulaIdent.FindAllString(formulaQuoted.ReplaceAllString(f, `""`), -1) {
+				if l := strings.ToLower(id); names[l] && l != strings.ToLower(d.name) {
+					out[l] = true
+				}
+			}
+			return out
+		}
+		before, after := reads(d.formula), reads(*p.Formula)
+		if len(before) == 0 {
+			continue
+		}
+		kept := false
+		for n := range before {
+			if after[n] {
+				kept = true
+				break
+			}
+		}
+		if kept || replaceAsk.MatchString(request) || replaceAsk.MatchString(step.Description) {
+			continue
+		}
+		if namesMetric(low, d.name, d.label) && !additionAsk.MatchString(request) {
+			continue
+		}
+		lost := make([]string, 0, len(before))
+		for n := range before {
+			lost = append(lost, n)
+		}
+		sort.Strings(lost)
+		problems = append(problems, fmt.Sprintf("step %d (update_metric %s): the new formula drops everything the formula reads now (%s): %q would replace %q. "+
+			"To add a term, keep the formula and add to it (old formula + new term); replace a whole formula only when the request asks for that",
+			i+1, d.name, strings.Join(lost, ", "), *p.Formula, d.formula))
+		failed = append(failed, i)
+	}
+	return problems, failed
+}
+
+// namedFile finds file names a request names: "hightech-actuals-2027-01-06.xlsx".
+var namedFile = regexp.MustCompile(`(?i)[\w][\w.()&+-]*\.(xlsx|xlsm|xls|csv)\b`)
+
+// missingFileProblems refuses a plan that imports a file while the request
+// names a file the chat does not have: asked to load the actuals file, which
+// was not attached in that session, the AI loaded the main workbook's empty
+// Import BS template instead and said nothing (2026-11-11).
+func missingFileProblems(steps []aiassistant.ProposalStep, request string, attached []string) (problems []string, failed []int) {
+	have := map[string]bool{}
+	for _, a := range attached {
+		have[strings.ToLower(strings.TrimSpace(a))] = true
+	}
+	var missing []string
+	for _, f := range namedFile.FindAllString(request, -1) {
+		f = strings.TrimSpace(f)
+		low := strings.ToLower(f)
+		found := have[low]
+		for a := range have {
+			if strings.HasSuffix(low, a) || strings.HasSuffix(a, low) {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, f)
+		}
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	for i, step := range steps {
+		if step.Tool != "import_file_data" {
+			continue
+		}
+		var p struct {
+			File string `json:"file"`
+		}
+		_ = json.Unmarshal(step.Params, &p)
+		list := "none"
+		if len(attached) > 0 {
+			list = strings.Join(attached, ", ")
+		}
+		problems = append(problems, fmt.Sprintf("step %d (import_file_data %s): the request names %s, which is not attached to this chat (attached: %s). "+
+			"Never load another file in its place: say that the file is missing and ask the developer to attach it",
+			i+1, p.File, strings.Join(missing, ", "), list))
+		failed = append(failed, i)
+	}
+	return problems, failed
 }

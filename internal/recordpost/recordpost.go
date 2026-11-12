@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"maps"
 	"net/http"
 	"runtime/debug"
@@ -162,6 +163,15 @@ type MemberCache struct {
 type dimMembers struct {
 	leaf    map[string]bool     // code → has no children
 	byLabel map[string][]string // label → the codes of the members with it
+	// periods: a time dimension's leaf periods, narrowest first, for a
+	// field given a date (timedim.DayOf).
+	periods []leafPeriod
+}
+
+// leafPeriod is a leaf member of a time dimension and the days it covers.
+type leafPeriod struct {
+	code       string
+	start, end time.Time
 }
 
 // NewMemberCache is an empty MemberCache.
@@ -195,6 +205,27 @@ func (c *MemberCache) load(ctx context.Context, ps *Poster, dimID string) (*dimM
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
+	prows, err := ps.db(ctx).Query(ctx, `
+		SELECT m.code, m.period_start, m.period_end
+		FROM model.dimension_member m
+		WHERE m.dimension_id = $1::uuid AND m.period_start IS NOT NULL AND m.period_end IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
+		ORDER BY m.period_end - m.period_start, m.period_start`, dimID)
+	if err != nil {
+		return nil, err
+	}
+	defer prows.Close()
+	for prows.Next() {
+		var lp leafPeriod
+		if err := prows.Scan(&lp.code, &lp.start, &lp.end); err != nil {
+			return nil, err
+		}
+		m.periods = append(m.periods, lp)
+	}
+	if err := prows.Err(); err != nil {
+		return nil, err
+	}
 	c.dims[dimID] = m
 	return m, nil
 }
@@ -212,6 +243,14 @@ func (c *MemberCache) codeFor(ctx context.Context, ps *Poster, dimID, raw string
 	}
 	if codes := m.byLabel[raw]; len(codes) == 1 {
 		return codes[0], nil
+	}
+	// A date names the leaf period that holds it.
+	if day, ok := timedim.DayOf(raw); ok {
+		for _, p := range m.periods {
+			if !day.Before(p.start) && !day.After(p.end) {
+				return p.code, nil
+			}
+		}
 	}
 	return raw, nil
 }

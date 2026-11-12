@@ -32,6 +32,7 @@ func TestLintProposalStep(t *testing.T) {
 		{"a closing rate", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "none", "time_summary": "last"}, ""},
 		{"a calculated rate with no total summed over time", "create_metric", map[string]any{"name": "eff", "formula": "pct", "format": "percentage", "agg_rule": "none"}, `time_summary "average"`},
 		{"an input percentage summed", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "sum"}, `agg_rule "average"`},
+		{"an input percentage summed both ways names both fields", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage"}, `BOTH fields in this step: agg_rule "average" and time_summary "average"`},
 		{"another tool", "create_grid", map[string]any{"name": "g"}, ""},
 		{"a value on a metric", "create_metric", map[string]any{"name": "cutoff", "is_input": true, "value": 9}, "create_metric has no value"},
 		{"a key create_grid does not read", "create_grid", map[string]any{"name": "g", "rows": []string{"a"}}, "create_grid does not read rows"},

@@ -1151,10 +1151,17 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
 		MetricID string `json:"metric_id"`
+		// MetricIDs deletes several together: metrics that read each other
+		// (a cycle, a helper and its reader) go in one step, refused only
+		// while a metric outside them reads one.
+		MetricIDs []string `json:"metric_ids"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
 		return "", "", perr
+	}
+	if perr == nil && len(p.MetricIDs) > 0 {
+		return e.deleteMetricsTogether(ctx, append(p.MetricIDs, strings.TrimSpace(p.MetricID)))
 	}
 	if perr != nil || p.MetricID == "" {
 		return "", "", fmt.Errorf("metric_id is required")
@@ -1181,6 +1188,44 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 		return "", "", fmt.Errorf("delete metric: %w", err)
 	}
 	return fmt.Sprintf("Metric '%s' deleted", name), "", nil
+}
+
+// deleteMetricsTogether deletes refs (names or ids, blanks ignored) in one
+// step, as the developer's delete with ?with= does.
+func (e *WriteExecutor) deleteMetricsTogether(ctx context.Context, refs []string) (string, string, error) {
+	var ids, names []string
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		if strings.TrimSpace(ref) == "" {
+			continue
+		}
+		id, err := e.requireInModel(ctx, "metric", ref)
+		if err != nil {
+			return "", "", err
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var name string
+		_ = e.pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name)
+		ids, names = append(ids, id), append(names, name)
+	}
+	if len(ids) == 0 {
+		return "", "", fmt.Errorf("metric_ids names no metric")
+	}
+	if err := metricformula.CheckMetricsNotInUse(ctx, e.pool, ids); err != nil {
+		return "", "", err
+	}
+	for _, id := range ids {
+		if err := modeledit.DropWidgetsReferencing(ctx, e.pool, id); err != nil {
+			return "", "", err
+		}
+	}
+	if _, err := e.pool.Exec(ctx, `DELETE FROM model.metric_def WHERE id = ANY($1::uuid[])`, ids); err != nil {
+		return "", "", fmt.Errorf("delete metrics: %w", err)
+	}
+	return fmt.Sprintf("Metrics deleted together: %s", strings.Join(names, ", ")), "", nil
 }
 
 // ── create_dimension ──────────────────────────────────────────────────────────
@@ -2359,6 +2404,9 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 	p.DimensionIDs = append(p.DimensionIDs, p.Dimensions...)
 	revID := e.effectiveRevision(p.RevisionID)
 
+	if err := metricformula.CheckGridNameFree(ctx, e.pool, e.modelID, revID, p.Name, ""); err != nil {
+		return "", "", err
+	}
 	var newID string
 	var err error
 	if revID != "" {
@@ -3666,6 +3714,39 @@ type createWorkflowDefParams struct {
 	RevisionID   string `json:"revision_id"`
 }
 
+// resolveSubjectConfig turns the names a workflow's subject_config gives
+// (form_id, grid_id, metric_id) into the ids its runs read: a table named
+// "hire_request" there was stored as the name, and the run, comparing ids,
+// never drove the record's status.
+func (e *WriteExecutor) resolveSubjectConfig(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw, nil
+	}
+	var cfg map[string]any
+	if json.Unmarshal(raw, &cfg) != nil {
+		return raw, nil
+	}
+	changed := false
+	for key, kind := range map[string]string{"form_id": "form", "grid_id": "grid", "metric_id": "metric"} {
+		ref, _ := cfg[key].(string)
+		if strings.TrimSpace(ref) == "" {
+			continue
+		}
+		id, err := e.requireInModel(ctx, kind, ref)
+		if err != nil {
+			return nil, fmt.Errorf("subject_config.%s: %w", key, err)
+		}
+		if id != ref {
+			cfg[key] = id
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, nil
+	}
+	return json.Marshal(cfg)
+}
+
 func (e *WriteExecutor) createWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createWorkflowDefParams
 	if err := decodeParams(raw, &p); err != nil {
@@ -3803,6 +3884,9 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 
 	ws := workflow.NewStoreOn(e.pool)
 	if p.ContextSchema, err = e.resolveContextDimensions(ctx, p.ContextSchema); err != nil {
+		return "", "", err
+	}
+	if p.SubjectConfig, err = e.resolveSubjectConfig(ctx, p.SubjectConfig); err != nil {
 		return "", "", err
 	}
 	def, err := ws.UpdateWorkflowDefFull(ctx, p.WorkflowDefID, name, description, triggerEvent, subjectType, e.userID, p.Steps, p.ContextSchema, p.SubjectConfig)
