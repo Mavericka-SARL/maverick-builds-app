@@ -125,7 +125,7 @@ const unproposedNudge = "(Sent by the server, not the developer.) You ended this
 // the corrected single proposal now", "I will submit the plan" — which four
 // turns of the Creator & Agency build (2026-11-08) ended with, proposing
 // nothing; the fixed phrases below had no send, submit or post.
-var announcesProposal = regexp.MustCompile(`(?i)\b(i'?ll|i will|i am going to|i'm going to|let me)\s+(now\s+)?(send|submit|post|prepare|propose|resubmit|re-?propose|re-?send|put together)\b[^.?!\n]{0,80}\b(proposal|plan|steps)\b`)
+var announcesProposal = regexp.MustCompile(`(?i)\b(i'?ll|i will|i am going to|i'm going to|let me)\s+(now\s+)?(send|submit|post|prepare|propose|resubmit|re-?propose|re-?send|put together)\b[^.?!\n]{0,80}\b(proposals?|plans?|steps?|propose_actions)\b`)
 
 // pointsAtPlan: a reply sending the developer to a plan — "I've prepared
 // the plan — please confirm above", "the plan is ready for your review" —
@@ -136,6 +136,7 @@ var pointsAtPlan = regexp.MustCompile(`(?i)(\b(i'?ve|i have)\s+(now\s+)?prepared
 // claimsUnproposedChange reports whether a reply, ending a turn that
 // proposed nothing, says the model was changed or announces a proposal.
 func claimsUnproposedChange(reply string) bool {
+	reply = plainApostrophes(reply)
 	if announcesProposal.MatchString(reply) {
 		return true
 	}
@@ -158,6 +159,7 @@ func claimsUnproposedChange(reply string) bool {
 // explaining why no plan can be made ("FR is not a country in the model"),
 // which is a fine end of a turn and is not nudged.
 func asksToPropose(reply string) bool {
+	reply = plainApostrophes(reply)
 	// A reply laying out options is a real question about the model (which
 	// reading, which source wins), not a request for permission: the
 	// developer answers it (owner, 2026-11-07: "if the AI Developer is not
@@ -181,6 +183,7 @@ func asksToPropose(reply string) bool {
 // times in one build) — rather than a choice that changes the model, which
 // it lays out as options and the developer answers.
 func asksPermission(reply string) bool {
+	reply = plainApostrophes(reply)
 	if presentsChoices(reply) {
 		return false
 	}
@@ -217,6 +220,7 @@ var choiceLine = regexp.MustCompile(`(?mi)^\s*(?:[-*]\s*)?(?:\*\*)?(?:\d[.)]|[a-
 // presentsChoices reports whether reply offers the developer two or more
 // options to choose between.
 func presentsChoices(reply string) bool {
+	reply = plainApostrophes(reply)
 	return len(choiceLine.FindAllStringIndex(reply, -1)) >= 2
 }
 
@@ -438,3 +442,67 @@ func replacedToolNote(steps int) string {
 func replacedChatNote(steps int) string {
 	return fmt.Sprintf("(From the server.) This proposal replaces the earlier one (%d step(s)), which is withdrawn: confirming runs only the proposal below.", steps)
 }
+
+// ownWorkNext: a reply naming the work it will do next instead of
+// proposing it — "I'm correcting that now", "I need to resubmit this as a
+// clean create-and-grid bundle", "I'll continue with a corrected proposal
+// for that next", "Next step remains the same: load the rest …" (gpt-5.4-mini,
+// 2026-11-12, a dozen turns of 1–3 tool calls ending so).
+var ownWorkNext = regexp.MustCompile(`(?i)(\b(i'?ll|i will|i'?m going to|i am going to|i need to|i must|i have to|i should)\s+(now\s+|next\s+|first\s+|then\s+)?` +
+	`(continue|correct|fix|convert|reshape|create|build|add|load|import|attach|wire|resubmit|rebuild|redo|move on|proceed|go on|resend|re-?propose|set up|put)\b` +
+	`|\b(i'?m|i am)\s+(now\s+)?(correcting|fixing|converting|reshaping|creating|building|adding|loading|importing|attaching|resubmitting|rebuilding)\b` +
+	`|\bnext step\b[^.?!\n]{0,40}\b(is|remains|will be)\b)`)
+
+// announcesOwnWork reports whether a reply that proposed nothing ends by
+// naming its own next work — not a question to the developer, not choices.
+func announcesOwnWork(reply string) bool {
+	reply = plainApostrophes(reply)
+	tail := strings.TrimSpace(reply)
+	if len(tail) > 600 {
+		tail = tail[len(tail)-600:]
+	}
+	if strings.Contains(tail, "?") || presentsChoices(reply) {
+		return false
+	}
+	return ownWorkNext.MatchString(tail)
+}
+
+// plainApostrophes writes typographic apostrophes and quotes as ASCII ones,
+// so the reply checks' "i'?ll", "i'?ve", "don't" read "I’ll", "I’ve",
+// "don’t" too: gpt-5-mini writes them so, and every "I’ll proceed …"
+// ending passed the send-backs (2026-11-12).
+func plainApostrophes(s string) string {
+	return strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'", "“", `"`, "”", `"`).Replace(s)
+}
+
+// maxTurnNudges is how many times one turn's ending is sent back (a
+// permission question, an announced plan with none proposed, a split
+// question): every time, not once — after one send-back gpt-5-mini asked
+// again in the same turn and the question reached the developer
+// (2026-11-12) — up to this many, so a model that keeps doing it still
+// ends its turn.
+const maxTurnNudges = 3
+
+// splitAsk: a question about how to cut the work into proposals — "A) two
+// consecutive proposals or B) three or more smaller proposals?", "shall I
+// split this into batches?".
+var splitAsk = regexp.MustCompile(`(?i)(\b(split|batch(es)?|smaller|separate|consecutive|two|three|several|multiple)\b[^?\n]{0,70}\b(proposals?|plans?|batches|parts|steps|chunks)\b|\b(proposals?|plans?)\b[^?\n]{0,40}\b(split|batch(es)?|chunks|parts)\b)`)
+
+// asksHowToSplit reports a reply that ends asking how to split the work.
+func asksHowToSplit(reply string) bool {
+	reply = plainApostrophes(reply)
+	tail := strings.TrimSpace(reply)
+	if len(tail) > 900 {
+		tail = tail[len(tail)-900:]
+	}
+	if !strings.Contains(tail, "?") && !choiceLine.MatchString(tail) {
+		return false
+	}
+	return splitAsk.MatchString(tail)
+}
+
+// splitDecision is recorded once the server has answered a split question.
+const splitDecision = "Split any stage into as many proposals as it needs (up to 100 steps each), one after another, without asking the developer how to split."
+
+const splitNudge = "(Sent by the server, not the developer.) How to split the work is decided: as many proposals as it needs, up to 100 steps each, one after another — never ask how to split. " +
+	"Call propose_actions now with the first part; after it is confirmed, propose the next."

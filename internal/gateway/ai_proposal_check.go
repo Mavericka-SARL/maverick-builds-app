@@ -31,8 +31,10 @@ const maxProposalRejections = 3
 
 // proposalCheck is what a dry run of a proposal found.
 type proposalCheck struct {
-	problems  []string // one line per step that would fail
-	unchecked []int    // 1-based steps a dry run cannot run (or that use their results)
+	problems []string // one line per step that would fail
+	// placed: metrics the server placed on a grid (placeUnplacedMetrics).
+	placed    map[string]bool
+	unchecked []int // 1-based steps a dry run cannot run (or that use their results)
 	// warnings: formulas that run but look wrong (planWarnings) — only
 	// looked for once nothing fails.
 	warnings []string
@@ -106,6 +108,12 @@ func (h *handler) checkProposalOnce(ctx context.Context, sessionID, modelID, rev
 			out.autoSteps = append(out.autoSteps, a.step)
 			out.notes = append(out.notes, a.note)
 		}
+		placements, placed := h.placeUnplacedMetrics(ctx, tx, sessionID, modelID, revID, resolved, created)
+		for _, a := range placements {
+			out.autoSteps = append(out.autoSteps, a.step)
+			out.notes = append(out.notes, a.note)
+		}
+		out.placed = placed
 		out.problems = append(out.problems, unorderedPagesProblems(ctx, tx, revID, resolved)...)
 		out.problems = append(out.problems, dashboardLayoutProblems(ctx, tx, revID, resolved, created)...)
 	}
@@ -121,6 +129,7 @@ func (h *handler) checkProposalOnce(ctx context.Context, sessionID, modelID, rev
 			resolved[i] = s
 		}
 		out.warnings = append(out.warnings, currencyWarnings(ctx, tx, modelID, revID, resolved)...)
+		out.warnings = append(out.warnings, h.constantFormulaWarnings(ctx, revID, "", resolved)...)
 	}
 	if err == nil && len(out.problems) == 0 {
 		resolved := make([]aiassistant.ProposalStep, len(steps))
@@ -128,7 +137,7 @@ func (h *handler) checkProposalOnce(ctx context.Context, sessionID, modelID, rev
 			s.Params = resolveParamRefs(storedParams(s.Params), created)
 			resolved[i] = s
 		}
-		out.warnings = append(out.warnings, unplacedMetricWarnings(ctx, tx, modelID, revID, resolved, created)...)
+		out.warnings = append(out.warnings, unplacedMetricWarnings(ctx, tx, modelID, revID, resolved, created, out.placed)...)
 		out.warnings = append(out.warnings, aiassistant.PlanConditionTotalWarnings(ctx, tx, modelID, revID, resolved)...)
 		out.warnings = append(out.warnings, aiassistant.ScenarioTotalWarnings(resolved)...)
 		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
@@ -318,7 +327,7 @@ func storedParams(raw json.RawMessage) json.RawMessage {
 // import refuses it; its values are not staged (that store works on the
 // pool), so nothing is written for them.
 func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, userID string, req aiassistant.FileImportRequest) (string, error) {
-	f, err := h.loadAttachedFile(ctx, sessionID, req)
+	f, err := h.loadAttachedFile(ctx, sessionID, &req)
 	if err != nil {
 		return "", err
 	}
@@ -367,14 +376,35 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, u
 	}
 	if len(importErrs) > 0 {
 		rows := make([]map[string]any, 0, len(importErrs))
+		unknownMetric := ""
 		for _, e := range importErrs {
 			rows = append(rows, map[string]any{"row": e.RowNumber, "column": e.Column, "message": e.Message})
+			if e.ErrorCode == "UNKNOWN_METRIC" && unknownMetric == "" {
+				unknownMetric = e.RawValue
+			}
 		}
-		return "", fmt.Errorf("import rejected: %d value(s) in %s failed validation, nothing would be imported:\n%s",
-			len(rows), f.describe(), importErrorLines(rows, 10))
+		// Row labels where metric names belong: say how to map them — the
+		// AI imported the Assumptions sheet's labels five times without a
+		// value_map and then gave up (2026-11-12).
+		hint := ""
+		if unknownMetric != "" {
+			col := "<the column mapped to \"metric\">"
+			for c, field := range req.ColumnMap {
+				if field == "metric" {
+					col = c
+				}
+			}
+			hint = fmt.Sprintf("\nThe file holds labels where metric names belong: map each to its metric with reshape.value_map {%q: {%q: \"<metric name>\", …}} "+
+				"(list_metrics gives the names), in the same reshape.", col, unknownMetric)
+		}
+		return "", fmt.Errorf("import rejected: %d value(s) in %s failed validation, nothing would be imported:\n%s%s",
+			len(rows), f.describe(), importErrorLines(rows, 10), hint)
 	}
 	if len(staged) == 0 {
 		return "", fmt.Errorf("%s holds no values for any metric", f.describe())
+	}
+	if req.PercentFractions {
+		h.scalePercentFractions(ctx, tx, staged)
 	}
 	// Fractions into a Percentage metric are refused here, not just warned
 	// of: the assistant imported 0.056 for 5.6% after previews that warned.

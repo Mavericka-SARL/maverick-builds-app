@@ -2168,6 +2168,10 @@ export interface AISettings {
   default_models?: Record<string, string>;
   /** Sent with every OpenAI call when set: "", none, minimal, low, medium, high, xhigh. */
   reasoning_effort?: string;
+  /** Whether the model and effort suit building a model from a workbook (server rule); absent when they do. */
+  build_advice?: string;
+  /** The model for turns whose sheet plan the server generated whole; "" keeps every turn on `model`. */
+  routine_model?: string;
 }
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
@@ -3502,7 +3506,7 @@ export const api = {
   aiGetSettings: () => apiFetch<AISettings>("/api/ai/settings"),
   aiWorkbookMap: (sessionId: string) => apiFetch<AIWorkbookMap>(`/api/ai/sessions/${sessionId}/workbook-map`),
   getConnectorInfo: () => apiFetch<ConnectorInfo>("/api/connector"),
-  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string }) =>
+  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string; routine_model?: string }) =>
     apiFetch<{ status: string }>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
 
 };

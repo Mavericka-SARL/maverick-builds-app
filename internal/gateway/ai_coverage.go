@@ -180,6 +180,38 @@ func nonBlank(list []string) []string {
 	return out
 }
 
+// splitCoverage parts the coverage check's missing items into those of the
+// request and those of the task plan's current stage (named by the stage's
+// own wording when the checker reworded one).
+func splitCoverage(missing, stageItems []string) (request, stage []string) {
+	for _, m := range missing {
+		hit := ""
+		for _, it := range stageItems {
+			if aiassistant.SameItem(m, it) {
+				hit = it
+				break
+			}
+		}
+		switch {
+		case hit == "":
+			request = append(request, m)
+		case !itemListed(stage, hit):
+			stage = append(stage, hit)
+		}
+	}
+	return request, stage
+}
+
+// itemListed reports whether item is in list (as SameItem reads them).
+func itemListed(list []string, item string) bool {
+	for _, x := range list {
+		if aiassistant.SameItem(x, item) {
+			return true
+		}
+	}
+	return false
+}
+
 // coverageWarning is the plan's send-back for missing items.
 func coverageWarning(missing []string) string {
 	return fmt.Sprintf("the plan has no step for: %s — add them, or say in your reply which you leave out and why", strings.Join(missing, "; "))

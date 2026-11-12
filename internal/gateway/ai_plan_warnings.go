@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -639,7 +640,7 @@ type autoPlacement struct {
 // grid that nothing reads: it has no cells, shows nowhere and is never
 // computed. Two year figures of the High-Tech build stayed missing that way
 // (2026-11-11) — the reader check only fires when another metric reads one.
-func unplacedMetricWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string) []string {
+func unplacedMetricWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep, created []string, placed map[string]bool) []string {
 	// Only in a plan that places what it makes on grids: one that left a
 	// metric out forgot it.
 	places := false
@@ -654,7 +655,7 @@ func unplacedMetricWarnings(ctx context.Context, tx pgx.Tx, modelID, revID strin
 	}
 	var out []string
 	for i, step := range steps {
-		if step.Tool != "create_metric" || i >= len(created) || created[i] == "" {
+		if step.Tool != "create_metric" || i >= len(created) || created[i] == "" || placed[created[i]] {
 			continue
 		}
 		var name string
@@ -1278,6 +1279,146 @@ func memberlessDimensionWarnings(ctx context.Context, tx pgx.Tx, revID string, s
 			seen[strings.ToLower(ref)] = true
 			out = append(out, fmt.Sprintf("step %d (%s %s): dimension %s has no members as this plan leaves it — add its members first (in this plan, or by importing them): the grid shows no rows along it until it has some",
 				i+1, step.Tool, grid, name))
+		}
+	}
+	return out
+}
+
+// placeUnplacedMetrics places the metrics a plan creates and leaves on no
+// grid, where the grid is certain: the one the target model names for the
+// metric (a guess such as "the plan's only new grid" placed metrics a
+// later batch of the plan was to place). A plan of 83 input metrics and 4 new
+// grids placed none and was executed, and the next ~150 calls went into
+// placing them (2026-11-12). It returns the placements and the metrics placed.
+func (h *handler) placeUnplacedMetrics(ctx context.Context, tx pgx.Tx, sessionID, modelID, revID string, steps []aiassistant.ProposalStep, created []string) ([]autoPlacement, map[string]bool) {
+	gridStep := map[string]int{}
+	for i, s := range steps {
+		if s.Tool != "create_grid" {
+			continue
+		}
+		var p struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(s.Params, &p) == nil && p.Name != "" {
+			gridStep[strings.ToLower(strings.TrimSpace(p.Name))] = i
+		}
+	}
+	metricGrid := map[string]string{}
+	if plan, _ := h.aiChatStore(ctx).TaskPlan(ctx, sessionID); plan != nil && plan.Target != nil {
+		for _, s := range plan.Target.Sheets {
+			for _, m := range s.Metrics {
+				if s.Grid != "" {
+					metricGrid[strings.ToLower(strings.TrimSpace(m))] = s.Grid
+				}
+			}
+		}
+	}
+	var auto []autoPlacement
+	placed := map[string]bool{}
+	for i, step := range steps {
+		if step.Tool != "create_metric" || i >= len(created) || created[i] == "" {
+			continue
+		}
+		var name string
+		var onGrid, read bool
+		if tx.QueryRow(ctx, `
+			SELECT m.name,
+			       EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = m.id),
+			       EXISTS (SELECT 1 FROM model.calc_dependency cd WHERE cd.depends_on_metric_id = m.id AND cd.metric_id <> m.id)
+			FROM model.metric_def m WHERE m.id::text = $1 AND m.model_id = $2::uuid AND m.revision_id = $3::uuid`,
+			created[i], modelID, revID).Scan(&name, &onGrid, &read) != nil || onGrid || read {
+			continue
+		}
+		var gridRef, gridName, why string
+		after := i
+		if g := metricGrid[strings.ToLower(name)]; g != "" {
+			gridName, why = g, "the target model puts it there"
+			if gi, ok := gridStep[strings.ToLower(g)]; ok {
+				gridRef, after = fmt.Sprintf("<created in step %d>", gi+1), max(i, gi)
+			} else {
+				_ = tx.QueryRow(ctx, `SELECT id::text FROM model.grid_def WHERE revision_id = $1::uuid AND lower(name) = lower($2)`, revID, g).Scan(&gridRef)
+			}
+		}
+		if gridRef == "" {
+			continue
+		}
+		params, _ := json.Marshal(map[string]string{"grid_id": gridRef, "metric_id": fmt.Sprintf("<created in step %d>", i+1)})
+		auto = append(auto, autoPlacement{
+			step: aiassistant.InsertedStep{After: after, Step: aiassistant.ProposalStep{
+				Tool: "add_grid_metric", Description: fmt.Sprintf("Place %s on %s (added by the server: %s)", name, gridName, why), Params: params,
+			}},
+			note: fmt.Sprintf("Added by the server: %s placed on the grid %s (%s) — a metric on no grid has no cells.", name, gridName, why),
+		})
+		placed[created[i]] = true
+	}
+	return auto, placed
+}
+
+// identRE: a name in a formula (string literals removed first).
+var (
+	identRE  = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_.]*`)
+	strLitRE = regexp.MustCompile(`"(?:[^"]|"")*"|'(?:[^']|'')*'`)
+)
+
+// constantFormulaWarnings names each update that gives an input metric a
+// formula reading no metric: the input becomes constants typed into a
+// formula. gpt-5.4-mini set opening_unrestricted_cash and three more Control
+// inputs to IF(scenario = "Base", 2500000, 2500000) (2026-11-12). The input
+// state is read before the plan (the pool, not the plan's transaction).
+func (h *handler) constantFormulaWarnings(ctx context.Context, revID, request string, steps []aiassistant.ProposalStep) []string {
+	names := map[string]bool{}
+	rows, err := h.db.For(ctx).Query(ctx, `SELECT lower(name) FROM model.metric_def WHERE revision_id = $1::uuid`, revID)
+	if err != nil {
+		return nil
+	}
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil {
+			names[n] = true
+		}
+	}
+	rows.Close()
+	for _, s := range steps {
+		if s.Tool != "create_metric" {
+			continue
+		}
+		var p struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(s.Params, &p) == nil && p.Name != "" {
+			names[strings.ToLower(p.Name)] = true
+		}
+	}
+	low := strings.ToLower(request)
+	var out []string
+	for i, s := range steps {
+		if s.Tool != "update_metric" {
+			continue
+		}
+		var p struct {
+			MetricID string `json:"metric_id"`
+			Formula  string `json:"formula"`
+			IsInput  *bool  `json:"is_input"`
+		}
+		if json.Unmarshal(s.Params, &p) != nil || strings.TrimSpace(p.Formula) == "" || (p.IsInput != nil && *p.IsInput) {
+			continue
+		}
+		var name string
+		var isInput bool
+		if h.db.QueryRow(ctx, `SELECT name, is_input FROM model.metric_def WHERE revision_id = $1::uuid AND (id::text = $2 OR lower(name) = lower($2))`,
+			revID, p.MetricID).Scan(&name, &isInput) != nil || !isInput || strings.Contains(low, strings.ToLower(name)) {
+			continue
+		}
+		reads := false
+		for _, id := range identRE.FindAllString(strLitRE.ReplaceAllString(p.Formula, ""), -1) {
+			if names[strings.ToLower(id)] && !strings.EqualFold(id, name) {
+				reads = true
+				break
+			}
+		}
+		if !reads {
+			out = append(out, fmt.Sprintf("step %d (update_metric %s): %s is an input, and this gives it a formula that reads no metric (%s) — its values would become constants typed into a formula. "+
+				"Keep it an input and write or load its values (write_input_values, load_sheet)", i+1, name, name, clip(p.Formula, 80)))
 		}
 	}
 	return out

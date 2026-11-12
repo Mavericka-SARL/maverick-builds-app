@@ -792,3 +792,68 @@ func missingFileProblems(steps []aiassistant.ProposalStep, request string, attac
 	}
 	return problems, failed
 }
+
+// aiTypedFiles are the session's files the assistant wrote itself
+// (create_csv_file, sample values) — a converted-file record with no sheet,
+// reshape or column map — by lower-cased file name; none while the session
+// has no spreadsheet of the developer's attached, where there is nothing
+// to retype.
+func (h *handler) aiTypedFiles(ctx context.Context, sessionID string) map[string]bool {
+	if len(h.attachedSheetNames(ctx, sessionID)) == 0 {
+		return nil
+	}
+	rows, err := h.db.For(ctx).Query(ctx, `
+		SELECT d.filename FROM ai_assistant.document d
+		JOIN ai_assistant.conversion c ON c.document_id = d.id
+		WHERE d.session_id = $1::uuid AND COALESCE(c.sheet, '') = '' AND c.reshape IS NULL AND c.column_map IS NULL`, sessionID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) == nil {
+			out[strings.ToLower(strings.TrimSpace(name))] = true
+		}
+	}
+	return out
+}
+
+// typedFileProblems refuses importing a file the assistant typed into a
+// grid or table while the developer's workbook is attached, unless the
+// request names the file or asks for sample data: gpt-5-mini, its sheet
+// conversion failing, retyped the Assumptions sheet with invented numbers
+// (ARPU 10/8/12 for the workbook's 59/49/69) into create_csv_file and
+// imported it as the sheet — twice, the second time after the developer
+// said never to retype, and with the real conversion already made
+// (2026-11-12).
+func typedFileProblems(steps []aiassistant.ProposalStep, request string, typed map[string]bool) (problems []string, failed []int) {
+	if len(typed) == 0 {
+		return nil, nil
+	}
+	low := strings.ToLower(request)
+	if strings.Contains(low, "sample") || strings.Contains(low, "test data") || strings.Contains(low, "dummy") {
+		return nil, nil
+	}
+	for i, step := range steps {
+		if step.Tool != "import_file_data" {
+			continue
+		}
+		var p struct {
+			File string `json:"file"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(p.File))
+		if name == "" || !typed[name] || strings.Contains(low, name) {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("step %d (import_file_data %s): you wrote this file yourself (create_csv_file) — its values are typed, not read from the developer's workbook. "+
+			"Import the source: convert the attached sheet (prepare_converted_file, or import_file_data on the workbook with reshape and column_map) and import that. "+
+			"Never retype a sheet; if the conversion fails, fix its parameters or ask the developer", i+1, p.File))
+		failed = append(failed, i)
+	}
+	return problems, failed
+}

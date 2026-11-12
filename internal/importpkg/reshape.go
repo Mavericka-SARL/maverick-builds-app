@@ -20,6 +20,7 @@ package importpkg
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,7 +56,7 @@ type Reshape struct {
 	Constants map[string]string `json:"constants,omitempty"`
 	// ValueMap rewrites values in a column: {"Region": {"EMEA": "Europe"}}.
 	// Matching ignores case and surrounding spaces.
-	ValueMap map[string]map[string]string `json:"value_map,omitempty"`
+	ValueMap ValueMaps `json:"value_map,omitempty"`
 	// NumberColumns are read as numbers written for people: thousands
 	// separators, "(123)" for -123, "12%" for 0.12, currency signs. The
 	// unpivot's value column and every Scale column are read so as well.
@@ -756,4 +757,33 @@ func RenumberRows(rows []RawRow, lines []int) {
 			rows[i].RowNumber = lines[k]
 		}
 	}
+}
+
+// ValueMaps is reshape.value_map: per column, file value → new value.
+type ValueMaps map[string]map[string]string
+
+// UnmarshalJSON names the shape when a flat map comes — {"<label>":
+// "<metric>"} with no column above it — instead of the decoder's "cannot
+// unmarshal string into … map[string]string", which an AI Developer
+// re-sent unchanged twice and then gave up on (2026-11-12).
+func (v *ValueMaps) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf(`value_map is {"<column>": {"<file value>": "<new value>"}}: %w`, err)
+	}
+	out := ValueMaps{}
+	for col, m := range raw {
+		var one map[string]string
+		if err := json.Unmarshal(m, &one); err != nil {
+			var s string
+			if json.Unmarshal(m, &s) == nil {
+				return fmt.Errorf(`value_map is one map per column: {"<column>": {"<file value>": "<new value>"}} — %q: %q has no column; `+
+					`write it under the column it rewrites, e.g. {"Driver": {%q: %q, …}}`, col, s, col, s)
+			}
+			return fmt.Errorf(`value_map[%q]: a map of file value → new value: %w`, col, err)
+		}
+		out[col] = one
+	}
+	*v = out
+	return nil
 }

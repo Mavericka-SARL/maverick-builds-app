@@ -130,16 +130,41 @@ func ReadTools() []providers.ToolDef {
 const (
 	PlanTaskTool       = "plan_task"
 	UpdateTaskPlanTool = "update_task_plan"
+	SetTargetModelTool = "set_target_model"
 )
 
 var taskPlanTools = []providers.ToolDef{
 	{
+		Name: SetTargetModelTool,
+		Description: "Records the TO-BE model of a build from a workbook -- the design you build towards, before plan_task: the dimensions and their members, and for EVERY sheet " +
+			"(in build order) its role, the grid it becomes, that grid's dimensions, the rows it covers and its metric names (snake_case, one per workbook row " +
+			"or one per row group when a dimension replaces repeated rows), plus the pages, roles and workflows. Read the whole workbook first (analyse_workbook). " +
+			"It is shown in every later turn and session; call it again to change the design (the whole target each time). No confirmation needed: it changes nothing in the model.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"summary":{"type":"string","description":"the model to build, in two or three sentences"},
+			"dimensions":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"members":{"type":"string","description":"its members, or where they come from"}},"required":["name","members"]}},
+			"sheets":{"type":"array","items":{"type":"object","properties":{
+				"sheet":{"type":"string"},
+				"role":{"type":"string","enum":["input","calculation","report","actuals","guide","skip"]},
+				"grid":{"type":"string"},
+				"dimensions":{"type":"array","items":{"type":"string"}},
+				"rows":{"type":"string","description":"the sheet rows it covers, e.g. 6-77"},
+				"metrics":{"type":"array","items":{"type":"string"}},
+				"notes":{"type":"string"}},"required":["sheet","role"]}},
+			"pages":{"type":"array","items":{"type":"string"}},
+			"roles":{"type":"array","items":{"type":"string"}},
+			"workflows":{"type":"array","items":{"type":"string"}}},
+			"required":["summary","sheets"]}`),
+	},
+	{
 		Name: PlanTaskTool,
 		Description: "Plans a goal the developer delegated (build a model from this workbook, add the pages people need, make the numbers match) before building it: " +
-			"stages in build order, each one proposal of at most a few dozen steps, each naming the items it delivers and how you will check it. " +
-			"A plan already under way is kept and the new stages follow it; the developer sees it. Not for a direct order or a goal one proposal does.",
+			"stages in build order, each one proposal of at most a few dozen steps (one sheet or one page per stage, not several), each naming the items it delivers and how you will check it. " +
+			"A plan already under way is kept and the new stages follow it (one stage is enough), or with replace: true they re-cut its open stages (done stages stay); the developer sees it. " +
+			"Not for a direct order or a goal one proposal does.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"goal":{"type":"string","description":"the goal, in the developer's words"},
+			"replace":{"type":"boolean","description":"true: these stages replace the open stages of the plan under way (re-cut it); done stages and decisions stay"},
 			"stages":{"type":"array","items":{"type":"object","properties":{
 				"title":{"type":"string"},
 				"items":{"type":"array","items":{"type":"string"},"description":"what the stage delivers, named: metrics, grids, pages, postings, rows"},
@@ -150,6 +175,7 @@ var taskPlanTools = []providers.ToolDef{
 	{
 		Name: UpdateTaskPlanTool,
 		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. The note says what the check showed. " +
+			"A stage that loads or matches values is done by its numbers: marking it done checks the sheets it names in the workbook map, and is refused while rows are not compared, differ or are not mapped. " +
 			"\"decision\" records a convention the developer decided (\"percentages are stored in percent units\") so that no later turn or session asks it again; it may come alone (no stage).",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"stage":{"type":"integer","description":"1-based; omit to record only a decision"},
@@ -321,6 +347,12 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.workbookMap(ctx, args)
 	case "read_attached_sheet":
 		return e.readAttachedSheet(ctx, args)
+	case "analyse_workbook":
+		return e.analyseWorkbook(ctx, args)
+	case "load_sheet":
+		return e.loadSheet(ctx, args)
+	case "plan_sheet":
+		return e.planSheet(ctx, args)
 	case "compare_with_sheet":
 		return e.compareWithSheet(ctx, args)
 	case "preview_export":
@@ -820,8 +852,8 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 
 func (e *ToolExecutor) listRevisions(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT r.id::text, r.name, r.created_at::date,
-		       (m.active_revision_id = r.id) AS is_active
+		SELECT r.id::text, r.name, to_char(r.created_at, 'YYYY-MM-DD'),
+		       COALESCE(m.active_revision_id = r.id, false) AS is_active
 		FROM model.revision r
 		JOIN core.model m ON m.id = r.model_id
 		WHERE r.model_id=$1::uuid
@@ -836,7 +868,11 @@ func (e *ToolExecutor) listRevisions(ctx context.Context) (string, error) {
 	for rows.Next() {
 		var id, name, date string
 		var active bool
-		_ = rows.Scan(&id, &name, &date, &active)
+		// The date was a SQL date scanned into a string: pgx refuses that,
+		// and the tool failed every time it was called (2026-11-12).
+		if err := rows.Scan(&id, &name, &date, &active); err != nil {
+			return "", err
+		}
 		tag := ""
 		if active {
 			tag = " [ACTIVE]"

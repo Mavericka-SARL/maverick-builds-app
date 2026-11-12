@@ -27,7 +27,7 @@ import (
 )
 
 func (h *handler) aiPrepareConversion(ctx context.Context, sessionID string, req aiassistant.FileImportRequest) (string, error) {
-	f, err := h.loadAttachedFile(ctx, sessionID, req)
+	f, err := h.loadAttachedFile(ctx, sessionID, &req)
 	if err != nil {
 		return "", err
 	}
@@ -83,9 +83,10 @@ func (h *handler) aiConversions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("format must be csv or xlsx"), http.StatusBadRequest)
 		return
 	}
-	f, err := h.loadAttachedFile(ctx, sess.ID, aiassistant.FileImportRequest{
+	creq := aiassistant.FileImportRequest{
 		File: c.DocumentID, Sheet: c.Sheet, Reshape: c.Reshape, ColumnMap: c.ColumnMap,
-	})
+	}
+	f, err := h.loadAttachedFile(ctx, sess.ID, &creq)
 	if err != nil {
 		jsonErr(w, err, http.StatusUnprocessableEntity)
 		return

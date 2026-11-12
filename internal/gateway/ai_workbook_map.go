@@ -76,6 +76,9 @@ func mapSpecsForPlans(rows []aiassistant.MapRow, touched map[string]bool, have [
 		if !sheets[strings.ToLower(r.File+"\x00"+r.Sheet)] {
 			continue
 		}
+		if r.Members[loadedMember] != "" {
+			continue // a loaded input row: its values are the sheet's by the import
+		}
 		key := strings.ToLower(r.File + "\x00" + r.Sheet + "\x00" + fmt.Sprint(r.Row) + "\x00" + membersKey(r.Members))
 		if seen[key] {
 			continue

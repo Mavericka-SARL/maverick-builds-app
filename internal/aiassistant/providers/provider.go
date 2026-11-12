@@ -26,6 +26,10 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"` // set on role="tool"
 	ToolName   string     `json:"tool_name,omitempty"`    // set on role="tool"
+	// Reasoning is a reasoning model's encrypted reasoning items for its tool
+	// calls (the Responses API), sent back with them within the turn so the
+	// model keeps its thread; not stored with the history.
+	Reasoning json.RawMessage `json:"-"`
 }
 
 // ChatRequest is the full context sent to the LLM on each turn.

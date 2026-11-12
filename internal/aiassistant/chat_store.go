@@ -440,6 +440,9 @@ type LLMSettings struct {
 	// ReasoningEffort is sent with every OpenAI call when set (migration
 	// 178): "", none, minimal, low, medium, high or xhigh.
 	ReasoningEffort string `json:"reasoning_effort"`
+	// RoutineModel runs the turns whose sheet plan the server generated
+	// whole (migration 181); "" keeps every turn on Model.
+	RoutineModel string `json:"routine_model"`
 }
 
 // ReasoningEfforts are the values ReasoningEffort may hold.
@@ -449,9 +452,9 @@ func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings
 	var ls LLMSettings
 	var apiKeyEnc *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, model, api_key_enc, reasoning_effort
+		SELECT provider, model, api_key_enc, reasoning_effort, routine_model
 		FROM ai_assistant.llm_settings WHERE user_id=$1::uuid
-	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort)
+	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort, &ls.RoutineModel)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// No model: the gateway runs the provider's default.
@@ -526,7 +529,7 @@ func SettleHistory(msgs []ChatMessage, settled time.Time) []ChatMessage {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "user" {
 			turnsSeen++
-			if turnsSeen == keptTurns {
+			if turnsSeen == settledKeptTurns {
 				cut = i
 				break
 			}
@@ -553,10 +556,36 @@ func SettleHistory(msgs []ChatMessage, settled time.Time) []ChatMessage {
 			}
 			m.ToolCalls = nil
 		}
+		// The AI's own replies before the last confirmed plan are decided
+		// too: the task plan, its decisions and the target carry them
+		// (2026-11-12, "send less with every call"). A stub keeps the turn
+		// order; the developer's words and the server's notes stay.
+		if m.Role == "assistant" && len(m.Content) > settledReplyKeep && !strings.HasPrefix(m.Content, "(From the server") && !strings.HasPrefix(m.Content, "⚠") {
+			m.Content = clipRunes(m.Content, settledReplyKeep) + " … (an earlier reply, settled: the task plan carries it)"
+			dropped++
+		}
 		out = append(out, m)
 	}
 	if dropped == 0 {
 		return msgs
 	}
 	return out
+}
+
+// settledReplyKeep is how much of a settled reply of the AI stays (SettleHistory).
+const settledReplyKeep = 200
+
+// settledKeptTurns: only the current turn is kept whole by SettleHistory —
+// what came before the last confirmed plan is decided, the turn before
+// included (2026-11-12: the two kept turns of a long build replayed ~74k
+// tokens of sheet reads at every call). A plan rejected or still pending is
+// not confirmed, so its turn stays (settled is the last executed plan).
+const settledKeptTurns = 1
+
+// SaveRoutineModel sets the developer's model for routine turns (migration
+// 181); the row exists once SaveSettingsWithEffort ran.
+func (s *ChatStore) SaveRoutineModel(ctx context.Context, userID, model string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE ai_assistant.llm_settings SET routine_model = $2, updated_at = now() WHERE user_id = $1::uuid`,
+		userID, strings.TrimSpace(model))
+	return err
 }

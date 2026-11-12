@@ -165,16 +165,31 @@ plainly and briefly. Propose nothing unless they ask for a change.
 // playbooks are the specific instructions of each task kind.
 var playbooks = map[string]string{
 	"workbook_build": `### Playbook: a model from a workbook
-1. Read the workbook first: the Guide (owners, process), every sheet's layout and formulas (read_attached_sheet).
-2. Plan the stages: dimensions and members; inputs and settings with their grids; data (imports, tables of
-   records, postings); calculations sheet by sheet in the workbook's order; pages; the process (workflows);
-   who opens which page. Each sheet people read gets a page or a place on one.
-3. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
+1. Understand the WHOLE workbook before building anything: analyse_workbook (every sheet: its role, layout,
+   input and formula rows, the sheets it reads, the build order), the Guide (owners, process), and
+   read_attached_sheet for the formulas of the sheets you are unsure of.
+2. Record the TO-BE model with set_target_model before any plan: the dimensions and their members; for EVERY
+   sheet its role (input, calculation, report, actuals, guide, skip), its grid, the grid's dimensions, the rows it
+   covers and its metric names; the pages, roles, workflows and triggers. This is the model you build — keep
+   every plan within it, and change it (set_target_model again) when the workbook shows it must.
+3. Then plan_task from the target, STRUCTURE FIRST: dimensions; inputs (load_sheet, or sample values where real data
+   comes later); the calculation sheets in build order, each with plan_sheet (the server translates the formulas;
+   you propose one sheet_plan step with fixes for the rows it could not translate); roles and access; workflows
+   and triggers; pages (one per stage). Actuals import tables and loaders come after that, and loading the real
+   data and reconciling every sheet last. The server cuts larger stages and orders them so.
+   Inputs are LOADED from the sheet with load_sheet, never typed.
+4. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
    percentages in percent units); the workbook's own tests and guards stay in the formulas. Every metric and
    grid gets the tag of its sheet's area ("tags" on create): a model of hundreds is navigated by them.
-4. After each calculation stage, compare_with_sheet every row of the sheets it built; a stage is done when they
+5. After each calculation stage, compare_with_sheet every row of the sheets it built; a stage is done when they
    match, not when its metrics exist. Never type a workbook value into a calculated metric.
-5. Who may change which inputs is a business admin's to set: list it in your report, per the Guide.
+6. Who may change which inputs is a business admin's to set: list it in your report, per the Guide.
+Know-how from earlier builds:
+- Settings and drivers that are single values (per scenario at most) go on a grid WITHOUT Month: on a monthly grid
+  every value needs a month. Fix a wrong grid by changing the grid, not the metrics.
+- A sheet with members across its columns (scenarios, months) and labels down a column is loaded with load_sheet;
+  never retype its numbers into a file or a plan.
+- plan_task, update_task_plan and set_target_model are called directly, never as steps of propose_actions.
 `,
 	"workbook_fix": `### Playbook: numbers that must match a workbook
 1. compare_with_sheet the whole sheet first ("rows": every row) to see what differs and from which period.

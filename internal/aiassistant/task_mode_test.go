@@ -109,7 +109,7 @@ func TestTaskPlanCarriedContext(t *testing.T) {
 		t.Fatalf("render lacks the decision:\n%s", r)
 	}
 	plan.MarkFound(map[int][]string{1: {"revenue"}})
-	if plan.Stages[1].Note != "already in the model: revenue" || plan.Stages[1].Status == StageDone {
+	if !strings.HasSuffix(plan.Stages[1].Note, "(unverified — check, then mark the stage done): revenue") || plan.Stages[1].Status == StageDone {
 		t.Fatalf("partly found stage: %+v", plan.Stages[1])
 	}
 	plan.Append("Add the pages", []TaskStage{{Title: "Pages", Items: []string{"P&L page"}, Status: StageDone}})

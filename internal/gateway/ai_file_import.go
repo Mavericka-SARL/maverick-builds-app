@@ -50,9 +50,34 @@ type attachedFile struct {
 	shape    importpkg.ShapeStats // what the reshape left out
 }
 
-func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req aiassistant.FileImportRequest) (*attachedFile, error) {
+// loadAttachedFile reads req's file. A converted file's name (prepare_
+// converted_file: "<workbook> (converted)") stands for its source read
+// with the conversion's sheet, reshape and column map — whatever req does
+// not give itself — and req is completed with them: the manual says to ask
+// the assistant to import a converted file, and the import refused its name
+// ("no file named … (converted) is attached", 2026-11-12), so the AI typed
+// the sheet instead.
+func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, reqp *aiassistant.FileImportRequest) (*attachedFile, error) {
 	store := aiassistant.NewDocumentStore(h.db.For(ctx))
-	doc, raw, err := store.GetRaw(ctx, sessionID, strings.TrimSpace(req.File))
+	doc, raw, err := store.GetRaw(ctx, sessionID, strings.TrimSpace(reqp.File))
+	if err != nil {
+		if c, ok := h.convertedFileNamed(ctx, sessionID, reqp.File); ok {
+			if d, r, cErr := store.GetRaw(ctx, sessionID, c.DocumentID); cErr == nil {
+				doc, raw, err = d, r, nil
+				reqp.File = d.Filename
+				if reqp.Sheet == "" {
+					reqp.Sheet = c.Sheet
+				}
+				if reqp.Reshape.IsZero() {
+					reqp.Reshape = c.Reshape
+				}
+				if len(reqp.ColumnMap) == 0 {
+					reqp.ColumnMap = c.ColumnMap
+				}
+			}
+		}
+	}
+	req := *reqp
 	if err != nil {
 		var names []string
 		if docs, lErr := store.ListDocuments(ctx, sessionID); lErr == nil {
@@ -303,7 +328,7 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID, userID str
 // aiPreviewFileImportOn previews as userID, the person in the chat (a
 // table's records are created as them).
 func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessionID, userID string, req aiassistant.FileImportRequest) (string, error) {
-	f, err := h.loadAttachedFile(ctx, sessionID, req)
+	f, err := h.loadAttachedFile(ctx, sessionID, &req)
 	if err != nil {
 		return "", err
 	}
@@ -360,6 +385,9 @@ func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessio
 		parts = append(parts, fmt.Sprintf("%s (%d)", name, n))
 	}
 	sort.Strings(parts)
+	if req.PercentFractions {
+		h.scalePercentFractions(ctx, q, staged)
+	}
 	fmt.Fprintf(&sb, "No errors. Would import %d value(s): %s.\n", len(staged), strings.Join(parts, ", "))
 	sb.WriteString(h.percentFractionWarning(ctx, q, staged))
 	return sb.String(), nil
@@ -397,7 +425,7 @@ func (f *attachedFile) layout(req aiassistant.FileImportRequest) string {
 func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string, req aiassistant.FileImportRequest) (string, error) {
 	q := h.db.For(ctx)
 	started := time.Now()
-	f, err := h.loadAttachedFile(ctx, sessionID, req)
+	f, err := h.loadAttachedFile(ctx, sessionID, &req)
 	if err != nil {
 		return "", err
 	}
@@ -497,6 +525,9 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	if len(staged) == 0 {
 		return fail(fmt.Errorf("%s holds no values for any metric", f.describe()))
 	}
+	if req.PercentFractions {
+		h.scalePercentFractions(ctx, q, staged)
+	}
 	mode := importpkg.ImportMode(cmp.Or(req.ImportMode, string(importpkg.ModeReplace)))
 	metricIDs, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, mode, "ai_attachment",
 		h.gridJobDetails(ctx, req.RevisionID, req.TargetID, mode, f.filename, started), "")
@@ -506,6 +537,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	if req.IntegrationID != "" {
 		h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, len(staged), 0, "success", "AI import of "+f.describe())
 	}
+	h.recordLoadedRows(ctx, modelID, req.RevisionID, f, req)
 	audit(len(staged))
 	return fmt.Sprintf("Imported %d value(s) from %s into %d metric(s) (mode %s)", len(staged), f.describe(), len(metricIDs), mode) +
 		h.percentFractionWarning(ctx, q, staged), nil
@@ -563,6 +595,15 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		},
 		ReadAttachedSheet: func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error) {
 			return h.aiReadAttachedSheet(ctx, sessionID, file, sheet, fromRow, toRow)
+		},
+		AnalyseWorkbook: func(ctx context.Context, file string, sheets []string) (string, error) {
+			return h.aiAnalyseWorkbook(ctx, sessionID, file, sheets)
+		},
+		LoadSheet: func(ctx context.Context, file, sheet, grid string, headerRow int) (string, error) {
+			return h.aiLoadSheet(ctx, sessionID, userID, file, sheet, grid, headerRow)
+		},
+		PlanSheet: func(ctx context.Context, sheet string, rows map[int]string) (string, error) {
+			return h.aiPlanSheet(ctx, sessionID, sheet, rows)
 		},
 		AttachedFile: func(ctx context.Context, file string) (string, []byte, error) {
 			doc, raw, err := aiassistant.NewDocumentStore(h.db.For(ctx)).GetRaw(ctx, sessionID, strings.TrimSpace(file))
@@ -899,4 +940,47 @@ func (h *handler) aiReplaceBy(ctx context.Context, req aiassistant.FileImportReq
 // assistant offers it and clears them only on the developer's yes.
 func aiPreexistingValuesOffer(note string) string {
 	return note + ` — ask the developer whether they are stale; on a yes, clear them with update_dimension_property {"dimension_id", "property", "clear_values": true}`
+}
+
+// convertedFileNamed finds the session's converted file called name (with
+// or without an extension, case aside) that came from an attached sheet —
+// not one the assistant typed (no sheet, reshape or column map).
+func (h *handler) convertedFileNamed(ctx context.Context, sessionID, name string) (aiassistant.Conversion, bool) {
+	want := strings.ToLower(strings.TrimSpace(name))
+	if want == "" {
+		return aiassistant.Conversion{}, false
+	}
+	list, err := aiassistant.NewConversionStore(h.db.For(ctx)).List(ctx, sessionID)
+	if err != nil {
+		return aiassistant.Conversion{}, false
+	}
+	for i := len(list) - 1; i >= 0; i-- {
+		c := list[i]
+		if c.Sheet == "" && c.Reshape.IsZero() && len(c.ColumnMap) == 0 {
+			continue
+		}
+		fn := strings.ToLower(strings.TrimSpace(c.Filename))
+		if fn == want || fn+".csv" == want || fn+".xlsx" == want {
+			return c, true
+		}
+	}
+	return aiassistant.Conversion{}, false
+}
+
+// scalePercentFractions multiplies by 100 the staged values of Percentage
+// metrics — a sheet's 23% is the fraction 0.23, the metric stores 23 — and
+// leaves every other metric's values as they are (percent_fractions).
+func (h *handler) scalePercentFractions(ctx context.Context, q dbQuerier, staged []importpkg.StagingRow) {
+	format := map[string]string{}
+	for i := range staged {
+		id := staged[i].MetricID
+		f, ok := format[id]
+		if !ok {
+			_ = q.QueryRow(ctx, `SELECT format FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&f)
+			format[id] = f
+		}
+		if f == "percentage" {
+			staged[i].Value *= 100
+		}
+	}
 }

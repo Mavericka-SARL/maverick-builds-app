@@ -15,6 +15,7 @@ import {
   Txt,
 } from "../../ui";
 import { parsePastedTable } from "./pastedTable";
+import { buildAdvice } from "./aiBuildAdvice";
 
 // ── Settings panel ────────────────────────────────────────────────────────────
 // The model is free text, offered the models the key reaches (asked from the
@@ -32,6 +33,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   const [apiKey, setApiKey]     = useState("");
   const [saved, setSaved]       = useState(false);
   const [effort, setEffort]     = useState(initialSettings?.reasoning_effort ?? "");
+  const [routineModel, setRoutineModel] = useState(initialSettings?.routine_model ?? "");
   // The models the key reaches: asked for the saved key when the panel opens
   // or the provider changes, and for a typed key on "List models".
   const [typedKeyAsked, setTypedKeyAsked] = useState("");
@@ -50,7 +52,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   };
 
   const save = useMutation({
-    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
+    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort, routine_model: routineModel }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-settings"] });
       setSaved(true);
@@ -117,10 +119,24 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           </datalist>
         </Field>
 
+        <Field
+          label="Model for generated sheet plans"
+          description="Optional. When the server translated a sheet's formulas whole, that turn runs on this model (a cheaper one); designing the model, rows the server could not translate and everything else stay on the model above."
+        >
+          <TextInput
+            value={routineModel}
+            onChange={e => setRoutineModel(e.target.value)}
+            placeholder="Blank: every turn on the model above"
+            aria-label="Model for generated sheet plans"
+            autoComplete="off"
+            list="ai-model-options"
+          />
+        </Field>
+
         {provider === "openai" && (
           <Field
             label="Reasoning effort"
-            description="Sent with every call to a reasoning model. Some models take tools only with None; a lower effort makes long build turns shorter."
+            description="Sent with every call to a reasoning model. Models that take tools with reasoning only through OpenAI's Responses API are sent there, so every effort works; a lower effort makes turns shorter, a higher one plans builds better."
           >
             <Select value={effort} onChange={e => setEffort(e.target.value)} aria-label="Reasoning effort">
               <option value="">Model default</option>
@@ -132,6 +148,12 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
               <option value="xhigh">Extra high</option>
             </Select>
           </Field>
+        )}
+
+        {buildAdvice(provider, model || initialSettings?.default_models?.[provider] || "", effort) && (
+          <p role="note" style={{ fontSize: 12, margin: 0, color: "var(--color-warning, var(--text-secondary))" }}>
+            {buildAdvice(provider, model || initialSettings?.default_models?.[provider] || "", effort)}
+          </p>
         )}
 
         <Field

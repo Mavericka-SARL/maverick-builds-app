@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,9 @@ type TaskPlan struct {
 	// Session 2 of the High-Tech build asked the percent question answered
 	// in session 1, and redid the inputs as fractions (2026-11-11).
 	Decisions []string `json:"decisions,omitempty"`
+	// Target is the TO-BE model of a build from a workbook (target_model.go),
+	// recorded before the plan and kept with it.
+	Target *TargetModel `json:"target,omitempty"`
 }
 
 // maxDecisions bounds the decisions a plan keeps (the oldest go first).
@@ -61,15 +65,119 @@ func (p *TaskPlan) AddDecision(decision string) bool {
 }
 
 // MarkCovered notes that proposalID does every item of the current stage
-// (the coverage check found none missing): confirmed whole, it finishes
-// the stage (RecordConfirmed).
+// (the coverage check found none missing): confirmed whole, its items count
+// as done (RecordConfirmed).
 func (p *TaskPlan) MarkCovered(proposalID string) bool {
+	cur := p.Current()
+	if cur < 0 {
+		return false
+	}
+	return p.NoteCoverage(proposalID, p.Stages[cur].Items)
+}
+
+// NoteCoverage notes which items of the current stage proposalID does (the
+// coverage check's answer). Confirmed whole, they count as done; a stage is
+// finished once its confirmed plans did every item between them — a stage
+// is often several plans (2026-11-12: every plan of an eleven-sheet stage
+// was sent back as incomplete, and the AI looped on four-step plans).
+func (p *TaskPlan) NoteCoverage(proposalID string, items []string) bool {
 	cur := p.Current()
 	if cur < 0 || proposalID == "" || len(p.Stages[cur].Items) == 0 {
 		return false
 	}
-	p.Stages[cur].CoveredBy = proposalID
+	st := &p.Stages[cur]
+	st.PendingCover = &StageCover{Proposal: proposalID, Items: items}
+	if containsAllItems(items, st.Items) {
+		st.CoveredBy = proposalID
+	}
 	return true
+}
+
+// OpenItems are the stage's items no confirmed plan has done yet.
+func (s TaskStage) OpenItems() []string {
+	var out []string
+	for _, it := range s.Items {
+		if !containsItem(s.Covered, it) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// needsProofRE: a stage that loads or matches values is finished by its
+// numbers, not by its steps having been confirmed (2026-11-12: a plan
+// writing 9 of 72 driver values was judged to "load the workbook's values
+// for all driver inputs", and the stage was closed).
+var needsProofRE = regexp.MustCompile(`(?i)\b(values?|load(s|ed|ing)?|import(s|ed|ing)?|match(es|ed|ing)?|reconcil\w*|compar\w*|actuals?)\b`)
+
+// NeedsProof reports whether the stage's numbers decide when it is done.
+func (s TaskStage) NeedsProof() bool {
+	if s.Sheet != "" {
+		return true
+	}
+	if needsProofRE.MatchString(s.Title) {
+		return true
+	}
+	for _, it := range s.Items {
+		if needsProofRE.MatchString(it) {
+			return true
+		}
+	}
+	return false
+}
+
+func normItem(s string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r <= 127
+	}), " ")
+}
+
+func containsItem(list []string, item string) bool {
+	for _, x := range list {
+		if SameItem(x, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAllItems(have, want []string) bool {
+	for _, w := range want {
+		if !containsItem(have, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// SameItem reports whether a coverage answer's item names the stage item
+// (the checker repeats items in its own words at times).
+func SameItem(answer, item string) bool {
+	a, b := normItem(answer), normItem(item)
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	short, long := a, b
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	return len(short) >= 12 && strings.Contains(long, short)
+}
+
+// stageNumberRE strips a "Stage 3 —" numbering, to recognise the same
+// stage proposed again.
+var stageNumberRE = regexp.MustCompile(`(?i)^\s*(stage|step|phase)\s*\d+\s*[—–:.\-]*\s*`)
+
+func stageTitleKey(t string) string { return normItem(stageNumberRE.ReplaceAllString(t, "")) }
+
+// StageCover is the coverage check's answer for one proposal, kept until
+// the developer confirms it.
+type StageCover struct {
+	Proposal string   `json:"proposal"`
+	Items    []string `json:"items"`
 }
 
 // TaskStage is one stage: what it delivers (named, so a plan for it can be
@@ -87,6 +195,47 @@ type TaskStage struct {
 	// CoveredBy is the proposal the coverage check found doing every item
 	// of the stage (MarkCovered).
 	CoveredBy string `json:"covered_by,omitempty"`
+	// Covered are the items confirmed plans of the stage did, between them;
+	// PendingCover is the latest checked proposal's share, until confirmed.
+	Covered      []string    `json:"covered,omitempty"`
+	PendingCover *StageCover `json:"pending_cover,omitempty"`
+	// ProofAsked: a "done" the workbook map could not confirm was sent back
+	// once; marked done again, it is taken with the note (update_task_plan).
+	ProofAsked bool `json:"proof_asked,omitempty"`
+	// Sheet is the workbook sheet the stage builds (one sheet per stage):
+	// the stage is done when the workbook map shows that sheet matching.
+	Sheet string `json:"sheet,omitempty"`
+}
+
+// UnmarshalJSON takes "items" as a list or, as models send it at times, one
+// string (2026-11-12: plan_task failed on "items": "Time dimension …").
+func (s *TaskStage) UnmarshalJSON(b []byte) error {
+	type plain TaskStage
+	var raw struct {
+		plain
+		Items json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*s = TaskStage(raw.plain)
+	s.Items = nil
+	if len(raw.Items) == 0 || string(raw.Items) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(raw.Items, &s.Items); err == nil {
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(raw.Items, &one); err != nil {
+		return fmt.Errorf("items: a list of strings")
+	}
+	for _, part := range strings.Split(one, ";") {
+		if part = strings.TrimSpace(part); part != "" {
+			s.Items = append(s.Items, part)
+		}
+	}
+	return nil
 }
 
 // Stage statuses.
@@ -112,10 +261,10 @@ func (p *TaskPlan) Current() int {
 
 // Render is the plan as the AI and the developer read it.
 func (p *TaskPlan) Render() string {
-	if p == nil || (len(p.Stages) == 0 && len(p.Decisions) == 0) {
+	if p == nil || (len(p.Stages) == 0 && len(p.Decisions) == 0 && p.Target == nil) {
 		return ""
 	}
-	return p.renderStages() + p.renderDecisions()
+	return p.Target.RenderFor(p.currentSheet()) + p.renderStages() + p.renderDecisions()
 }
 
 // renderDecisions is the decisions part of Render.
@@ -142,7 +291,30 @@ func (p *TaskPlan) renderStages() string {
 		b.WriteString("(Carried over from an earlier session in this draft: go on from the CURRENT stage.)\n")
 	}
 	cur := p.Current()
+	// A long plan shows its counts, the stages around the current one and
+	// the current stage whole: the 80-stage plan of 2026-11-12 was 50k
+	// characters, re-sent with every call.
+	compact := len(p.Stages) > compactStagesAbove
+	if compact {
+		done, skipped := 0, 0
+		for _, s := range p.Stages {
+			switch s.Status {
+			case StageDone:
+				done++
+			case StageSkipped:
+				skipped++
+			}
+		}
+		fmt.Fprintf(&b, "%d stages: %d done, %d skipped (titles of the others below; their items are shown when each is CURRENT).\n", len(p.Stages), done, skipped)
+	}
 	for i, s := range p.Stages {
+		if compact && i != cur {
+			if cur >= 0 && (i < cur-2 || i > cur+6) {
+				continue
+			}
+			fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress", StagePending: "to do", "": "to do"}[s.Status], s.Title)
+			continue
+		}
 		mark := map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress"}[s.Status]
 		if mark == "" {
 			mark = "to do"
@@ -153,6 +325,9 @@ func (p *TaskPlan) renderStages() string {
 		fmt.Fprintf(&b, "%d. [%s] %s", i+1, mark, s.Title)
 		if len(s.Items) > 0 {
 			fmt.Fprintf(&b, " — items: %s", strings.Join(s.Items, "; "))
+		}
+		if open := s.OpenItems(); i == cur && len(s.Covered) > 0 && len(open) > 0 {
+			fmt.Fprintf(&b, " — done by confirmed plans: %s; still open: %s", strings.Join(s.Covered, "; "), strings.Join(open, "; "))
 		}
 		if s.Check != "" {
 			fmt.Fprintf(&b, " — check: %s", s.Check)
@@ -221,18 +396,41 @@ func (p *TaskPlan) RecordConfirmed(proposalID string, steps int, whole bool) boo
 	}
 	st.Confirmed++
 	st.ConfirmedSteps += steps
+	if whole && proposalID != "" && st.PendingCover != nil && st.PendingCover.Proposal == proposalID {
+		for _, it := range st.PendingCover.Items {
+			if !containsItem(st.Covered, it) {
+				st.Covered = append(st.Covered, it)
+			}
+		}
+		st.PendingCover = nil
+	}
 	if whole && proposalID != "" && st.CoveredBy == proposalID {
-		st.Status = StageDone
-		if st.Note == "" {
-			st.Note = "done by the server: a confirmed plan did every item"
+		for _, it := range st.Items {
+			if !containsItem(st.Covered, it) {
+				st.Covered = append(st.Covered, it)
+			}
+		}
+	}
+	if len(st.Items) > 0 && len(st.OpenItems()) == 0 {
+		if st.NeedsProof() {
+			// Its steps are all confirmed; its numbers decide (update_task_plan
+			// "done" is checked against the workbook map).
+			st.Note = "every item has a confirmed step; the values are not proven yet — compare the stage's sheets, then mark it done"
+		} else {
+			st.Status = StageDone
+			st.Note = "done by the server: confirmed plans did every item"
 		}
 	}
 	return true
 }
 
-// MarkFound marks the stages whose items the model already holds — the
-// carried-plan check's answer, by 0-based stage: done when every item is
-// found, with a note naming the ones found otherwise.
+// MarkFound notes on the stages which items the model already holds — the
+// carried-plan check's answer, by 0-based stage. It finishes no stage: one
+// reading by the session's model found "every item" of stages with nothing
+// built — an eleven-sheet calculation stage, then Headcount, SaaS, Sites
+// Logistics, Hardware, Operating Expenses and Checks (2026-11-12). The AI
+// marks a stage done (update_task_plan, checked against the workbook map
+// for a sheet's stage); confirmed plans finish theirs (RecordConfirmed).
 func (p *TaskPlan) MarkFound(found map[int][]string) bool {
 	changed := false
 	for i, items := range found {
@@ -243,12 +441,7 @@ func (p *TaskPlan) MarkFound(found map[int][]string) bool {
 		if st.Status == StageDone || st.Status == StageSkipped {
 			continue
 		}
-		if len(items) >= len(st.Items) {
-			st.Status = StageDone
-			st.Note = "done: the model already holds every item (checked when the plan was carried)"
-		} else {
-			st.Note = "already in the model: " + strings.Join(items, "; ")
-		}
+		st.Note = "the carried-plan check read these as already in the model (unverified — check, then mark the stage done): " + strings.Join(items, "; ")
 		changed = true
 	}
 	return changed
@@ -258,14 +451,58 @@ func (p *TaskPlan) MarkFound(found map[int][]string) bool {
 // carried plan is unfinished: the carried stages and decisions stay (owner,
 // 2026-11-11: a new session must read the earlier sessions' plan, never
 // lose it).
-func (p *TaskPlan) Append(goal string, stages []TaskStage) {
+//
+// A stage the plan already has (same title, numbering aside) is not added
+// again: a new session re-sent the carried plan's five stages and the plan
+// held each twice (2026-11-12). It returns the titles left out.
+func (p *TaskPlan) Append(goal string, stages []TaskStage) []string {
 	if g := strings.TrimSpace(goal); g != "" && !strings.Contains(p.Goal, g) {
 		p.Goal = strings.TrimSpace(p.Goal + "; then: " + g)
 	}
+	var dup []string
 	for _, st := range stages {
-		st.Status, st.Note, st.CoveredBy = StagePending, "", ""
+		if p.hasStage(st.Title) {
+			dup = append(dup, st.Title)
+			continue
+		}
+		st.Status, st.Note, st.CoveredBy, st.Covered, st.PendingCover, st.ProofAsked = StagePending, "", "", nil, nil, false
 		p.Stages = append(p.Stages, st)
 	}
+	return dup
+}
+
+// Replace re-cuts the plan's open stages: done and skipped stages stay as
+// they are (what was built stays recorded), the open ones give way to
+// stages — the developer asked for a stage per sheet and the AI could not
+// change the plan (2026-11-12). The goal and decisions stay.
+func (p *TaskPlan) Replace(goal string, stages []TaskStage) {
+	var kept []TaskStage
+	for _, st := range p.Stages {
+		if st.Status == StageDone || st.Status == StageSkipped {
+			kept = append(kept, st)
+		}
+	}
+	p.Stages = kept
+	if g := strings.TrimSpace(goal); g != "" && p.Goal == "" {
+		p.Goal = g
+	}
+	for _, st := range stages {
+		if p.hasStage(st.Title) {
+			continue
+		}
+		st.Status, st.Note, st.CoveredBy, st.Covered, st.PendingCover, st.ProofAsked = StagePending, "", "", nil, nil, false
+		p.Stages = append(p.Stages, st)
+	}
+}
+
+func (p *TaskPlan) hasStage(title string) bool {
+	k := stageTitleKey(title)
+	for _, s := range p.Stages {
+		if stageTitleKey(s.Title) == k {
+			return true
+		}
+	}
+	return false
 }
 
 // Finished reports whether every stage is done or skipped.
@@ -298,11 +535,11 @@ func (s *ChatStore) CarryTaskPlan(ctx context.Context, sessionID, modelID, userI
 		return nil, nil
 	}
 	if p.Finished() || len(p.Stages) == 0 {
-		// A finished goal is not carried; its decisions are.
-		if len(p.Decisions) == 0 {
+		// A finished goal is not carried; its decisions and target are.
+		if len(p.Decisions) == 0 && p.Target == nil {
 			return nil, nil
 		}
-		p = TaskPlan{Decisions: p.Decisions}
+		p = TaskPlan{Decisions: p.Decisions, Target: p.Target}
 	}
 	p.CarriedFrom = from
 	p.CarriedChecked = false
@@ -321,18 +558,32 @@ func NewTaskPlan(goal string, stages []TaskStage) (*TaskPlan, error) {
 	if len(stages) < 2 {
 		return nil, fmt.Errorf("plan_task needs two stages or more: a goal one plan can do needs no task plan — propose it")
 	}
-	if len(stages) > 20 {
-		return nil, fmt.Errorf("plan_task: %d stages; group them into 20 or fewer", len(stages))
+	if err := CheckStages(stages); err != nil {
+		return nil, err
+	}
+	return &TaskPlan{Goal: goal, Stages: stages}, nil
+}
+
+// CheckStages checks stages the AI wrote — for a new plan, or to add to or
+// re-cut a plan under way, where one stage is enough.
+func CheckStages(stages []TaskStage) error {
+	if len(stages) == 0 {
+		return fmt.Errorf("plan_task needs at least one stage")
+	}
+	// 80: a workbook build cut one stage per sheet and per page ran to 75
+	// (2026-11-12); a stage is a line of the plan, not a cost.
+	if len(stages) > 80 {
+		return fmt.Errorf("plan_task: %d stages; group them into 80 or fewer", len(stages))
 	}
 	for i := range stages {
 		st := &stages[i]
 		st.Title = strings.TrimSpace(st.Title)
 		if st.Title == "" || len(st.Items) == 0 {
-			return nil, fmt.Errorf("plan_task: stage %d needs a title and the items it delivers (metrics, grids, pages, postings — named)", i+1)
+			return fmt.Errorf("plan_task: stage %d needs a title and the items it delivers (metrics, grids, pages, postings — named)", i+1)
 		}
 		st.Status, st.Note = StagePending, ""
 	}
-	return &TaskPlan{Goal: goal, Stages: stages}, nil
+	return nil
 }
 
 // UpdateStage marks stage (1-based) with status and an optional note.
@@ -348,9 +599,25 @@ func (p *TaskPlan) UpdateStage(stage int, status, note string) error {
 	if status == StageSkipped && strings.TrimSpace(note) == "" {
 		return fmt.Errorf("update_task_plan: a skipped stage needs a note saying why")
 	}
+	// A finished stage stays finished: Stage 1, built, turned "skipped"
+	// when a re-sent plan replaced it (2026-11-12).
+	if p.Stages[stage-1].Status == StageDone && status == StageSkipped {
+		return fmt.Errorf("update_task_plan: stage %d is done — what it built stays; a done stage is not skipped", stage)
+	}
 	p.Stages[stage-1].Status = status
 	if note = strings.TrimSpace(note); note != "" {
 		p.Stages[stage-1].Note = note
 	}
 	return nil
+}
+
+// compactStagesAbove: a plan of more stages renders compactly (renderStages).
+const compactStagesAbove = 12
+
+// currentSheet is the sheet the current stage builds ("" when none).
+func (p *TaskPlan) currentSheet() string {
+	if cur := p.Current(); cur >= 0 {
+		return p.Stages[cur].Sheet
+	}
+	return ""
 }

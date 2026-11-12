@@ -522,18 +522,39 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Build system prompt with live model context + any uploaded documents.
 	mc := aiassistant.FetchModelContext(ctx, h.db.For(ctx), modelID, revID)
-	systemPrompt := aiassistant.BuildSystemPrompt(mc)
-	if docs, dErr := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID); dErr == nil {
-		systemPrompt += buildDocumentContext(docs)
-	}
 	// The message read as a direct order, a delegated goal or a question,
 	// with the playbooks of its tasks and the session's plan (ai_task.go).
 	taskPlan, _ := store.TaskPlan(ctx, sessionID)
+	// A turn building one sheet of a target model gets only what that needs
+	// (aiassistant/prompt_trim.go): every call re-sent ~110k tokens on
+	// 2026-11-12, 120k characters of them instructions for workflows,
+	// connectors, exports and pages, 60k the workbook's text.
+	sheetTurn := false
+	if cur := taskPlan.Current(); cur >= 0 && taskPlan.Target != nil && taskPlan.Stages[cur].Sheet != "" {
+		sheetTurn = true
+	}
+	systemPrompt := aiassistant.BuildSystemPrompt(mc)
+	if sheetTurn {
+		systemPrompt = aiassistant.TrimPromptForSheet(systemPrompt)
+	}
+	if docs, dErr := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID); dErr == nil {
+		if taskPlan != nil && taskPlan.Target != nil {
+			// The target model holds what the workbook says; the AI reads a
+			// sheet when it needs one (read_attached_sheet, plan_sheet).
+			systemPrompt += buildDocumentIndex(docs, h.sessionWorkbooks(ctx, sessionID))
+		} else {
+			systemPrompt += buildDocumentContext(docs)
+		}
+	}
 	// Carried context made right (ai_plan_carry.go): the developer's answer
 	// to the AI's question is kept as a decision, and a carried plan's open
 	// stages are checked against the model once.
 	taskPlan = recordDecision(ctx, store, sessionID, taskPlan, history, req.Content)
 	h.checkCarriedPlan(ctx, store, llmProvider, llmModel, sessionID, revID, taskPlan)
+	// State proven from the model: a sheet's stage whose rows the workbook
+	// map shows matching is done, whatever any call said (ai_task.go).
+	taskPlan = h.closeProvenStages(ctx, store, sessionID, modelID, revID, taskPlan)
+	systemPrompt += h.targetProgress(ctx, modelID, revID, taskPlan)
 	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
 	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
@@ -545,8 +566,27 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// 4. Tool executors.
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
+	planHooks := taskHooks{
+		Proof:  func(st aiassistant.TaskStage) string { return h.stageProofFor(ctx, sessionID, modelID, revID, st) },
+		Sheets: func() []string { return h.attachedSheetNames(ctx, sessionID) },
+	}
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
 	tools := aiassistant.TurnTools(reqMode, req.Content)
+	if sheetTurn && reqMode.Mode != aiassistant.ModeQuestion {
+		tools = aiassistant.SheetStageTools(tools)
+	}
+	// Model routing (owner, 2026-11-12): a turn whose sheet plan the server
+	// generated whole runs on the developer's routine model; designing the
+	// target and rows the server could not translate stay on the main one.
+	if sheetTurn && reqMode.Mode != aiassistant.ModeQuestion {
+		if st, sErr := h.aiChatStore(personalCtx(ctx, a)).GetSettings(personalCtx(ctx, a), a.UserID); sErr == nil && st.RoutineModel != "" {
+			sheet := taskPlan.Stages[taskPlan.Current()].Sheet
+			if h.sheetGeneratedWhole(ctx, sessionID, revID, sheet) {
+				log.Printf("AI routing: session=%s sheet %q generated whole: %s instead of %s", sessionID, sheet, st.RoutineModel, llmModel)
+				llmModel = st.RoutineModel
+			}
+		}
+	}
 
 	// 5. From here on, respond over SSE so the frontend can render the final
 	//    reply token-by-token instead of waiting for the whole thing. Every
@@ -647,14 +687,19 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
 		}
 	}
-	// stageCovered: the turn's coverage check found every item of the task
-	// plan's current stage in the plan.
-	stageCovered := false
+	// stageChecked: the turn's coverage check answered for the task plan's
+	// current stage; stageDoes are the stage's open items the plan does,
+	// stageOpen the ones it leaves for later plans of the stage.
+	stageChecked := false
+	var stageDoes, stageOpen []string
 	// sentBack: a plan of this turn went back to be fixed. A model that then
 	// ends the turn asking leave to propose ("confirm and I will post it" —
 	// gpt-5-mini did, stage after stage) is told once to propose instead.
 	sendSSE("tool_status", map[string]string{"tool": modeStatus(reqMode)})
-	sentBack, nudged := false, false
+	sentBack, nudges := false, 0
+	// doneChecked: a "done" claim was checked against the comparisons -- once a
+	// turn; the model's answer to the check ends it.
+	doneChecked := false
 	// emptyNudged: an empty reply went back once; unreadable: propose_actions
 	// calls whose arguments were not a plan, sent back to the model.
 	emptyNudged, unreadable := false, 0
@@ -668,7 +713,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 			result := writeResult
 			if !aiassistant.IsWriteTool(call.Name) {
 				var execErr error
-				if result, execErr = runTool(ctx, store, sessionID, readExecutor, call.Name, call.Arguments); execErr != nil {
+				if result, execErr = runTool(ctx, store, sessionID, planHooks, readExecutor, call.Name, call.Arguments); execErr != nil {
 					result = fmt.Sprintf("error: %v", execErr)
 				}
 			}
@@ -801,55 +846,90 @@ turn:
 				provMessages = append(provMessages, providers.Message{Role: "user", Content: emptyReplyNudge})
 				continue
 			}
+			// How to split the work into proposals is the server's to
+			// answer, once and for the whole build: "as many as it needs"
+			// (2026-11-12: "A) two proposals or B) three or more?" ended
+			// turns as a choice for the developer).
+			if nudges < maxTurnNudges && asksHowToSplit(llmResp.Message.Content) {
+				nudges++
+				if plan, _ := store.TaskPlan(ctx, sessionID); plan != nil {
+					if plan.AddDecision(splitDecision) {
+						_ = store.SetTaskPlan(ctx, sessionID, plan)
+					}
+				} else if plan := (&aiassistant.TaskPlan{}); plan.AddDecision(splitDecision) {
+					_ = store.SetTaskPlan(ctx, sessionID, plan)
+				}
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: splitNudge})
+				continue
+			}
 			// Asking leave to propose, or to confirm defaults it named, when
 			// the developer asked for a change: propose instead (ai_turn.go).
-			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksLeaveToPropose(llmResp.Message.Content) {
-				nudged = true
+			if nudges < maxTurnNudges && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksLeaveToPropose(llmResp.Message.Content) {
+				nudges++
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: leaveNudge})
 				continue
 			}
-			if sentBack && !nudged && asksToPropose(llmResp.Message.Content) {
-				nudged = true
+			if sentBack && nudges < maxTurnNudges && asksToPropose(llmResp.Message.Content) {
+				nudges++
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: proposeNudge})
 				continue
 			}
 			// A permission question with no choice in it is answered by the
 			// server: the developer's request is the leave (2026-11-11).
-			if !nudged && reqMode.Mode != aiassistant.ModeQuestion && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksPermission(llmResp.Message.Content) {
-				nudged = true
+			if nudges < maxTurnNudges && reqMode.Mode != aiassistant.ModeQuestion && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && asksPermission(llmResp.Message.Content) {
+				nudges++
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: permissionNudge})
 				continue
 			}
-			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && pointsAtPlan.MatchString(llmResp.Message.Content) {
+			if nudges < maxTurnNudges && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && pointsAtPlan.MatchString(plainApostrophes(llmResp.Message.Content)) {
 				if pending, _ := proposalStore.ListPendingProposals(ctx, sessionID); len(pending) == 0 {
-					nudged = true
+					nudges++
 					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
 					continue
 				}
 			}
-			if !nudged && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && claimsUnproposedChange(llmResp.Message.Content) {
-				nudged = true
+			if nudges < maxTurnNudges && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") && claimsUnproposedChange(llmResp.Message.Content) {
+				nudges++
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
 				continue
 			}
+			// In a delegated build under a task plan, a turn ending on the
+			// work it will do next ("I'm correcting that now", "I need to
+			// resubmit this as a clean bundle", "I'll continue from there")
+			// with nothing proposed goes back once (2026-11-12: a dozen
+			// such turns of 1–3 tool calls).
+			if nudges < maxTurnNudges && reqMode.Mode != aiassistant.ModeQuestion && !strings.HasSuffix(strings.TrimSpace(req.Content), "?") &&
+				announcesOwnWork(llmResp.Message.Content) {
+				if plan, _ := store.TaskPlan(ctx, sessionID); plan.Current() >= 0 {
+					if pending, _ := proposalStore.ListPendingProposals(ctx, sessionID); len(pending) == 0 {
+						nudges++
+						_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+						provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: unproposedNudge})
+						continue
+					}
+				}
+			}
 			// A sheet called done is checked against the session's value
 			// comparisons first (ai_sheet_check.go).
-			if !nudged {
+			if nudges < maxTurnNudges && !doneChecked {
 				if nudge := h.pagesDoneNudge(ctx, sessionID, revID, llmResp.Message.Content); nudge != "" {
-					nudged = true
+					nudges++
+					doneChecked = true
 					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: nudge})
 					continue
 				}
 			}
-			if !nudged {
+			if nudges < maxTurnNudges && !doneChecked {
 				if nudge := h.sheetDoneNudge(ctx, store, sessionID, llmResp.Message.Content); nudge != "" {
-					nudged = true
+					nudges++
+					doneChecked = true
 					_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
 					provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: nudge})
 					continue
@@ -907,7 +987,7 @@ turn:
 						oversized, maxProposalSteps, maxProposalSteps, maxProposalSteps)
 				} else {
 					var execErr error
-					result, execErr = runTool(ctx, store, sessionID, readExecutor, tc.Name, tc.Arguments)
+					result, execErr = runTool(ctx, store, sessionID, planHooks, readExecutor, tc.Name, tc.Arguments)
 					if execErr != nil {
 						result = fmt.Sprintf("error: %v", execErr)
 					}
@@ -935,6 +1015,14 @@ turn:
 					return
 				}
 				continue turn
+			}
+			// A sheet_plan step is the server's plan of a sheet (ai_sheet_plan.go).
+			if expanded, xErr := h.expandSheetPlans(ctx, sessionID, revID, args.Steps); xErr != nil {
+				answerCalls(llmResp.Message, "Proposal NOT shown to the developer: "+xErr.Error())
+				sentBack = true
+				continue turn
+			} else {
+				args.Steps = expanded
 			}
 			// Each metric before what names it, so a plan written in reading
 			// order is checked, shown and run in an order that works.
@@ -987,6 +1075,15 @@ turn:
 						check.failed[i] = true
 					}
 				}
+				if probs, failed := typedFileProblems(args.Steps, req.Content, h.aiTypedFiles(ctx, sessionID)); len(probs) > 0 {
+					check.problems = append(check.problems, probs...)
+					if check.failed == nil {
+						check.failed = map[int]bool{}
+					}
+					for _, i := range failed {
+						check.failed[i] = true
+					}
+				}
 			}
 			// A plan that runs goes back once more when it leaves out part
 			// of a request naming several things (ai_coverage.go).
@@ -995,18 +1092,32 @@ turn:
 				plan, _ := store.TaskPlan(ctx, sessionID)
 				var stageItems []string
 				if cur := plan.Current(); cur >= 0 && reqMode.Mode == aiassistant.ModeDelegated {
-					stageItems = plan.Stages[cur].Items
+					// Only what earlier plans of the stage left open.
+					stageItems = plan.Stages[cur].OpenItems()
 				}
 				missing, extra, usage := planCoverage(turnCtx, llmProvider, llmModel, req.Content, stageItems, reqMode.Mode == aiassistant.ModeDirect, args.Steps,
 					modelInventory(turnCtx, h.db.For(ctx), revID))
-				// Every item of the current stage has a step: confirmed
-				// whole, this plan finishes the stage (TaskPlan.MarkCovered).
-				stageCovered = len(stageItems) > 0 && len(missing) == 0 && usage.InputTokens+usage.CacheReadTokens > 0
 				if usage.InputTokens+usage.CacheReadTokens > 0 {
 					_ = store.AddUsage(context.WithoutCancel(ctx), sessionID, usage)
 				}
-				if len(missing) > 0 {
-					check.warnings = append(check.warnings, coverageWarning(missing))
+				// A stage is often several plans: the stage items a plan
+				// leaves are information (kept open for the next plans), not
+				// a reason to send it back — every plan of an eleven-sheet
+				// stage went back as incomplete and the AI looped on
+				// four-step plans (2026-11-12). Items of the request itself
+				// still send it back.
+				reqMissing, stageMissing := splitCoverage(missing, stageItems)
+				if len(stageItems) > 0 && usage.InputTokens+usage.CacheReadTokens > 0 {
+					stageChecked, stageOpen = true, stageMissing
+					stageDoes = nil
+					for _, it := range stageItems {
+						if !itemListed(stageMissing, it) {
+							stageDoes = append(stageDoes, it)
+						}
+					}
+				}
+				if len(reqMissing) > 0 {
+					check.warnings = append(check.warnings, coverageWarning(reqMissing))
 				}
 				if drop, notes, rest := unaskedChanges(extra, args.Steps); len(drop) > 0 {
 					kept, _ := aiassistant.DropSteps(args.Steps, drop)
@@ -1071,7 +1182,7 @@ turn:
 					result := planResult
 					if !aiassistant.IsWriteTool(call.Name) {
 						var execErr error
-						if result, execErr = runTool(ctx, store, sessionID, readExecutor, call.Name, call.Arguments); execErr != nil {
+						if result, execErr = runTool(ctx, store, sessionID, planHooks, readExecutor, call.Name, call.Arguments); execErr != nil {
 							result = fmt.Sprintf("error: %v", execErr)
 						}
 					}
@@ -1084,6 +1195,7 @@ turn:
 			// What the server changed in the plan is shown beside it, as
 			// the warnings are, and told to the model.
 			shownWarnings := append(append([]string{}, check.notes...), check.warnings...)
+			h.labelImportSources(ctx, sessionID, args.Steps)
 			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps, shownWarnings)
 			if pErr != nil {
 				sendSSE("error", map[string]string{"error": fmt.Sprintf("save proposal: %v", pErr)})
@@ -1104,9 +1216,13 @@ turn:
 			if len(check.warnings) > 0 {
 				created += " Shown with the plan check's warnings: " + strings.Join(check.warnings, " | ")
 			}
-			if stageCovered {
-				if plan, pErr := store.TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.MarkCovered(proposal.ID) {
+			if stageChecked {
+				if plan, pErr := store.TaskPlan(ctx, sessionID); pErr == nil && plan != nil && plan.NoteCoverage(proposal.ID, stageDoes) {
 					_ = store.SetTaskPlan(ctx, sessionID, plan)
+				}
+				if len(stageOpen) > 0 {
+					created += " This plan does part of the current stage; still open in it after this plan: " + strings.Join(stageOpen, "; ") +
+						". That is expected — they stay open for your next plans of the stage. Do not propose again in this turn."
 				}
 			}
 			_, replacedSteps, _ := proposalStore.WithdrawPending(ctx, sessionID, proposal.ID)
@@ -1127,7 +1243,7 @@ turn:
 					result = "Not created: only one proposal is shown per turn. After the developer confirms or rejects the proposal above, call propose_actions again with these steps."
 				} else {
 					var execErr error
-					if result, execErr = runTool(ctx, store, sessionID, readExecutor, other.Name, other.Arguments); execErr != nil {
+					if result, execErr = runTool(ctx, store, sessionID, planHooks, readExecutor, other.Name, other.Arguments); execErr != nil {
 						result = fmt.Sprintf("error: %v", execErr)
 					}
 				}
@@ -1161,7 +1277,7 @@ turn:
 
 		for _, tc := range llmResp.Message.ToolCalls {
 			sendSSE("tool_status", map[string]string{"tool": tc.Name})
-			result, execErr := runTool(ctx, store, sessionID, readExecutor, tc.Name, tc.Arguments)
+			result, execErr := runTool(ctx, store, sessionID, planHooks, readExecutor, tc.Name, tc.Arguments)
 			if execErr != nil {
 				result = fmt.Sprintf("error: %v", execErr)
 			} else if isTaskPlanTool(tc.Name) {
@@ -1180,6 +1296,7 @@ turn:
 	}
 
 	if warnedPlan != nil {
+		h.labelImportSources(ctx, sessionID, warnedPlan)
 		if proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, warnedPlan, warnedWarnings); pErr == nil {
 			if strings.TrimSpace(finalReply) != "" {
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", finalReply, nil, "", "")
@@ -1915,6 +2032,7 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 		TenantEnforced: tenant.OK && tenant.Enforced,
 		TenantProvider: tenantProviderLabel(tenant),
 		DefaultModels:  defaultModels(),
+		BuildAdvice:    buildAdvice(cmp.Or(settings.Provider, "openai"), cmp.Or(settings.Model, defaultModel(cmp.Or(settings.Provider, "openai"))), settings.ReasoningEffort),
 	})
 }
 
@@ -1928,6 +2046,9 @@ type aiSettingsResponse struct {
 	TenantProvider string `json:"tenant_provider,omitempty"`
 	// DefaultModels is the model each provider runs when the setting is blank.
 	DefaultModels map[string]string `json:"default_models"`
+	// BuildAdvice says whether the model and effort suit building a model
+	// (buildAdvice); "" when they do.
+	BuildAdvice string `json:"build_advice,omitempty"`
 }
 
 func tenantProviderLabel(t tenantAIKeyResult) string {
@@ -1948,6 +2069,9 @@ type aiSettingsReq struct {
 	APIKey   string `json:"api_key"` // optional; omit to keep existing key
 	// ReasoningEffort: omitted keeps the saved one; "" clears it.
 	ReasoningEffort *string `json:"reasoning_effort"`
+	// RoutineModel: the model for turns whose sheet plan the server generated
+	// whole; omitted keeps the saved one, "" clears it.
+	RoutineModel *string `json:"routine_model"`
 }
 
 // validReasoningEffort refuses an effort OpenAI does not take.
@@ -2003,6 +2127,12 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if err := h.aiChatStore(personalCtx(ctx, a)).SaveSettingsWithEffort(personalCtx(ctx, a), a.UserID, req.Provider, req.Model, req.APIKey, req.ReasoningEffort); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
+	}
+	if req.RoutineModel != nil {
+		if err := h.aiChatStore(personalCtx(ctx, a)).SaveRoutineModel(personalCtx(ctx, a), a.UserID, *req.RoutineModel); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAISettingsUpdated,
@@ -2231,7 +2361,11 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonOK(w, probeProviderKeyEffort(ctx, provider, model, apiKey, effort))
+	res := probeProviderKeyEffort(ctx, provider, model, apiKey, effort)
+	if adv := buildAdvice(provider, model, effort); adv != "" {
+		res["build_advice"] = adv
+	}
+	jsonOK(w, res)
 }
 
 // ── POST /api/ai/settings/models ─────────────────────────────────────────────

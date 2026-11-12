@@ -51,6 +51,10 @@ type FileImportRequest struct {
 	// Percentage metric really are percents under 1% — the plan check
 	// otherwise refuses them as fractions to scale by 100.
 	ValuesArePercentUnits bool
+	// PercentFractions: the file holds percentages as fractions (a sheet's
+	// 23% is 0.23): values for Percentage metrics are multiplied by 100, the
+	// others kept (load_sheet sets it for a sheet mixing both).
+	PercentFractions bool
 	// IntegrationID, when set, records the run in that integration's
 	// history.
 	IntegrationID string
@@ -70,6 +74,14 @@ type ReadHooks struct {
 	// ReadAttachedSheet renders rows from..to of one sheet of an attached
 	// workbook, with those rows' whole formulas.
 	ReadAttachedSheet func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error)
+	// AnalyseWorkbook describes every sheet of an attached workbook (or those
+	// named) for designing the target model (workbook_analysis.go).
+	AnalyseWorkbook func(ctx context.Context, file string, sheets []string) (string, error)
+	// LoadSheet reads one sheet for loading: layout, label → metric,
+	// and the converted file to import (load_sheet.go).
+	LoadSheet func(ctx context.Context, file, sheet, grid string, headerRow int) (string, error)
+	// PlanSheet translates a sheet with the target model (sheet_plan.go).
+	PlanSheet func(ctx context.Context, sheet string, rows map[int]string) (string, error)
 	// AttachedFile is an attached file's name and bytes, kept whole
 	// (compare_with_sheet reads one row of it).
 	AttachedFile func(ctx context.Context, file string) (string, []byte, error)
@@ -116,6 +128,32 @@ func integrationToolDefs() []toolDef {
 				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"},
 				"after_steps":{"type":"array","description":"Write steps of the proposal you are preparing, in propose_actions' step shape ({tool, description, params}), run first in a dry run (nothing is kept) so the file previews into a grid or dimension they create; target_id may then be \"<created in step N>\" or the new name","items":{"type":"object"}}
 			},"required":["file","target_id"]}`,
+		},
+		{
+			Name:        "analyse_workbook",
+			Description: "Reads the WHOLE attached workbook at once (.xlsx/.xlsm), on the server: every sheet's likely role (inputs, calculations, a report, an import template, text), its layout (header row, period columns, other columns), every row marked I (typed numbers), F (formulas) or T (text), the sheets it reads and is read by, and an order to build the sheets in. Call it first when a model is built from a workbook, then record the TO-BE model with set_target_model. Read-only.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"The attached workbook's name"},
+				"sheets":{"type":"array","items":{"type":"string"},"description":"Only these sheets; omit for all"}
+			},"required":["file"]}`,
+		},
+		{
+			Name:        "plan_sheet",
+			Description: "Translates one calculation sheet of the attached workbook into the model, on the server, from the target model: each row's formula in the model's terms (another row → its metric, the column before → LAG, a running total → CUMULATE, another sheet → its metric). It lists what it translated, the metrics it could not (with the Excel formula) and the ONE step to propose: {\"tool\": \"sheet_plan\", \"params\": {\"sheet\", \"fixes\": {metric: formula}, \"skip\": [metric]}}, which the server expands into the sheet's whole plan. Write only the fixes; never retype translated formulas. Read-only.",
+			Parameters: `{"type":"object","properties":{
+				"sheet":{"type":"string"},
+				"rows":{"type":"object","description":"Only to correct the server's row → metric match: {\"<row number>\": \"<metric>\"}"}
+			},"required":["sheet"]}`,
+		},
+		{
+			Name:        "load_sheet",
+			Description: "Reads one sheet of inputs for loading into the model, on the server: finds the header row with a dimension's members across the columns (scenarios, months), the label column, and matches every row label to a metric (exact name, label, or nearest -- check those). It saves the sheet read with that mapping as a converted file and gives the ONE import_file_data step to propose. Rows with no metric are listed with suggested names: create those metrics first, then call it again. Use it for every input sheet; never retype a sheet's numbers. Read-only.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"The attached workbook's name"},
+				"sheet":{"type":"string"},
+				"grid":{"type":"string","description":"The grid to load into (name); omit to use the grid its metrics are on"},
+				"header_row":{"type":"integer","description":"Only when the server picked the wrong header row"}
+			},"required":["file","sheet"]}`,
 		},
 		{
 			Name:        "read_attached_sheet",
@@ -291,13 +329,14 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		return "", fmt.Errorf("file import is not available here")
 	}
 	var p struct {
-		File       string             `json:"file"`
-		Sheet      string             `json:"sheet"`
-		TargetType string             `json:"target_type"`
-		TargetID   string             `json:"target_id"`
-		Reshape    *importpkg.Reshape `json:"reshape"`
-		ColumnMap  map[string]string  `json:"column_map"`
-		AfterSteps []ProposalStep     `json:"after_steps"`
+		File             string             `json:"file"`
+		Sheet            string             `json:"sheet"`
+		TargetType       string             `json:"target_type"`
+		TargetID         string             `json:"target_id"`
+		Reshape          *importpkg.Reshape `json:"reshape"`
+		ColumnMap        map[string]string  `json:"column_map"`
+		AfterSteps       []ProposalStep     `json:"after_steps"`
+		PercentFractions bool               `json:"percent_fractions"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
@@ -311,7 +350,7 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 	if err := p.Reshape.Validate(); err != nil {
 		return "", err
 	}
-	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, Reshape: p.Reshape, ColumnMap: p.ColumnMap}
+	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, Reshape: p.Reshape, ColumnMap: p.ColumnMap, PercentFractions: p.PercentFractions}
 	if len(p.AfterSteps) > 0 {
 		// The target may be one of these steps' creations: it is resolved
 		// after they run, on the dry run's transaction.
@@ -933,6 +972,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		ReplaceBy     string             `json:"replace_by"`
 		// See FileImportRequest.ValuesArePercentUnits.
 		ValuesArePercentUnits bool `json:"values_are_percent_units"`
+		PercentFractions      bool `json:"percent_fractions"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -946,7 +986,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 	if strings.TrimSpace(p.File) == "" {
 		return "", "", fmt.Errorf("file is required — the attached file's name")
 	}
-	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, ValuesArePercentUnits: p.ValuesArePercentUnits}
+	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, ValuesArePercentUnits: p.ValuesArePercentUnits, PercentFractions: p.PercentFractions}
 	if p.IntegrationID != "" {
 		row, err := e.loadIntegrationDef(ctx, p.IntegrationID)
 		if err != nil {
@@ -1092,4 +1132,64 @@ func (e *ToolExecutor) workbookMap(ctx context.Context, raw json.RawMessage) (st
 		}
 	}
 	return RenderWorkbookMap(rows, Coverage(rows, books), strings.TrimSpace(p.Sheet)), nil
+}
+
+func (e *ToolExecutor) analyseWorkbook(ctx context.Context, raw json.RawMessage) (string, error) {
+	if e.hooks.AnalyseWorkbook == nil {
+		return "", fmt.Errorf("analysing an attached workbook is not available here")
+	}
+	var p struct {
+		File   string   `json:"file"`
+		Sheets []string `json:"sheets"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if strings.TrimSpace(p.File) == "" {
+		return "", fmt.Errorf("file is required — the attached workbook's name")
+	}
+	return e.hooks.AnalyseWorkbook(ctx, p.File, p.Sheets)
+}
+
+func (e *ToolExecutor) loadSheet(ctx context.Context, raw json.RawMessage) (string, error) {
+	if e.hooks.LoadSheet == nil {
+		return "", fmt.Errorf("loading a sheet is not available here")
+	}
+	var p struct {
+		File      string `json:"file"`
+		Sheet     string `json:"sheet"`
+		Grid      string `json:"grid"`
+		HeaderRow int    `json:"header_row"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if strings.TrimSpace(p.File) == "" || strings.TrimSpace(p.Sheet) == "" {
+		return "", fmt.Errorf("file and sheet are required")
+	}
+	return e.hooks.LoadSheet(ctx, p.File, p.Sheet, p.Grid, p.HeaderRow)
+}
+
+func (e *ToolExecutor) planSheet(ctx context.Context, raw json.RawMessage) (string, error) {
+	if e.hooks.PlanSheet == nil {
+		return "", fmt.Errorf("plan_sheet is not available here")
+	}
+	var p struct {
+		Sheet string            `json:"sheet"`
+		Rows  map[string]string `json:"rows"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if strings.TrimSpace(p.Sheet) == "" {
+		return "", fmt.Errorf("sheet is required")
+	}
+	rows := map[int]string{}
+	for k, v := range p.Rows {
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(k), "%d", &n); err == nil {
+			rows[n] = v
+		}
+	}
+	return e.hooks.PlanSheet(ctx, p.Sheet, rows)
 }

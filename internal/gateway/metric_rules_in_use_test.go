@@ -93,8 +93,11 @@ func TestMetricRenameCarriesIntoRules(t *testing.T) {
 // published workflow answers it as it is, an archived one 409.
 func TestDeleteTogetherGridNamesAndRepublish(t *testing.T) {
 	f := metricRulesFixture(t)
-	for name, text := range map[string]string{"copy_a": "revenue * 1", "copy_b": "copy_a + 1", "copy_c": "copy_b * 2"} {
-		f.metric[name] = f.call("POST", "/api/developer/metrics", f.metricBody(name, text))
+	// In order: each reads the one before (a map's random order made the
+	// test fail whenever copy_b came before copy_a, 2026-11-12).
+	for _, m := range []struct{ name, text string }{{"copy_a", "revenue * 1"}, {"copy_b", "copy_a + 1"}, {"copy_c", "copy_b * 2"}} {
+		name := m.name
+		f.metric[name] = f.call("POST", "/api/developer/metrics", f.metricBody(name, m.text))
 		f.call("POST", "/api/developer/grids/"+f.gridID+"/metrics/"+f.metric[name], nil)
 	}
 	status, raw := f.req("DELETE", "/api/developer/metrics/"+f.metric["copy_a"]+"?with="+f.metric["copy_b"], nil)

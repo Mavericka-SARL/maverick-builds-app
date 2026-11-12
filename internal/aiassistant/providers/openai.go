@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -25,6 +26,10 @@ type OpenAIProvider struct {
 	// effort is the reasoning_effort sent with every OpenAI call
 	// (WithReasoningEffort); "" falls back to AI_OPENAI_REASONING_EFFORT.
 	effort string
+	// apiKey and baseURL serve the Responses API (openai_responses.go),
+	// which go-openai does not speak; http is its client (nil: default).
+	apiKey, baseURL string
+	http            *http.Client
 }
 
 // WithReasoningEffort sets the reasoning_effort every OpenAI call sends (""
@@ -34,8 +39,31 @@ func (p *OpenAIProvider) WithReasoningEffort(effort string) *OpenAIProvider {
 	return p
 }
 
+// effectiveEffort is the effort sent: the developer's, else the deployment's.
+func (p *OpenAIProvider) effectiveEffort() string {
+	if p.effort != "" {
+		return p.effort
+	}
+	return strings.TrimSpace(os.Getenv("AI_OPENAI_REASONING_EFFORT"))
+}
+
+func (p *OpenAIProvider) httpClient() *http.Client {
+	if p.http != nil {
+		return p.http
+	}
+	return http.DefaultClient
+}
+
 func NewOpenAI(apiKey string) *OpenAIProvider {
-	return &OpenAIProvider{client: openai.NewClient(apiKey), label: "openai"}
+	return &OpenAIProvider{client: openai.NewClient(apiKey), label: "openai", apiKey: apiKey, baseURL: "https://api.openai.com/v1"}
+}
+
+// NewOpenAIAt is NewOpenAI against another base URL (tests).
+func NewOpenAIAt(apiKey, baseURL string, client *http.Client) *OpenAIProvider {
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = baseURL
+	cfg.HTTPClient = client
+	return &OpenAIProvider{client: openai.NewClientWithConfig(cfg), label: "openai", apiKey: apiKey, baseURL: baseURL, http: client}
 }
 
 // NewOpenAICompatible targets an OpenAI-compatible chat-completions endpoint
@@ -154,7 +182,14 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 }
 
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	if p.useResponses(req.Model) {
+		return p.chatResponses(ctx, req)
+	}
 	resp, err := p.client.CreateChatCompletion(ctx, p.buildRequest(req))
+	if needsResponses(err) && p.label == "openai" && p.apiKey != "" {
+		rememberResponses(req.Model)
+		return p.chatResponses(ctx, req)
+	}
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("%s: %w", p.label, err)
 	}
@@ -194,7 +229,14 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 	if p.label == "openai" {
 		creq.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
 	}
+	if p.useResponses(req.Model) {
+		return p.streamResponses(ctx, req, onDelta)
+	}
 	stream, err := p.client.CreateChatCompletionStream(ctx, creq)
+	if needsResponses(err) && p.label == "openai" && p.apiKey != "" {
+		rememberResponses(req.Model)
+		return p.streamResponses(ctx, req, onDelta)
+	}
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("%s: %w", p.label, err)
 	}
