@@ -750,7 +750,7 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
       </button>
       {shown === i && (
         <div className="mvx-admin-muted" style={muted}>
-          {s.items.length > 0 && <div><Txt>{s.items.join("; ")}</Txt></div>}
+          {(s.items?.length ?? 0) > 0 && <div><Txt>{s.items.join("; ")}</Txt></div>}
           {s.evidence && (
             <div><Txt>{[s.evidence.compared && `compared: ${s.evidence.compared}`, s.evidence.differences && s.evidence.differences !== "none" && `differs: ${s.evidence.differences}`]
               .filter(Boolean).join(" · ")}</Txt></div>
@@ -1469,7 +1469,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           </div>
         )}
 
-        {taskPlan && taskPlan.stages.length > 0 && <TaskPlanCard plan={taskPlan} />}
+        {taskPlan && (taskPlan.stages?.length ?? 0) > 0 && <TaskPlanCard plan={taskPlan} />}
         {taskPlan && (taskPlan.decisions?.length ?? 0) > 0 && <DecisionsCard decisions={taskPlan.decisions ?? []} />}
         {sessionId && <WorkbookMapCard sessionId={sessionId} turns={messages.length} />}
 

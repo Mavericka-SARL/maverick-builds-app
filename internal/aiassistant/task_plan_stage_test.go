@@ -86,3 +86,32 @@ func TestMarkFoundLeavesValueStagesOpen(t *testing.T) {
 		t.Fatalf("found: %+v", plan.Stages)
 	}
 }
+
+// A plan holding only carried decisions (or a decision recorded before
+// plan_task) has no stages; the console reads stages.length, so stages and a
+// stage's items go out as arrays, and a stored null heals on the way out
+// (a carried decisions-only plan stopped the AI developer tab, 2026-11-13).
+func TestTaskPlanStagesNeverNull(t *testing.T) {
+	b, err := json.Marshal(&TaskPlan{Decisions: []string{"store percentages in percent units"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"stages":[]`) {
+		t.Fatalf("decisions-only plan: want stages [], got %s", b)
+	}
+	var stored TaskPlan
+	if err := json.Unmarshal([]byte(`{"goal":"g","stages":[{"title":"t","items":null,"status":"pending"}],"decisions":["d"]}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	b, err = json.Marshal(map[string]any{"task_plan": &stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"items":[]`) || strings.Contains(string(b), "null") {
+		t.Fatalf("stored plan: want items [] and no null, got %s", b)
+	}
+	stored.Stages = nil
+	if b, _ = json.Marshal(stored); !strings.Contains(string(b), `"stages":[]`) {
+		t.Fatalf("stored null stages: want [], got %s", b)
+	}
+}

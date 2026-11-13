@@ -39,6 +39,20 @@ type TaskPlan struct {
 	Target *TargetModel `json:"target,omitempty"`
 }
 
+// MarshalJSON writes stages as an array, never null: a plan can hold only
+// the decisions and target carried from a finished goal, or a decision
+// recorded before plan_task, and the console reads stages.length (a
+// carried decisions-only plan stopped the AI developer tab, 2026-11-13).
+// Stored plans pass through here on every read, so old nulls heal too.
+func (p TaskPlan) MarshalJSON() ([]byte, error) {
+	type plain TaskPlan
+	q := plain(p)
+	if q.Stages == nil {
+		q.Stages = []TaskStage{}
+	}
+	return json.Marshal(q)
+}
+
 // maxDecisions bounds the decisions a plan keeps (the oldest go first).
 const maxDecisions = 30
 
@@ -214,6 +228,16 @@ type TaskStage struct {
 	Evidence *StageEvidence `json:"evidence,omitempty"`
 	// Measure is what the stage took, turn by turn (AddTurn).
 	Measure *StageMeasure `json:"measure,omitempty"`
+}
+
+// MarshalJSON writes items as an array, never null (see TaskPlan.MarshalJSON).
+func (s TaskStage) MarshalJSON() ([]byte, error) {
+	type plain TaskStage
+	q := plain(s)
+	if q.Items == nil {
+		q.Items = []string{}
+	}
+	return json.Marshal(q)
 }
 
 // StageEvidence ends a stage (update_task_plan "done").

@@ -90,16 +90,30 @@ func TestNewSessionsCarryThePlanOfAPromotedDraft(t *testing.T) {
 		t.Fatalf("s3's first plan made draft %q, want a fresh one (s1's was %s)", d3, d1)
 	}
 
-	// A finished plan is not carried.
+	// A finished plan is not carried; its decisions are.
 	for i := range carried.Stages {
 		carried.Stages[i].Status = aiassistant.StageDone
 	}
+	carried.AddDecision("store percentages in percent units")
 	_ = chat.SetTaskPlan(ctx, s3.ID, carried)
 	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s3.ID+"/promote-draft", f.devSub, nil); status != http.StatusOK {
 		t.Fatalf("promote s3: %d %s", status, body)
 	}
 	s4 := newSession("")
-	if p, _ := chat.TaskPlan(ctx, s4.ID); p != nil && len(p.Stages) > 0 {
-		t.Errorf("a finished plan was carried: %+v", p)
+	if p, _ := chat.TaskPlan(ctx, s4.ID); p == nil || len(p.Stages) > 0 || len(p.Decisions) != 1 {
+		t.Errorf("s4's plan = %+v, want only the finished plan's decisions", p)
+	}
+	// The console reads task_plan.stages.length when it opens the session: a
+	// decisions-only plan goes out with stages [], never null (it stopped
+	// the AI developer tab, 2026-11-13).
+	status, body := f.do(t, "GET", "/api/ai/sessions/"+s4.ID, f.devSub, nil)
+	var opened struct {
+		TaskPlan map[string]json.RawMessage `json:"task_plan"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &opened) != nil {
+		t.Fatalf("open s4: %d %s", status, body)
+	}
+	if got := string(opened.TaskPlan["stages"]); got != "[]" {
+		t.Errorf("s4's task_plan.stages = %s, want []", got)
 	}
 }
