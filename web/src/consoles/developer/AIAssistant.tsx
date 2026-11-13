@@ -289,7 +289,6 @@ const TOOL_LABELS: Record<string, string> = {
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
   create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",
   create_revision: "Create revision",
-  start_new_draft: "Start a new draft",
   delete_dimension: "Delete dimension", delete_dimension_member: "Delete dimension member",
   generate_time_members: "Generate time periods", update_grid: "Rename grid", delete_grid: "Delete grid",
   remove_grid_metric: "Remove grid metric", reorder_grid_metrics: "Reorder grid metrics", reorder_dashboards: "Reorder dashboards", arrange_dashboard: "Arrange dashboard", set_date_format: "Set date format", remove_grid_dimension: "Remove grid dimension",
@@ -700,6 +699,21 @@ function formatElapsed(ms: number): string {
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
 
+// sessionDraftState is what became of a session's draft, for the list: a
+// session is its draft (2026-11-13).
+function sessionDraftState(s: AISession): string {
+  if (s.promoted_at) return "working revision ✓";
+  return s.draft_revision_id ? "draft" : "";
+}
+
+// sessionProgress is a session's plan and calls, for the list.
+function sessionProgress(s: AISession): string {
+  const parts: string[] = [];
+  if (s.plan_stages) parts.push(`${s.plan_done ?? 0}/${s.plan_stages} stages`);
+  if (s.llm_calls) parts.push(`${s.llm_calls} calls`);
+  return parts.join(" · ");
+}
+
 // formatTokens shortens a token count (1.2M, 340k).
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -707,10 +721,13 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-// TaskPlanCard shows the plan of a delegated goal: its stages, which is
-// current, and what each delivers — the developer sees where the work stands.
+// TaskPlanCard shows the plan of a delegated goal, compactly (owner,
+// 2026-11-13: the open plan took two screens): one line with the goal and
+// progress, the decision waiting and the current stage; expanded, one line
+// per stage; a stage's items, evidence and what it took open on a click.
 function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState<number | null>(null);
   const current = plan.stages.findIndex(s => s.status !== "done" && s.status !== "skipped");
   const done = plan.stages.filter(s => s.status === "done").length;
   const mark = (s: AITaskStage, i: number) =>
@@ -723,11 +740,35 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
   const openDecisions = (plan.target?.decisions ?? []).filter(d => !d.choice);
   const checks = plan.target?.checks ?? [];
   const recorded = checks.filter(c => c.status && c.status !== "open").length;
+  const muted = { marginLeft: 18, fontWeight: 400 } as const;
+  const stageLine = (s: AITaskStage, i: number) => (
+    <li key={i} style={{ listStyle: "none", fontWeight: i === current ? 600 : 400, color: s.status === "done" || s.status === "skipped" ? "var(--color-text-muted)" : "var(--color-text)" }}>
+      <button type="button" onClick={() => setShown(v => (v === i ? null : i))} aria-expanded={shown === i}
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", font: "inherit", fontWeight: "inherit", color: "inherit" }}>
+        <span aria-hidden style={{ display: "inline-block", width: 18 }}>{mark(s, i)}</span>
+        <Txt>{`${i + 1}. ${s.title}`}</Txt>
+      </button>
+      {shown === i && (
+        <div className="mvx-admin-muted" style={muted}>
+          {s.items.length > 0 && <div><Txt>{s.items.join("; ")}</Txt></div>}
+          {s.evidence && (
+            <div><Txt>{[s.evidence.compared && `compared: ${s.evidence.compared}`, s.evidence.differences && s.evidence.differences !== "none" && `differs: ${s.evidence.differences}`]
+              .filter(Boolean).join(" · ")}</Txt></div>
+          )}
+          {s.note && <div><Txt>{s.note}</Txt></div>}
+          {s.measure && <div><Txt>{took(s.measure)}</Txt></div>}
+        </div>
+      )}
+    </li>
+  );
   return (
     <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
-      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)" }}>
-        <Txt>{`Plan: ${plan.goal} — ${done} of ${plan.stages.length} stages done`}</Txt>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label={open ? "Collapse the plan" : "Expand the plan"}
+        title={plan.goal}
+        style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)",
+          textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span aria-hidden style={{ display: "inline-block", width: 14 }}>{open ? "▾" : "▸"}</span>
+        <Txt>{`Plan: ${done} of ${plan.stages.length} stages done — ${plan.goal}`}</Txt>
       </button>
       {total.calls > 0 && (
         <span className="mvx-admin-muted"><Txt>{` · ${Math.round(total.minutes)} min, ${total.calls} calls, ${total.corrections} correction${total.corrections === 1 ? "" : "s"} so far`}</Txt></span>
@@ -740,29 +781,9 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
           <Txt>{`Waiting for your decision: ${openDecisions.map(d => d.options?.length ? `${d.question} (${d.options.join(" / ")})` : d.question).join("; ")}`}</Txt>
         </div>
       )}
-      {open && (
-        <ol style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-          {plan.stages.map((s, i) => (
-            <li key={i} style={{ listStyle: "none", marginLeft: -18, fontWeight: i === current ? 600 : 400, color: s.status === "done" || s.status === "skipped" ? "var(--color-text-muted)" : "var(--color-text)" }}>
-              <span aria-hidden style={{ display: "inline-block", width: 18 }}>{mark(s, i)}</span>
-              <Txt>{`${i + 1}. ${s.title}`}</Txt>
-              {s.note && <span className="mvx-admin-muted"><Txt>{` — ${s.note}`}</Txt></span>}
-              {i === current && s.items.length > 0 && (
-                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}><Txt>{s.items.join("; ")}</Txt></div>
-              )}
-              {s.status === "done" && s.evidence && (
-                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}>
-                  <Txt>{[s.evidence.compared && `compared: ${s.evidence.compared}`, s.evidence.differences && s.evidence.differences !== "none" && `differs: ${s.evidence.differences}`]
-                    .filter(Boolean).join(" · ")}</Txt>
-                </div>
-              )}
-              {s.measure && (s.status === "done" || i === current) && (
-                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}><Txt>{took(s.measure)}</Txt></div>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
+      <ol style={{ margin: "6px 0 0", padding: 0 }}>
+        {open ? plan.stages.map(stageLine) : current >= 0 && stageLine(plan.stages[current], current)}
+      </ol>
     </div>
   );
 }
@@ -950,8 +971,6 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     queryKey: ["ai-sessions", revisionId ?? ""],
     queryFn: () => api.aiListSessions(revisionId),
   });
-  // The developer's open AI draft in this model, which New session continues.
-  const openDraft = sessions.find(s => s.draft_revision_id && !s.promoted_at)?.draft_revision_id;
 
   const { data: settings } = useQuery<AISettings>({
     queryKey: ["ai-settings"],
@@ -993,7 +1012,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   // Create a new session: it continues the developer's open AI draft, or
   // with newDraft makes the next draft on its first confirmed proposal.
   const newSession = useMutation({
-    mutationFn: (newDraft?: boolean) => api.aiCreateSession(revisionId, newDraft),
+    mutationFn: () => api.aiCreateSession(revisionId),
     onSuccess: (sess) => {
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
       setSessionId(sess.id);
@@ -1337,25 +1356,12 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           variant="ghost"
           leadingIcon={<Plus size={13} />}
           disabled={newSession.isPending}
-          onClick={() => newSession.mutate(false)}
-          title={openDraft ? "Continues your open AI draft" : undefined}
+          onClick={() => newSession.mutate()}
+          title="A new session is its own draft: its first confirmed plan copies your working revision"
           style={{ marginBottom: 4 }}
         >
           New session
         </Button>
-        {openDraft && (
-          <Button
-            size="sm"
-            variant="ghost"
-            leadingIcon={<Plus size={13} />}
-            disabled={newSession.isPending}
-            onClick={() => newSession.mutate(true)}
-            title="A new session whose first confirmed proposal makes a new AI draft from your working revision; your open draft stays in Models"
-            style={{ marginBottom: 4 }}
-          >
-            Start a new draft
-          </Button>
-        )}
 
         {sessions.map(s => (
           <div
@@ -1397,7 +1403,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                   {s.title || "Session"}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--color-text-subtle)", marginTop: 1 }}>
-                  {s.created_at.slice(0, 10)}
+                  {[s.created_at.slice(0, 10), sessionDraftState(s), sessionProgress(s)].filter(Boolean).join(" · ")}
                 </div>
               </button>
             )}
@@ -1480,7 +1486,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           <div className="mvx-context-banner" style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 0, borderLeft: "none", borderRight: "none", borderTop: "none" }}>
             <RevisionBadge status="draft" label="AI draft" />
             <span style={{ flex: 1, fontSize: 12 }}>
-              Working in your AI draft — every new session continues it until you use it as your working revision or discard it. It goes live only when you Set active in Models.
+              This session's AI draft — every plan of the session goes here until you use it as your working revision or discard it. It goes live only when you Set active in Models; a new session starts its own draft.
             </span>
             {promoteName === null ? (
               <>
@@ -1623,7 +1629,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
               border: "1px solid var(--color-info-border)", background: "var(--color-info-bg)" }}>
               <span style={{ flex: 1 }}>This session's draft is now your working revision, so the session is finished. Start a new session to keep building — it works on your working revision.</span>
-              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate(false)}>New session</Button>
+              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate()}>New session</Button>
             </div>
           )}
           {sessionId && <SessionExports sessionId={sessionId} />}

@@ -1678,7 +1678,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   function loadingCell(m: Metric, borderLeft?: string) {
     return (
       <td className="mvx-cell--loading" aria-busy="true" title="Loading"
-        style={{ ...td, textAlign: isTextMetric(m) ? "left" : "right", borderLeft }}>…</td>
+        style={{ ...td, whiteSpace: "nowrap", textAlign: isTextMetric(m) ? "left" : "right", borderLeft }}>…</td>
     );
   }
 
@@ -1712,7 +1712,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       return (
         <td
           className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
-          style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
+          style={{ ...td, whiteSpace: "nowrap", textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
           title={val === null ? WITHHELD_TITLE : isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : postedFrom ? `From the records of ${postedFrom}: change them there. Right-click for history` : m.readonly || fc.some(member => member.readonly) ? `Read-only for you (an access rule).${note ? `\n\n${note}` : ""} Right-click for history` : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
@@ -1758,7 +1758,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, text: iso });
       };
       return (
-        <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
           <DateInput value={stored} format={dateFormat} className="mvx-cell-input" ariaLabel={`${m.label ?? m.name} — date`}
             {...pasteAttrs("date", stored)} onCommit={writeDate} />
         </td>
@@ -1770,7 +1770,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // list, written at once (the key; "—" clears it).
       const current = val != null && val !== 0 ? String(val) : "";
       return (
-        <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
           <select
             className="mvx-cell-input mvx-cell-select"
             aria-label={`${m.label ?? m.name} — choose a member`}
@@ -1805,7 +1805,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       ? editing[key]
       : (val != null ? fmtMetric(m, val, gridScale) : "");
     return (
-      <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+      <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
         <input
           value={dispVal} placeholder="—"
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
@@ -1863,7 +1863,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       <td
         className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : "", recalcPending ? "mvx-cell--pending" : "", toneClass(cellTone(m, fc, v))].filter(Boolean).join(" ")}
         title={recalcPending ? "Recalculating — this value is about to change" : undefined}
-        style={{ ...td, textAlign: "right", borderLeft }}
+        style={{ ...td, whiteSpace: "nowrap", textAlign: "right", borderLeft }}
       >
         {fmtCell(m, fc, v, gridScale, dateFormat)}
       </td>
@@ -2049,7 +2049,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                             const total = colTotal(m.id, cc);
                             return (
                               <td key={`tot-${comboKey(cc)}`} className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
-                                style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
+                                style={{ ...td, whiteSpace: "nowrap", textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
                                 {fmtCell(m, cc, total, gridScale, dateFormat)}
                               </td>
                             );
@@ -2233,7 +2233,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                         return (
                           <td key={`tot-${comboKey(cc)}-${m.id}`}
                             className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
-                            style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
+                            style={{ ...td, whiteSpace: "nowrap", textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
                             {fmtCell(m, cc, total, gridScale, dateFormat)}
                           </td>
                         );

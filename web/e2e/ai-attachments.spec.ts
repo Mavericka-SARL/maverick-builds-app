@@ -51,7 +51,7 @@ test("several files at once, dropped files, and sent files leave the composer", 
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "AI Developer" }).click();
   await page.getByRole("button", { name: /Session/ }).first().click();
-  await expect(page.getByText("Working in your AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("This session's AI draft")).toBeVisible({ timeout: 10_000 });
 
   // The picker takes two files in one go.
   const csv = (name: string) => ({ name, mimeType: "text/csv", buffer: Buffer.from("code,label\nA,a\n") });
@@ -81,12 +81,11 @@ test("several files at once, dropped files, and sent files leave the composer", 
   await page.getByRole("button", { name: "Show the session's files (3)" }).click();
   await expect(page.getByText("members_sku.csv")).toBeVisible();
 
-  // With a draft open, a new session continues it unless a new draft is asked for.
-  await page.getByRole("button", { name: "Start a new draft" }).click();
-  await expect.poll(() => created.at(-1) ?? "").toContain("new_draft=1");
+  // A session is its draft: one New session, no separate new-draft button.
+  await expect(page.getByRole("button", { name: "Start a new draft" })).toHaveCount(0);
   await page.getByRole("button", { name: "New session", exact: true }).click();
-  await expect.poll(() => created.length).toBe(2);
-  expect(created[1]).not.toContain("new_draft");
+  await expect.poll(() => created.length).toBeGreaterThan(0);
+  expect(created.at(-1)).not.toContain("new_draft");
 });
 
 // A block copied from a spreadsheet arrives as tab-separated text. Sent as chat
@@ -99,7 +98,7 @@ test("a pasted table is attached, can come back as text, and prose stays prose",
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "AI Developer" }).click();
   await page.getByRole("button", { name: /Session/ }).first().click();
-  await expect(page.getByText("Working in your AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("This session's AI draft")).toBeVisible({ timeout: 10_000 });
 
   const box = page.getByLabel("Message");
   const paste = (text: string) => box.evaluate((el, t) => {

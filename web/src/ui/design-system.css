@@ -2336,6 +2336,7 @@ td[data-sel] .mvx-cell-input { background: transparent; }
 .mvx-wfstatus__step--current { color: var(--color-text-strong); font-weight: 600; }
 .mvx-wfstatus__step--current .mvx-wfstatus__mark { color: var(--color-brand-600); }
 .mvx-wfstatus__step--sent_back .mvx-wfstatus__mark { color: var(--color-warning, #d97706); }
+.mvx-wfstatus__step--rejected .mvx-wfstatus__mark { color: var(--color-danger, #dc2626); }
 .mvx-wfstatus__meta { font-weight: 400; font-size: 12px; color: var(--color-text-muted); }
 .mvx-wfstatus__late { color: var(--color-danger); font-weight: 600; }
 

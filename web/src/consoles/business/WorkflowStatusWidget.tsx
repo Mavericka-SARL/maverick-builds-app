@@ -28,7 +28,7 @@ function due(iso?: string): { text: string; late: boolean } | null {
   return { text: d === 0 ? "due today" : `due in ${days(d)}`, late: false };
 }
 
-const MARK: Record<WorkflowStatusStep["state"], string> = { done: "✓", current: "●", sent_back: "↺", skipped: "–", pending: "○" };
+const MARK: Record<WorkflowStatusStep["state"], string> = { done: "✓", current: "●", sent_back: "↺", rejected: "✕", skipped: "–", pending: "○" };
 
 // Where the latest run of one workflow stands (GET /api/workflow/status):
 // every step a person acts on, in order, the current one with its roles,
@@ -71,6 +71,7 @@ export function WorkflowStatusWidget({ name }: { name: string }) {
                 </span>
               )}
               {s.state === "sent_back" && <span className="mvx-wfstatus__meta">sent back</span>}
+              {s.state === "rejected" && <span className="mvx-wfstatus__meta">rejected</span>}
             </li>
           );
         })}

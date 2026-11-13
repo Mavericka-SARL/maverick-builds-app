@@ -35,12 +35,12 @@ type RequestMode struct {
 
 // ClassifierPrompt asks a model to classify one message.
 const ClassifierPrompt = `You classify a developer's message to an AI that builds planning models (dimensions, metrics,
-grids, pages, tables of records, workflows) from workbooks and descriptions. Reply with JSON only:
+grids, dashboards, tables of records, workflows) from workbooks and descriptions. Reply with JSON only:
 {"mode": "direct" | "delegated" | "question", "tasks": [...]}.
 - direct: it names the objects and operations to make or change — create dimension Region with members …, rename
-  metric X, set Y's formula to …, delete page Z, add a widget showing W. The developer has decided; the AI executes.
+  metric X, set Y's formula to …, delete dashboard Z, add a widget showing W. The developer has decided; the AI executes.
 - delegated: it states a goal and leaves the how to the AI — build a model from this workbook, make the P&L match
-  the sheet, add the pages people need, fix whatever differs, finish the actuals. The AI decides, plans, checks.
+  the sheet, add the dashboards people need, fix whatever differs, finish the actuals. The AI decides, plans, checks.
 - question: it asks for information or an explanation, and asks for no change.
 tasks: those of workbook_build (a model or part of one from a workbook or description), workbook_fix (numbers
 that must match a workbook), pages (dashboards, widgets, the guide), records (tables of records, postings,
@@ -141,7 +141,7 @@ func TurnBrief(m RequestMode, plan *TaskPlan) string {
 }
 
 const directBrief = `The developer gave a DIRECT ORDER: they decided what to make or change. Do exactly that — the
-objects, names, values and places as written — in one plan, and nothing beyond it: no extra metrics, renames, pages,
+objects, names, values and places as written — in one plan, and nothing beyond it: no extra metrics, renames, dashboards,
 layouts or "improvements" (name in your reply anything you would add, for them to order). Ask only when the order
 lacks a value it needs or reads two ways. A direct order needs no task plan.
 `
@@ -176,7 +176,7 @@ var playbooks = map[string]string{
    the business requirements the platform adds (scenarios as members selectable in views, requests with their
    approval, department owners editing their scope and Finance the shared assumptions and actuals, submission and
    review and approval with rejection back to the right scope, a frozen approved revision apart from the working
-   forecast, role pages reading the same calculations); and the verification checks beyond the saved workbook
+   forecast, role dashboards reading the same calculations); and the verification checks beyond the saved workbook
    (other scenarios, a switch turned off, a delay or a constraint, a rule from month 13, actual zero against missing,
    cash and balance reconciliation, a rejected approval, a restricted user). Record each substantive choice the
    workbook leaves open as a decision (a sheet nothing reads; whether imported closing balances start the next
@@ -185,7 +185,7 @@ var playbooks = map[string]string{
 3. plan_task from the target: one coherent module per stage in dependency order (e.g. Hiring Plan → Headcount →
    payroll first; then revenue, production, the statements), each stage loading its inputs and translating and
    proving its calculations; then actuals and reforecasting; then the business requirements (roles and access,
-   workflows, the approved revision, pages for each audience), once the calculations they read reconcile; the
+   workflows, the approved revision, dashboards for each audience), once the calculations they read reconcile; the
    verification checks last. The server keeps a module to a few sheets and orders the stages so.
 4. Routine work goes to the server's bulk tools; you handle the ambiguous mappings and unsupported logic:
    - inputs: load_sheet (or import_file_data on the workbook), never typed — not into a plan, not into a file;
@@ -223,14 +223,14 @@ Know-how from earlier builds:
 5. Name each difference precisely: the draft, metric, month, scenario, expected and actual value, and how to
    reproduce it.
 `,
-	"pages": `### Playbook: pages
-1. A page per sheet people read, or a place on a page with the sheets it belongs with; KPI pages show what the
+	"pages": `### Playbook: dashboards
+1. A dashboard per sheet people read, or a place on a dashboard with the sheets it belongs with; KPI dashboards show what the
    workbook's dashboard sheet shows (compare_with_sheet its rows to pick the metrics).
-2. Each page in the plan that creates it: its widgets, arrange_dashboard, reorder_dashboards, and
+2. Each dashboard in the plan that creates it: its widgets, arrange_dashboard, reorder_dashboards, and
    set_role_dashboards for the roles that use it.
 3. Grids show labelled metrics (the workbook's row text), the workbook's formats, a title with the unit; charts
    name their series (series_names) and mark actuals (actual_metric_id).
-   One grid, one widget: what a page shows from one grid with the same rows, columns and scale goes in one
+   One grid, one widget: what a dashboard shows from one grid with the same rows, columns and scale goes in one
    widget (its metrics, or the rows' members, together), not a widget per metric or per group of rows — two
    only for a different number scale or a group that needs its own total row.
 4. A change to a text (the guide) changes only the lines asked: keep the rest word for word.
@@ -247,10 +247,10 @@ Know-how from earlier builds:
 	"workflows": `### Playbook: workflows and triggers
 1. Steps name roles exactly as list_workflow_roles gives them; a workflow is a draft until published
    (publish_workflow_def as the plan's last step when it should run).
-2. A start button on a page (automation_button) for each process people start; the guide says who does what.
+2. A start button on a dashboard (automation_button) for each process people start; the guide says who does what.
 `,
 	"access": `### Playbook: roles and access
-1. Who opens which page: set_role_dashboards (keeps a role's pages and adds). Who may change a dimension's
+1. Who opens which dashboard: set_role_dashboards (keeps a role's dashboards and adds). Who may change a dimension's
    members: update_dimension "editor_roles".
 2. Which inputs each role may change (role access rules) is a business admin's to set: list them per role, as
    the workbook's Guide names the owners, for the business admin.

@@ -83,36 +83,35 @@ func defaultModels() map[string]string {
 // including intermediate read-tool round-trips within a single chat turn —
 // enforced both before a turn starts and before each loop iteration inside it.
 // AI_MAX_CALLS_PER_SESSION and AI_MAX_CALLS_PER_DAY set them per deployment.
-// The defaults leave room for a whole model: rebuilding a 13-sheet FP&A
-// workbook took gpt-5.2 78 calls and gpt-5-mini 74 (each preview and list is
-// one), past the earlier 50 per session.
+// A session is its draft and goes on as one thread (owner, 2026-11-13): no
+// per-session cap by default — the developer's own call budget, the daily
+// cap and the token budget bound it; AI_MAX_CALLS_PER_SESSION sets one per
+// deployment. Its history is settled as it grows (SettleHistory).
 const (
-	defaultLLMCallsPerSession    = 200
+	defaultLLMCallsPerSession    = 0
 	defaultLLMCallsPerUserPerDay = 1000
 )
 
-// sessionCapMessage says what to do when a session has used its calls: the
-// confirmed work is in the session's AI draft, which a new session
-// continues (OpenDraft), with the task plan and the rows it checked.
-func sessionCapMessage(limit int, draftRevisionID string) string {
-	if draftRevisionID != "" {
-		return fmt.Sprintf("this session has reached its limit of %d LLM calls. Your confirmed changes are in its AI draft: "+
-			"start a new session — it continues that draft, with the task plan and the rows checked so far", limit)
+// sessionCapMessage says what to do when a session has used its calls: its
+// call budget is the developer's to raise; a deployment's limit is the
+// administrator's. A session is its draft, so the work goes on here.
+func sessionCapMessage(limit int, budget bool) string {
+	if budget {
+		return fmt.Sprintf("this session has used its call budget of %d model calls: raise or clear the budget to go on — the work stays in this session's draft", limit)
 	}
-	return fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", limit)
+	return fmt.Sprintf("this session has reached this deployment's limit of %d model calls (AI_MAX_CALLS_PER_SESSION): an administrator can raise it", limit)
 }
 
-// sessionLengthNote asks the model to suggest a new session once it has used
-// most of its calls, at the end of a stage rather than in the middle of one
-// (the guide: one task per session; the Creator & Agency build hit the cap
-// mid-stage, 2026-11-08). "" before that.
+// sessionLengthNote tells the model, once most of the session's call budget
+// is used, to finish the part it is on and say how far the work got, at
+// the end of a stage rather than in the middle of one. "" before that, and
+// with no budget.
 func sessionLengthNote(used, limit int) string {
 	if limit <= 0 || used*10 < limit*7 {
 		return ""
 	}
-	return fmt.Sprintf("\n\n## Session length\nThis session has used %d of its %d model calls. Finish the part you are on; then, rather "+
-		"than starting the next stage here, tell the developer to start a new session for it: it continues this draft, and the task "+
-		"plan and the rows checked carry over.", used, limit)
+	return fmt.Sprintf("\n\n## Call budget\nThis session has used %d of its %d-call budget. Finish the part you are on, then tell the "+
+		"developer how far the work got and what remains; they can raise the budget to go on.", used, limit)
 }
 
 // llmCallCaps returns the per-session and per-user-per-day caps.
@@ -251,22 +250,11 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	// A new session continues the developer's open AI draft, reading and
-	// writing it from its first message; ?new_draft=1 leaves the session
-	// to start the next draft on its first confirmed proposal (owner
-	// decision, 2026-10-24: a new draft only when the developer asks).
-	if r.URL.Query().Get("new_draft") == "" {
-		draft, dErr := store.OpenDraft(ctx, modelID, a.UserID, r.URL.Query().Get("revision_id"))
-		if dErr == nil && draft != "" {
-			dErr = store.SetDraftRevisionID(ctx, sess.ID, draft)
-		}
-		if dErr != nil {
-			jsonErr(w, fmt.Errorf("continue the open draft: %w", dErr), http.StatusInternalServerError)
-			return
-		}
-		sess.DraftRevisionID = draft
-	}
-	// An unfinished task plan goes on in the session that follows it.
+	// A session is its draft (owner, 2026-11-13): a new session starts a
+	// fresh draft from the developer's working revision on its first
+	// confirmed proposal, and goes on as one thread with no session cap.
+	// Continuing earlier work is continuing its session.
+	// A plan whose session's draft became the working revision goes on here.
 	if _, err := store.CarryTaskPlan(ctx, sess.ID, modelID, a.UserID, sess.DraftRevisionID); err != nil {
 		log.Printf("AI session %s: carry the task plan: %v", sess.ID, err)
 	}
@@ -425,12 +413,14 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxLLMCallsPerSession, maxLLMCallsPerUserPerDay := llmCallCaps()
-	// The developer's own budget for this session, when they set one.
-	if sess.CallBudget != nil && *sess.CallBudget > 0 && *sess.CallBudget < maxLLMCallsPerSession {
-		maxLLMCallsPerSession = *sess.CallBudget
+	// The developer's own budget for this session, when they set one (0 =
+	// no per-session cap).
+	byBudget := false
+	if sess.CallBudget != nil && *sess.CallBudget > 0 && (maxLLMCallsPerSession <= 0 || *sess.CallBudget < maxLLMCallsPerSession) {
+		maxLLMCallsPerSession, byBudget = *sess.CallBudget, true
 	}
-	if sessionCalls >= maxLLMCallsPerSession {
-		jsonErr(w, fmt.Errorf("%s", sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)), http.StatusTooManyRequests)
+	if maxLLMCallsPerSession > 0 && sessionCalls >= maxLLMCallsPerSession {
+		jsonErr(w, fmt.Errorf("%s", sessionCapMessage(maxLLMCallsPerSession, byBudget)), http.StatusTooManyRequests)
 		return
 	}
 	if dailyCalls >= maxLLMCallsPerUserPerDay {
@@ -736,8 +726,8 @@ turn:
 		if stopTurn() {
 			return
 		}
-		if sessionCalls >= maxLLMCallsPerSession {
-			sendSSE("error", map[string]string{"error": sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)})
+		if maxLLMCallsPerSession > 0 && sessionCalls >= maxLLMCallsPerSession {
+			sendSSE("error", map[string]string{"error": sessionCapMessage(maxLLMCallsPerSession, byBudget)})
 			return
 		}
 		if dailyCalls >= maxLLMCallsPerUserPerDay {
@@ -1448,8 +1438,7 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		return newRevID, nil
 	}
 	revID := sess.DraftRevisionID
-	// A plan starting with start_new_draft makes its own draft below.
-	if revID == "" && (len(proposal.Steps) == 0 || proposal.Steps[0].Tool != aiassistant.StartNewDraftTool) {
+	if revID == "" {
 		if revID, err = newDraft(""); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -1511,26 +1500,6 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resolved := resolveParamRefs(step.Params, created[:i])
-		if step.Tool == aiassistant.StartNewDraftTool {
-			// The developer asked for a new draft: this step and every
-			// later proposal work in it; the previous one stays in Models.
-			var p struct {
-				Name string `json:"name"`
-			}
-			_ = json.Unmarshal(resolved, &p)
-			newRevID, dErr := newDraft(p.Name)
-			if dErr != nil {
-				steps[i].Status, steps[i].Result, anyFailed = "failed", dErr.Error(), true
-				continue
-			}
-			revID = newRevID
-			executor = aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
-			var name string
-			_ = h.db.QueryRow(ctx, `SELECT name FROM model.revision WHERE id = $1::uuid`, revID).Scan(&name)
-			steps[i].Status, steps[i].Result, steps[i].CreatedID = "success", fmt.Sprintf("Started the new draft '%s': the rest of this plan and every later proposal work in it", name), revID
-			created[i] = revID
-			continue
-		}
 		stepCard = card.Secrets[strconv.Itoa(i+1)]
 		result, createdID, execErr := executor.Execute(ctx, step.Tool, resolved)
 		stepCard = nil

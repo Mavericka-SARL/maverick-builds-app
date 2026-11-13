@@ -3,7 +3,6 @@ package aiassistant
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -43,6 +42,11 @@ type Session struct {
 	// CallBudget caps the session's provider calls (migration 180); nil is
 	// the deployment's per-session cap.
 	CallBudget *int `json:"call_budget,omitempty"`
+	// LLMCalls, PlanDone and PlanStages show the session's work in the list:
+	// its model calls and its task plan's stages done (or skipped) of all.
+	LLMCalls   int `json:"llm_calls"`
+	PlanDone   int `json:"plan_done,omitempty"`
+	PlanStages int `json:"plan_stages,omitempty"`
 }
 
 // SetCallBudget sets (n > 0) or clears (nil) a session's call budget.
@@ -81,7 +85,11 @@ func (s *ChatStore) CreateSession(ctx context.Context, appID, modelID, userID, p
 // ListSessions lists the user's sessions in one model, newest first.
 func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([]Session, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at,
+		       llm_calls,
+		       CASE WHEN jsonb_typeof(task_plan->'stages') = 'array' THEN jsonb_array_length(task_plan->'stages') ELSE 0 END,
+		       CASE WHEN jsonb_typeof(task_plan->'stages') = 'array'
+		            THEN (SELECT count(*) FROM jsonb_array_elements(task_plan->'stages') e WHERE e->>'status' IN ('done', 'skipped')) ELSE 0 END
 		FROM ai_assistant.session
 		WHERE model_id=$1::uuid AND user_id=$2::uuid
 		ORDER BY created_at DESC LIMIT 20
@@ -94,7 +102,8 @@ func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([
 	for rows.Next() {
 		var sess Session
 		var draftRevID *string
-		if rows.Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt) == nil {
+		if rows.Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt,
+			&sess.LLMCalls, &sess.PlanStages, &sess.PlanDone) == nil {
 			if draftRevID != nil {
 				sess.DraftRevisionID = *draftRevID
 			}
@@ -139,35 +148,6 @@ func (s *ChatStore) MarkPromoted(ctx context.Context, sessionID string) (time.Ti
 	var at time.Time
 	err := s.pool.QueryRow(ctx, `UPDATE ai_assistant.session SET promoted_at=now() WHERE id=$1::uuid RETURNING promoted_at`, sessionID).Scan(&at)
 	return at, err
-}
-
-// OpenDraft is userID's AI draft in modelID that a session still works in
-// — not taken as the working revision (promoting clears the column), not
-// discarded (deleting the revision clears it), not made the active revision
-// since — the newest such draft; "" when there is none. A new session
-// continues it: one draft until the developer is done with it, where each
-// session used to copy the working revision again (a tester's three
-// sessions left three drafts, the third without the second's clearing,
-// 2026-10-24).
-//
-// A draft older than the model's active revision is not open: the revision
-// activated since supersedes it. A session of the Creator & Agency build
-// opened on the active revision — the last AI draft, activated — and worked
-// in the draft before it, whose numbers were a stage behind (2026-11-09).
-// preferred, a draft the console shows, wins when it is one of the open ones.
-func (s *ChatStore) OpenDraft(ctx context.Context, modelID, userID, preferred string) (string, error) {
-	var id string
-	err := s.pool.QueryRow(ctx, `
-		SELECT r.id::text FROM ai_assistant.session s JOIN model.revision r ON r.id = s.draft_revision_id
-		WHERE s.model_id = $1::uuid AND s.user_id = $2::uuid AND s.promoted_at IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM core.model m WHERE m.active_revision_id = r.id)
-		  AND NOT EXISTS (SELECT 1 FROM core.model m JOIN model.revision a ON a.id = m.active_revision_id
-		                  WHERE m.id = $1::uuid AND a.created_at > r.created_at)
-		ORDER BY (r.id::text = $3) DESC, r.created_at DESC, r.id LIMIT 1`, modelID, userID, preferred).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
-	return id, err
 }
 
 // EarlierSessions are the sessions whose work sessionID goes on with, oldest

@@ -2123,10 +2123,13 @@ components:
         llm_provider:      { type: string }
         llm_model:         { type: string }
         title:             { type: string, description: "Human name; auto-generated from the first request, renameable. Empty = unnamed." }
-        draft_revision_id: { type: string, format: uuid, description: "The developer's AI draft the session works in: set at creation when they have one open in the model, else by the first confirmed proposal; a start_new_draft step moves it to a new one" }
+        draft_revision_id: { type: string, format: uuid, description: "The session's AI draft — a session is its draft: made from the working revision by its first confirmed proposal; every later proposal of the session writes there" }
         created_at:        { type: string, format: date-time }
         promoted_at:       { type: string, format: date-time, description: "Set once its draft was promoted: the session is finished and refuses messages (409 SESSION_PROMOTED)" }
         call_budget:       { type: integer, description: "The developer's cap on the session's provider calls; absent = the deployment's per-session cap" }
+        llm_calls:         { type: integer, description: "The session's model calls so far" }
+        plan_done:         { type: integer, description: "Stages of the session's task plan done or skipped (in the list)" }
+        plan_stages:       { type: integer, description: "Stages of the session's task plan (in the list)" }
 
     AiConversion:
       type: object
@@ -4449,7 +4452,7 @@ paths:
                         name:         { type: string }
                         type:         { type: string }
                         roles:        { type: array, items: { type: string } }
-                        state:        { type: string, enum: [done, current, sent_back, skipped, pending] }
+                        state:        { type: string, enum: [done, current, sent_back, rejected, skipped, pending] }
                         since:        { type: string, format: date-time }
                         due_at:       { type: string, format: date-time }
                         completed_at: { type: string, format: date-time }
@@ -9058,10 +9061,6 @@ paths:
           in: query
           schema: { type: string, format: uuid }
           description: Names the model the session belongs to (the revision's model). Without it, the application's selected or default model.
-        - name: new_draft
-          in: query
-          schema: { type: string, enum: ["1"] }
-          description: Start the next draft instead of continuing the open one — the session's first confirmed proposal copies the working revision into a new draft.
       responses:
         "200":
           description: Session created
@@ -9463,7 +9462,7 @@ paths:
     post:
       operationId: confirmAiProposal
       tags: [AI Assistant]
-      summary: Execute a pending proposal's write steps (creates the session's draft on first use when it has none; a start_new_draft step moves the session to a new draft for the steps after it)
+      summary: Execute a pending proposal's write steps (creates the session's draft on first use when it has none)
       parameters:
         - name: id
           in: path

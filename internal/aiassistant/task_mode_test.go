@@ -57,7 +57,7 @@ func TestTurnBriefCarriesModePlaybooksAndPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	delegated := TurnBrief(RequestMode{Mode: ModeDelegated, Tasks: []string{"pages"}}, plan)
-	for _, want := range []string{"DELEGATED A GOAL", "### Playbook: pages", "1. [done] Demand & revenue", "2. [to do, CURRENT] Variance — items: page Variance", "Work on the CURRENT stage"} {
+	for _, want := range []string{"DELEGATED A GOAL", "### Playbook: dashboards", "1. [done] Demand & revenue", "2. [to do, CURRENT] Variance — items: page Variance", "Work on the CURRENT stage"} {
 		if !strings.Contains(delegated, want) {
 			t.Errorf("delegated brief lacks %q:\n%s", want, delegated)
 		}

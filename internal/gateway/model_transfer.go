@@ -13,13 +13,18 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -62,6 +67,10 @@ func (h *handler) adminModelExport(w http.ResponseWriter, r *http.Request) {
 	pkg, err := modeltransfer.CollectExportWithOptions(ctx, h.db.For(ctx), modelID, revisionID, revisionName,
 		modeltransfer.ExportOptions{IncludeData: includeData})
 	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if pkg.ApprovedLocks, err = h.approvedLocks(ctx, modelID); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -191,6 +200,14 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("import failed: %w", err), http.StatusBadRequest)
 		return
 	}
+	// The approvals that locked values in the exported workspace lock them
+	// here too: each is made again as an approved run of its workflow.
+	carried, err := carryApprovedLocks(ctx, tx, req.ApplicationID, act.UserID, req.Package.ApprovedLocks)
+	if err != nil {
+		jsonErr(w, fmt.Errorf("import failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+	notes = append(notes, req.Package.LockNotes(carried)...)
 	if err := tx.Commit(ctx); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -314,4 +331,168 @@ func (h *handler) recalcCalculated(ctx context.Context, modelID, revisionID stri
 	if err := sched.RecalcSpecific(ctx, modelID, revisionID, ids); err != nil {
 		h.log.Warn().Err(err).Str("revision", revisionID).Msg("recalc revision failed")
 	}
+}
+
+// approvedLocks lists the finished runs of modelID's application whose last
+// approval approved and whose context names a member to lock (a budget
+// year): the locks an import of the model does not carry. A run without a
+// member in its context locks nothing (writeguard).
+func (h *handler) approvedLocks(ctx context.Context, modelID string) ([]modeltransfer.ApprovedLock, error) {
+	db := h.db.For(ctx)
+	rows, err := db.Query(ctx, `
+		SELECT wd.name, COALESCE(wi.context, '{}'::jsonb), COALESCE(wd.context_schema, '[]'::jsonb),
+		       COALESCE(wi.completed_at, wi.started_at),
+		       COALESCE((SELECT s.step_def_id FROM workflow.workflow_step s
+		                 WHERE s.instance_id = wi.id AND s.decision = 'approve' AND s.completed_at IS NOT NULL
+		                 ORDER BY s.completed_at DESC LIMIT 1), '')
+		FROM workflow.workflow_instance wi
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+	`+writeguard.LastApprovalJoinSQL+`
+		WHERE wd.application_id = (SELECT application_id FROM core.model WHERE id = $1::uuid)
+		  AND NOT COALESCE(wi.test_run, false) AND `+writeguard.ReopenableSQL+`
+		ORDER BY wi.completed_at, wi.started_at`, modelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []modeltransfer.ApprovedLock
+	seen := map[string]bool{}
+	var metricIDs []string
+	for rows.Next() {
+		var name, step string
+		var ctxJSON, schemaJSON []byte
+		var at time.Time
+		if err := rows.Scan(&name, &ctxJSON, &schemaJSON, &at, &step); err != nil {
+			return nil, err
+		}
+		var values map[string]any
+		_ = json.Unmarshal(ctxJSON, &values)
+		var vars []struct {
+			Key      string `json:"key"`
+			Label    string `json:"label"`
+			DataType string `json:"data_type"`
+		}
+		_ = json.Unmarshal(schemaJSON, &vars)
+		lock := modeltransfer.ApprovedLock{Workflow: name, ApprovedAt: at.UTC(), Context: map[string]string{}, ApprovalStep: step}
+		members := 0
+		for _, v := range vars {
+			val := strings.TrimSpace(fmt.Sprint(values[v.Key]))
+			if values[v.Key] == nil || val == "" || (v.DataType != "Dimension member" && v.DataType != "Metric") {
+				continue
+			}
+			if v.DataType == "Dimension member" {
+				members++
+			} else if _, err := uuid.Parse(val); err == nil {
+				metricIDs = append(metricIDs, val)
+			}
+			label := v.Label
+			if label == "" {
+				label = v.Key
+			}
+			lock.Scope = append(lock.Scope, label+" = "+val)
+			lock.Context[v.Key] = val
+		}
+		if members == 0 {
+			continue
+		}
+		key := name + "\x1f" + strings.Join(lock.Scope, "\x1f")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, lock)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// A Metric field may hold a metric's id: carry its name, which the
+	// imported model shares (a lock matches metrics by name).
+	if len(metricIDs) > 0 {
+		names := map[string]string{}
+		nr, err := db.Query(ctx, `SELECT id::text, name FROM model.metric_def WHERE id = ANY($1::uuid[])`, metricIDs)
+		if err != nil {
+			return nil, err
+		}
+		for nr.Next() {
+			var id, n string
+			if nr.Scan(&id, &n) == nil {
+				names[id] = n
+			}
+		}
+		nr.Close()
+		for i := range out {
+			for k, v := range out[i].Context {
+				if n, ok := names[v]; ok {
+					out[i].Context[k] = n
+					for j, sc := range out[i].Scope {
+						out[i].Scope[j] = strings.Replace(sc, " = "+v, " = "+n, 1)
+					}
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// carryApprovedLocks makes, in tx, each approval of a package's
+// ApprovedLocks again as a finished run of the imported workflow of that
+// name in appID, approved at its approval step: a lock is an approved run
+// (writeguard), so the values it locked stay locked in the copy. carried[i]
+// says whether ApprovedLocks[i] was made; a workflow the package did not
+// bring, or one without that approval step, is left out and named.
+func carryApprovedLocks(ctx context.Context, tx pgx.Tx, appID, userID string, locks []modeltransfer.ApprovedLock) ([]bool, error) {
+	carried := make([]bool, len(locks))
+	for i, l := range locks {
+		if len(l.Context) == 0 {
+			continue
+		}
+		var defID string
+		var steps []byte
+		err := tx.QueryRow(ctx, `
+			SELECT id::text, COALESCE(steps, '[]'::jsonb) FROM workflow.workflow_def
+			WHERE application_id = $1::uuid AND lower(name) = lower($2) AND status = 'published'
+			ORDER BY (revision_id IS NOT NULL) DESC, created_at DESC LIMIT 1`, appID, l.Workflow).Scan(&defID, &steps)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		step := l.ApprovalStep
+		var defs []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(steps, &defs)
+		ok := false
+		for _, d := range defs {
+			isApproval := strings.EqualFold(d.Type, "approval") || strings.EqualFold(d.Type, "step_type_approval") || d.Type == "2"
+			if isApproval && (step == "" || d.ID == step) {
+				step, ok = d.ID, true
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		ctxJSON, _ := json.Marshal(l.Context)
+		at := l.ApprovedAt
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
+		var instID string
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO workflow.workflow_instance (workflow_def_id, status, started_by, context, started_at, completed_at, steps_snapshot)
+			VALUES ($1::uuid, 'completed', NULLIF($2, '')::uuid, $3::jsonb, $4, $4, $5::jsonb) RETURNING id::text`,
+			defID, userID, ctxJSON, at, steps).Scan(&instID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, comment, created_at, completed_at)
+			VALUES ($1::uuid, $2, 'completed', 'approve', $3, $4, $4)`,
+			instID, step, "Approved in the workspace the model was exported from; carried by the model import.", at); err != nil {
+			return nil, err
+		}
+		carried[i] = true
+	}
+	return carried, nil
 }

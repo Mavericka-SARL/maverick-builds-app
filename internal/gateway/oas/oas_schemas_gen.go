@@ -2726,8 +2726,8 @@ type AiSession struct {
 	LlmModel    string    `json:"llm_model"`
 	// Human name; auto-generated from the first request, renameable. Empty = unnamed.
 	Title OptString `json:"title"`
-	// The developer's AI draft the session works in: set at creation when they have one open in the
-	// model, else by the first confirmed proposal; a start_new_draft step moves it to a new one.
+	// The session's AI draft — a session is its draft: made from the working revision by its first
+	// confirmed proposal; every later proposal of the session writes there.
 	DraftRevisionID OptUUID   `json:"draft_revision_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	// Set once its draft was promoted: the session is finished and refuses messages (409
@@ -2735,6 +2735,12 @@ type AiSession struct {
 	PromotedAt OptDateTime `json:"promoted_at"`
 	// The developer's cap on the session's provider calls; absent = the deployment's per-session cap.
 	CallBudget OptInt `json:"call_budget"`
+	// The session's model calls so far.
+	LlmCalls OptInt `json:"llm_calls"`
+	// Stages of the session's task plan done or skipped (in the list).
+	PlanDone OptInt `json:"plan_done"`
+	// Stages of the session's task plan (in the list).
+	PlanStages OptInt `json:"plan_stages"`
 }
 
 // GetID returns the value of ID.
@@ -2792,6 +2798,21 @@ func (s *AiSession) GetCallBudget() OptInt {
 	return s.CallBudget
 }
 
+// GetLlmCalls returns the value of LlmCalls.
+func (s *AiSession) GetLlmCalls() OptInt {
+	return s.LlmCalls
+}
+
+// GetPlanDone returns the value of PlanDone.
+func (s *AiSession) GetPlanDone() OptInt {
+	return s.PlanDone
+}
+
+// GetPlanStages returns the value of PlanStages.
+func (s *AiSession) GetPlanStages() OptInt {
+	return s.PlanStages
+}
+
 // SetID sets the value of ID.
 func (s *AiSession) SetID(val uuid.UUID) {
 	s.ID = val
@@ -2845,6 +2866,21 @@ func (s *AiSession) SetPromotedAt(val OptDateTime) {
 // SetCallBudget sets the value of CallBudget.
 func (s *AiSession) SetCallBudget(val OptInt) {
 	s.CallBudget = val
+}
+
+// SetLlmCalls sets the value of LlmCalls.
+func (s *AiSession) SetLlmCalls(val OptInt) {
+	s.LlmCalls = val
+}
+
+// SetPlanDone sets the value of PlanDone.
+func (s *AiSession) SetPlanDone(val OptInt) {
+	s.PlanDone = val
+}
+
+// SetPlanStages sets the value of PlanStages.
+func (s *AiSession) SetPlanStages(val OptInt) {
+	s.PlanStages = val
 }
 
 // Ref: #/components/schemas/AiTestSettingsRequest
@@ -6454,40 +6490,6 @@ func (s *CreateAdminUserTrailingSlashReq) SetDisplayName(val string) {
 // SetRole sets the value of Role.
 func (s *CreateAdminUserTrailingSlashReq) SetRole(val OptString) {
 	s.Role = val
-}
-
-type CreateAiSessionNewDraft string
-
-const (
-	CreateAiSessionNewDraft1 CreateAiSessionNewDraft = "1"
-)
-
-// AllValues returns all CreateAiSessionNewDraft values.
-func (CreateAiSessionNewDraft) AllValues() []CreateAiSessionNewDraft {
-	return []CreateAiSessionNewDraft{
-		CreateAiSessionNewDraft1,
-	}
-}
-
-// MarshalText implements encoding.TextMarshaler.
-func (s CreateAiSessionNewDraft) MarshalText() ([]byte, error) {
-	switch s {
-	case CreateAiSessionNewDraft1:
-		return []byte(s), nil
-	default:
-		return nil, errors.Errorf("invalid value: %q", s)
-	}
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (s *CreateAiSessionNewDraft) UnmarshalText(data []byte) error {
-	switch CreateAiSessionNewDraft(data) {
-	case CreateAiSessionNewDraft1:
-		*s = CreateAiSessionNewDraft1
-		return nil
-	default:
-		return errors.Errorf("invalid value: %q", data)
-	}
 }
 
 // Ref: #/components/schemas/CreateApplicationRequest
@@ -15112,6 +15114,7 @@ const (
 	GetWorkflowStatusOKStepsItemStateDone     GetWorkflowStatusOKStepsItemState = "done"
 	GetWorkflowStatusOKStepsItemStateCurrent  GetWorkflowStatusOKStepsItemState = "current"
 	GetWorkflowStatusOKStepsItemStateSentBack GetWorkflowStatusOKStepsItemState = "sent_back"
+	GetWorkflowStatusOKStepsItemStateRejected GetWorkflowStatusOKStepsItemState = "rejected"
 	GetWorkflowStatusOKStepsItemStateSkipped  GetWorkflowStatusOKStepsItemState = "skipped"
 	GetWorkflowStatusOKStepsItemStatePending  GetWorkflowStatusOKStepsItemState = "pending"
 )
@@ -15122,6 +15125,7 @@ func (GetWorkflowStatusOKStepsItemState) AllValues() []GetWorkflowStatusOKStepsI
 		GetWorkflowStatusOKStepsItemStateDone,
 		GetWorkflowStatusOKStepsItemStateCurrent,
 		GetWorkflowStatusOKStepsItemStateSentBack,
+		GetWorkflowStatusOKStepsItemStateRejected,
 		GetWorkflowStatusOKStepsItemStateSkipped,
 		GetWorkflowStatusOKStepsItemStatePending,
 	}
@@ -15135,6 +15139,8 @@ func (s GetWorkflowStatusOKStepsItemState) MarshalText() ([]byte, error) {
 	case GetWorkflowStatusOKStepsItemStateCurrent:
 		return []byte(s), nil
 	case GetWorkflowStatusOKStepsItemStateSentBack:
+		return []byte(s), nil
+	case GetWorkflowStatusOKStepsItemStateRejected:
 		return []byte(s), nil
 	case GetWorkflowStatusOKStepsItemStateSkipped:
 		return []byte(s), nil
@@ -15156,6 +15162,9 @@ func (s *GetWorkflowStatusOKStepsItemState) UnmarshalText(data []byte) error {
 		return nil
 	case GetWorkflowStatusOKStepsItemStateSentBack:
 		*s = GetWorkflowStatusOKStepsItemStateSentBack
+		return nil
+	case GetWorkflowStatusOKStepsItemStateRejected:
+		*s = GetWorkflowStatusOKStepsItemStateRejected
 		return nil
 	case GetWorkflowStatusOKStepsItemStateSkipped:
 		*s = GetWorkflowStatusOKStepsItemStateSkipped
@@ -23477,52 +23486,6 @@ func (o OptConnectorSettingsScope) Get() (v ConnectorSettingsScope, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptConnectorSettingsScope) Or(d ConnectorSettingsScope) ConnectorSettingsScope {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
-// NewOptCreateAiSessionNewDraft returns new OptCreateAiSessionNewDraft with value set to v.
-func NewOptCreateAiSessionNewDraft(v CreateAiSessionNewDraft) OptCreateAiSessionNewDraft {
-	return OptCreateAiSessionNewDraft{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptCreateAiSessionNewDraft is optional CreateAiSessionNewDraft.
-type OptCreateAiSessionNewDraft struct {
-	Value CreateAiSessionNewDraft
-	Set   bool
-}
-
-// IsSet returns true if OptCreateAiSessionNewDraft was set.
-func (o OptCreateAiSessionNewDraft) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptCreateAiSessionNewDraft) Reset() {
-	var v CreateAiSessionNewDraft
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptCreateAiSessionNewDraft) SetTo(v CreateAiSessionNewDraft) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptCreateAiSessionNewDraft) Get() (v CreateAiSessionNewDraft, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptCreateAiSessionNewDraft) Or(d CreateAiSessionNewDraft) CreateAiSessionNewDraft {
 	if v, ok := o.Get(); ok {
 		return v
 	}

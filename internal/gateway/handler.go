@@ -2293,7 +2293,8 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		h.jsonLimitErr(w, err)
 		return
 	}
-	if err := h.storeCells(ctx, req.ModelID, req.RevisionID, a.UserID, []preparedCell{cell}); err != nil {
+	changedMetrics, err := h.storeCellsChanged(ctx, req.ModelID, req.RevisionID, a.UserID, []preparedCell{cell})
+	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -2325,6 +2326,9 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	// The changed metric's owning grid (grid_metric is unique per metric) is
 	// passed as the event source so rules scoped via source_grid_id can match.
 	dispatch := func() {
+		if !changedMetrics[req.MetricID] {
+			return // the value written is the one the cell held: nothing changed
+		}
 		bgCtx := context.WithoutCancel(ctx)
 		appID, _ := h.appIDFromModelID(bgCtx, req.ModelID)
 		if appID != "" {
@@ -11741,6 +11745,10 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			if body.Data == nil {
 				body.Data = map[string]any{}
 			}
+			if msg := crudapp.StatusInDataProblem(scope.form, body.Data, body.Status); msg != "" {
+				jsonErr(w, errors.New(msg), http.StatusBadRequest)
+				return
+			}
 			crudapp.ApplyDefaults(scope.form, body.Data, time.Now().UTC().Format("2006-01-02"))
 			if code, msg, problems, err := h.checkRecordSave(ctx, scope, nil, &recordState{Status: body.Status, Data: body.Data}, true); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
@@ -11832,18 +11840,31 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			OwnRecordsOnly *bool `json:"own_records_only"`
 			tableSettings
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
 			return
+		}
+		before, err := store.GetForm(ctx, formID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		// What the body leaves out the table keeps: a label change alone used
+		// to answer "invalid body" for want of the name and fields (2026-11-13).
+		if body.Name == "" {
+			body.Name = before.Name
+		}
+		if body.Label == "" {
+			body.Label = before.Label
+		}
+		if body.Fields == nil {
+			body.Fields = before.Fields
 		}
 		if err := crudapp.ValidateFields(body.Fields); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		if before, err := store.GetForm(ctx, formID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		} else if err := crudapp.CheckFieldChange(before, body.Fields); err != nil {
+		if err := crudapp.CheckFieldChange(before, body.Fields); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -11979,6 +12000,10 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			} else {
 				jsonErr(w, fmt.Errorf("forbidden: you may not change this record"), http.StatusForbidden)
 			}
+			return
+		}
+		if msg := crudapp.StatusInDataProblem(scope.form, body.Data, newStatus); msg != "" {
+			jsonErr(w, errors.New(msg), http.StatusBadRequest)
 			return
 		}
 		data := rec.Data

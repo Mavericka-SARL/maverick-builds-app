@@ -358,15 +358,48 @@ func (h *handler) checkCellLimits(ctx context.Context, modelID string, cells []p
 // new fact_input row entered by userID, a clear deletes the cell's directly
 // entered rows (clearCellTx).
 func (h *handler) storeCells(ctx context.Context, modelID, revisionID, userID string, cells []preparedCell) error {
+	_, err := h.storeCellsChanged(ctx, modelID, revisionID, userID, cells)
+	return err
+}
+
+// storeCellsChanged stores cells as storeCells does and says which metrics
+// a value of really changed: a write of the value a cell already holds is
+// still stored (the cell's history keeps who confirmed it), but it changes
+// nothing, so grid_change rules must not fire for it. A rewrite of
+// unchanged drivers started a cash-floor warning workflow each time
+// (2026-11-13).
+func (h *handler) storeCellsChanged(ctx context.Context, modelID, revisionID, userID string, cells []preparedCell) (map[string]bool, error) {
+	changed := map[string]bool{}
 	tx, err := h.db.For(ctx).Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	for _, c := range cells {
+		var held bool
+		var oldValue float64
+		var oldText *string
+		switch err := tx.QueryRow(ctx, `
+			SELECT value, text_value FROM runtime.fact_input
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+			  AND dim_members = $4::jsonb AND source_ref IS NULL
+			ORDER BY entered_at DESC, id DESC LIMIT 1`, modelID, revisionID, c.metricID, c.dimMembers).Scan(&oldValue, &oldText); {
+		case err == nil:
+			held = true
+		case !errors.Is(err, pgx.ErrNoRows):
+			return nil, err
+		}
 		if c.write.clear {
+			if held {
+				changed[c.metricID] = true
+			}
 			err = clearCellTx(ctx, tx, modelID, revisionID, c.metricID, c.dimMembers)
 		} else {
+			same := held && oldValue == c.write.value &&
+				((oldText == nil && c.write.text == nil) || (oldText != nil && c.write.text != nil && *oldText == *c.write.text))
+			if !same {
+				changed[c.metricID] = true
+			}
 			_, err = tx.Exec(ctx, `
 				INSERT INTO runtime.fact_input
 				    (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
@@ -374,10 +407,10 @@ func (h *handler) storeCells(ctx context.Context, modelID, revisionID, userID st
 			`, modelID, revisionID, c.metricID, c.dimMembers, c.write.value, userID, c.write.text)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return tx.Commit(ctx)
+	return changed, tx.Commit(ctx)
 }
 
 // ── POST /api/cells/batch ───────────────────────────────────────────────────
@@ -533,7 +566,8 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.storeCells(ctx, req.ModelID, revisionID, a.UserID, cells); err != nil {
+	changedMetrics, err := h.storeCellsChanged(ctx, req.ModelID, revisionID, a.UserID, cells)
+	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -568,6 +602,9 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, metricID := range metricIDs {
+			if !changedMetrics[metricID] {
+				continue // every value written was the one the cell held
+			}
 			var sourceGridID string
 			_ = h.db.QueryRow(ctx, `SELECT grid_id::text FROM model.grid_metric WHERE metric_id=$1::uuid LIMIT 1`, metricID).Scan(&sourceGridID)
 			h.workflowStore(ctx).DispatchEventRules(ctx, appID, revisionID, "grid_change", sourceGridID, a.UserID, map[string]string{

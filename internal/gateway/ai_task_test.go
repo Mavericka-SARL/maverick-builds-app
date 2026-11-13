@@ -50,7 +50,7 @@ func TestADelegatedGoalIsPlannedAndThePlanCarriesOn(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(sse, "read as a delegated goal") || !strings.Contains(sse, `"task_plan"`) {
 		t.Fatalf("turn: %d\n%.600s", status, sse)
 	}
-	if len(fake.prompts) == 0 || !strings.Contains(fake.prompts[0], "DELEGATED A GOAL") || !strings.Contains(fake.prompts[0], "### Playbook: pages") {
+	if len(fake.prompts) == 0 || !strings.Contains(fake.prompts[0], "DELEGATED A GOAL") || !strings.Contains(fake.prompts[0], "### Playbook: dashboards") {
 		t.Errorf("the turn's instructions lack the delegated brief or the pages playbook")
 	}
 	plan, err := env.chat.TaskPlan(context.Background(), env.session)

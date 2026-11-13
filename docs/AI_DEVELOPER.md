@@ -10,20 +10,16 @@ that it leaves to people. It reads through **read tools** it calls freely, and
 writes only by **proposing** an ordered plan that the developer confirms.
 Nothing is written until then.
 
-**Where its writes land.** Model changes land in the developer's AI draft
-revision, created by a first confirmed proposal as a copy of the developer's
-working revision (else the active one), and promoted or discarded by the
-developer. Until then every new session of that developer in that model
-continues the same draft, reading and writing it from its first message
-(`ChatStore.OpenDraft`: the newest draft a session of theirs works in, not
-promoted, discarded or made active; owner decision, 2026-10-24 — each session
-used to copy the working revision again, so a tester's three sessions left
-three drafts, the third without the second's clearing). A new draft is made
-only when the developer asks: **Start a new draft** in the session list
-(`POST /api/ai/sessions?new_draft=1`, a session whose first confirmed proposal
-makes one), or in chat, where the assistant makes `start_new_draft` the
-first step of its plan and the steps after it go into the new draft; the
-previous draft stays in Developer › Developer Models. Promoting makes the draft the
+**Where its writes land.** A session is its draft (owner decision,
+2026-11-13, replacing one draft shared by every session of 2026-10-24): the
+session's first confirmed proposal copies the developer's working revision
+(else the active one) into a new AI draft, and every later proposal of the
+session writes there until the developer promotes or discards it. A new
+session starts a fresh draft; there is no separate "new draft" action. The
+session goes on as one thread — no per-session call cap by default
+(`AI_MAX_CALLS_PER_SESSION` sets one per deployment; the developer's call
+budget, the daily cap and `AI_SESSION_TOKEN_LIMIT` still apply), its history
+settled as it grows. Promoting makes the draft the
 developer's **working** revision, not the live one: making a revision active
 is a separate step (**Set active** in Developer › Developer Models; owner decision,
 2026-10-10). Data the assistant imports from a spreadsheet
@@ -99,7 +95,7 @@ on it.
 | Grids | `create_grid`, `update_grid`, `delete_grid`, `add_grid_metric`, `remove_grid_metric`, `reorder_grid_metrics`, `add_grid_dimension`, `update_grid_dimension`, `remove_grid_dimension` | the Grids screen, including a dimension's display level |
 | Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer; `selector_bar` on `create_dashboard` and `update_dashboard` is the designer's **Selector bar**; a `board` widget (`widget_props.board`) and a records widget's `record_filters` / `record_columns` / `record_sort` are checked against the table's fields as the designer's are; a KPI tile in `bar` mode may also carry a `kpi_scope` |
 | Integrations | `create_file_integration`, `import_file_data`, `create_export_integration`, `update_integration`, `delete_integration` | the Integrations tab: the Import Wizard's file import and **Save as integration**, the **Data Export** editor, an integration's rename, tags and delete (REST API connectors are configured only in their wizard) |
-| Other | `set_tags`, `set_date_format`, `create_revision`, `start_new_draft`, `set_user_access_rules` | tag editors, the model's **Dates** choice (Developer › Models), **New revision**, **Start a new draft** (only when the developer asks; see above), the exception above |
+| Other | `set_tags`, `set_date_format`, `create_revision`, `set_user_access_rules` | tag editors, the model's **Dates** choice (Developer › Models), **New revision**, **Start a new draft** (only when the developer asks; see above), the exception above |
 
 What an edit does to stored data is the developer's own code, not a copy:
 `internal/modeledit` holds the member delete (input values to history, time
@@ -376,25 +372,20 @@ workbook, 2026-11-08/09; `internal/gateway/ai_build_guards.go`, `ai_turn.go`):
   note is shown in the chat and given to the model with the developer's
   message.
 
-**Sessions carry the work on** (`aiCreateSession`, `ChatStore.OpenDraft`,
-`CarryTaskPlan`, `EarlierSessions`). A session ends at its call limit (200);
-a large build is several sessions, and each used to start without the task
-plan and the rows already checked — and one opened on the active revision
-worked in an older draft it had superseded. Now:
+**A session carries its own work on** (`aiCreateSession`, `CarryTaskPlan`,
+`EarlierSessions`). A build runs in one session, its draft and its task plan
+together; nothing has to be handed over. A new session starts a fresh draft:
 
-- a new session continues the developer's open AI draft — the one the console
-  shows when it is open, else the newest — but never a draft older than the
-  model's active revision;
 - it takes over the task plan of the developer's previous session in the
-  model when that plan is unfinished and the session worked in the same draft
-  or was promoted (`carried_from`); a confirmed plan marks the current stage
-  in progress and counts its plans and steps (`RecordConfirmed`);
-- the value check reads the comparisons of the earlier sessions in the draft
-  (and of the sessions the plan came from), and a session's first turn opens
-  with a handover check of those rows;
-- from 70% of its calls the model is asked to end the part it is on and
-  suggest a new session (`sessionLengthNote`); at the limit, the message says
-  a new session continues the draft — no promote needed.
+  model only when that plan is unfinished and that session's draft became the
+  working revision (`carried_from`) — then the work the plan did is in what the
+  new draft copies; a confirmed plan marks the current stage in progress and
+  counts its plans and steps (`RecordConfirmed`);
+- the value check reads the comparisons of the sessions the plan came from, and
+  a session's first turn opens with a handover check of those rows;
+- with a call budget set, from 70% of it the model is asked to finish the part
+  it is on and say how far the work got (`sessionLengthNote`); at the budget,
+  the message says to raise it — the work stays in the session's draft.
 
 **Modelling know-how in the tools** (2026-11-09):
 
@@ -455,7 +446,7 @@ them. Step-by-step instructions do not steer it: after the first step it
 plans the whole model. So the recommended way is: a strong model at **low**
 effort (AI Settings says so: `buildAdvice`); the workbook attached; one
 short instruction naming the model, its input and calculation sheets, the
-dimensions, the business requirements and pages; confirm each plan, answer
+dimensions, the business requirements and dashboards; confirm each plan, answer
 the decisions it asks; for a large workbook a call budget with a checkpoint.
 The optional second model for generated sheet plans was removed the same
 day: one model runs every turn.
@@ -492,10 +483,10 @@ it moves an input the developer did not name (`inputOverwriteWarnings`).
 
 **One module per stage, with evidence** (`cutStages`, `buildOrder`,
 `update_task_plan`). A stage may build a few dependent sheets together
-(`TaskStage.Sheets`, at most 4; a few pages, at most 3) and is proven by all
+(`TaskStage.Sheets`, at most 4; a few dashboards, at most 3) and is proven by all
 of them. Stages run: calculation modules in dependency order, actuals, the
 business requirements (roles and access, workflows, the approved revision,
-pages), the verification checks. A stage closes with its **evidence** —
+dashboards), the verification checks. A stage closes with its **evidence** —
 what was built or repaired, what still differs and why, the next stage — and
 the server adds the rows and periods compared from the workbook map
 (`comparedFor`); a stage the map shows matching is closed by the server with

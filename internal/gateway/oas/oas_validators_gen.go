@@ -1994,15 +1994,6 @@ func (s *CreateAdminUserTrailingSlashReq) Validate() error {
 	return nil
 }
 
-func (s CreateAiSessionNewDraft) Validate() error {
-	switch s {
-	case "1":
-		return nil
-	default:
-		return errors.Errorf("invalid value: %v", s)
-	}
-}
-
 func (s *CreateApplicationRequest) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -4502,6 +4493,8 @@ func (s GetWorkflowStatusOKStepsItemState) Validate() error {
 	case "current":
 		return nil
 	case "sent_back":
+		return nil
+	case "rejected":
 		return nil
 	case "skipped":
 		return nil

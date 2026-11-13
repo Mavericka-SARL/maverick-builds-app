@@ -47,7 +47,7 @@ func (h *handler) workflowStatus(w http.ResponseWriter, r *http.Request) {
 		Name        string     `json:"name"`
 		Type        string     `json:"type"`
 		Roles       []string   `json:"roles"`
-		State       string     `json:"state"` // done | current | sent_back | skipped | pending
+		State       string     `json:"state"` // done | current | sent_back | rejected | skipped | pending
 		Since       *time.Time `json:"since,omitempty"`
 		DueAt       *time.Time `json:"due_at,omitempty"`
 		CompletedAt *time.Time `json:"completed_at,omitempty"`
@@ -121,6 +121,23 @@ func (h *handler) workflowStatus(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	// A rejection sent the run back when a person's step started after it;
+	// one that nothing followed ended the run (a request turned down) and
+	// reads "rejected", not "sent back".
+	personStarted := func(after *time.Time) bool {
+		if after == nil {
+			return false
+		}
+		for _, d := range defs {
+			if d.Type != "task" && d.Type != "approval" {
+				continue
+			}
+			if row, ok := latest[d.ID]; ok && row.created.After(*after) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, d := range defs {
 		if d.Type != "task" && d.Type != "approval" {
 			continue // a condition, a notification: the engine's, not a person's
@@ -134,6 +151,9 @@ func (h *handler) workflowStatus(w http.ResponseWriter, r *http.Request) {
 				s.State = "skipped"
 			case row.status == "rejected" || strings.EqualFold(row.decision, "reject"):
 				s.State, s.CompletedAt = "sent_back", row.completedAt
+				if !personStarted(row.completedAt) {
+					s.State = "rejected"
+				}
 			default:
 				s.State, s.CompletedAt = "done", row.completedAt
 			}

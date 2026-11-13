@@ -265,7 +265,7 @@ Under **Revisions**, each revision has two export icons of its own: *with data* 
 
 		taText(`## Importing
 
-Under an application, press **Import model** and choose a `+tick+`.mavericks-model.json`+tick+` file. It arrives as a new model with a single revision, which is live, and its calculated values are worked out as it lands. Your edition's limits are checked first: an import that would not fit is refused before anything is created.
+Under an application, press **Import model** and choose a `+tick+`.mavericks-model.json`+tick+` file. It arrives as a new model with a single revision, which is live, and its calculated values are worked out as it lands. Your edition's limits are checked first: an import that would not fit is refused before anything is created. Approvals that locked values where the file was exported (an approved budget year) come with it, so those values stay locked here; a business admin can reopen one in Workflow History, with a reason.
 
 A file is checked the way the same things are checked when a developer saves them: a formula that would be refused stops the import, which names the metric. Anything the file names but does not contain, such as a link mistyped in a hand-edited file, is left out, and the import lists each one under the application.`, 210),
 

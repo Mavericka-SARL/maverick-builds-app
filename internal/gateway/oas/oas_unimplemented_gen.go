@@ -223,7 +223,7 @@ func (UnimplementedHandler) CompleteTask(ctx context.Context, req *TaskActionReq
 // ConfirmAiProposal implements confirmAiProposal operation.
 //
 // Execute a pending proposal's write steps (creates the session's draft on first use when it has
-// none; a start_new_draft step moves the session to a new draft for the steps after it).
+// none).
 //
 // POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 func (UnimplementedHandler) ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (r ConfirmAiProposalRes, _ error) {

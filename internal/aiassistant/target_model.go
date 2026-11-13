@@ -511,7 +511,7 @@ func (t *TargetModel) RenderFor(current ...string) string {
 	for _, l := range []struct {
 		name  string
 		items []string
-	}{{"Pages", t.Pages}, {"Roles", t.Roles}, {"Workflows and triggers", t.Workflows}} {
+	}{{"Dashboards", t.Pages}, {"Roles", t.Roles}, {"Workflows and triggers", t.Workflows}} {
 		if len(l.items) > 0 {
 			fmt.Fprintf(&b, "%s: %s\n", l.name, strings.Join(l.items, "; "))
 		}

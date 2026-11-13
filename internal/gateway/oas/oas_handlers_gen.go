@@ -3901,7 +3901,7 @@ func (s *Server) handleCompleteTaskRequest(args [1]string, argsEscaped bool, w h
 // handleConfirmAiProposalRequest handles confirmAiProposal operation.
 //
 // Execute a pending proposal's write steps (creates the session's draft on first use when it has
-// none; a start_new_draft step moves the session to a new draft for the steps after it).
+// none).
 //
 // POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -4037,7 +4037,7 @@ func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ConfirmAiProposalOperation,
-			OperationSummary: "Execute a pending proposal's write steps (creates the session's draft on first use when it has none; a start_new_draft step moves the session to a new draft for the steps after it)",
+			OperationSummary: "Execute a pending proposal's write steps (creates the session's draft on first use when it has none)",
 			OperationID:      "confirmAiProposal",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -5585,10 +5585,6 @@ func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, 
 					Name: "revision_id",
 					In:   "query",
 				}: params.RevisionID,
-				{
-					Name: "new_draft",
-					In:   "query",
-				}: params.NewDraft,
 			},
 			Raw: r,
 		}

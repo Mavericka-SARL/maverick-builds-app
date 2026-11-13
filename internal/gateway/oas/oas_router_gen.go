@@ -10755,7 +10755,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 															switch method {
 															case "POST":
 																r.name = ConfirmAiProposalOperation
-																r.summary = "Execute a pending proposal's write steps (creates the session's draft on first use when it has none; a start_new_draft step moves the session to a new draft for the steps after it)"
+																r.summary = "Execute a pending proposal's write steps (creates the session's draft on first use when it has none)"
 																r.operationID = "confirmAiProposal"
 																r.operationGroup = ""
 																r.pathPattern = "/api/ai/sessions/{id}/proposals/{pid}/confirm"

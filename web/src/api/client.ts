@@ -2118,9 +2118,9 @@ export interface AISession {
   model_id: string;
   llm_provider: string;
   llm_model: string;
-  // The developer's AI draft the session works in: made by a first
-  // confirmed proposal, continued by every new session until it is promoted
-  // or discarded. AI writes land here, never directly in another revision.
+  // The session's AI draft: a session is its draft. Made by its first
+  // confirmed proposal from the working revision; every later proposal of
+  // the session writes there until it is promoted or discarded.
   draft_revision_id?: string;
   // Auto-generated from the first request; renameable. Empty = unnamed.
   title?: string;
@@ -2130,6 +2130,10 @@ export interface AISession {
   promoted_at?: string;
   /** The developer's cap on this session's provider calls; absent = the deployment's. */
   call_budget?: number;
+  /** The session's model calls, and its task plan's stages done of all (in the list). */
+  llm_calls?: number;
+  plan_done?: number;
+  plan_stages?: number;
 }
 
 export interface AIMessage {
@@ -2260,7 +2264,7 @@ export interface WorkflowStatusStep {
   name: string;
   type: string;
   roles: string[];
-  state: "done" | "current" | "sent_back" | "skipped" | "pending";
+  state: "done" | "current" | "sent_back" | "rejected" | "skipped" | "pending";
   since?: string;
   due_at?: string;
   completed_at?: string;
@@ -3427,12 +3431,11 @@ export const api = {
   // A session belongs to one model: the console's revision names it.
   aiListSessions: (revisionId?: string) =>
     apiFetch<AISession[]>(`/api/ai/sessions${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  // A new session continues the developer's open AI draft; newDraft starts
-  // the next one instead.
-  aiCreateSession: (revisionId?: string, newDraft?: boolean) => {
+  // A new session starts a fresh draft from the working revision on its
+  // first confirmed proposal: a session is its draft.
+  aiCreateSession: (revisionId?: string) => {
     const q = new URLSearchParams();
     if (revisionId) q.set("revision_id", revisionId);
-    if (newDraft) q.set("new_draft", "1");
     const qs = q.toString();
     return apiFetch<AISession>(`/api/ai/sessions${qs ? `?${qs}` : ""}`, { method: "POST" });
   },

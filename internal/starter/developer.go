@@ -192,9 +192,9 @@ func devFirstModelPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-1-first-model", devFirstPage,
 		devText(`# Your first model
 
-This guide is for the person who builds models. This page goes from nothing to a model people can type numbers into, in eight steps; the pages after it explain each step in depth.
+This guide is for the person who builds models. This dashboard goes from nothing to a model people can type numbers into, in eight steps; the dashboards after it explain each step in depth.
 
-The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Developer screens and change it as much as you like, in a revision of your own.
+The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that dashboard 4 uses. Open it in the Developer screens and change it as much as you like, in a revision of your own.
 
 Not building models? Go back to the `+dashLink("tour", ModelName, DashboardName)+` and pick the guide for what you came to do.`, 200),
 
@@ -204,7 +204,7 @@ Not building models? Go back to the `+dashLink("tour", ModelName, DashboardName)
 
 An **application** groups related models; a **model** holds what you build. Creating them belongs to the **tenant admin**. If you signed up for this workspace yourself, that is you: your account is tenant admin, developer and business admin at once. If it is not, ask your tenant admin for the two, and start at step 3.
 
-1. Open **Developer › Developer Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
+1. Open **Developer › Developer Models** and press **New application** at the top of the tab. Type a name, such as *Sales*, and press **Create application**.
 2. The model form opens next, with the new application already chosen. Type a name, such as *Sales plan*, and press **Create model**. For another model in an application you already have, press **New model** instead.
 
 **Tenant admin › Applications** does the same: **New application** at the top of your tenant, **Add model** at the top of each application.`, 244),
@@ -231,7 +231,7 @@ A new model comes with one empty revision, **Revision 1**, which is not live yet
 
 		devText(`## 8 · Make it live
 
-Back in **Developer › Developer Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
+Back in **Developer › Developer Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — dashboard 5 shows where. Before a later change goes live, dashboard 7 has a short checklist.
 
 ## Or describe it to the AI Developer
 
@@ -276,7 +276,7 @@ An application can hold several models: *Getting started* holds the tour and thr
 
 		devText(`## Two more things to know
 
-- The **AI Developer** puts its model changes into a revision of its own, named *AI Draft* and the date, which the first change you confirm creates. Page 7 covers it, and the few kinds of change that take effect at once.
+- The **AI Developer** puts its model changes into a revision of its own, named *AI Draft* and the date, which the first change you confirm creates. Dashboard 7 covers it, and the few kinds of change that take effect at once.
 - People, business roles and access rules belong to the whole workspace, not to a revision. A workflow that is already running keeps the definition it started with, whatever you change afterwards.
 
 ---
@@ -315,7 +315,7 @@ Open **Developer › Metrics** and press **Add metric**:
 - **Aggregation rule** and **Time summary** — how its totals are made, below.
 - **Tags** — for the tag filter and the *Search metrics…* box.
 
-A metric has no dimensions of its own: it takes those of the grid it sits on (page 5), and sits on one grid at most. Until it is on a grid it has none, and a time function has nothing to move along.
+A metric has no dimensions of its own: it takes those of the grid it sits on (dashboard 5), and sits on one grid at most. Until it is on a grid it has none, and a time function has nothing to move along.
 
 To change a metric later, use **Edit** on its row. After a formula change, a *Recalc results* banner shows the new values.`, 336),
 
@@ -369,7 +369,7 @@ A formula names metrics and combines them: `+devCode("=units * price")+`. It is 
 
 A formula can also ask where it is: `+devCode("product")+` is the code of the cell's product, `+devCode("product.origin")+` one of its properties, and `+devCode("PARENT(product)")+` the code of its parent.`, 276),
 
-		devText(`## The example on this page
+		devText(`## The example on this dashboard
 
 Two products, Coffee and Tea, over the four quarters of 2026, on a Time dimension called *period*:
 
@@ -456,7 +456,7 @@ Click a widget in Design and **Widget Properties** opens beside it:
 - **Default context** (Metric KPI) — **Whole-model total**, **Follow dashboard selectors**, **Follow the selector bar** (a company total for the bar's choice, such as a scenario), or **Pin to a member**.
 - **Chart configuration**, **Header**, **Appearance**, where the **Selectors** sit, and an exact **Position** and **Size**.
 
-When several widgets share a dimension such as a scenario or a period, press **Selector bar** in the Design toolbar: one selector per chosen dimension sits at the top of the page, and every grid and chart follows it, as does a KPI set to follow the selectors or the bar.`, 300),
+When several widgets share a dimension such as a scenario or a period, press **Selector bar** in the Design toolbar: one selector per chosen dimension sits at the top of the dashboard, and every grid and chart follows it, as does a KPI set to follow the selectors or the bar.`, 300),
 
 		[]modeltransfer.Widget{
 			{
@@ -471,11 +471,11 @@ When several widgets share a dimension such as a scenario or a period, press **S
 			},
 		},
 
-		devText(`The left card's **Default context** is **Whole-model total**: revenue for both products over the whole year. The right one is pinned to Coffee. Change a number on page 4 and both follow.`, 84),
+		devText(`The left card's **Default context** is **Whole-model total**: revenue for both products over the whole year. The right one is pinned to Coffee. Change a number on dashboard 4 and both follow.`, 84),
 
 		devText(`## Preview, and who sees it
 
-Beside the dashboard's name, switch from **Design** to **Preview** to use the page as people will: type into grids, use the selectors.
+Beside the dashboard's name, switch from **Design** to **Preview** to use the dashboard as people will: type into grids, use the selectors.
 
 **User › Dashboards** shows the dashboards of the live revision of the model a person has open, so a dashboard you build in your own revision reaches people when you press **Set active**. Which dashboards a business role can open is set per role under **Developer › Roles**, on your working revision; the grants go live with it. If you are also a business admin, Build has no Roles screen: use **Business Admin › Roles**, which changes the live revision of the model selected under **Business Admin › Models**.
 
@@ -556,23 +556,23 @@ Ask it how something works, too. It reads your model — formulas, grids, workfl
 
 **Before you start**
 
-- **One task per session.** Press **New session** for each new piece of work. A long session — a few dozen turns — starts to drift and repeat earlier tasks.
+- **A session is its draft.** Its first confirmed plan copies your working revision into a draft, and the whole piece of work goes on in that session, however long. Press **New session** for a separate piece of work: it starts a fresh draft.
 - **Give it the source.** Attach the workbook or specification you are building from, and say what to take from it.
-- **Say what you want in the model's own terms:** the dimensions and their members, what people type in and what is calculated, the time grain and scenarios, units and currency, who does what. "Revenue = units × price per product and month, in EUR, for Base and Downside" beats "add revenue". Name the business requirements too: requests and their approval, who edits what, an approved plan, the pages each role needs.
+- **Say what you want in the model's own terms:** the dimensions and their members, what people type in and what is calculated, the time grain and scenarios, units and currency, who does what. "Revenue = units × price per product and month, in EUR, for Base and Downside" beats "add revenue". Name the business requirements too: requests and their approval, who edits what, an approved plan, the dashboards each role needs.
 - **Pick a model to suit the job** under **AI Settings**: for building a whole model from a workbook, a strong reasoning model at **low** effort — it finishes in fewer calls and less time than a small model, which asks more and stops short; a small one for small changes.
 
 **While it builds**
 
-- **Let it plan from an agreed design:** from a workbook it first agrees a target with you — the conventions every row follows, the choices the workbook leaves open (answer each once), the business requirements and the checks — then builds one module per stage (the inputs and calculations that belong together, checked against your workbook over every period), then the actuals, then roles, workflows and pages. Confirm each stage, and judge it by the evidence on the plan card: the rows and periods compared, what still differs, and what the stage took.
-- **Keep requests to a size it can finish:** one page, one workflow, one group of metrics. "Fix the Management dashboard" works better than "fix every page".
-- **Read every Action plan before you confirm it.** Each one has already been tried in a trial run: a plan that would fail, or that leaves a page overlapping, cramped or without its selector bar, goes back to the AI Developer before you see it. What it could not settle shows as a warning on the plan; ask it to fix the warning, or to explain a step, before you confirm.
-- **Ask for pages the way people use them:** a *Start here* page first, with the workflow buttons, their status and a short guide; a selector bar for the scenario and period; KPI tiles over a chart over the grids. It sets the page order and lays out each page with **Arrange**, which you can also press yourself in the dashboard designer.
+- **Let it plan from an agreed design:** from a workbook it first agrees a target with you — the conventions every row follows, the choices the workbook leaves open (answer each once), the business requirements and the checks — then builds one module per stage (the inputs and calculations that belong together, checked against your workbook over every period), then the actuals, then roles, workflows and dashboards. Confirm each stage, and judge it by the evidence on the plan card: the rows and periods compared, what still differs, and what the stage took.
+- **Keep requests to a size it can finish:** one dashboard, one workflow, one group of metrics. "Fix the Management dashboard" works better than "fix every dashboard".
+- **Read every Action plan before you confirm it.** Each one has already been tried in a trial run: a plan that would fail, or that leaves a dashboard overlapping, cramped or without its selector bar, goes back to the AI Developer before you see it. What it could not settle shows as a warning on the plan; ask it to fix the warning, or to explain a step, before you confirm.
+- **Ask for dashboards the way people use them:** a *Start here* dashboard first, with the workflow buttons, their status and a short guide; a selector bar for the scenario and period; KPI tiles over a chart over the grids. It sets the dashboard order and lays out each dashboard with **Arrange**, which you can also press yourself in the dashboard designer.
 
 **Checking its work**
 
-- Open the draft in **Developer › Developer Models** and look through it: the numbers in the grids against your source, each page in **Preview**, every workflow's steps and roles.
+- Open the draft in **Developer › Developer Models** and look through it: the numbers in the grids against your source, each dashboard in **Preview**, every workflow's steps and roles.
 - **Say exactly what is wrong:** "the Net revenue tile shows €99.4M; it should be FY 2026 for Base". It corrects the same draft.
-- If a draft has gone astray, **Discard** it and start a new session from your working revision rather than patching it.`, 760),
+- If a draft has gone astray, **Discard** it and start a new session — a fresh draft from your working revision — rather than patching it.`, 760),
 
 		devText(`## Where its changes land
 
@@ -592,7 +592,7 @@ Before you press **Set active**:
 
 - **Developer › Metrics** — no red mark beside a formula.
 - **Developer › Dependency Graph** — every calculated metric reads what you meant it to.
-- **Developer › Dashboards** — each page checked in **Preview**.
+- **Developer › Dashboards** — each dashboard checked in **Preview**.
 - **Developer › Workflows** — the ones people need are published, and each that should start on a button, a schedule or an event has a rule under **Developer › Triggers**.
 
 Then open **Developer › Developer Models**, press **Set active** on your revision, and **Set as business default** if people should open this model first.`, 252),

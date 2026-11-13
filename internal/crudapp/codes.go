@@ -401,3 +401,31 @@ func ApplyDefaults(form *FormDef, data map[string]any, today string) {
 		data[f.Name] = f.Default
 	}
 }
+
+// StatusInDataProblem says why a record body's data names a status for the
+// table's status field that differs from the status the save results in
+// (effective): the status is set by the top-level "status" field, and the
+// server drops a value inside data, so such a save used to answer 200 and
+// leave the record as it was (2026-11-13). "" when data names none, or the
+// same one (a form echoing the record as read).
+func StatusInDataProblem(form *FormDef, data map[string]any, effective string) string {
+	if form == nil {
+		return ""
+	}
+	for _, f := range form.Fields {
+		if f.Type != FieldStatus {
+			continue
+		}
+		v, ok := data[f.Name]
+		if !ok || v == nil {
+			return ""
+		}
+		s, _ := v.(string)
+		if strings.EqualFold(strings.TrimSpace(s), effective) {
+			return ""
+		}
+		return fmt.Sprintf("the status is set with the top-level \"status\" field, not inside data (data.%s = %v; the record would be %s)",
+			f.Name, v, effective)
+	}
+	return ""
+}

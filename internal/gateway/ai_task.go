@@ -103,7 +103,7 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		}
 		if len(plan.Stages) == 0 {
 			note += "Next: plan_task from it — one coherent module per stage in dependency order (a few dependent sheets proven together), " +
-				"then actuals, then the business requirements (roles and access, workflows, the approved revision, pages), then the verification checks.\n"
+				"then actuals, then the business requirements (roles and access, workflows, the approved revision, dashboards), then the verification checks.\n"
 		}
 		return note + t.Render(), nil
 	case aiassistant.UpdateTargetModelTool:
@@ -142,7 +142,7 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if len(sheets) > 0 {
 			if cur, _ := store.TaskPlan(ctx, sessionID); cur == nil || cur.Target == nil {
 				return "", fmt.Errorf("plan_task: a model built from the attached workbook is planned from its target model — first analyse_workbook, " +
-					"then set_target_model with the whole TO-BE design (every sheet's role, grid, dimensions and metrics; pages, roles, workflows), then plan_task")
+					"then set_target_model with the whole TO-BE design (every sheet's role, grid, dimensions and metrics; dashboards, roles, workflows), then plan_task")
 			} else {
 				// Stages follow the target's build order.
 				if order := cur.Target.BuildSheets(); len(order) > 0 {
@@ -158,7 +158,7 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if len(sheets) > 0 {
 			var cut []string
 			if a.Stages, cut = cutStages(a.Stages, sheets); len(cut) > 0 {
-				cutNote = fmt.Sprintf("The server cut %s into modules of at most %d sheets or %d pages. ", strings.Join(cut, "; "), maxModuleSheets, maxStagePages)
+				cutNote = fmt.Sprintf("The server cut %s into modules of at most %d sheets or %d dashboards. ", strings.Join(cut, "; "), maxModuleSheets, maxStagePages)
 			}
 		}
 		// Calculations first, module by module; then the actuals; then the
@@ -167,7 +167,7 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if cur, _ := store.TaskPlan(ctx, sessionID); cur != nil && cur.Target != nil {
 			if moved := buildOrder(a.Stages, cur.Target); moved != nil {
 				a.Stages = moved
-				cutNote += "Stages ordered: calculation modules, then actuals, then roles, workflows and pages, then the verification checks. "
+				cutNote += "Stages ordered: calculation modules, then actuals, then roles, workflows and dashboards, then the verification checks. "
 			}
 		}
 		// A plan already under way — carried from earlier sessions, or
@@ -458,7 +458,7 @@ func cutStages(stages []aiassistant.TaskStage, sheets []string) ([]aiassistant.T
 			cut = append(cut, st.Title)
 			for k := 0; k < len(st.Items); k += maxStagePages {
 				part := st.Items[k:min(k+maxStagePages, len(st.Items))]
-				out = append(out, aiassistant.TaskStage{Title: "Pages: " + clip(strings.Join(part, ", "), 90), Items: part, Check: st.Check})
+				out = append(out, aiassistant.TaskStage{Title: "Dashboards: " + clip(strings.Join(part, ", "), 90), Items: part, Check: st.Check})
 			}
 			continue
 		}
@@ -691,9 +691,9 @@ func buildAdvice(provider, model, effort string) string {
 	small := strings.Contains(m, "mini") || strings.Contains(m, "nano")
 	switch {
 	case effort == "none" || effort == "minimal":
-		return "Reasoning effort " + effort + " plans too shallowly to build a model from a workbook: fine for questions, pages and small edits. For builds choose low or higher."
+		return "Reasoning effort " + effort + " plans too shallowly to build a model from a workbook: fine for questions, dashboards and small edits. For builds choose low or higher."
 	case small:
-		return "A small model: good for pages, wiring and small edits with an exact request. To build a model from a workbook, use a strong reasoning model (gpt-6.1-sol, gpt-5.5) at low effort: " +
+		return "A small model: good for dashboards, wiring and small edits with an exact request. To build a model from a workbook, use a strong reasoning model (gpt-6.1-sol, gpt-5.5) at low effort: " +
 			"it finishes in fewer calls and less time, where a small model asks more and stops short."
 	case effort == "high" || effort == "xhigh":
 		return "Low effort is usually enough to build a model from a workbook with this model; " + effort + " makes every call longer and costlier. Raise it only when plans come back too shallow."

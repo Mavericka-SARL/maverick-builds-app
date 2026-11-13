@@ -80,6 +80,30 @@ func TestWorkflowStatus_Route(t *testing.T) {
 		t.Errorf("a running cycle: %+v %v", s.Instance, got)
 	}
 
+	// A rejection that ended the run reads "rejected"; one a person's step
+	// followed (the route led back to Plan) reads "sent back".
+	stateOf := func(id string) string {
+		for _, st := range status().Steps {
+			if st.ID == id {
+				return st.State
+			}
+		}
+		return ""
+	}
+	q(`UPDATE workflow.workflow_step SET created_at=now() - interval '3 hours' WHERE instance_id=$1::uuid RETURNING id::text`, inst)
+	q(`UPDATE workflow.workflow_step SET status='completed', decision='done', completed_at=now() - interval '2 hours' WHERE instance_id=$1::uuid AND step_def_id='s-plan' RETURNING id::text`, inst)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, created_at, completed_at)
+		VALUES ($1::uuid, 's-approve', 'completed', 'reject', now() - interval '1 hour', now() - interval '1 hour') RETURNING id::text`, inst)
+	q(`UPDATE workflow.workflow_instance SET status='completed', completed_at=now() WHERE id=$1::uuid RETURNING id::text`, inst)
+	if got := stateOf("s-approve"); got != "rejected" {
+		t.Errorf("a rejection that ended the run reads %q, want rejected", got)
+	}
+	q(`UPDATE workflow.workflow_instance SET status='running', completed_at=NULL WHERE id=$1::uuid RETURNING id::text`, inst)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 's-plan', 'pending') RETURNING id::text`, inst)
+	if got := stateOf("s-approve"); got != "sent_back" {
+		t.Errorf("a rejection followed by Plan again reads %q, want sent_back", got)
+	}
+
 	// No such workflow: found false, not an error.
 	code, raw := f.do(t, "GET", "/api/workflow/status?name=nothing", "mm-user", f.app1, f.modelA, nil)
 	if code != http.StatusOK || !strings.Contains(string(raw), `"found":false`) {

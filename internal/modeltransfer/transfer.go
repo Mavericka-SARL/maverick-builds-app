@@ -402,6 +402,42 @@ type Package struct {
 	Workflows       []Workflow       `json:"workflows"`
 	AutomationRules []AutomationRule `json:"automation_rules"`
 	Facts           []Fact           `json:"facts"`
+	// ApprovedLocks are the approvals that locked values of the exported
+	// model's application (an approved budget year). A lock comes from an
+	// approved workflow run; the import makes that run again in the new
+	// application, so a published "approved and locked" budget arrives
+	// locked (2026-11-13: it arrived open).
+	ApprovedLocks []ApprovedLock `json:"approved_locks,omitempty"`
+}
+
+// ApprovedLock is one approved workflow run that locked a scope of values.
+type ApprovedLock struct {
+	Workflow   string    `json:"workflow"`
+	Scope      []string  `json:"scope"` // "Budget year = FY2027", in the context schema's order
+	ApprovedAt time.Time `json:"approved_at"`
+	// Context is the run's scope as its context holds it: member codes and
+	// metric names, by context key. ApprovalStep is the approval step that
+	// approved it.
+	Context      map[string]string `json:"context,omitempty"`
+	ApprovalStep string            `json:"approval_step,omitempty"`
+}
+
+// LockNotes says, for an import, which approvals of the exported model's
+// workspace it carried (carried[i] for ApprovedLocks[i]) and which it could
+// not, and what that means.
+func (p *Package) LockNotes(carried []bool) []string {
+	var out []string
+	for i, l := range p.ApprovedLocks {
+		scope := strings.Join(l.Scope, ", ")
+		if i < len(carried) && carried[i] {
+			out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from: the approval came with the model, so those values are locked here too. A business admin can reopen it in Workflow History, with a reason.",
+				l.Workflow, scope))
+			continue
+		}
+		out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from, but the import could not carry the approval: those values are open here until %q is run for them again.",
+			l.Workflow, scope, l.Workflow))
+	}
+	return out
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────

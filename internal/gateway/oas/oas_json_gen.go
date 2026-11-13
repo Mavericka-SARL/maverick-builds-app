@@ -6444,9 +6444,27 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 			s.CallBudget.Encode(e)
 		}
 	}
+	{
+		if s.LlmCalls.Set {
+			e.FieldStart("llm_calls")
+			s.LlmCalls.Encode(e)
+		}
+	}
+	{
+		if s.PlanDone.Set {
+			e.FieldStart("plan_done")
+			s.PlanDone.Encode(e)
+		}
+	}
+	{
+		if s.PlanStages.Set {
+			e.FieldStart("plan_stages")
+			s.PlanStages.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiSession = [11]string{
+var jsonFieldsNameOfAiSession = [14]string{
 	0:  "id",
 	1:  "app_id",
 	2:  "model_id",
@@ -6458,6 +6476,9 @@ var jsonFieldsNameOfAiSession = [11]string{
 	8:  "created_at",
 	9:  "promoted_at",
 	10: "call_budget",
+	11: "llm_calls",
+	12: "plan_done",
+	13: "plan_stages",
 }
 
 // Decode decodes AiSession from json.
@@ -6592,6 +6613,36 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"call_budget\"")
+			}
+		case "llm_calls":
+			if err := func() error {
+				s.LlmCalls.Reset()
+				if err := s.LlmCalls.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"llm_calls\"")
+			}
+		case "plan_done":
+			if err := func() error {
+				s.PlanDone.Reset()
+				if err := s.PlanDone.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"plan_done\"")
+			}
+		case "plan_stages":
+			if err := func() error {
+				s.PlanStages.Reset()
+				if err := s.PlanStages.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"plan_stages\"")
 			}
 		default:
 			return d.Skip()
@@ -37076,6 +37127,8 @@ func (s *GetWorkflowStatusOKStepsItemState) Decode(d *jx.Decoder) error {
 		*s = GetWorkflowStatusOKStepsItemStateCurrent
 	case GetWorkflowStatusOKStepsItemStateSentBack:
 		*s = GetWorkflowStatusOKStepsItemStateSentBack
+	case GetWorkflowStatusOKStepsItemStateRejected:
+		*s = GetWorkflowStatusOKStepsItemStateRejected
 	case GetWorkflowStatusOKStepsItemStateSkipped:
 		*s = GetWorkflowStatusOKStepsItemStateSkipped
 	case GetWorkflowStatusOKStepsItemStatePending:

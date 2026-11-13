@@ -7,10 +7,10 @@ export function buildAdvice(provider: string, model: string, effort: string): st
   if ((provider || "openai") !== "openai") return "";
   const m = model.trim().toLowerCase();
   if (effort === "none" || effort === "minimal") {
-    return `Reasoning effort ${effort} plans too shallowly to build a model from a workbook: fine for questions, pages and small edits. For builds choose low or higher.`;
+    return `Reasoning effort ${effort} plans too shallowly to build a model from a workbook: fine for questions, dashboards and small edits. For builds choose low or higher.`;
   }
   if (m.includes("mini") || m.includes("nano")) {
-    return "A small model: good for pages, wiring and small edits with an exact request. To build a model from a workbook, use a strong reasoning model (gpt-6.1-sol, gpt-5.5) at low effort: " +
+    return "A small model: good for dashboards, wiring and small edits with an exact request. To build a model from a workbook, use a strong reasoning model (gpt-6.1-sol, gpt-5.5) at low effort: " +
       "it finishes in fewer calls and less time, where a small model asks more and stops short.";
   }
   if (effort === "high" || effort === "xhigh") {

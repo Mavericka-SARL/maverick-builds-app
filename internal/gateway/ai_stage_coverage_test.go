@@ -194,7 +194,7 @@ func TestCutStages(t *testing.T) {
 		titles = append(titles, s.Title+"="+strings.Join(s.StageSheets(), "+"))
 	}
 	want := "Hiring Plan → Headcount → payroll=Hiring Plan+Headcount|Inputs=Hiring Plan|SaaS → Hardware → P&L → Cash Flow=SaaS+Hardware+P&L+Cash Flow|" +
-		"Balance Sheet=Balance Sheet|Dashboards=|Pages: Start, Board, Statements=|Pages: SaaS drivers, Actuals=|Roles and access="
+		"Balance Sheet=Balance Sheet|Dashboards=|Dashboards: Start, Board, Statements=|Dashboards: SaaS drivers, Actuals=|Roles and access="
 	if got := strings.Join(titles, "|"); got != want || len(cut) != 2 {
 		t.Fatalf("stages\n%s\nwant\n%s\n(cut %v)", got, want, cut)
 	}
@@ -256,7 +256,7 @@ func TestTargetModelBeforePlan(t *testing.T) {
 func TestBuildOrder(t *testing.T) {
 	target := &aiassistant.TargetModel{Sheets: []aiassistant.TargetSheet{{Sheet: "Import GL", Role: "actuals"}, {Sheet: "P&L", Role: "calculation"}}}
 	in := []aiassistant.TaskStage{
-		{Title: "Import GL — postings", Sheet: "Import GL"}, {Title: "Pages: board, statements"}, {Title: "P&L", Sheet: "P&L"},
+		{Title: "Import GL — postings", Sheet: "Import GL"}, {Title: "Dashboards: board, statements"}, {Title: "P&L", Sheet: "P&L"},
 		{Title: "Final verification", Sheets: []string{"Checks"}}, {Title: "Roles and access"}, {Title: "Actuals P&L import loader"},
 	}
 	out := buildOrder(in, target)
@@ -264,7 +264,7 @@ func TestBuildOrder(t *testing.T) {
 	for _, s := range out {
 		titles = append(titles, s.Title)
 	}
-	if got := strings.Join(titles, " | "); got != "P&L | Import GL — postings | Actuals P&L import loader | Pages: board, statements | Roles and access | Final verification" {
+	if got := strings.Join(titles, " | "); got != "P&L | Import GL — postings | Actuals P&L import loader | Dashboards: board, statements | Roles and access | Final verification" {
 		t.Fatalf("order: %s", got)
 	}
 	if buildOrder(out, target) != nil {

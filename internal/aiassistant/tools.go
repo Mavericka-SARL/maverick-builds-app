@@ -45,7 +45,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "describe_dashboard",
-			Description: "Returns one dashboard of the working revision as its users see it: the business roles that may open it, its selector bar, then every widget in reading order — a text widget's whole Markdown (the instructions and explanations the page gives) with where each of its links leads, what each other widget reads (grid, metric, table, integration or automation rule), a button's label, and each widget's settings (widget_props, as update_dashboard_widget takes them) with the metrics, dimensions and grids their ids name. Call it to explain a dashboard or how the app is meant to be used, and before changing a text widget's content.",
+			Description: "Returns one dashboard of the working revision as its users see it: the business roles that may open it, its selector bar, then every widget in reading order — a text widget's whole Markdown (the instructions and explanations the dashboard gives) with where each of its links leads, what each other widget reads (grid, metric, table, integration or automation rule), a button's label, and each widget's settings (widget_props, as update_dashboard_widget takes them) with the metrics, dimensions and grids their ids name. Call it to explain a dashboard or how the app is meant to be used, and before changing a text widget's content.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"dashboard_id":{"type":"string","description":"The dashboard's id from list_dashboards, or its exact name"}},"required":["dashboard_id"]}`),
 		},
 		{
@@ -139,10 +139,10 @@ var taskPlanTools = []providers.ToolDef{
 		Name: SetTargetModelTool,
 		Description: "Records the TO-BE model of a build from a workbook -- the design you build towards, before plan_task: the dimensions and their members, and for EVERY sheet " +
 			"(in build order) its role, the grid it becomes, that grid's dimensions, the rows it covers and its metric names (snake_case, one per workbook row " +
-			"or one per row group when a dimension replaces repeated rows), its owner and how it is verified, plus the pages, roles and workflows. " +
+			"or one per row group when a dimension replaces repeated rows), its owner and how it is verified, plus the dashboards, roles and workflows. " +
 			"Agree it once, before building: the conventions every row follows (units, signs, percentages, opening balances, scenarios, monthly against annual), " +
 			"the substantive choices the workbook leaves open as decisions (each with its options and the sheets it holds back until the developer chooses), " +
-			"the business requirements the platform adds (scenarios, requests, access, approval, an approved revision, role pages) and the verification checks " +
+			"the business requirements the platform adds (scenarios, requests, access, approval, an approved revision, role dashboards) and the verification checks " +
 			"beyond the saved workbook (another scenario, a switch off, a delay, actual zero against missing, a rejected approval, a restricted user). " +
 			"Read the whole workbook first (analyse_workbook). It is shown in every later turn and session; call it again to change the design (the whole target each time), " +
 			"or update_target_model for decisions, requirements, checks and row notes. No confirmation needed: it changes nothing in the model.",
@@ -194,8 +194,8 @@ var taskPlanTools = []providers.ToolDef{
 	},
 	{
 		Name: PlanTaskTool,
-		Description: "Plans a goal the developer delegated (build a model from this workbook, add the pages people need, make the numbers match) before building it: " +
-			"stages in build order, each one coherent module (a few dependent sheets built and proven together, e.g. Hiring Plan, Headcount and payroll; a few pages by audience), " +
+		Description: "Plans a goal the developer delegated (build a model from this workbook, add the dashboards people need, make the numbers match) before building it: " +
+			"stages in build order, each one coherent module (a few dependent sheets built and proven together, e.g. Hiring Plan, Headcount and payroll; a few dashboards by audience), " +
 			"each naming the items it delivers and how you will check it. " +
 			"A plan already under way is kept and the new stages follow it (one stage is enough), or with replace: true they re-cut its open stages (done stages stay); the developer sees it. " +
 			"Not for a direct order or a goal one proposal does.",
@@ -204,8 +204,8 @@ var taskPlanTools = []providers.ToolDef{
 			"replace":{"type":"boolean","description":"true: these stages replace the open stages of the plan under way (re-cut it); done stages and decisions stay"},
 			"stages":{"type":"array","items":{"type":"object","properties":{
 				"title":{"type":"string"},
-				"items":{"type":"array","items":{"type":"string"},"description":"what the stage delivers, named: metrics, grids, pages, postings, rows"},
-				"check":{"type":"string","description":"how you will check it once confirmed: compare_with_sheet of which rows, describe_dashboard of which page"}},
+				"items":{"type":"array","items":{"type":"string"},"description":"what the stage delivers, named: metrics, grids, dashboards, postings, rows"},
+				"check":{"type":"string","description":"how you will check it once confirmed: compare_with_sheet of which rows, describe_dashboard of which dashboard"}},
 				"required":["title","items"]}}},
 			"required":["goal","stages"]}`),
 	},
@@ -247,7 +247,7 @@ var WriteToolNames = []string{
 	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards", "arrange_dashboard",
 	"set_date_format",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
-	"set_tags", "create_revision", StartNewDraftTool, "rename_draft",
+	"set_tags", "create_revision", "rename_draft",
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
 	"publish_workflow_def", "archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
 	"create_form_def", "update_form_def", "delete_form_def",

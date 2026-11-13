@@ -28,7 +28,7 @@ Claude** shows the connector URL and each host's client ID and secret.
 | `list_sources` | a model's grids you can read |
 | `describe_source` | a grid's metrics (input or calculated, aggregation, time summary, format) and dimensions |
 | `list_members` | members of a grid dimension you can see, for filters and breakdowns |
-| `query_grid` | engine totals for a filtered slice, or values per member of one dimension |
+| `query_grid` | engine totals for a filtered slice, or values per member of one dimension; a pick-list reads as its member (`text`), a text metric as its text where every dimension is filtered |
 | `compare_grid` | two readings member by member (actual vs budget, one period vs another): difference and percent change |
 | `render_chart` | a bar, line, pie, scatter or histogram chart of a grid query |
 | `render_report` | up to 10 sections — KPIs, tables, charts, comparisons — each a grid query |

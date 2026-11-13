@@ -178,7 +178,7 @@ type Invoker interface {
 	// ConfirmAiProposal invokes confirmAiProposal operation.
 	//
 	// Execute a pending proposal's write steps (creates the session's draft on first use when it has
-	// none; a start_new_draft step moves the session to a new draft for the steps after it).
+	// none).
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
@@ -4797,7 +4797,7 @@ func (c *Client) sendCompleteTask(ctx context.Context, request *TaskActionReques
 // ConfirmAiProposal invokes confirmAiProposal operation.
 //
 // Execute a pending proposal's write steps (creates the session's draft on first use when it has
-// none; a start_new_draft step moves the session to a new draft for the steps after it).
+// none).
 //
 // POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 func (c *Client) ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error) {
@@ -5830,23 +5830,6 @@ func (c *Client) sendCreateAiSession(ctx context.Context, params CreateAiSession
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.RevisionID.Get(); ok {
 				return e.EncodeValue(conv.UUIDToString(val))
-			}
-			return nil
-		}); err != nil {
-			return res, errors.Wrap(err, "encode query")
-		}
-	}
-	{
-		// Encode "new_draft" parameter.
-		cfg := uri.QueryParameterEncodingConfig{
-			Name:    "new_draft",
-			Style:   uri.QueryStyleForm,
-			Explode: true,
-		}
-
-		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
-			if val, ok := params.NewDraft.Get(); ok {
-				return e.EncodeValue(conv.StringToString(string(val)))
 			}
 			return nil
 		}); err != nil {

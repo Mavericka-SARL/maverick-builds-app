@@ -299,6 +299,26 @@ func TestRecordTables(t *testing.T) {
 		if count() != 0 {
 			t.Fatal("a draft posted")
 		}
+		// A status inside data is refused, not dropped: it used to answer 200
+		// and leave the record a draft (2026-11-13). The record's own status
+		// echoed back, as a form does, still saves.
+		draftID := idOf(draft)
+		inData := map[string]any{"data": map[string]any{"region": "US", "product": "LAPTOP", "period": "Q1", "amount": 9, "status": "approved"}}
+		if code, raw := d.req("PUT", "/api/records/"+draftID, d.westRep, inData); code != http.StatusBadRequest || !strings.Contains(string(raw), `top-level \"status\"`) {
+			t.Errorf("status inside data: %d %s, want 400 naming the top-level field", code, raw)
+		}
+		if code, raw := d.req("POST", "/api/forms/"+adjID+"/records", d.westRep, inData); code != http.StatusBadRequest {
+			t.Errorf("a new record with a status inside data: %d %s, want 400", code, raw)
+		}
+		d.call("PUT", "/api/records/"+draftID, d.westRep, map[string]any{"data": map[string]any{
+			"region": "US", "product": "LAPTOP", "period": "Q1", "amount": 9, "status": "draft"}})
+		// A label alone renames the table and keeps its fields.
+		d.call("PATCH", "/api/forms/"+adjID, d.dev, map[string]any{"label": "Adjustments"})
+		var label string
+		var nFields int
+		if err := d.pool.QueryRow(ctx, `SELECT label, jsonb_array_length(fields) FROM model.form_def WHERE id=$1::uuid`, adjID).Scan(&label, &nFields); err != nil || label != "Adjustments" || nFields != len(withStatus) {
+			t.Errorf("label-only PATCH: label %q, %d fields (want Adjustments, %d): %v", label, nFields, len(withStatus), err)
+		}
 		patched := d.call("PATCH", "/api/forms/"+adjID, d.dev, map[string]any{"name": "adj", "label": "Adjustment", "fields": fields})
 		if patched["status_field_changed"] != true {
 			t.Errorf("PATCH answer = %v, want status_field_changed", patched)

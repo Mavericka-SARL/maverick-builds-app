@@ -32,8 +32,16 @@ type Completeness struct {
 // (no value, or withheld — a source that does not tell the two apart).
 type Value struct {
 	Value *float64 `json:"value"`
-	State string   `json:"state"`
+	// Text is the value of a text metric, or the member a pick-list cell
+	// holds ("Enabled (ENABLED)"); Value is then empty. A pick-list is stored
+	// as its member's key, a large number that means nothing to a reader,
+	// and a text metric has no number at all: both were served as numbers
+	// (the key; 0 for a text) until 2026-11-13.
+	Text  *string `json:"text,omitempty"`
+	State string  `json:"state"`
 }
+
+func textValue(t string) Value { return Value{Text: &t, State: "ok"} }
 
 func okValue(v float64) Value { return Value{Value: &v, State: "ok"} }
 
@@ -109,6 +117,35 @@ type gridMetric struct {
 	DimensionIDs   []string `json:"dimension_ids"`
 	// InputRules: the values an input metric's cells accept; absent when any.
 	InputRules json.RawMessage `json:"input_rules"`
+	// PicklistOptions: the members a pick-list metric's cells hold, by key.
+	PicklistOptions []struct {
+		Key   float64 `json:"key"`
+		Code  string  `json:"code"`
+		Label string  `json:"label"`
+	} `json:"picklist_options"`
+}
+
+// textual says whether m's values are words, not numbers: a text metric or a pick-list.
+func (m gridMetric) textual() bool { return m.Format == "text" || m.Format == "picklist" }
+
+// picked is the member a pick-list cell's stored key stands for.
+func (m gridMetric) picked(key float64) (Value, bool) {
+	if key == 0 {
+		return Value{State: "no_value"}, true
+	}
+	for _, o := range m.PicklistOptions {
+		if o.Key == key {
+			label := o.Label
+			if label == "" {
+				label = o.Code
+			}
+			if o.Code != "" && o.Code != label {
+				label += " (" + o.Code + ")"
+			}
+			return textValue(label), true
+		}
+	}
+	return Value{}, false
 }
 
 type member struct {
@@ -394,8 +431,9 @@ func (s *Session) QueryGrid(ctx context.Context, p Pinned, q GridQuery) (*GridRe
 
 	// Metrics: every one requested must be one the person sees in this grid.
 	type metricCol struct {
-		ref Ref
-		col Column
+		ref  Ref
+		col  Column
+		meta gridMetric
 	}
 	var metrics []metricCol
 	byID := map[string]int{}
@@ -422,9 +460,14 @@ func (s *Session) QueryGrid(ctx context.Context, p Pinned, q GridQuery) (*GridRe
 		if label == "" {
 			label = m.Name
 		}
+		typ := "number"
+		if m.textual() {
+			typ = "string"
+		}
 		metrics = append(metrics, metricCol{
-			ref: Ref{ID: m.ID, Name: label},
-			col: Column{ID: m.ID, Label: label, Type: "number", Format: m.Format, Decimals: m.FormatDecimals, Currency: m.FormatCurrency},
+			ref:  Ref{ID: m.ID, Name: label},
+			col:  Column{ID: m.ID, Label: label, Type: typ, Format: m.Format, Decimals: m.FormatDecimals, Currency: m.FormatCurrency},
+			meta: m,
 		})
 		res.Metrics = append(res.Metrics, Ref{ID: m.ID, Name: label})
 	}
@@ -464,11 +507,47 @@ func (s *Session) QueryGrid(ctx context.Context, p Pinned, q GridQuery) (*GridRe
 		if totals.RevisionID != p.RevisionID {
 			return nil, notFound("grid")
 		}
+		// A text metric's words come only with the cells of one member of
+		// every dimension: read them when the filters pin every dimension.
+		var texts map[string]string
+		pinned := make([]string, 0, len(g.meta.Dimensions))
+		for _, d := range g.meta.Dimensions {
+			if code, ok := q.Filters[d.ID]; ok {
+				pinned = append(pinned, code)
+			}
+		}
+		if len(pinned) == len(g.meta.Dimensions) && slices.ContainsFunc(metrics, func(m metricCol) bool { return m.meta.Format == "text" }) {
+			var full struct {
+				Texts map[string]string `json:"texts"`
+			}
+			fv := url.Values{"grid_def_id": {q.GridID}, "revision_id": {p.RevisionID}}
+			if len(q.Filters) > 0 {
+				fv.Set("scope", string(scope))
+			}
+			if _, err := s.get(ctx, "grid", p.request("/api/grid", fv), &full); err != nil {
+				return nil, err
+			}
+			texts = full.Texts
+		}
 		for _, m := range metrics {
 			v := Value{State: "no_value"}
 			switch {
 			case slices.Contains(totals.Withheld, m.ref.ID):
 				v = Value{State: "withheld"}
+			case m.meta.Format == "text":
+				key := m.ref.ID
+				if len(pinned) > 0 {
+					key += ":" + strings.Join(pinned, ":")
+				}
+				if t, ok := texts[key]; ok && len(pinned) == len(g.meta.Dimensions) {
+					v = textValue(t)
+				}
+			case m.meta.Format == "picklist":
+				if t, ok := totals.Totals[m.ref.ID]; ok {
+					if pv, ok := m.meta.picked(t); ok {
+						v = pv
+					}
+				}
 			default:
 				if t, ok := totals.Totals[m.ref.ID]; ok {
 					v = okValue(t)
@@ -541,7 +620,15 @@ func (s *Session) QueryGrid(ctx context.Context, p Pinned, q GridQuery) (*GridRe
 				}
 				for _, sr := range series.Series {
 					v := Value{State: "absent"}
-					if ci < len(sr.Values) && sr.Values[ci] != nil {
+					meta := metrics[slices.IndexFunc(metrics, func(m metricCol) bool { return m.ref.ID == sr.MetricID })].meta
+					switch {
+					case meta.Format == "text":
+						// Words have no series: read them filtered to one member of every dimension.
+					case ci < len(sr.Values) && sr.Values[ci] != nil && meta.Format == "picklist":
+						if pv, ok := meta.picked(*sr.Values[ci]); ok {
+							v = pv
+						}
+					case ci < len(sr.Values) && sr.Values[ci] != nil:
 						v = okValue(*sr.Values[ci])
 					}
 					row[sr.MetricID] = v
