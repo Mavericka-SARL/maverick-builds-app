@@ -558,12 +558,12 @@ Ask it how something works, too. It reads your model — formulas, grids, workfl
 
 - **One task per session.** Press **New session** for each new piece of work. A long session — a few dozen turns — starts to drift and repeat earlier tasks.
 - **Give it the source.** Attach the workbook or specification you are building from, and say what to take from it.
-- **Say what you want in the model's own terms:** the dimensions and their members, what people type in and what is calculated, the time grain and scenarios, units and currency, who does what. "Revenue = units × price per product and month, in EUR, for Base and Downside" beats "add revenue".
-- **Pick a model to suit the job** under **AI Settings**: a larger model for building a whole model from a workbook, a small one for small changes.
+- **Say what you want in the model's own terms:** the dimensions and their members, what people type in and what is calculated, the time grain and scenarios, units and currency, who does what. "Revenue = units × price per product and month, in EUR, for Base and Downside" beats "add revenue". Name the business requirements too: requests and their approval, who edits what, an approved plan, the pages each role needs.
+- **Pick a model to suit the job** under **AI Settings**: for building a whole model from a workbook, a strong reasoning model at **low** effort — it finishes in fewer calls and less time than a small model, which asks more and stops short; a small one for small changes.
 
 **While it builds**
 
-- **Build in stages and confirm each:** structure (dimensions, metrics, grids), then calculations, then data, then pages, then workflows and roles. Check the numbers of a stage before asking for the next.
+- **Let it plan from an agreed design:** from a workbook it first agrees a target with you — the conventions every row follows, the choices the workbook leaves open (answer each once), the business requirements and the checks — then builds one module per stage (the inputs and calculations that belong together, checked against your workbook over every period), then the actuals, then roles, workflows and pages. Confirm each stage, and judge it by the evidence on the plan card: the rows and periods compared, what still differs, and what the stage took.
 - **Keep requests to a size it can finish:** one page, one workflow, one group of metrics. "Fix the Management dashboard" works better than "fix every page".
 - **Read every Action plan before you confirm it.** Each one has already been tried in a trial run: a plan that would fail, or that leaves a page overlapping, cramped or without its selector bar, goes back to the AI Developer before you see it. What it could not settle shows as a warning on the plan; ask it to fix the warning, or to explain a step, before you confirm.
 - **Ask for pages the way people use them:** a *Start here* page first, with the workflow buttons, their status and a short guide; a selector bar for the scenario and period; KPI tiles over a chart over the grids. It sets the page order and lays out each page with **Arrange**, which you can also press yourself in the dashboard designer.
@@ -572,7 +572,7 @@ Ask it how something works, too. It reads your model — formulas, grids, workfl
 
 - Open the draft in **Developer › Developer Models** and look through it: the numbers in the grids against your source, each page in **Preview**, every workflow's steps and roles.
 - **Say exactly what is wrong:** "the Net revenue tile shows €99.4M; it should be FY 2026 for Base". It corrects the same draft.
-- If a draft has gone astray, **Discard** it and start a new session from your working revision rather than patching it.`, 640),
+- If a draft has gone astray, **Discard** it and start a new session from your working revision rather than patching it.`, 760),
 
 		devText(`## Where its changes land
 

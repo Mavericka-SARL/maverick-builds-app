@@ -2170,8 +2170,6 @@ export interface AISettings {
   reasoning_effort?: string;
   /** Whether the model and effort suit building a model from a workbook (server rule); absent when they do. */
   build_advice?: string;
-  /** The model for turns whose sheet plan the server generated whole; "" keeps every turn on `model`. */
-  routine_model?: string;
 }
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
@@ -2321,6 +2319,20 @@ export interface AITaskStage {
   check?: string;
   status: "pending" | "in_progress" | "done" | "skipped";
   note?: string;
+  /** The workbook sheets the stage builds and proves together (a module). */
+  sheet?: string;
+  sheets?: string[];
+  /** How the stage ended: what was built, the server's comparison count, what still differs, the next stage. */
+  evidence?: { built: string; compared?: string; differences?: string; next?: string };
+  /** What the stage took, turn by turn. */
+  measure?: { turns: number; minutes: number; calls: number; input_tokens: number; cached_tokens: number; output_tokens: number; tool_calls: number; corrections: number };
+}
+/** The agreed target design of a build from a workbook (the parts the console shows). */
+export interface AITargetModel {
+  summary: string;
+  decisions?: { question: string; options?: string[]; choice?: string; sheets?: string[] }[];
+  requirements?: { area: string; behaviour: string; status?: string }[];
+  checks?: { name: string; how: string; status?: string; evidence?: string }[];
 }
 export interface AITaskPlan {
   goal: string;
@@ -2328,6 +2340,7 @@ export interface AITaskPlan {
   updated_at?: string;
   /** What the developer decided in answer to the AI, kept for every later turn and session. */
   decisions?: string[];
+  target?: AITargetModel;
 }
 
 /** The workbook map: which metric each compared workbook row became. */
@@ -3506,7 +3519,7 @@ export const api = {
   aiGetSettings: () => apiFetch<AISettings>("/api/ai/settings"),
   aiWorkbookMap: (sessionId: string) => apiFetch<AIWorkbookMap>(`/api/ai/sessions/${sessionId}/workbook-map`),
   getConnectorInfo: () => apiFetch<ConnectorInfo>("/api/connector"),
-  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string; routine_model?: string }) =>
+  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string }) =>
     apiFetch<{ status: string }>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
 
 };

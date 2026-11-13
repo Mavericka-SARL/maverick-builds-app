@@ -532,27 +532,36 @@ func PlanSheet(raw []byte, in SheetPlanInput) ([]SheetRow, error) {
 			typical = g.periodStart
 		}
 		fTyp, fFirst := g.formulas[[2]int{r, typical}], g.formulas[[2]int{r, g.periodStart}]
-		if fTyp == "" && fFirst == "" {
+		if fTyp == "" && fFirst == "" && !anyFormula(g, r) {
 			sr.Input = true
 			out = append(out, sr)
 			continue
 		}
 		sr.Excel = fTyp
-		pc.col, pc.firstCol = typical, false
-		tTyp, p1 := pc.translate(fTyp)
-		pc.col, pc.firstCol = g.periodStart, true
-		tFirst, p2 := pc.translate(fFirst)
+		if sr.Excel == "" {
+			sr.Excel = fFirst
+		}
+		// Every period is read, not the first two: a formula that changes
+		// later in the horizon (a trailing window that grows over the
+		// opening months, a rule from month 13) is translated per run of
+		// periods, or named as a problem (owner, 2026-11-12).
+		segs, prob := pc.translateRuns(g, r)
 		switch {
-		case p1 != "":
-			sr.Problem = p1
-		case tFirst == tTyp || fFirst == "":
-			sr.Formula = tTyp
-		case p2 != "":
-			sr.Problem = "the first period differs: " + p2
-		default:
+		case prob != "":
+			sr.Problem = prob
+		case len(segs) == 1:
+			sr.Formula = segs[0].expr
+		case len(segs) == 2 && segs[0].to == g.periodStart:
 			// The first period differs (an opening value): the first month
 			// takes its own formula, the others the later one.
-			sr.Formula = fmt.Sprintf("IF(((YEAR(START()) - %d) * 12 + MONTH(START()) - %d + 1) = 1, %s, %s)", in.FirstYear, in.FirstMon, tFirst, tTyp)
+			sr.Formula = fmt.Sprintf("IF(((YEAR(START()) - %d) * 12 + MONTH(START()) - %d + 1) = 1, %s, %s)", in.FirstYear, in.FirstMon, segs[0].expr, segs[1].expr)
+		default:
+			idx := fmt.Sprintf("((YEAR(START()) - %d) * 12 + MONTH(START()) - %d + 1)", in.FirstYear, in.FirstMon)
+			f := segs[len(segs)-1].expr
+			for i := len(segs) - 2; i >= 0; i-- {
+				f = fmt.Sprintf("IF(%s <= %d, %s, %s)", idx, segs[i].to-g.periodStart+1, segs[i].expr, f)
+			}
+			sr.Formula = f
 		}
 		if sr.Formula != "" && sr.Percentage && !strings.Contains(sr.Formula, "* 100") {
 			sr.Formula = "(" + sr.Formula + ") * 100"
@@ -560,4 +569,60 @@ func PlanSheet(raw []byte, in SheetPlanInput) ([]SheetRow, error) {
 		out = append(out, sr)
 	}
 	return out, nil
+}
+
+// run is one run of periods whose formulas translate alike: columns from
+// to to (1-based), and the translation.
+type run struct {
+	from, to int
+	expr     string
+}
+
+// anyFormula reports whether row r holds a formula in any period.
+func anyFormula(g *sheetGrid, r int) bool {
+	for c := g.periodStart; c <= g.periodEnd; c++ {
+		if g.formulas[[2]int{r, c}] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// translateRuns translates row r's formula in every period and groups the
+// periods into runs of the same translation. A period that cannot be
+// translated, or typed values among formulas after the first period, is a
+// problem naming the month. A typed first period (an opening value) before
+// formulas takes the formulas' translation, as before.
+func (pc *planContext) translateRuns(g *sheetGrid, r int) ([]run, string) {
+	var runs []run
+	for c := g.periodStart; c <= g.periodEnd; c++ {
+		f := g.formulas[[2]int{r, c}]
+		month := c - g.periodStart + 1
+		if f == "" {
+			if c == g.periodStart {
+				continue
+			}
+			return nil, fmt.Sprintf("month %d holds a typed value among formulas: build the row by hand (an input for those months, or the workbook's rule)", month)
+		}
+		pc.col, pc.firstCol = c, c == g.periodStart
+		t, p := pc.translate(f)
+		if p != "" {
+			if c == g.periodStart {
+				return nil, "the first period differs: " + p
+			}
+			if month > 2 {
+				return nil, fmt.Sprintf("the formula changes at month %d (%s): %s", month, f, p)
+			}
+			return nil, p
+		}
+		if n := len(runs); n > 0 && runs[n-1].expr == t && runs[n-1].to == c-1 {
+			runs[n-1].to = c
+			continue
+		}
+		runs = append(runs, run{from: c, to: c, expr: t})
+	}
+	if len(runs) > 0 && runs[0].from > g.periodStart {
+		runs[0].from = g.periodStart
+	}
+	return runs, ""
 }

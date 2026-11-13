@@ -105,6 +105,12 @@ func (h *handler) aiLoadSheet(ctx context.Context, sessionID, userID, file, shee
 	if err != nil {
 		return "", err
 	}
+	// A substantive choice is made once, before the sheet is loaded.
+	if plan, _ := h.aiChatStore(ctx).TaskPlan(ctx, sessionID); plan != nil {
+		if held := plan.Target.HeldBack(sheet); held != "" {
+			return "", fmt.Errorf("%s", held)
+		}
+	}
 	revID := sess.DraftRevisionID
 	if revID == "" {
 		return "", fmt.Errorf("load_sheet reads the AI draft: confirm a first plan so the session has one")

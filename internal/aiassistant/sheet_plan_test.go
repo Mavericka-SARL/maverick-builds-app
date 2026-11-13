@@ -126,3 +126,64 @@ func TestCompactPlanRender(t *testing.T) {
 		t.Errorf("target render:\n%s", r)
 	}
 }
+
+// Every period is read (owner, 2026-11-12): a rule that changes at month 13
+// becomes an IF on the month number; a trailing window that grows over the
+// opening months, and a typed value among formulas, are named problems with
+// their month — not hidden behind the first two months.
+func TestPlanSheetReadsEveryPeriod(t *testing.T) {
+	f := excelize.NewFile()
+	_ = f.SetSheetName("Sheet1", "Plan")
+	_ = f.SetCellValue("Plan", "A1", "Period")
+	_ = f.SetCellValue("Plan", "A4", "Base units")
+	_ = f.SetCellValue("Plan", "A5", "Bonus units")
+	_ = f.SetCellValue("Plan", "A6", "Trailing units")
+	_ = f.SetCellValue("Plan", "A7", "Mixed units")
+	for i := 0; i < 15; i++ {
+		col, _ := excelize.ColumnNumberToName(i + 2)
+		_ = f.SetCellValue("Plan", col+"1", []string{"Jan-27", "Feb-27", "Mar-27", "Apr-27", "May-27", "Jun-27", "Jul-27", "Aug-27", "Sep-27", "Oct-27", "Nov-27", "Dec-27", "Jan-28", "Feb-28", "Mar-28"}[i])
+		_ = f.SetCellValue("Plan", col+"4", 100+i)
+		if i < 12 {
+			_ = f.SetCellFormula("Plan", col+"5", col+"4*1")
+		} else {
+			_ = f.SetCellFormula("Plan", col+"5", col+"4*2")
+		}
+		if i < 2 {
+			_ = f.SetCellFormula("Plan", col+"6", col+"4")
+		} else {
+			from, _ := excelize.ColumnNumberToName(i)
+			_ = f.SetCellFormula("Plan", col+"6", "AVERAGE("+from+"4:"+col+"4)")
+		}
+		if i < 14 {
+			_ = f.SetCellFormula("Plan", col+"7", col+"4")
+		} else {
+			_ = f.SetCellValue("Plan", col+"7", 5)
+		}
+	}
+	var buf bytes.Buffer
+	_ = f.Write(&buf)
+	target := &TargetModel{Summary: "x", Sheets: []TargetSheet{
+		{Sheet: "Plan", Role: "calculation", Grid: "Plan", Dimensions: []string{"month"}, Metrics: []string{"base_units", "bonus_units", "trailing_units", "mixed_units"}},
+	}}
+	rows, err := PlanSheet(buf.Bytes(), SheetPlanInput{Sheet: "Plan", Target: target, FirstYear: 2027, FirstMon: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]SheetRow{}
+	for _, r := range rows {
+		got[r.Metric] = r
+	}
+	idx := "((YEAR(START()) - 2027) * 12 + MONTH(START()) - 1 + 1)"
+	if want := "IF(" + idx + " <= 12, base_units*1, base_units*2)"; got["bonus_units"].Formula != want {
+		t.Errorf("bonus_units = %q / %q, want %q", got["bonus_units"].Formula, got["bonus_units"].Problem, want)
+	}
+	if p := got["trailing_units"].Problem; !strings.Contains(p, "changes at month 3") {
+		t.Errorf("trailing_units problem = %q (formula %q), want the change at month 3 named", p, got["trailing_units"].Formula)
+	}
+	if p := got["mixed_units"].Problem; !strings.Contains(p, "month 15 holds a typed value") {
+		t.Errorf("mixed_units problem = %q (formula %q), want month 15's typed value named", p, got["mixed_units"].Formula)
+	}
+	if !got["base_units"].Input {
+		t.Errorf("base_units is an input: %+v", got["base_units"])
+	}
+}

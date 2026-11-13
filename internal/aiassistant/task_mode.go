@@ -168,28 +168,49 @@ var playbooks = map[string]string{
 1. Understand the WHOLE workbook before building anything: analyse_workbook (every sheet: its role, layout,
    input and formula rows, the sheets it reads, the build order), the Guide (owners, process), and
    read_attached_sheet for the formulas of the sheets you are unsure of.
-2. Record the TO-BE model with set_target_model before any plan: the dimensions and their members; for EVERY
-   sheet its role (input, calculation, report, actuals, guide, skip), its grid, the grid's dimensions, the rows it
-   covers and its metric names; the pages, roles, workflows and triggers. This is the model you build — keep
-   every plan within it, and change it (set_target_model again) when the workbook shows it must.
-3. Then plan_task from the target, STRUCTURE FIRST: dimensions; inputs (load_sheet, or sample values where real data
-   comes later); the calculation sheets in build order, each with plan_sheet (the server translates the formulas;
-   you propose one sheet_plan step with fixes for the rows it could not translate); roles and access; workflows
-   and triggers; pages (one per stage). Actuals import tables and loaders come after that, and loading the real
-   data and reconciling every sheet last. The server cuts larger stages and orders them so.
-   Inputs are LOADED from the sheet with load_sheet, never typed.
-4. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
+2. Agree ONE target design before construction, with set_target_model: the dimensions (only where they mean
+   something: a function for payroll, a site for capacity, a channel for sales); the conventions every row follows
+   (units, signs, percentages — the model stores percent units, 5 = 5% — opening balances, scenario treatment, monthly
+   against annual); for EVERY sheet its role, grid, dimensions, rows, metrics, owner and how it is verified, with row
+   notes for meanings that need saying and for rows the model changes on purpose (status changed, with the reason);
+   the business requirements the platform adds (scenarios as members selectable in views, requests with their
+   approval, department owners editing their scope and Finance the shared assumptions and actuals, submission and
+   review and approval with rejection back to the right scope, a frozen approved revision apart from the working
+   forecast, role pages reading the same calculations); and the verification checks beyond the saved workbook
+   (other scenarios, a switch turned off, a delay or a constraint, a rule from month 13, actual zero against missing,
+   cash and balance reconciliation, a rejected approval, a restricted user). Record each substantive choice the
+   workbook leaves open as a decision (a sheet nothing reads; whether imported closing balances start the next
+   forecast) and ASK the developer once, with the options; record the answer with update_target_model. A sheet
+   with an open decision is not loaded or translated until then.
+3. plan_task from the target: one coherent module per stage in dependency order (e.g. Hiring Plan → Headcount →
+   payroll first; then revenue, production, the statements), each stage loading its inputs and translating and
+   proving its calculations; then actuals and reforecasting; then the business requirements (roles and access,
+   workflows, the approved revision, pages for each audience), once the calculations they read reconcile; the
+   verification checks last. The server keeps a module to a few sheets and orders the stages so.
+4. Routine work goes to the server's bulk tools; you handle the ambiguous mappings and unsupported logic:
+   - inputs: load_sheet (or import_file_data on the workbook), never typed — not into a plan, not into a file;
+   - calculations: plan_sheet translates the sheet's formulas; propose ONE sheet_plan step with fixes only for the
+     rows it could not translate (it names the month a formula changes);
+   - proof: compare_with_sheet every row of the module, all periods; the workbook map keeps what matched.
+   Approve coherent changes: one proposal per module where it fits, not dozens of small edits.
+5. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
    percentages in percent units); the workbook's own tests and guards stay in the formulas. Every metric and
    grid gets the tag of its sheet's area ("tags" on create): a model of hundreds is navigated by them.
-5. After each calculation stage, compare_with_sheet every row of the sheets it built; a stage is done when they
-   match, not when its metrics exist. Never type a workbook value into a calculated metric.
-6. Who may change which inputs is a business admin's to set: list it in your report, per the Guide.
+6. A stage is done when its numbers are: every mapped row of its sheets compared over every period and matching,
+   or the difference explained. End it with update_task_plan done and its evidence — what was built or repaired,
+   what still differs and why (none when none), the next bounded stage; the server adds the rows and periods
+   compared. The saved workbook is one case (one scenario, its switches as saved): record each verification check
+   (update_target_model: passed, failed or not_possible, with evidence) — the build ends when all are recorded.
+7. Report a difference precisely: the draft, metric, month, scenario, expected and actual value, and how to
+   reproduce it. Fix its upstream cause, then compare the outputs it feeds. Never change an input to make a
+   calculated row match.
 Know-how from earlier builds:
 - Settings and drivers that are single values (per scenario at most) go on a grid WITHOUT Month: on a monthly grid
   every value needs a month. Fix a wrong grid by changing the grid, not the metrics.
 - A sheet with members across its columns (scenarios, months) and labels down a column is loaded with load_sheet;
   never retype its numbers into a file or a plan.
-- plan_task, update_task_plan and set_target_model are called directly, never as steps of propose_actions.
+- plan_task, update_task_plan, set_target_model and update_target_model are called directly, never as steps of
+  propose_actions.
 `,
 	"workbook_fix": `### Playbook: numbers that must match a workbook
 1. compare_with_sheet the whole sheet first ("rows": every row) to see what differs and from which period.
@@ -198,7 +219,9 @@ Know-how from earlier builds:
 3. Copy the workbook's own logic (its closed-month test, its guards); never type a workbook value into a
    calculated metric, never "if the actual is 0, use the plan", and never move an input (an assumption, a driver)
    until a row matches: inputs change only where they differ from their own row in the workbook.
-4. Compare again after the fix; report rows matching before and after.
+4. Compare again after the fix, and the outputs the fixed row feeds; report rows matching before and after.
+5. Name each difference precisely: the draft, metric, month, scenario, expected and actual value, and how to
+   reproduce it.
 `,
 	"pages": `### Playbook: pages
 1. A page per sheet people read, or a place on a page with the sheets it belongs with; KPI pages show what the

@@ -102,3 +102,25 @@ func TestOpenAIResponsesFallback(t *testing.T) {
 		t.Errorf("second input order %s", got)
 	}
 }
+
+// A stream's error event keeps its message, whether it stands on the event
+// or in its error object (2026-11-12: a key out of credits read only
+// "openai: responses: ").
+func TestOpenAIResponsesStreamErrorMessage(t *testing.T) {
+	for _, ev := range []string{
+		`{"type":"error","error":{"message":"You have no credits remaining.","code":"insufficient_quota"}}`,
+		`{"type":"error","message":"You have no credits remaining.","code":"insufficient_quota"}`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", ev)
+		}))
+		p := NewOpenAIAt("k", srv.URL, srv.Client()).WithReasoningEffort("low")
+		responsesModels.Store("m-credits", true)
+		_, err := p.ChatStream(context.Background(), ChatRequest{Model: "m-credits", Messages: []Message{{Role: "user", Content: "hi"}}}, func(string) {})
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "You have no credits remaining") || !strings.Contains(err.Error(), "insufficient_quota") {
+			t.Errorf("event %s: error %v", ev, err)
+		}
+	}
+}

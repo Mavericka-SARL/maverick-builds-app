@@ -92,14 +92,17 @@ func TestPlanTaskAppendReplaceAndProof(t *testing.T) {
 	plan.Stages = append(plan.Stages, aiassistant.TaskStage{Title: "Assumptions", Items: []string{"Assumptions values loaded"}, Status: aiassistant.StagePending})
 	_ = chat.SetTaskPlan(ctx, s.ID, plan)
 	notProven := func(aiassistant.TaskStage) string { return "Assumptions: no row compared yet" }
-	if _, err := call(aiassistant.UpdateTaskPlanTool, map[string]any{"stage": 2, "status": "done"}, notProven); err == nil || !strings.Contains(err.Error(), "not done by its numbers") {
+	if _, err := call(aiassistant.UpdateTaskPlanTool, map[string]any{"stage": 2, "status": "done"}, nil); err == nil || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("done without evidence taken: %v", err)
+	}
+	if _, err := call(aiassistant.UpdateTaskPlanTool, map[string]any{"stage": 2, "status": "done", "evidence": map[string]any{"built": "Assumptions loaded", "differences": "none", "next": "SaaS"}}, notProven); err == nil || !strings.Contains(err.Error(), "not done by its numbers") {
 		t.Fatalf("unproven done taken: %v", err)
 	}
-	if _, err := call(aiassistant.UpdateTaskPlanTool, map[string]any{"stage": 2, "status": "done", "note": "the sheet is scenario columns, compared by hand"}, notProven); err != nil {
+	if _, err := call(aiassistant.UpdateTaskPlanTool, map[string]any{"stage": 2, "status": "done", "note": "the sheet is scenario columns, compared by hand", "evidence": map[string]any{"built": "Assumptions loaded", "differences": "none", "next": "SaaS"}}, notProven); err != nil {
 		t.Fatal(err)
 	}
 	plan, _ = chat.TaskPlan(ctx, s.ID)
-	if st := plan.Stages[1]; st.Status != aiassistant.StageDone || !strings.HasPrefix(st.Note, "not proven by the workbook map") {
+	if st := plan.Stages[1]; st.Status != aiassistant.StageDone || !strings.HasPrefix(st.Note, "not proven by the workbook map") || st.Evidence == nil || st.Evidence.Next != "SaaS" {
 		t.Fatalf("second done: %+v", st)
 	}
 }
@@ -171,26 +174,32 @@ func TestAsksHowToSplit(t *testing.T) {
 	}
 }
 
-// A stage of several sheets is cut one per sheet, in the workbook's order;
-// a stage of pages one per page; a one-sheet stage stays.
+// A stage is one coherent module (owner, 2026-11-12): a few dependent
+// sheets stay together and are proven together; more are cut into modules of
+// at most maxModuleSheets in the workbook's order; a few pages stay one
+// stage and more are cut into stages of maxStagePages.
 func TestCutStages(t *testing.T) {
-	sheets := []string{"Guide", "Assumptions", "Headcount", "SaaS", "P&L", "Cash Flow"}
+	sheets := []string{"Guide", "Hiring Plan", "Headcount", "SaaS", "Hardware", "P&L", "Cash Flow", "Balance Sheet"}
 	in := []aiassistant.TaskStage{
-		{Title: "Inputs", Items: []string{"Assumptions drivers by scenario"}},
-		{Title: "Calculation sheets", Items: []string{"Formula metrics and grids for Headcount, SaaS and P&L", "Workbook comparisons for every calculated row"}},
-		{Title: "Dashboards", Items: []string{"Start page with instructions", "Board dashboard with KPIs"}},
+		{Title: "Hiring Plan → Headcount → payroll", Items: []string{"hiring events loaded", "FTE and payroll"}},
+		{Title: "Inputs", Items: []string{"Hiring Plan drivers by scenario"}},
+		{Title: "Calculation sheets", Items: []string{"Formula metrics for SaaS, Hardware, P&L, Cash Flow and Balance Sheet", "Workbook comparisons for every calculated row"}},
+		{Title: "Dashboards", Items: []string{"Start page", "Board dashboard"}},
+		{Title: "Pages", Items: []string{"Start", "Board", "Statements", "SaaS drivers", "Actuals"}},
+		{Title: "Roles and access", Items: []string{"Hardware Operations edits Hardware drivers"}},
 	}
 	out, cut := cutStages(in, sheets)
 	var titles []string
 	for _, s := range out {
-		titles = append(titles, s.Title)
+		titles = append(titles, s.Title+"="+strings.Join(s.StageSheets(), "+"))
 	}
-	want := "Inputs|Headcount|SaaS|P&L|Page: Start page with instructions|Page: Board dashboard with KPIs"
+	want := "Hiring Plan → Headcount → payroll=Hiring Plan+Headcount|Inputs=Hiring Plan|SaaS → Hardware → P&L → Cash Flow=SaaS+Hardware+P&L+Cash Flow|" +
+		"Balance Sheet=Balance Sheet|Dashboards=|Pages: Start, Board, Statements=|Pages: SaaS drivers, Actuals=|Roles and access="
 	if got := strings.Join(titles, "|"); got != want || len(cut) != 2 {
-		t.Fatalf("stages %s (cut %v)", got, cut)
+		t.Fatalf("stages\n%s\nwant\n%s\n(cut %v)", got, want, cut)
 	}
 	if last := out[3]; !strings.Contains(strings.Join(last.Items, ";"), "Workbook comparisons") {
-		t.Errorf("generic item not kept with the last sheet: %+v", last)
+		t.Errorf("generic item not kept with the last module: %+v", last)
 	}
 }
 
@@ -216,7 +225,13 @@ func TestTargetModelBeforePlan(t *testing.T) {
 	if _, err := call(aiassistant.PlanTaskTool, map[string]any{"goal": "Build", "stages": stages}); err == nil || !strings.Contains(err.Error(), "set_target_model") {
 		t.Fatalf("plan without a target taken: %v", err)
 	}
-	target := map[string]any{"summary": "A driver model.", "sheets": []any{
+	conventions := map[string]any{"units": "EUR", "signs": "costs positive", "percentages": "percent units; the workbook stores fractions",
+		"opening_balances": "n/a", "scenarios": "Base only", "aggregation": "monthly sums"}
+	if _, err := call(aiassistant.SetTargetModelTool, map[string]any{"summary": "A driver model.", "sheets": []any{
+		map[string]any{"sheet": "Assumptions", "role": "input", "grid": "Assumptions"}}}); err == nil || !strings.Contains(err.Error(), "conventions") {
+		t.Fatalf("a target without conventions taken: %v", err)
+	}
+	target := map[string]any{"summary": "A driver model.", "conventions": conventions, "sheets": []any{
 		map[string]any{"sheet": "Assumptions", "role": "input", "grid": "Assumptions", "dimensions": []string{"scenario"}, "metrics": []string{"arpu"}},
 		map[string]any{"sheet": "headcount", "role": "calculation", "grid": "Headcount", "metrics": []string{"fte"}},
 	}}
@@ -236,22 +251,23 @@ func TestTargetModelBeforePlan(t *testing.T) {
 	}
 }
 
-// Structure first: actuals imports after the build, reconciliation last.
-func TestStructureFirst(t *testing.T) {
+// Build order: calculation modules, then actuals, then the business
+// requirements, then the verification checks (owner, 2026-11-12).
+func TestBuildOrder(t *testing.T) {
 	target := &aiassistant.TargetModel{Sheets: []aiassistant.TargetSheet{{Sheet: "Import GL", Role: "actuals"}, {Sheet: "P&L", Role: "calculation"}}}
 	in := []aiassistant.TaskStage{
-		{Title: "Import GL — postings", Sheet: "Import GL"}, {Title: "P&L", Sheet: "P&L"},
-		{Title: "Final reconciliation: P&L"}, {Title: "Roles and access"}, {Title: "Actuals P&L import loader"},
+		{Title: "Import GL — postings", Sheet: "Import GL"}, {Title: "Pages: board, statements"}, {Title: "P&L", Sheet: "P&L"},
+		{Title: "Final verification", Sheets: []string{"Checks"}}, {Title: "Roles and access"}, {Title: "Actuals P&L import loader"},
 	}
-	out := structureFirst(in, target)
+	out := buildOrder(in, target)
 	var titles []string
 	for _, s := range out {
 		titles = append(titles, s.Title)
 	}
-	if got := strings.Join(titles, " | "); got != "P&L | Roles and access | Import GL — postings | Actuals P&L import loader | Final reconciliation: P&L" {
+	if got := strings.Join(titles, " | "); got != "P&L | Import GL — postings | Actuals P&L import loader | Pages: board, statements | Roles and access | Final verification" {
 		t.Fatalf("order: %s", got)
 	}
-	if structureFirst(out, target) != nil {
+	if buildOrder(out, target) != nil {
 		t.Error("an ordered plan was reordered")
 	}
 }

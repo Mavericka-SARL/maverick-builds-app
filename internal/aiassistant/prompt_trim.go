@@ -80,7 +80,7 @@ var sheetTools = map[string]bool{
 	"list_dimensions": true, "list_grids": true, "list_metrics": true, "list_revisions": true, "load_sheet": true,
 	"plan_sheet": true, "prepare_converted_file": true, "preview_file_import": true, "propose_actions": true,
 	"read_attached_sheet": true, "read_manual": true, "validate_formulas": true, "workbook_map": true,
-	PlanTaskTool: true, UpdateTaskPlanTool: true, SetTargetModelTool: true,
+	PlanTaskTool: true, UpdateTaskPlanTool: true, SetTargetModelTool: true, UpdateTargetModelTool: true,
 }
 
 // SheetStageTools keeps, of tools, those a sheet turn uses.

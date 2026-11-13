@@ -29,6 +29,10 @@ func (h *handler) sheetPlanRows(ctx context.Context, sessionID, revID, sheet str
 	if err != nil || plan == nil || plan.Target == nil {
 		return nil, nil, fmt.Errorf("plan_sheet works from the target model: record it first (set_target_model)")
 	}
+	// A substantive choice is made once, before the sheet is built.
+	if held := plan.Target.HeldBack(sheet); held != "" {
+		return nil, nil, fmt.Errorf("%s", held)
+	}
 	var target *aiassistant.TargetSheet
 	for i := range plan.Target.Sheets {
 		if strings.EqualFold(plan.Target.Sheets[i].Sheet, sheet) {
@@ -348,24 +352,4 @@ func humanName(m string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-// sheetGeneratedWhole reports whether the server's plan of a sheet leaves
-// nothing to the AI: every row mapped, and every metric not yet built an
-// input or a translated formula.
-func (h *handler) sheetGeneratedWhole(ctx context.Context, sessionID, revID, sheet string) bool {
-	rows, _, err := h.sheetPlanRows(ctx, sessionID, revID, sheet, nil)
-	if err != nil || len(rows) == 0 {
-		return false
-	}
-	exists := h.metricNamesOf(ctx, revID)
-	for _, r := range rows {
-		if r.Metric == "" {
-			return false
-		}
-		if !exists[strings.ToLower(r.Metric)] && !r.Input && r.Formula == "" {
-			return false
-		}
-	}
-	return true
 }

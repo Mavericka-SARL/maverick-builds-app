@@ -307,16 +307,21 @@ func (s *ChatStore) ListMessages(ctx context.Context, sessionID string) ([]ChatM
 	return msgs, rows.Err()
 }
 
-// CountLLMCallsInSession returns the number of LLM API calls made so far in
-// a session. Every Chat() invocation results in exactly one assistant-role
-// message being saved (mid-loop tool-call turns, the propose_actions turn,
-// and the final reply all save one each), so this is an exact count, not an
-// approximation.
+// CountLLMCallsInSession returns the model calls a session has made: the
+// count AddUsage keeps with the session, the same number the usage panel
+// shows. Counting assistant messages took the server's own notes for calls
+// (2026-11-12: a session refused at "200 LLM calls" had made 176).
 func (s *ChatStore) CountLLMCallsInSession(ctx context.Context, sessionID string) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM ai_assistant.message WHERE session_id=$1::uuid AND role='assistant'
-	`, sessionID).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT llm_calls FROM ai_assistant.session WHERE id=$1::uuid`, sessionID).Scan(&n)
+	return n, err
+}
+
+// CountToolMessages counts the tool results a session holds: the tools its
+// turns ran.
+func (s *ChatStore) CountToolMessages(ctx context.Context, sessionID string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM ai_assistant.message WHERE session_id=$1::uuid AND role='tool'`, sessionID).Scan(&n)
 	return n, err
 }
 
@@ -440,9 +445,6 @@ type LLMSettings struct {
 	// ReasoningEffort is sent with every OpenAI call when set (migration
 	// 178): "", none, minimal, low, medium, high or xhigh.
 	ReasoningEffort string `json:"reasoning_effort"`
-	// RoutineModel runs the turns whose sheet plan the server generated
-	// whole (migration 181); "" keeps every turn on Model.
-	RoutineModel string `json:"routine_model"`
 }
 
 // ReasoningEfforts are the values ReasoningEffort may hold.
@@ -452,9 +454,9 @@ func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings
 	var ls LLMSettings
 	var apiKeyEnc *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, model, api_key_enc, reasoning_effort, routine_model
+		SELECT provider, model, api_key_enc, reasoning_effort
 		FROM ai_assistant.llm_settings WHERE user_id=$1::uuid
-	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort, &ls.RoutineModel)
+	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// No model: the gateway runs the provider's default.
@@ -581,11 +583,3 @@ const settledReplyKeep = 200
 // tokens of sheet reads at every call). A plan rejected or still pending is
 // not confirmed, so its turn stays (settled is the last executed plan).
 const settledKeptTurns = 1
-
-// SaveRoutineModel sets the developer's model for routine turns (migration
-// 181); the row exists once SaveSettingsWithEffort ran.
-func (s *ChatStore) SaveRoutineModel(ctx context.Context, userID, model string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE ai_assistant.llm_settings SET routine_model = $2, updated_at = now() WHERE user_id = $1::uuid`,
-		userID, strings.TrimSpace(model))
-	return err
-}

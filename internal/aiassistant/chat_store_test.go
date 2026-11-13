@@ -2,6 +2,7 @@ package aiassistant_test
 
 import (
 	"context"
+	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,11 +40,11 @@ func seedAppAndUser(t *testing.T, pool *pgxpool.Pool, email string) (appID, mode
 	return appID, modelID, userID
 }
 
-// TestCountLLMCallsInSession_OnlyCountsAssistantMessages is a regression test
-// for the rate-limiting design: every Chat() call saves exactly one
-// assistant-role message, so counting those (and only those) must give an
-// exact LLM-call count, unaffected by user/tool-role messages in between.
-func TestCountLLMCallsInSession_OnlyCountsAssistantMessages(t *testing.T) {
+// TestCountLLMCallsInSession_CountsModelCalls: the session cap counts the
+// model calls recorded with the session, not messages — the server's own
+// notes are assistant messages too (2026-11-12: refused at "200 LLM calls"
+// after 176).
+func TestCountLLMCallsInSession_CountsModelCalls(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
 	appID, modelID, userID := seedAppAndUser(t, pool, "dev@test.com")
@@ -53,23 +54,28 @@ func TestCountLLMCallsInSession_OnlyCountsAssistantMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-
-	saveOrFail := func(role, content string) {
-		if _, err := chatStore.SaveMessage(ctx, sess.ID, role, content, nil, "", ""); err != nil {
-			t.Fatalf("SaveMessage(%s): %v", role, err)
+	for _, m := range []struct{ role, content string }{
+		{"user", "create a revenue metric"}, {"assistant", ""}, {"tool", "Metric 'revenue' created"},
+		{"assistant", "Done — I've created the revenue metric."}, {"assistant", "The plan below runs (server note)."},
+	} {
+		if _, err := chatStore.SaveMessage(ctx, sess.ID, m.role, m.content, nil, "", ""); err != nil {
+			t.Fatalf("SaveMessage(%s): %v", m.role, err)
 		}
 	}
-	saveOrFail("user", "create a revenue metric")
-	saveOrFail("assistant", "") // tool-call turn
-	saveOrFail("tool", "Metric 'revenue' created")
-	saveOrFail("assistant", "Done — I've created the revenue metric.")
-
+	for i := 0; i < 2; i++ {
+		if err := chatStore.AddUsage(ctx, sess.ID, providers.Usage{InputTokens: 100, OutputTokens: 10}); err != nil {
+			t.Fatalf("AddUsage: %v", err)
+		}
+	}
 	n, err := chatStore.CountLLMCallsInSession(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("CountLLMCallsInSession: %v", err)
 	}
 	if n != 2 {
-		t.Fatalf("expected 2 assistant-role messages counted, got %d", n)
+		t.Fatalf("expected the 2 recorded model calls, got %d", n)
+	}
+	if tools, err := chatStore.CountToolMessages(ctx, sess.ID); err != nil || tools != 1 {
+		t.Fatalf("CountToolMessages = %d, %v; want 1", tools, err)
 	}
 }
 
@@ -81,17 +87,11 @@ func TestCountLLMCallsInSession_ScopedToSession(t *testing.T) {
 
 	sessA, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	sessB, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
-
-	if _, err := chatStore.SaveMessage(ctx, sessA.ID, "assistant", "reply A1", nil, "", ""); err != nil {
-		t.Fatalf("SaveMessage A1: %v", err)
+	for _, id := range []string{sessA.ID, sessA.ID, sessB.ID} {
+		if err := chatStore.AddUsage(ctx, id, providers.Usage{}); err != nil {
+			t.Fatalf("AddUsage: %v", err)
+		}
 	}
-	if _, err := chatStore.SaveMessage(ctx, sessA.ID, "assistant", "reply A2", nil, "", ""); err != nil {
-		t.Fatalf("SaveMessage A2: %v", err)
-	}
-	if _, err := chatStore.SaveMessage(ctx, sessB.ID, "assistant", "reply B1", nil, "", ""); err != nil {
-		t.Fatalf("SaveMessage B1: %v", err)
-	}
-
 	nA, err := chatStore.CountLLMCallsInSession(ctx, sessA.ID)
 	if err != nil {
 		t.Fatalf("CountLLMCallsInSession A: %v", err)

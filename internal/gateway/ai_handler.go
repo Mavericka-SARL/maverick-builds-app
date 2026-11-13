@@ -530,7 +530,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// 2026-11-12, 120k characters of them instructions for workflows,
 	// connectors, exports and pages, 60k the workbook's text.
 	sheetTurn := false
-	if cur := taskPlan.Current(); cur >= 0 && taskPlan.Target != nil && taskPlan.Stages[cur].Sheet != "" {
+	if cur := taskPlan.Current(); cur >= 0 && taskPlan.Target != nil && len(taskPlan.Stages[cur].StageSheets()) > 0 {
 		sheetTurn = true
 	}
 	systemPrompt := aiassistant.BuildSystemPrompt(mc)
@@ -554,6 +554,9 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// State proven from the model: a sheet's stage whose rows the workbook
 	// map shows matching is done, whatever any call said (ai_task.go).
 	taskPlan = h.closeProvenStages(ctx, store, sessionID, modelID, revID, taskPlan)
+	// What the turn takes goes to the stage it works on (owner, 2026-11-12:
+	// minutes, calls, tokens, tool calls and corrections per stage).
+	defer h.measureTurn(ctx, store, sessionID, taskPlan, req.Content)()
 	systemPrompt += h.targetProgress(ctx, modelID, revID, taskPlan)
 	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
@@ -567,25 +570,14 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
 	planHooks := taskHooks{
-		Proof:  func(st aiassistant.TaskStage) string { return h.stageProofFor(ctx, sessionID, modelID, revID, st) },
-		Sheets: func() []string { return h.attachedSheetNames(ctx, sessionID) },
+		Proof:    func(st aiassistant.TaskStage) string { return h.stageProofFor(ctx, sessionID, modelID, revID, st) },
+		Sheets:   func() []string { return h.attachedSheetNames(ctx, sessionID) },
+		Compared: func(sheets []string) string { return h.comparedFor(ctx, modelID, revID, sheets) },
 	}
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
 	tools := aiassistant.TurnTools(reqMode, req.Content)
 	if sheetTurn && reqMode.Mode != aiassistant.ModeQuestion {
 		tools = aiassistant.SheetStageTools(tools)
-	}
-	// Model routing (owner, 2026-11-12): a turn whose sheet plan the server
-	// generated whole runs on the developer's routine model; designing the
-	// target and rows the server could not translate stay on the main one.
-	if sheetTurn && reqMode.Mode != aiassistant.ModeQuestion {
-		if st, sErr := h.aiChatStore(personalCtx(ctx, a)).GetSettings(personalCtx(ctx, a), a.UserID); sErr == nil && st.RoutineModel != "" {
-			sheet := taskPlan.Stages[taskPlan.Current()].Sheet
-			if h.sheetGeneratedWhole(ctx, sessionID, revID, sheet) {
-				log.Printf("AI routing: session=%s sheet %q generated whole: %s instead of %s", sessionID, sheet, st.RoutineModel, llmModel)
-				llmModel = st.RoutineModel
-			}
-		}
 	}
 
 	// 5. From here on, respond over SSE so the frontend can render the final
@@ -822,10 +814,11 @@ turn:
 		if u := llmResp.Usage; u.InputTokens+u.CacheReadTokens+u.CacheWriteTokens > 0 {
 			log.Printf("AI call: session=%s input=%d cache_read=%d cache_write=%d output=%d",
 				sessionID, u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.OutputTokens)
-			// Kept with the session, so a build's cost is known afterwards.
-			if uErr := store.AddUsage(context.WithoutCancel(ctx), sessionID, u); uErr != nil {
-				log.Printf("AI call: session=%s record usage: %v", sessionID, uErr)
-			}
+		}
+		// Every call is kept with the session, tokens or not: the session's
+		// call cap and a build's cost are read from it.
+		if uErr := store.AddUsage(context.WithoutCancel(ctx), sessionID, llmResp.Usage); uErr != nil {
+			log.Printf("AI call: session=%s record usage: %v", sessionID, uErr)
 		}
 
 		// A reply cut off at the output limit while writing a tool call: its
@@ -1041,6 +1034,9 @@ turn:
 				// left out, missing grid placements added (proposalCheck).
 				args.Steps = check.planSteps(args.Steps)
 				check.warnings = append(check.warnings, inputOverwriteWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
+				if len(h.attachedSheetNames(ctx, sessionID)) > 0 {
+					check.warnings = append(check.warnings, typedWorkbookValueWarnings(args.Steps, req.Content, workbookNumbers(h.sessionWorkbooks(ctx, sessionID)))...)
+				}
 				check.warnings = append(check.warnings, calcToInputWarnings(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content)...)
 				if probs, failed := formulaReplacedProblems(turnCtx, h.db.For(ctx), modelID, revID, args.Steps, req.Content); len(probs) > 0 {
 					check.problems = append(check.problems, probs...)
@@ -2069,9 +2065,6 @@ type aiSettingsReq struct {
 	APIKey   string `json:"api_key"` // optional; omit to keep existing key
 	// ReasoningEffort: omitted keeps the saved one; "" clears it.
 	ReasoningEffort *string `json:"reasoning_effort"`
-	// RoutineModel: the model for turns whose sheet plan the server generated
-	// whole; omitted keeps the saved one, "" clears it.
-	RoutineModel *string `json:"routine_model"`
 }
 
 // validReasoningEffort refuses an effort OpenAI does not take.
@@ -2127,12 +2120,6 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if err := h.aiChatStore(personalCtx(ctx, a)).SaveSettingsWithEffort(personalCtx(ctx, a), a.UserID, req.Provider, req.Model, req.APIKey, req.ReasoningEffort); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
-	}
-	if req.RoutineModel != nil {
-		if err := h.aiChatStore(personalCtx(ctx, a)).SaveRoutineModel(personalCtx(ctx, a), a.UserID, *req.RoutineModel); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAISettingsUpdated,

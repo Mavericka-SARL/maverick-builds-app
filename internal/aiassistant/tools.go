@@ -128,9 +128,10 @@ func ReadTools() []providers.ToolDef {
 // Task plan tools (task_plan.go): they write the session's plan, not the
 // model, so they run at once, as reads do — the gateway runs them.
 const (
-	PlanTaskTool       = "plan_task"
-	UpdateTaskPlanTool = "update_task_plan"
-	SetTargetModelTool = "set_target_model"
+	PlanTaskTool          = "plan_task"
+	UpdateTaskPlanTool    = "update_task_plan"
+	SetTargetModelTool    = "set_target_model"
+	UpdateTargetModelTool = "update_target_model"
 )
 
 var taskPlanTools = []providers.ToolDef{
@@ -138,11 +139,22 @@ var taskPlanTools = []providers.ToolDef{
 		Name: SetTargetModelTool,
 		Description: "Records the TO-BE model of a build from a workbook -- the design you build towards, before plan_task: the dimensions and their members, and for EVERY sheet " +
 			"(in build order) its role, the grid it becomes, that grid's dimensions, the rows it covers and its metric names (snake_case, one per workbook row " +
-			"or one per row group when a dimension replaces repeated rows), plus the pages, roles and workflows. Read the whole workbook first (analyse_workbook). " +
-			"It is shown in every later turn and session; call it again to change the design (the whole target each time). No confirmation needed: it changes nothing in the model.",
+			"or one per row group when a dimension replaces repeated rows), its owner and how it is verified, plus the pages, roles and workflows. " +
+			"Agree it once, before building: the conventions every row follows (units, signs, percentages, opening balances, scenarios, monthly against annual), " +
+			"the substantive choices the workbook leaves open as decisions (each with its options and the sheets it holds back until the developer chooses), " +
+			"the business requirements the platform adds (scenarios, requests, access, approval, an approved revision, role pages) and the verification checks " +
+			"beyond the saved workbook (another scenario, a switch off, a delay, actual zero against missing, a rejected approval, a restricted user). " +
+			"Read the whole workbook first (analyse_workbook). It is shown in every later turn and session; call it again to change the design (the whole target each time), " +
+			"or update_target_model for decisions, requirements, checks and row notes. No confirmation needed: it changes nothing in the model.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"summary":{"type":"string","description":"the model to build, in two or three sentences"},
-			"dimensions":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"members":{"type":"string","description":"its members, or where they come from"}},"required":["name","members"]}},
+			"dimensions":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"members":{"type":"string","description":"its members, or where they come from"}},"required":["name","members"]},
+				"description":"only where a dimension has meaning (a function for payroll, a site for capacity, a channel for sales)"},
+			"conventions":{"type":"object","description":"agreed once, for every row: how the workbook does it and what the model does",
+				"properties":{"units":{"type":"string"},"signs":{"type":"string"},"percentages":{"type":"string","description":"the model stores percent units (5 = 5%); how the workbook stores them"},
+				"opening_balances":{"type":"string"},"scenarios":{"type":"string","description":"how scenarios are held, and which one the saved workbook shows"},
+				"aggregation":{"type":"string","description":"monthly against annual: sums, closings, averages"}},
+				"required":["units","signs","percentages","opening_balances","scenarios","aggregation"]},
 			"sheets":{"type":"array","items":{"type":"object","properties":{
 				"sheet":{"type":"string"},
 				"role":{"type":"string","enum":["input","calculation","report","actuals","guide","skip"]},
@@ -150,16 +162,41 @@ var taskPlanTools = []providers.ToolDef{
 				"dimensions":{"type":"array","items":{"type":"string"}},
 				"rows":{"type":"string","description":"the sheet rows it covers, e.g. 6-77"},
 				"metrics":{"type":"array","items":{"type":"string"}},
+				"owner":{"type":"string","description":"the business role that owns its inputs or reads its results"},
+				"verification":{"type":"string","description":"how it is shown right: compare_with_sheet of its rows, a check below"},
+				"row_notes":{"type":"array","items":{"type":"object","properties":{"row":{"type":"integer"},"meaning":{"type":"string"},
+					"status":{"type":"string","enum":["","changed"]},"reason":{"type":"string"}},"required":["row"]},
+					"description":"rows whose business meaning needs saying, and rows the model changes on purpose (status changed, with the reason)"},
 				"notes":{"type":"string"}},"required":["sheet","role"]}},
 			"pages":{"type":"array","items":{"type":"string"}},
 			"roles":{"type":"array","items":{"type":"string"}},
-			"workflows":{"type":"array","items":{"type":"string"}}},
+			"workflows":{"type":"array","items":{"type":"string"}},
+			"decisions":{"type":"array","items":{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},
+				"choice":{"type":"string","description":"empty while the developer has not chosen"},"sheets":{"type":"array","items":{"type":"string"},"description":"the sheets that wait for it"}},
+				"required":["question"]}},
+			"requirements":{"type":"array","items":{"type":"object","properties":{"area":{"type":"string"},"behaviour":{"type":"string"},
+				"status":{"type":"string","enum":["open","built","verified"]}},"required":["area","behaviour"]}},
+			"checks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"how":{"type":"string"},
+				"status":{"type":"string","enum":["open","passed","failed","not_possible"]},"evidence":{"type":"string"}},"required":["name","how"]}}},
 			"required":["summary","sheets"]}`),
+	},
+	{
+		Name: UpdateTargetModelTool,
+		Description: "Changes part of the target model without re-sending it: records the developer's choice on a decision (and keeps it as a decision for every later turn), " +
+			"moves a requirement on (built, verified) or adds one, records a verification check (passed, failed or not_possible, with its evidence) or adds one, " +
+			"and gives rows their business meaning or marks a row changed on purpose (with the reason). Items are matched by question, area, name or sheet and row. No confirmation needed.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"decisions":{"type":"array","items":{"type":"object","properties":{"question":{"type":"string"},"choice":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"sheets":{"type":"array","items":{"type":"string"}}},"required":["question"]}},
+			"requirements":{"type":"array","items":{"type":"object","properties":{"area":{"type":"string"},"behaviour":{"type":"string"},"status":{"type":"string","enum":["open","built","verified"]}},"required":["area"]}},
+			"checks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"how":{"type":"string"},"status":{"type":"string","enum":["open","passed","failed","not_possible"]},"evidence":{"type":"string"}},"required":["name"]}},
+			"rows":{"type":"array","items":{"type":"object","properties":{"sheet":{"type":"string"},"row":{"type":"integer"},"meaning":{"type":"string"},"status":{"type":"string","enum":["","changed"]},"reason":{"type":"string"}},"required":["sheet","row"]}}},
+			"required":[]}`),
 	},
 	{
 		Name: PlanTaskTool,
 		Description: "Plans a goal the developer delegated (build a model from this workbook, add the pages people need, make the numbers match) before building it: " +
-			"stages in build order, each one proposal of at most a few dozen steps (one sheet or one page per stage, not several), each naming the items it delivers and how you will check it. " +
+			"stages in build order, each one coherent module (a few dependent sheets built and proven together, e.g. Hiring Plan, Headcount and payroll; a few pages by audience), " +
+			"each naming the items it delivers and how you will check it. " +
 			"A plan already under way is kept and the new stages follow it (one stage is enough), or with replace: true they re-cut its open stages (done stages stay); the developer sees it. " +
 			"Not for a direct order or a goal one proposal does.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
@@ -174,13 +211,19 @@ var taskPlanTools = []providers.ToolDef{
 	},
 	{
 		Name: UpdateTaskPlanTool,
-		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. The note says what the check showed. " +
+		Description: "Marks a stage of the session's task plan: in_progress when you propose it, done once confirmed and checked, skipped with a note saying why. " +
+			"Done needs the stage's evidence: what was built or repaired, the remaining differences and their causes (\"none\" when none) and the next bounded stage; " +
+			"the server adds the rows and periods compared from the workbook map. " +
 			"A stage that loads or matches values is done by its numbers: marking it done checks the sheets it names in the workbook map, and is refused while rows are not compared, differ or are not mapped. " +
 			"\"decision\" records a convention the developer decided (\"percentages are stored in percent units\") so that no later turn or session asks it again; it may come alone (no stage).",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"stage":{"type":"integer","description":"1-based; omit to record only a decision"},
 			"status":{"type":"string","enum":["pending","in_progress","done","skipped"]},
 			"note":{"type":"string"},
+			"evidence":{"type":"object","description":"with done: how the stage ended","properties":{
+				"built":{"type":"string","description":"what was built or repaired"},
+				"differences":{"type":"string","description":"what still differs and why, or none"},
+				"next":{"type":"string","description":"the next bounded stage"}},"required":["built","differences","next"]},
 			"decision":{"type":"string","description":"a convention the developer decided, in one sentence"}},
 			"required":[]}`),
 	},

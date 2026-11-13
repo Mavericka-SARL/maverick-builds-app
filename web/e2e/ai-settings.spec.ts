@@ -44,13 +44,13 @@ test("the model is free text offered the key's models, Google is offered, and sw
 
   await model.fill("gemini-99-ultra-tomorrow");
   await page.getByRole("button", { name: "Save settings" }).click();
-  await expect.poll(() => saved).toEqual({ provider: "google", model: "gemini-99-ultra-tomorrow", reasoning_effort: "", routine_model: "" });
+  await expect.poll(() => saved).toEqual({ provider: "google", model: "gemini-99-ultra-tomorrow", reasoning_effort: "" });
 
   await provider.selectOption("openai");
   await page.getByLabel("Reasoning effort").selectOption("none");
   await model.fill("gpt-6-luna");
-  // The optional model for generated sheet plans is saved with the rest.
-  await page.getByLabel("Model for generated sheet plans").fill("gpt-5-mini");
   await page.getByRole("button", { name: "Save settings" }).click();
-  await expect.poll(() => saved).toEqual({ provider: "openai", model: "gpt-6-luna", reasoning_effort: "none", routine_model: "gpt-5-mini" });
+  await expect.poll(() => saved).toEqual({ provider: "openai", model: "gpt-6-luna", reasoning_effort: "none" });
+  // One model runs every turn: no second model field (removed 2026-11-12).
+  await expect(page.getByLabel("Model for generated sheet plans")).toHaveCount(0);
 });

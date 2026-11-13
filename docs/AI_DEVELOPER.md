@@ -1,6 +1,6 @@
 # The AI Developer: what it can build, and what stays human
 
-> **Last verified:** 2026-10-05
+> **Last verified:** 2026-11-12
 
 The AI Developer is the assistant inside the developer console. Its rule is
 parity: it can build, change and remove what a developer builds, changes and
@@ -435,6 +435,86 @@ steps after it are marked *not run*, because they are usually built on it.
 What ran before it stays in the draft. Clearing a grid without input metrics
 is not a failure: it has nothing to clear, so "clear all the data" goes on to
 the next grid.
+
+## Building a model from a workbook
+
+A build from an attached workbook follows one process (owner, 2026-11-12):
+agree one target design, use the server's bulk tools for routine work, build
+one coherent module per stage with evidence before going on, add the
+platform's advantages as explicit business requirements, and call the build
+done only when its behaviour is verified. The playbook (`task_mode.go`,
+`workbook_build`) tells the model so; the server holds it to it.
+
+**How to work with it.** Building one three-sheet workbook five ways
+(2026-11-12): a strong reasoning model at low effort (gpt-6.1-sol) finished
+correctly in 75 calls and 4.2 minutes with no questions; at medium effort
+129 calls and 8.4 minutes; gpt-5-mini, with a short instruction, a detailed
+brief or five step-by-step instructions, did not finish in up to 181 calls —
+it asked what the workbook already said and typed inputs instead of loading
+them. Step-by-step instructions do not steer it: after the first step it
+plans the whole model. So the recommended way is: a strong model at **low**
+effort (AI Settings says so: `buildAdvice`); the workbook attached; one
+short instruction naming the model, its input and calculation sheets, the
+dimensions, the business requirements and pages; confirm each plan, answer
+the decisions it asks; for a large workbook a call budget with a checkpoint.
+The optional second model for generated sheet plans was removed the same
+day: one model runs every turn.
+
+**One agreed design** (`set_target_model`, `update_target_model`,
+`target_model.go`). The target model records, besides each sheet's role,
+grid, dimensions, rows and metrics: the **conventions** every row follows
+(units, signs, percentages, opening balances, scenarios, monthly against
+annual — required when a workbook is attached, as are the metric names of
+calculation and report sheets, which `plan_sheet` maps rows onto); each sheet's **owner** and
+how it is **verified**; **row notes** (a row's business meaning, or a row
+changed on purpose with its reason); the **decisions** the workbook leaves
+open, with their options and the sheets they hold back — `load_sheet` and
+`plan_sheet` refuse a held-back sheet until the developer has chosen, and the
+choice is also kept with the plan's decisions; the **business requirements**
+(area, behaviour, open/built/verified); and the **verification checks**
+beyond the saved workbook (open/passed/failed/not_possible, with evidence).
+`update_target_model` changes one decision, requirement, check or row note
+without re-sending the target. Every turn shows the target, the current
+module's sheets whole and the others one line each.
+
+**Bulk tools for routine work.** `analyse_workbook` (the whole workbook and
+its dependencies), `load_sheet` (inputs, matched to metrics and members),
+`plan_sheet` and the `sheet_plan` step (formulas translated on the server),
+`compare_with_sheet` (many rows over all their periods) and `workbook_map`
+(what each row became and how it compared). The translator reads **every
+period**: runs of periods that translate alike become one formula, a first
+period that differs an opening rule, later changes an `IF` on the month
+number; a formula that cannot be translated from some month on, or a typed
+value among formulas, is a problem naming the month
+(`translateRuns`). The plan check warns when a plan types values the
+attached workbook holds (`typedWorkbookValueWarnings`) and, as before, when
+it moves an input the developer did not name (`inputOverwriteWarnings`).
+
+**One module per stage, with evidence** (`cutStages`, `buildOrder`,
+`update_task_plan`). A stage may build a few dependent sheets together
+(`TaskStage.Sheets`, at most 4; a few pages, at most 3) and is proven by all
+of them. Stages run: calculation modules in dependency order, actuals, the
+business requirements (roles and access, workflows, the approved revision,
+pages), the verification checks. A stage closes with its **evidence** —
+what was built or repaired, what still differs and why, the next stage — and
+the server adds the rows and periods compared from the workbook map
+(`comparedFor`); a stage the map shows matching is closed by the server with
+the same evidence. The build's last stage closes only when every
+verification check is recorded. Each stage also carries what it took
+(`StageMeasure`: turns, minutes, calls, tokens, tool calls and the
+developer's corrections — messages other than confirming or continuing),
+added at the end of every turn (`measureTurn`). The console's plan card
+shows the evidence, the measures, the decision waiting for the developer
+and how many checks are recorded.
+
+**Precise corrections.** A difference is reported with the draft, metric,
+month, scenario, expected and actual value and how to reproduce it, and is
+fixed at its upstream cause, then the outputs it feeds compared again; an
+input is never moved to make a calculated row match.
+
+**The session's call limit counts model calls** (`CountLLMCallsInSession`
+reads the session's recorded `llm_calls`, which every call now adds to);
+it used to count assistant messages, the server's own notes among them.
 
 ## Attached spreadsheets and data exports
 

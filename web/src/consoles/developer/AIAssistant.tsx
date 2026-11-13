@@ -33,7 +33,6 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   const [apiKey, setApiKey]     = useState("");
   const [saved, setSaved]       = useState(false);
   const [effort, setEffort]     = useState(initialSettings?.reasoning_effort ?? "");
-  const [routineModel, setRoutineModel] = useState(initialSettings?.routine_model ?? "");
   // The models the key reaches: asked for the saved key when the panel opens
   // or the provider changes, and for a typed key on "List models".
   const [typedKeyAsked, setTypedKeyAsked] = useState("");
@@ -52,7 +51,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   };
 
   const save = useMutation({
-    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort, routine_model: routineModel }),
+    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-settings"] });
       setSaved(true);
@@ -117,20 +116,6 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           <datalist id="ai-model-options">
             {offered.map(m => <option key={m} value={m} />)}
           </datalist>
-        </Field>
-
-        <Field
-          label="Model for generated sheet plans"
-          description="Optional. When the server translated a sheet's formulas whole, that turn runs on this model (a cheaper one); designing the model, rows the server could not translate and everything else stay on the model above."
-        >
-          <TextInput
-            value={routineModel}
-            onChange={e => setRoutineModel(e.target.value)}
-            placeholder="Blank: every turn on the model above"
-            aria-label="Model for generated sheet plans"
-            autoComplete="off"
-            list="ai-model-options"
-          />
         </Field>
 
         {provider === "openai" && (
@@ -715,6 +700,13 @@ function formatElapsed(ms: number): string {
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
 
+// formatTokens shortens a token count (1.2M, 340k).
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 // TaskPlanCard shows the plan of a delegated goal: its stages, which is
 // current, and what each delivers — the developer sees where the work stands.
 function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
@@ -723,12 +715,31 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
   const done = plan.stages.filter(s => s.status === "done").length;
   const mark = (s: AITaskStage, i: number) =>
     s.status === "done" ? "✓" : s.status === "skipped" ? "–" : i === current ? "▶" : "○";
+  const took = (m: NonNullable<AITaskStage["measure"]>) =>
+    `${Math.round(m.minutes)} min · ${m.calls} calls · ${formatTokens(m.input_tokens + m.cached_tokens + m.output_tokens)} tokens · ${m.corrections} correction${m.corrections === 1 ? "" : "s"}`;
+  const total = plan.stages.reduce((t, s) => s.measure
+    ? { minutes: t.minutes + s.measure.minutes, calls: t.calls + s.measure.calls, corrections: t.corrections + s.measure.corrections }
+    : t, { minutes: 0, calls: 0, corrections: 0 });
+  const openDecisions = (plan.target?.decisions ?? []).filter(d => !d.choice);
+  const checks = plan.target?.checks ?? [];
+  const recorded = checks.filter(c => c.status && c.status !== "open").length;
   return (
     <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
         style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)" }}>
         <Txt>{`Plan: ${plan.goal} — ${done} of ${plan.stages.length} stages done`}</Txt>
       </button>
+      {total.calls > 0 && (
+        <span className="mvx-admin-muted"><Txt>{` · ${Math.round(total.minutes)} min, ${total.calls} calls, ${total.corrections} correction${total.corrections === 1 ? "" : "s"} so far`}</Txt></span>
+      )}
+      {checks.length > 0 && (
+        <span className="mvx-admin-muted"><Txt>{` · verification checks: ${recorded} of ${checks.length} recorded`}</Txt></span>
+      )}
+      {openDecisions.length > 0 && (
+        <div role="note" style={{ margin: "6px 0 0", color: "var(--color-warning-text, var(--color-text))" }}>
+          <Txt>{`Waiting for your decision: ${openDecisions.map(d => d.options?.length ? `${d.question} (${d.options.join(" / ")})` : d.question).join("; ")}`}</Txt>
+        </div>
+      )}
       {open && (
         <ol style={{ margin: "6px 0 0", paddingLeft: 18 }}>
           {plan.stages.map((s, i) => (
@@ -738,6 +749,15 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
               {s.note && <span className="mvx-admin-muted"><Txt>{` — ${s.note}`}</Txt></span>}
               {i === current && s.items.length > 0 && (
                 <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}><Txt>{s.items.join("; ")}</Txt></div>
+              )}
+              {s.status === "done" && s.evidence && (
+                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}>
+                  <Txt>{[s.evidence.compared && `compared: ${s.evidence.compared}`, s.evidence.differences && s.evidence.differences !== "none" && `differs: ${s.evidence.differences}`]
+                    .filter(Boolean).join(" · ")}</Txt>
+                </div>
+              )}
+              {s.measure && (s.status === "done" || i === current) && (
+                <div className="mvx-admin-muted" style={{ marginLeft: 18, fontWeight: 400 }}><Txt>{took(s.measure)}</Txt></div>
               )}
             </li>
           ))}

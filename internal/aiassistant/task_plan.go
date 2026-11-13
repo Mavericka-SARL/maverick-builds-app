@@ -112,7 +112,7 @@ var needsProofRE = regexp.MustCompile(`(?i)\b(values?|load(s|ed|ing)?|import(s|e
 
 // NeedsProof reports whether the stage's numbers decide when it is done.
 func (s TaskStage) NeedsProof() bool {
-	if s.Sheet != "" {
+	if len(s.StageSheets()) > 0 {
 		return true
 	}
 	if needsProofRE.MatchString(s.Title) {
@@ -202,9 +202,101 @@ type TaskStage struct {
 	// ProofAsked: a "done" the workbook map could not confirm was sent back
 	// once; marked done again, it is taken with the note (update_task_plan).
 	ProofAsked bool `json:"proof_asked,omitempty"`
-	// Sheet is the workbook sheet the stage builds (one sheet per stage):
-	// the stage is done when the workbook map shows that sheet matching.
-	Sheet string `json:"sheet,omitempty"`
+	// Sheet is the workbook sheet the stage builds (plans before modules);
+	// Sheets the module of dependent sheets it builds together (owner,
+	// 2026-11-12: one coherent module per stage, e.g. Hiring Plan →
+	// Headcount → payroll). The stage is done when the workbook map shows
+	// every one of them matching.
+	Sheet  string   `json:"sheet,omitempty"`
+	Sheets []string `json:"sheets,omitempty"`
+	// Evidence is how the stage ended: what was built or repaired, the rows
+	// and periods compared, what still differs and why, the next stage.
+	Evidence *StageEvidence `json:"evidence,omitempty"`
+	// Measure is what the stage took, turn by turn (AddTurn).
+	Measure *StageMeasure `json:"measure,omitempty"`
+}
+
+// StageEvidence ends a stage (update_task_plan "done").
+type StageEvidence struct {
+	Built       string `json:"built"`
+	Compared    string `json:"compared,omitempty"` // the server's count from the workbook map
+	Differences string `json:"differences,omitempty"`
+	Next        string `json:"next,omitempty"`
+}
+
+// StageMeasure is what a stage took: the developer's minutes waiting on the
+// AI, its model calls and tokens, the tools it ran, and the developer's
+// corrections (messages other than confirming and continuing).
+type StageMeasure struct {
+	Turns        int     `json:"turns"`
+	Minutes      float64 `json:"minutes"`
+	Calls        int     `json:"calls"`
+	InputTokens  int64   `json:"input_tokens"`
+	CachedTokens int64   `json:"cached_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	ToolCalls    int     `json:"tool_calls"`
+	Corrections  int     `json:"corrections"`
+}
+
+// StageSheets are the workbook sheets the stage builds.
+func (s TaskStage) StageSheets() []string {
+	if len(s.Sheets) > 0 {
+		return s.Sheets
+	}
+	if s.Sheet != "" {
+		return []string{s.Sheet}
+	}
+	return nil
+}
+
+// TurnMeasure is one turn's share of a stage's measure.
+type TurnMeasure struct {
+	Minutes                                 float64
+	Calls, ToolCalls                        int
+	InputTokens, CachedTokens, OutputTokens int64
+	Correction                              bool
+}
+
+// AddTurn adds a turn to stage i (0-based) of the plan; out of range is
+// ignored.
+func (p *TaskPlan) AddTurn(i int, t TurnMeasure) {
+	if p == nil || i < 0 || i >= len(p.Stages) {
+		return
+	}
+	st := &p.Stages[i]
+	if st.Measure == nil {
+		st.Measure = &StageMeasure{}
+	}
+	m := st.Measure
+	m.Turns++
+	m.Minutes += t.Minutes
+	m.Calls += t.Calls
+	m.ToolCalls += t.ToolCalls
+	m.InputTokens += t.InputTokens
+	m.CachedTokens += t.CachedTokens
+	m.OutputTokens += t.OutputTokens
+	if t.Correction {
+		m.Corrections++
+	}
+}
+
+// String is the measure in one line.
+func (m *StageMeasure) String() string {
+	if m == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.0f min, %d turns, %d calls, %s tokens, %d tool calls, %d corrections",
+		m.Minutes, m.Turns, m.Calls, shortCount(m.InputTokens+m.CachedTokens+m.OutputTokens), m.ToolCalls, m.Corrections)
+}
+
+func shortCount(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1e3)
+	}
+	return fmt.Sprint(n)
 }
 
 // UnmarshalJSON takes "items" as a list or, as models send it at times, one
@@ -264,7 +356,7 @@ func (p *TaskPlan) Render() string {
 	if p == nil || (len(p.Stages) == 0 && len(p.Decisions) == 0 && p.Target == nil) {
 		return ""
 	}
-	return p.Target.RenderFor(p.currentSheet()) + p.renderStages() + p.renderDecisions()
+	return p.Target.RenderFor(p.currentSheets()...) + p.renderStages() + p.renderDecisions()
 }
 
 // renderDecisions is the decisions part of Render.
@@ -312,7 +404,11 @@ func (p *TaskPlan) renderStages() string {
 			if cur >= 0 && (i < cur-2 || i > cur+6) {
 				continue
 			}
-			fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress", StagePending: "to do", "": "to do"}[s.Status], s.Title)
+			fmt.Fprintf(&b, "%d. [%s] %s", i+1, map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress", StagePending: "to do", "": "to do"}[s.Status], s.Title)
+			if s.Status == StageDone && s.Evidence != nil && s.Evidence.Compared != "" {
+				fmt.Fprintf(&b, " — compared: %s", s.Evidence.Compared)
+			}
+			b.WriteByte('\n')
 			continue
 		}
 		mark := map[string]string{StageDone: "done", StageSkipped: "skipped", StageInProgress: "in progress"}[s.Status]
@@ -337,6 +433,18 @@ func (p *TaskPlan) renderStages() string {
 		}
 		if s.Confirmed > 0 {
 			fmt.Fprintf(&b, " — confirmed: %d plan(s), %d step(s)", s.Confirmed, s.ConfirmedSteps)
+		}
+		if e := s.Evidence; e != nil {
+			fmt.Fprintf(&b, " — built: %s", e.Built)
+			if e.Compared != "" {
+				fmt.Fprintf(&b, "; compared: %s", e.Compared)
+			}
+			if e.Differences != "" {
+				fmt.Fprintf(&b, "; differences: %s", e.Differences)
+			}
+		}
+		if s.Measure != nil && (s.Status == StageDone || i == cur) {
+			fmt.Fprintf(&b, " — took %s", s.Measure.String())
 		}
 		b.WriteByte('\n')
 	}
@@ -614,10 +722,11 @@ func (p *TaskPlan) UpdateStage(stage int, status, note string) error {
 // compactStagesAbove: a plan of more stages renders compactly (renderStages).
 const compactStagesAbove = 12
 
-// currentSheet is the sheet the current stage builds ("" when none).
-func (p *TaskPlan) currentSheet() string {
+// currentSheets are the sheets the current stage builds (none when it
+// builds none).
+func (p *TaskPlan) currentSheets() []string {
 	if cur := p.Current(); cur >= 0 {
-		return p.Stages[cur].Sheet
+		return p.Stages[cur].StageSheets()
 	}
-	return ""
+	return nil
 }

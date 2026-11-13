@@ -269,6 +269,11 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req ChatRequest, o
 			Item     json.RawMessage `json:"item"`
 			Response json.RawMessage `json:"response"`
 			Message  string          `json:"message"`
+			Code     string          `json:"code"`
+			Error    *struct {
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
 		}
 		if json.Unmarshal(data.Bytes(), &ev) != nil {
 			return nil
@@ -304,7 +309,23 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req ChatRequest, o
 			}
 			return fmt.Errorf("%s: responses: the response failed", p.label)
 		case "error":
-			return fmt.Errorf("%s: responses: %s", p.label, ev.Message)
+			// The message may stand on the event or in its error object;
+			// with neither, the event itself says what went wrong
+			// (2026-11-12: "openai: responses: " and nothing more).
+			msg := ev.Message
+			if msg == "" && ev.Error != nil {
+				msg = strings.TrimSpace(ev.Error.Message + " " + ev.Error.Code)
+			}
+			if msg == "" {
+				raw := data.String()
+				if len(raw) > 600 {
+					raw = raw[:600] + "…"
+				}
+				msg = "error event: " + raw
+			} else if ev.Code != "" {
+				msg += " (" + ev.Code + ")"
+			}
+			return fmt.Errorf("%s: responses: %s", p.label, msg)
 		}
 		return nil
 	}
