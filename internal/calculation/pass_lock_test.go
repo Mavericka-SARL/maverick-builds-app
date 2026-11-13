@@ -152,7 +152,18 @@ func TestPassRunsAgainWhenItsLockIsLost(t *testing.T) {
 	if attempts != 2 {
 		t.Fatalf("the pass ran %d times, want 2 (once more after its lock was lost)", attempts)
 	}
-	if _, n := held(); n != 0 {
-		t.Fatalf("%d pass locks still held after the pass", n)
+	// Closing the lock's connection returns before its backend has gone, and
+	// the lock stays in pg_locks until it has (a release run failed on it,
+	// 2026-11-13): wait for it, as the test above does.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, n := held()
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d pass locks still held after the pass", n)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
