@@ -16,6 +16,7 @@ package aiassistant
 // "done" mean verified behaviour.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -26,9 +27,12 @@ type TargetModel struct {
 	Dimensions  []TargetDimension `json:"dimensions"`
 	Conventions TargetConventions `json:"conventions"`
 	Sheets      []TargetSheet     `json:"sheets"`
-	Pages       []string          `json:"pages,omitempty"`
-	Roles       []string          `json:"roles,omitempty"`
-	Workflows   []string          `json:"workflows,omitempty"`
+	// Pages are the dashboards, each with who reads it and the grids it
+	// shows: with the dimensions and the grids they make the architecture
+	// scheme the developer approves with the plan (owner, 2026-11-13).
+	Pages     []TargetPage `json:"pages,omitempty"`
+	Roles     []string     `json:"roles,omitempty"`
+	Workflows []string     `json:"workflows,omitempty"`
 	// Decisions are the design choices the workbook leaves open; one
 	// without a choice holds back the sheets it names.
 	Decisions []TargetDecision `json:"decisions,omitempty"`
@@ -42,6 +46,83 @@ type TargetModel struct {
 }
 
 // TargetDimension is one dimension of the target model.
+// TargetPage is a dashboard of the target model. A target saved before
+// dashboards named their grids held the names alone; those read as pages
+// with no grids.
+type TargetPage struct {
+	Name     string   `json:"name"`
+	Audience string   `json:"audience,omitempty"`
+	Grids    []string `json:"grids,omitempty"`
+	// Guide: a page of text only (instructions, a guide) — it shows no grid.
+	Guide bool `json:"guide,omitempty"`
+}
+
+// UnmarshalJSON takes a page as an object or, as earlier targets hold it, a
+// name.
+func (p *TargetPage) UnmarshalJSON(b []byte) error {
+	var name string
+	if json.Unmarshal(b, &name) == nil {
+		*p = TargetPage{Name: name}
+		return nil
+	}
+	type plain TargetPage
+	return json.Unmarshal(b, (*plain)(p))
+}
+
+// String is the page in one line.
+func (p TargetPage) String() string {
+	s := p.Name
+	if p.Audience != "" {
+		s += " (" + p.Audience + ")"
+	}
+	switch {
+	case len(p.Grids) > 0:
+		s += " — shows " + strings.Join(p.Grids, ", ")
+	case p.Guide:
+		s += " — guide, text only"
+	default:
+		s += " — GRIDS NOT NAMED"
+	}
+	return s
+}
+
+// checkPages: every dashboard names the grids it shows, by grids the target
+// has (a guide page shows none) — the links of the architecture scheme.
+func (t *TargetModel) checkPages(tool string) error {
+	grids := map[string]bool{}
+	for _, s := range t.Sheets {
+		if g := strings.ToLower(strings.TrimSpace(s.Grid)); g != "" {
+			grids[g] = true
+		}
+	}
+	for _, p := range t.Pages {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%s: a dashboard needs its name", tool)
+		}
+		if len(p.Grids) == 0 && !p.Guide {
+			return fmt.Errorf("%s: dashboard %q names no grids — list the grids it shows (by their names under sheets), or guide: true for a page of text only", tool, p.Name)
+		}
+		for _, g := range p.Grids {
+			if len(grids) > 0 && !grids[strings.ToLower(strings.TrimSpace(g))] {
+				return fmt.Errorf("%s: dashboard %q shows grid %q, which no sheet of the target becomes — use a grid name from sheets", tool, p.Name, g)
+			}
+		}
+	}
+	return nil
+}
+
+// UnlinkedPages are the dashboards that name no grids and are not guides
+// (targets saved before dashboards named their grids).
+func (t *TargetModel) UnlinkedPages() []string {
+	var out []string
+	for _, p := range t.Pages {
+		if len(p.Grids) == 0 && !p.Guide {
+			out = append(out, p.Name)
+		}
+	}
+	return out
+}
+
 type TargetDimension struct {
 	Name    string `json:"name"`
 	Members string `json:"members"` // what its members are, or where they come from
@@ -190,6 +271,12 @@ func CheckTarget(t *TargetModel, sheets []string) (missing []string, err error) 
 	if err := t.checkLists(seen); err != nil {
 		return nil, err
 	}
+	if err := targetFlatMetrics(t); err != nil {
+		return nil, err
+	}
+	if err := t.checkPages("set_target_model"); err != nil {
+		return nil, err
+	}
 	for _, s := range sheets {
 		if !seen[strings.ToLower(strings.TrimSpace(s))] {
 			missing = append(missing, s)
@@ -234,6 +321,8 @@ func (t *TargetModel) checkLists(placed map[string]bool) error {
 // requirements and checks moved on (or added), rows given a meaning or
 // marked changed on purpose.
 type TargetUpdate struct {
+	// Pages add a dashboard, or replace one found by name.
+	Pages        []TargetPage        `json:"pages,omitempty"`
 	Decisions    []TargetDecision    `json:"decisions,omitempty"`
 	Requirements []TargetRequirement `json:"requirements,omitempty"`
 	Checks       []TargetCheck       `json:"checks,omitempty"`
@@ -270,6 +359,18 @@ func (t *TargetModel) Apply(u TargetUpdate) (resolved []TargetDecision, err erro
 		}
 		if wasOpen && !t.Decisions[i].Open() {
 			resolved = append(resolved, t.Decisions[i])
+		}
+	}
+	for _, p := range u.Pages {
+		if i := findBy(len(t.Pages), func(i int) string { return t.Pages[i].Name }, p.Name); i >= 0 {
+			t.Pages[i] = p
+		} else {
+			t.Pages = append(t.Pages, p)
+		}
+	}
+	if len(u.Pages) > 0 {
+		if err := t.checkPages("update_target_model"); err != nil {
+			return nil, err
 		}
 	}
 	for _, r := range u.Requirements {
@@ -508,13 +609,21 @@ func (t *TargetModel) RenderFor(current ...string) string {
 			b.WriteByte('\n')
 		}
 	}
+	var pages []string
+	for _, p := range t.Pages {
+		pages = append(pages, p.String())
+	}
 	for _, l := range []struct {
 		name  string
 		items []string
-	}{{"Dashboards", t.Pages}, {"Roles", t.Roles}, {"Workflows and triggers", t.Workflows}} {
+	}{{"Dashboards", pages}, {"Roles", t.Roles}, {"Workflows and triggers", t.Workflows}} {
 		if len(l.items) > 0 {
 			fmt.Fprintf(&b, "%s: %s\n", l.name, strings.Join(l.items, "; "))
 		}
+	}
+	if un := t.UnlinkedPages(); len(un) > 0 {
+		fmt.Fprintf(&b, "Dashboards not linked to grids yet: %s — call update_target_model with pages, each with the grids it shows (guide: true for a "+
+			"page of text only): the developer's architecture scheme draws the links.\n", strings.Join(un, ", "))
 	}
 	var open, chosen []string
 	for _, d := range t.Decisions {

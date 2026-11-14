@@ -124,6 +124,20 @@ func encodeArrangeDashboardRequest(
 	return nil
 }
 
+func encodeAttachAiPlanRequest(
+	req *AttachAiPlanReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeCancelWorkflowInstanceRequest(
 	req OptCancelWorkflowInstanceReq,
 	r *http.Request,
@@ -200,6 +214,20 @@ func encodeCompleteTaskRequest(
 
 func encodeCopyBAValuesRequest(
 	req *CopyBAValuesReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeCopyFormRecordsRequest(
+	req *CopyFormRecordsReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

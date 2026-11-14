@@ -29,15 +29,15 @@ func TestSheetDoneGateReadsTheLastComparisons(t *testing.T) {
 	if got := last["actual_pnl"]; len(got) != 2 || got[6].matched != 12 || got[7].matched != 24 {
 		t.Fatalf("comparisons = %+v", last)
 	}
-	if nudge := sheetDoneProblems([]string{"Actual_PnL"}, last); !strings.Contains(nudge, "row 6 (12 of 24 periods)") || strings.Contains(nudge, "row 7") {
+	if nudge := sheetDoneProblems([]string{"Actual_PnL"}, last, nil); !strings.Contains(nudge, "row 6 (12 of 24 periods)") || strings.Contains(nudge, "row 7") {
 		t.Errorf("nudge with row 6 differing:\n%s", nudge)
 	}
 	// Row 6 compared again, matching: the sheet passes.
 	msgs = append(msgs, call("c2"), result("c2", "pnl_sales against sheet \"Actual_PnL\" row 6: 24 of 24 periods match"))
-	if nudge := sheetDoneProblems([]string{"Actual_PnL"}, sheetComparisons(msgs)); nudge != "" {
+	if nudge := sheetDoneProblems([]string{"Actual_PnL"}, sheetComparisons(msgs), nil); nudge != "" {
 		t.Errorf("every row matching, yet sent back:\n%s", nudge)
 	}
-	if nudge := sheetDoneProblems([]string{"Cash_Flow"}, sheetComparisons(msgs)); !strings.Contains(nudge, "Cash_Flow: no row of it compared yet") {
+	if nudge := sheetDoneProblems([]string{"Cash_Flow"}, sheetComparisons(msgs), nil); !strings.Contains(nudge, "Cash_Flow: no row of it compared yet") {
 		t.Errorf("a sheet never compared:\n%s", nudge)
 	}
 }

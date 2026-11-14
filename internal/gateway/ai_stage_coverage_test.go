@@ -51,9 +51,9 @@ func TestSheetNamedIn(t *testing.T) {
 	}
 }
 
-// plan_task adds one stage to a plan under way, re-cuts it with replace,
-// and does not add a stage twice; a values stage marked done is checked by
-// its numbers once, then taken with a note.
+// plan_task does not plan a request under way again (one plan per request,
+// owner 2026-11-13), re-cuts it with replace; a values stage marked done is
+// checked by its numbers once, then taken with a note.
 func TestPlanTaskAppendReplaceAndProof(t *testing.T) {
 	f := setupPromoteFixture(t)
 	ctx := context.Background()
@@ -75,12 +75,13 @@ func TestPlanTaskAppendReplaceAndProof(t *testing.T) {
 	if _, err := call(aiassistant.PlanTaskTool, map[string]any{"goal": "Build", "stages": []any{stage("Structure", "dimensions"), stage("Inputs", "Assumptions values loaded")}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call(aiassistant.PlanTaskTool, map[string]any{"goal": "Build", "stages": []any{stage("Stage 2 — Inputs", "x"), stage("Headcount", "Headcount rows")}}, nil); err != nil {
-		t.Fatal(err)
+	if _, err := call(aiassistant.PlanTaskTool, map[string]any{"goal": "Build", "stages": []any{stage("Stage 2 — Inputs", "x"), stage("Headcount", "Headcount rows")}}, nil); err == nil ||
+		!strings.Contains(err.Error(), "already has its plan") {
+		t.Fatalf("the same request planned again: %v, want it refused", err)
 	}
 	plan, _ := chat.TaskPlan(ctx, s.ID)
-	if len(plan.Stages) != 3 {
-		t.Fatalf("append: %d stages, want 3 (Inputs not twice)", len(plan.Stages))
+	if len(plan.Stages) != 2 {
+		t.Fatalf("after the refused plan: %d stages, want the 2 under way", len(plan.Stages))
 	}
 	if _, err := call(aiassistant.PlanTaskTool, map[string]any{"goal": "Build", "replace": true, "stages": []any{stage("SaaS", "SaaS rows")}}, nil); err != nil {
 		t.Fatal(err)

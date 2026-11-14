@@ -132,6 +132,7 @@ const WF_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success",
   running: "warning",
   cancelled: "neutral",
+  reopened: "warning",
   failed: "danger",
 };
 
@@ -205,6 +206,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
             <option value="running">Running</option>
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
+            <option value="reopened">Reopened</option>
             <option value="failed">Failed</option>
           </Select>
           <span className="mvx-admin-muted">{filtered.length} of {instances.length}</span>

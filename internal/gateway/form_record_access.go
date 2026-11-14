@@ -56,6 +56,9 @@ type formRecordScope struct {
 	// holds none of; notEditorReason says who may change it.
 	notEditor       bool
 	notEditorReason string
+	// parents: the table's belonging fields and the parents read so far
+	// (record_parent_status.go); nil until something reads them.
+	parents *parentCache
 }
 
 // resolveFormRecordScope decides reach and admin for act on formID. A form
@@ -213,6 +216,9 @@ func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 	if a.Everyone && rec != nil {
 		a.ReadOnly = s.readOnlyMember(rec.Data) != ""
 	}
+	if rec != nil {
+		a.ParentDecided = s.parentDecidedCached(rec.Data)
+	}
 	return a
 }
 
@@ -305,6 +311,9 @@ func (h *handler) reachRecord(ctx context.Context, act *actor, store *crudapp.St
 		return nil, scope, crudapp.RecordAccess{}, errRecordNotReached
 	}
 	if err != nil {
+		return nil, scope, crudapp.RecordAccess{}, err
+	}
+	if err := h.prefetchParents(ctx, &scope, []*crudapp.FormRecord{rec}); err != nil {
 		return nil, scope, crudapp.RecordAccess{}, err
 	}
 	return rec, scope, scope.permit(rec), nil

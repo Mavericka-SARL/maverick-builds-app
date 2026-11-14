@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { useBrandRefresh } from "../branding/brand";
 import { BrandMark } from "../branding/BrandMark";
@@ -25,13 +25,26 @@ import { momentDateTime } from "../consoles/dateSerial";
  * a stable hook order — and each returns null, having fetched nothing, when
  * the user's roles do not grant it.
  */
+const OPEN_TAB_KEY = "console_open_tab";
+
 export default function UnifiedConsole() {
   const { userRoles, persona } = useAuth();
   // The brand by tenant, now that the caller is known (and again when the
   // dev persona changes tenant).
   useBrandRefresh(persona);
   const ids = useMemo(() => enabledSections(userRoles), [userRoles]);
-  const [chosen, setTab] = useState<string>("");
+  // The open screen is remembered for this browser tab: any reload — a
+  // deploy, an application that was removed, the developer's own F5 — used to
+  // land on the first section's landing tab, the user Dashboards (owner,
+  // 2026-11-13: "from the AI developer chat the app reloads to the user
+  // dashboard screen").
+  const [chosen, setChosen] = useState<string>(() => {
+    try { return sessionStorage.getItem(OPEN_TAB_KEY) ?? ""; } catch { return ""; }
+  });
+  const setTab = useCallback((t: string) => {
+    setChosen(t);
+    try { sessionStorage.setItem(OPEN_TAB_KEY, t); } catch { /* storage unavailable: the tab is not remembered */ }
+  }, []);
   const switches = useModelSwitches();
   // A remembered choice from a section the user (no longer) holds falls
   // back to the landing tab of their first section.

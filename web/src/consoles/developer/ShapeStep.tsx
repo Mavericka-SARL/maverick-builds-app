@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Eye, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { api, cleanReshape, isEmptyReshape, type ApiError, type FileReshape } from "../../api/client";
-import { Button, IconButton, TextInput, Select, Field, InlineAlert, Txt } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, InlineAlert, Txt, Checkbox } from "../../ui";
 
 // The Import Wizard's Shape step: turns a sheet laid out for people — a
 // title above the header, months across the columns, a label written once
@@ -46,6 +46,8 @@ export function ShapeStep({
   isCsv,
   reshape,
   onReshapeChange,
+  asked = [],
+  onAskedChange,
   onNext,
   onBack,
 }: {
@@ -56,6 +58,10 @@ export function ShapeStep({
   isCsv: boolean;
   reshape: FileReshape;
   onReshapeChange: (r: FileReshape) => void;
+  /** Fixed-value columns a saved loader asks for at each upload instead
+   *  ("Period end"): the value here is this file's. */
+  asked?: string[];
+  onAskedChange?: (columns: string[]) => void;
   onNext: (shaped: Shaped) => void;
   onBack: () => void;
 }) {
@@ -207,7 +213,9 @@ export function ShapeStep({
           </div>
         </Field>
 
-        <Field label="Fixed values" description="What the file means but does not say, on every row (Scenario = Budget).">
+        <Field label="Fixed values" description={onAskedChange
+          ? "What the file means but does not say, on every row (Scenario = Budget). Ask at each upload: a saved loader asks for it each time (the period a file is for)."
+          : "What the file means but does not say, on every row (Scenario = Budget)."}>
           <div style={{ display: "grid", gap: 6 }}>
             {constants.map(([k, v], i) => (
               <div key={i} className="mvx-admin-inline-form" style={{ flexWrap: "nowrap" }}>
@@ -216,6 +224,10 @@ export function ShapeStep({
                 =
                 <TextInput value={v} placeholder="Budget" aria-label={`Fixed value ${i + 1} value`} style={{ width: 150 }}
                   onChange={e => set({ constants: Object.fromEntries(constants.map(([k2, v2], j) => j === i ? [k2, e.target.value] : [k2, v2])) })} />
+                {onAskedChange && (
+                  <Checkbox label="Ask at each upload" checked={!!k && asked.includes(k)} disabled={!k}
+                    onChange={e => onAskedChange(e.target.checked ? [...asked.filter(c => c !== k), k] : asked.filter(c => c !== k))} />
+                )}
                 <IconButton aria-label={`Remove fixed value ${i + 1}`} onClick={() => set({ constants: Object.fromEntries(constants.filter((_, j) => j !== i)) })}><XIcon size={13} /></IconButton>
               </div>
             ))}

@@ -130,12 +130,17 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		return "Target model updated.\n" + plan.Target.Render(), nil
 	case aiassistant.PlanTaskTool:
 		var a struct {
-			Goal    string                  `json:"goal"`
-			Stages  []aiassistant.TaskStage `json:"stages"`
-			Replace bool                    `json:"replace"`
+			Goal       string                  `json:"goal"`
+			Stages     []aiassistant.TaskStage `json:"stages"`
+			Replace    bool                    `json:"replace"`
+			NewRequest bool                    `json:"new_request"`
+			ResumePlan int                     `json:"resume_plan"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", fmt.Errorf("plan_task: %w", err)
+		}
+		if a.ResumePlan > 0 {
+			return resumePlan(ctx, store, sessionID, a.ResumePlan)
 		}
 		// A build from a workbook is planned from its target model: the
 		// whole TO-BE design first (owner, 2026-11-12).
@@ -170,35 +175,53 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 				cutNote += "Stages ordered: calculation modules, then actuals, then roles, workflows and dashboards, then the verification checks. "
 			}
 		}
-		// A plan already under way — carried from earlier sessions, or
-		// this session's own — is kept: the new stages follow it (one is
-		// enough), or with replace re-cut its open stages; its done stages
-		// and decisions stay (owner, 2026-11-11: carried context is never
-		// dropped).
+		// One plan per request (owner, 2026-11-13): the plan under way is
+		// the request's, and is worked, not planned again. The developer
+		// asking to change it re-cuts its open stages (replace); a different
+		// request sets it aside in the session (new_request) and gets its
+		// own plan. Done stages and decisions always stay.
 		prev, _ := store.TaskPlan(ctx, sessionID)
+		setAside := ""
 		if prev != nil && len(prev.Stages) > 0 && prev.Current() >= 0 {
-			if err := aiassistant.CheckStages(a.Stages); err != nil {
-				return "", err
-			}
-			var note string
-			if a.Replace {
-				prev.Replace(a.Goal, a.Stages)
-				note = "The plan's open stages were replaced by these; its done stages and decisions stay."
-			} else {
-				note = "The session's plan was under way, so these stages were added after its own (nothing earlier is dropped)."
-				if dup := prev.Append(a.Goal, a.Stages); len(dup) > 0 {
-					note += " Already in the plan, so not added again: " + strings.Join(dup, "; ") + "."
+			switch {
+			case a.Replace:
+				if err := aiassistant.CheckStages(a.Stages); err != nil {
+					return "", err
 				}
+				prev.Replace(a.Goal, a.Stages)
+				// Re-cut at the developer's request: theirs to approve again.
+				prev.PendingApproval = true
+				if err := store.SetTaskPlan(ctx, sessionID, prev); err != nil {
+					return "", err
+				}
+				log.Printf("AI task plan: session=%s stages=%d replace=true", sessionID, len(prev.Stages))
+				return cutNote + "The plan's open stages were replaced by these; its done stages and decisions stay. " + aiassistant.PlanSavedForApproval + "\n" +
+					prev.Render(), nil
+			case a.NewRequest:
+				if err := store.PutPlanAside(ctx, sessionID, prev); err != nil {
+					return "", err
+				}
+				setAside = fmt.Sprintf("The plan under way (%q, stage %d of %d) was set aside in this session; plan_task {\"resume_plan\": n} takes it up again. ",
+					prev.Goal, prev.Current()+1, len(prev.Stages))
+			default:
+				return "", fmt.Errorf("plan_task: this request already has its plan (%q, stage %d of %d is CURRENT) — one plan per request: work it "+
+					"(propose the CURRENT stage, mark stages with update_task_plan). If the developer asked to change the plan, call plan_task with replace: true; "+
+					"if their message is a different request, with new_request: true (the open plan is set aside and kept). Unsure which: ask the developer",
+					prev.Goal, prev.Current()+1, len(prev.Stages))
 			}
-			if err := store.SetTaskPlan(ctx, sessionID, prev); err != nil {
+		} else if prev != nil && prev.Finished() {
+			// The request before this one is done: its plan is kept among
+			// the session's earlier plans.
+			if err := store.PutPlanAside(ctx, sessionID, prev); err != nil {
 				return "", err
 			}
-			log.Printf("AI task plan: session=%s stages=%d replace=%v", sessionID, len(prev.Stages), a.Replace)
-			return cutNote + note + " The developer sees it.\n" + prev.Render() +
-				"To re-cut the open stages instead of adding to them, call plan_task with replace: true. Now propose the CURRENT stage.", nil
 		}
 		plan, err := aiassistant.NewTaskPlan(a.Goal, a.Stages)
 		if err != nil {
+			if setAside != "" {
+				// Nothing replaced it: the plan under way stays current.
+				_ = takeBackAside(ctx, store, sessionID)
+			}
 			return "", err
 		}
 		// The target model recorded before the plan stays with it (2026-11-12:
@@ -209,12 +232,19 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 		if prev != nil && len(prev.Decisions) > 0 {
 			plan.Decisions, plan.CarriedFrom, plan.CarriedChecked = prev.Decisions, prev.CarriedFrom, true
 		}
+		// The developer approves the whole plan before anything is built.
+		plan.PendingApproval = true
 		if err := store.SetTaskPlan(ctx, sessionID, plan); err != nil {
 			return "", err
 		}
 		log.Printf("AI task plan: session=%s stages=%d", sessionID, len(plan.Stages))
-		return cutNote + "Plan saved; the developer sees it.\n" + plan.Render() +
-			"Now propose stage 1 (mark it in_progress with update_task_plan as you do), and say in your reply what the stages are.", nil
+		archNote := ""
+		if plan.Target == nil {
+			archNote = "\nNo architecture is recorded for it yet: if this plan builds a model or a module, call set_target_model BEFORE you end the turn — " +
+				"the dimensions, each grid with its dimensions and metrics, the dashboards and the grids they show — so the developer approves the plan with its scheme."
+		}
+		return cutNote + setAside + "Plan saved. " + aiassistant.PlanSavedForApproval + "\n" + plan.Render() +
+			"Once approved, stage 1 comes first (mark it in_progress with update_task_plan as you propose it)." + archNote, nil
 	case aiassistant.UpdateTaskPlanTool:
 		var a struct {
 			Stage    int                        `json:"stage"`
@@ -284,8 +314,108 @@ func runTool(ctx context.Context, store *aiassistant.ChatStore, sessionID string
 			return "", err
 		}
 		return plan.Render(), nil
+	case aiassistant.RememberTool:
+		return remember(ctx, store, sessionID, args)
 	}
 	return exec.Execute(ctx, name, args)
+}
+
+// remember keeps a note, or an attachment's analysis, in the session's
+// memory (aiassistant/memory.go).
+func remember(ctx context.Context, store *aiassistant.ChatStore, sessionID string, args json.RawMessage) (string, error) {
+	var a struct {
+		Note       string `json:"note"`
+		Attachment string `json:"attachment"`
+		Analysis   string `json:"analysis"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("remember: %w", err)
+	}
+	if strings.TrimSpace(a.Note) == "" && strings.TrimSpace(a.Analysis) == "" {
+		return "", fmt.Errorf("remember: give a note, or an attachment with its analysis")
+	}
+	var docID string
+	if a.Analysis != "" {
+		if strings.TrimSpace(a.Attachment) == "" {
+			return "", fmt.Errorf("remember: an analysis needs the attachment it is about")
+		}
+		docs, _ := aiassistant.NewDocumentStore(store.Pool()).ListDocuments(ctx, sessionID)
+		found := false
+		for _, d := range docs {
+			if strings.EqualFold(d.Filename, strings.TrimSpace(a.Attachment)) {
+				a.Attachment, docID, found = d.Filename, d.ID, true
+			}
+		}
+		if !found {
+			return "", fmt.Errorf("remember: no file named %q is attached to this session", a.Attachment)
+		}
+	}
+	added := false
+	if _, err := store.UpdateMemory(ctx, sessionID, func(m *aiassistant.SessionMemory) error {
+		if a.Analysis != "" {
+			m.SetAttachment(a.Attachment, docID, aiassistant.ClipAnalysis(a.Analysis), "ai")
+			added = true
+		}
+		if m.AddNote(a.Note) {
+			added = true
+		}
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	if !added {
+		return "Your memory holds this already.", nil
+	}
+	return "Kept in your memory of this session; it is shown in every later turn.", nil
+}
+
+// resumePlan takes earlier plan n (1-based) of the session up again; the
+// plan under way, if any, takes its place among the earlier plans.
+func resumePlan(ctx context.Context, store *aiassistant.ChatStore, sessionID string, n int) (string, error) {
+	eps, err := store.EarlierPlans(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if n < 1 || n > len(eps) {
+		return "", fmt.Errorf("plan_task: this session has %d earlier plans — resume_plan names one of them (1-based)", len(eps))
+	}
+	chosen := eps[n-1].Plan
+	eps = append(eps[:n-1:n-1], eps[n:]...)
+	cur, _ := store.TaskPlan(ctx, sessionID)
+	if cur != nil && len(cur.Stages) > 0 {
+		state := "set_aside"
+		if cur.Finished() {
+			state = "finished"
+		}
+		eps = append(eps, aiassistant.EarlierPlan{Plan: *cur, State: state, At: time.Now().UTC()})
+		// Decisions are the session's conventions: they hold in every plan.
+		for _, d := range cur.Decisions {
+			chosen.AddDecision(d)
+		}
+		if chosen.Target == nil {
+			chosen.Target = cur.Target
+		}
+	}
+	if err := store.SetEarlierPlans(ctx, sessionID, eps); err != nil {
+		return "", err
+	}
+	if err := store.SetTaskPlan(ctx, sessionID, &chosen); err != nil {
+		return "", err
+	}
+	return "Earlier plan taken up again; the developer sees it.\n" + chosen.Render() + "Now propose the CURRENT stage.", nil
+}
+
+// takeBackAside makes the plan set aside last the session's plan again.
+func takeBackAside(ctx context.Context, store *aiassistant.ChatStore, sessionID string) error {
+	eps, err := store.EarlierPlans(ctx, sessionID)
+	if err != nil || len(eps) == 0 {
+		return err
+	}
+	last := eps[len(eps)-1].Plan
+	if err := store.SetEarlierPlans(ctx, sessionID, eps[:len(eps)-1]); err != nil {
+		return err
+	}
+	return store.SetTaskPlan(ctx, sessionID, &last)
 }
 
 // isTaskPlanTool reports whether name writes the session's plan.
@@ -351,12 +481,28 @@ func (h *handler) stageProofFor(ctx context.Context, sessionID, modelID, revID s
 	if len(named) == 0 {
 		return ""
 	}
+	// A sheet with a map is judged by its cell-by-cell checks (check_sheet).
+	verdicts := aiassistant.SheetMapVerdicts(ctx, h.db.For(ctx), modelID, revID)
+	var probs []string
+	unmapped := named[:0:0]
+	for _, s := range named {
+		v, has := verdicts[strings.ToLower(s)]
+		switch {
+		case !has:
+			unmapped = append(unmapped, s)
+		case v != "":
+			probs = append(probs, s+": "+v)
+		}
+	}
+	named = unmapped
+	if len(named) == 0 {
+		return strings.Join(probs, "; ")
+	}
 	rows, err := aiassistant.LoadWorkbookMap(ctx, h.db.For(ctx), modelID, revID, nil)
 	if err != nil {
-		return ""
+		return strings.Join(probs, "; ")
 	}
 	cov := aiassistant.Coverage(rows, h.sessionWorkbooks(ctx, sessionID))
-	var probs []string
 	for _, s := range named {
 		var c *aiassistant.SheetCoverage
 		for i := range cov {
@@ -367,7 +513,7 @@ func (h *handler) stageProofFor(ctx context.Context, sessionID, modelID, revID s
 		}
 		switch {
 		case c == nil || c.Mapped == 0:
-			probs = append(probs, fmt.Sprintf("%s: no row compared yet (compare_with_sheet records it in the workbook map)", s))
+			probs = append(probs, fmt.Sprintf("%s: not checked yet (check_sheet, one call for the sheet)", s))
 		default:
 			if len(c.Differ) > 0 {
 				probs = append(probs, fmt.Sprintf("%s: rows %s differ", s, intList(c.Differ, 15)))
@@ -517,7 +663,7 @@ func cutStages(stages []aiassistant.TaskStage, sheets []string) ([]aiassistant.T
 				items = append(items, generic...)
 			}
 			out = append(out, aiassistant.TaskStage{Title: strings.Join(mod, " → "), Items: items,
-				Check: "compare_with_sheet " + strings.Join(mod, ", "), Sheets: append([]string(nil), mod...)})
+				Check: "check_sheet " + strings.Join(mod, ", "), Sheets: append([]string(nil), mod...)})
 		}
 	}
 	return out, cut
@@ -590,8 +736,20 @@ func (h *handler) comparedFor(ctx context.Context, modelID, revID string, sheets
 	if err != nil {
 		return ""
 	}
+	maps, _ := aiassistant.LoadSheetMaps(ctx, h.db.For(ctx), modelID, nil, "")
 	var parts []string
 	for _, sh := range sheets {
+		cells, cellsOK := 0, 0
+		for _, m := range maps {
+			if strings.EqualFold(m.Sheet, sh) && m.Revision == revID {
+				cells += m.Compared
+				cellsOK += m.Matched
+			}
+		}
+		if cells > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d/%d cells matching (cell by cell)", sh, cellsOK, cells))
+			continue
+		}
 		var n, ok, per, perOK int
 		for _, r := range rows {
 			if !strings.EqualFold(r.Sheet, sh) || r.Compared == 0 {

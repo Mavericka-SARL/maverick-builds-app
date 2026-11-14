@@ -202,8 +202,11 @@ const (
 	EventAIProposalConfirmed EventType = "ai_proposal.confirmed"
 	EventAIProposalRejected  EventType = "ai_proposal.rejected"
 	EventAIDraftPromoted     EventType = "ai_draft.promoted"
-	EventAISettingsUpdated   EventType = "ai_settings.updated"
-	EventAISettingsTested    EventType = "ai_settings.tested"
+	// A plan of another session attached to a session; with its
+	// attachments, documents are copied between the two sessions.
+	EventAIPlanAttached    EventType = "ai_plan.attached"
+	EventAISettingsUpdated EventType = "ai_settings.updated"
+	EventAISettingsTested  EventType = "ai_settings.tested"
 	// Tenant-level AI key (enterprise). Separate from the per-user events
 	// above: one names a developer changing their own key, these name a
 	// tenant admin changing the key every developer in the tenant then uses.

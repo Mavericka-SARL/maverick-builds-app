@@ -576,6 +576,71 @@ func decodeAdminSwitchModelLinkParams(args [1]string, argsEscaped bool, r *http.
 	return params, nil
 }
 
+// ApproveAiPlanParams is parameters of approveAiPlan operation.
+type ApproveAiPlanParams struct {
+	ID uuid.UUID
+}
+
+func unpackApproveAiPlanParams(packed middleware.Parameters) (params ApproveAiPlanParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeApproveAiPlanParams(args [1]string, argsEscaped bool, r *http.Request) (params ApproveAiPlanParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ArchiveWorkflowParams is parameters of archiveWorkflow operation.
 type ArchiveWorkflowParams struct {
 	ID uuid.UUID
@@ -658,6 +723,71 @@ func unpackArrangeDashboardParams(packed middleware.Parameters) (params ArrangeD
 }
 
 func decodeArrangeDashboardParams(args [1]string, argsEscaped bool, r *http.Request) (params ArrangeDashboardParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// AttachAiPlanParams is parameters of attachAiPlan operation.
+type AttachAiPlanParams struct {
+	ID uuid.UUID
+}
+
+func unpackAttachAiPlanParams(packed middleware.Parameters) (params AttachAiPlanParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeAttachAiPlanParams(args [1]string, argsEscaped bool, r *http.Request) (params AttachAiPlanParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -1031,6 +1161,71 @@ func decodeClearMetricValuesParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// CompactAiSessionMemoryParams is parameters of compactAiSessionMemory operation.
+type CompactAiSessionMemoryParams struct {
+	ID uuid.UUID
+}
+
+func unpackCompactAiSessionMemoryParams(packed middleware.Parameters) (params CompactAiSessionMemoryParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeCompactAiSessionMemoryParams(args [1]string, argsEscaped bool, r *http.Request) (params CompactAiSessionMemoryParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // CompleteTaskParams is parameters of completeTask operation.
 type CompleteTaskParams struct {
 	StepId uuid.UUID
@@ -1261,6 +1456,71 @@ func decodeConfirmAiProposalParams(args [2]string, argsEscaped bool, r *http.Req
 		return params, &ogenerrors.DecodeParamError{
 			Name: "revision_id",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// CopyFormRecordsParams is parameters of copyFormRecords operation.
+type CopyFormRecordsParams struct {
+	ID uuid.UUID
+}
+
+func unpackCopyFormRecordsParams(packed middleware.Parameters) (params CopyFormRecordsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeCopyFormRecordsParams(args [1]string, argsEscaped bool, r *http.Request) (params CopyFormRecordsParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
 			Err:  err,
 		}
 	}
@@ -4812,6 +5072,9 @@ func decodeDownloadAiConversionParams(args [2]string, argsEscaped bool, r *http.
 // DownloadExportIntegrationParams is parameters of downloadExportIntegration operation.
 type DownloadExportIntegrationParams struct {
 	ID uuid.UUID
+	// A dashboard's selector bar as JSON {dimension id: member code}; an export whose spec follows the
+	// selector (follow_selector) is narrowed to those members.
+	Bar OptString `json:",omitempty,omitzero"`
 }
 
 func unpackDownloadExportIntegrationParams(packed middleware.Parameters) (params DownloadExportIntegrationParams) {
@@ -4822,10 +5085,20 @@ func unpackDownloadExportIntegrationParams(packed middleware.Parameters) (params
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "bar",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Bar = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeDownloadExportIntegrationParams(args [1]string, argsEscaped bool, r *http.Request) (params DownloadExportIntegrationParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -4868,6 +5141,47 @@ func decodeDownloadExportIntegrationParams(args [1]string, argsEscaped bool, r *
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: bar.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "bar",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotBarVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotBarVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Bar.SetTo(paramsDotBarVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "bar",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -6198,6 +6512,71 @@ func decodeGetAiSessionParams(args [1]string, argsEscaped bool, r *http.Request)
 	return params, nil
 }
 
+// GetAiSessionMemoryParams is parameters of getAiSessionMemory operation.
+type GetAiSessionMemoryParams struct {
+	ID uuid.UUID
+}
+
+func unpackGetAiSessionMemoryParams(packed middleware.Parameters) (params GetAiSessionMemoryParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGetAiSessionMemoryParams(args [1]string, argsEscaped bool, r *http.Request) (params GetAiSessionMemoryParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetAiWorkbookMapParams is parameters of getAiWorkbookMap operation.
 type GetAiWorkbookMapParams struct {
 	ID uuid.UUID
@@ -6257,6 +6636,70 @@ func decodeGetAiWorkbookMapParams(args [1]string, argsEscaped bool, r *http.Requ
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetApprovalChangesParams is parameters of getApprovalChanges operation.
+type GetApprovalChangesParams struct {
+	InstanceID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetApprovalChangesParams(packed middleware.Parameters) (params GetApprovalChangesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "instance_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.InstanceID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetApprovalChangesParams(args [0]string, argsEscaped bool, r *http.Request) (params GetApprovalChangesParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: instance_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "instance_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotInstanceIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotInstanceIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.InstanceID.SetTo(paramsDotInstanceIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "instance_id",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -8405,6 +8848,71 @@ func decodeGetWorkflowDefinitionParams(args [1]string, argsEscaped bool, r *http
 	return params, nil
 }
 
+// GetWorkflowInstanceParams is parameters of getWorkflowInstance operation.
+type GetWorkflowInstanceParams struct {
+	ID uuid.UUID
+}
+
+func unpackGetWorkflowInstanceParams(packed middleware.Parameters) (params GetWorkflowInstanceParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGetWorkflowInstanceParams(args [1]string, argsEscaped bool, r *http.Request) (params GetWorkflowInstanceParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetWorkflowInstancesParams is parameters of getWorkflowInstances operation.
 type GetWorkflowInstancesParams struct {
 	ID uuid.UUID
@@ -9397,6 +9905,71 @@ func decodeListAiConversionsParams(args [1]string, argsEscaped bool, r *http.Req
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ListAiPlansParams is parameters of listAiPlans operation.
+type ListAiPlansParams struct {
+	// Leave out this session's plans.
+	Exclude OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListAiPlansParams(packed middleware.Parameters) (params ListAiPlansParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "exclude",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Exclude = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListAiPlansParams(args [0]string, argsEscaped bool, r *http.Request) (params ListAiPlansParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: exclude.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "exclude",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotExcludeVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotExcludeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Exclude.SetTo(paramsDotExcludeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "exclude",
+			In:   "query",
 			Err:  err,
 		}
 	}

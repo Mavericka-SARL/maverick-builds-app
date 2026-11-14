@@ -7,10 +7,12 @@ import {
 import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
 import { credentialSteps, credentialsComplete } from "./proposalCredentials";
-import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage, type AITaskPlan, type AITaskStage } from "../../api/client";
+import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage, type AITaskPlan, type AITaskStage, type AIEarlierPlan, type AIMemoryStatus } from "../../api/client";
+import { AttachPlanPanel, EarlierPlansCard, MemoryGauge, MemoryPanel } from "./AIMemoryPlan";
+import { ArchitectureScheme, PlanReviewCard } from "./AIArchitecture";
 import { useDemo } from "../../api/useDemo";
 import {
-  Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
+  Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge,
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
   Txt,
 } from "../../ui";
@@ -192,12 +194,93 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
 // The files the AI Developer takes as attachments.
 const ATTACHABLE = ".pdf,.xlsx,.xlsm,.docx,.csv,.txt,.md,.json,.log";
 
+// The AI Developer's open session, remembered for this browser tab so a
+// reload opens it again (owner, 2026-11-13).
+const OPEN_SESSION_KEY = "ai_open_session";
+function rememberOpenSession(id: string) {
+  try { sessionStorage.setItem(OPEN_SESSION_KEY, id); } catch { /* storage unavailable */ }
+}
+
+// ── Message list ─────────────────────────────────────────────────────────────
+
+// What the AI read between two messages goes on one compact line (owner,
+// 2026-11-13: a bubble per "Fetching: list_metrics" took a screen): the
+// tools in order, a repeat counted ("read attached sheet ×2").
+function ToolsLine({ names }: { names: string[] }) {
+  const counted: { name: string; n: number }[] = [];
+  for (const n of names) {
+    const last = counted.at(-1);
+    if (last && last.name === n) last.n += 1;
+    else counted.push({ name: n, n: 1 });
+  }
+  const label = (n: string) => (n === "propose_actions" ? "wrote a plan" : n.replace(/_/g, " "));
+  return (
+    <div className="mvx-admin-muted" style={{ fontSize: 11, margin: "2px 0 8px", display: "flex", alignItems: "baseline", gap: 6 }}>
+      <Search size={11} aria-hidden="true" style={{ flexShrink: 0, position: "relative", top: 1 }} />
+      <Txt>{counted.map(c => (c.n > 1 ? `${label(c.name)} ×${c.n}` : label(c.name))).join(" · ")}</Txt>
+    </div>
+  );
+}
+
+// MessageList renders the session's messages: what each side wrote as
+// bubbles, the AI's reads between them as one ToolsLine. The first item of
+// the AI's latest answer carries data-turn-start, for scrolling to it.
+function MessageList({ messages }: { messages: AIMessage[] }) {
+  const lastUser = messages.reduce((at, m, i) => (m.role === "user" ? i : at), -1);
+  const items: React.ReactNode[] = [];
+  let tools: string[] = [];
+  let toolsKey = "";
+  let toolsAt = -1;
+  let marked = false;
+  const mark = (i: number) => {
+    if (marked || i <= lastUser) return {};
+    marked = true;
+    return { "data-turn-start": true };
+  };
+  const flush = () => {
+    if (tools.length > 0) {
+      items.push(<div key={`tools-${toolsKey}`} {...mark(toolsAt)}><ToolsLine names={tools} /></div>);
+      tools = [];
+    }
+  };
+  messages.forEach((m, i) => {
+    if (m.role === "tool") return;
+    if (m.content.trim() !== "") {
+      flush();
+      items.push(<div key={m.id} {...mark(i)}><MessageBubble msg={{ ...m, tool_calls: undefined }} /></div>);
+    }
+    if (m.tool_calls && m.tool_calls.length > 0) {
+      if (tools.length === 0) {
+        toolsKey = m.id;
+        toolsAt = i;
+      }
+      tools.push(...m.tool_calls.map(tc => tc.name));
+    }
+  });
+  flush();
+  return <>{items}</>;
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
+
+// A turn that went on by itself after a confirmed plan starts with this
+// (aiassistant.ContinuePrefix): shown as an automatic line, not a message
+// the developer typed.
+const CONTINUE_PREFIX = "▶ ";
 
 function MessageBubble({ msg }: { msg: AIMessage }) {
   if (msg.role === "tool") return null; // tool results are internal
 
   const isUser = msg.role === "user";
+  if (isUser && msg.content.startsWith(CONTINUE_PREFIX)) {
+    const approved = msg.content.startsWith(CONTINUE_PREFIX + "Plan approved");
+    return (
+      <div className="mvx-admin-muted" role="note" title={msg.content.slice(CONTINUE_PREFIX.length)}
+        style={{ fontSize: 12, textAlign: "center", margin: "6px 0" }}>
+        <Txt>{approved ? "▶ Plan approved — the AI starts building" : "▶ Plan confirmed — the AI goes on with the next step"}</Txt>
+      </div>
+    );
+  }
   return (
     <div className={["mvx-chat-row", isUser ? "mvx-chat-row--user" : ""].filter(Boolean).join(" ")}>
       <div className={["mvx-chat-bubble", isUser ? "mvx-chat-bubble--user" : ""].filter(Boolean).join(" ")}>
@@ -686,9 +769,6 @@ function ActivityPanel({ sessionId, onClose }: { sessionId: string; onClose: () 
   );
 }
 
-// MAX_PROPOSAL_STEPS mirrors aiassistant.MaxProposalSteps: a confirmed
-// batch this long very likely continues.
-const MAX_PROPOSAL_STEPS = 100;
 
 // formatElapsed is a running turn's time, m:ss.
 function formatElapsed(ms: number): string {
@@ -725,7 +805,10 @@ function formatTokens(n: number): string {
 // 2026-11-13: the open plan took two screens): one line with the goal and
 // progress, the decision waiting and the current stage; expanded, one line
 // per stage; a stage's items, evidence and what it took open on a click.
-function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
+function TaskPlanCard({ plan, onReview }: { plan: AITaskPlan; onReview: () => void }) {
+  // A plan waiting for approval is reviewed in the conversation
+  // (PlanReviewCard); here it is one line.
+  const awaiting = !!plan.pending_approval && plan.stages.length > 0;
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState<number | null>(null);
   const current = plan.stages.findIndex(s => s.status !== "done" && s.status !== "skipped");
@@ -761,8 +844,16 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
       )}
     </li>
   );
+  if (awaiting) {
+    return (
+      <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
+        <strong style={{ flex: 1 }}><Txt>{`Plan waiting for your approval — ${plan.stages.length} stages: ${plan.goal}`}</Txt></strong>
+        <Button size="sm" onClick={onReview}>Review</Button>
+      </div>
+    );
+  }
   return (
-    <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+    <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12, ...(open ? { maxHeight: "60vh", overflowY: "auto" } : {}) }}>
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label={open ? "Collapse the plan" : "Expand the plan"}
         title={plan.goal}
         style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)",
@@ -784,6 +875,12 @@ function TaskPlanCard({ plan }: { plan: AITaskPlan }) {
       <ol style={{ margin: "6px 0 0", padding: 0 }}>
         {open ? plan.stages.map(stageLine) : current >= 0 && stageLine(plan.stages[current], current)}
       </ol>
+      {open && plan.target && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontWeight: 600, margin: "0 0 6px" }}><Txt>{"Architecture"}</Txt></div>
+          <ArchitectureScheme target={plan.target} />
+        </div>
+      )}
     </div>
   );
 }
@@ -902,6 +999,15 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [usage, setUsage] = useState<AISessionUsage | null>(null);
   // The plan of a goal the developer delegated (plan_task); null for none.
   const [taskPlan, setTaskPlan] = useState<AITaskPlan | null>(null);
+  // The session's plans no longer under way (one plan per request), and the
+  // AI's memory of the session: how full it is and what it holds.
+  const [earlierPlans, setEarlierPlans] = useState<AIEarlierPlan[]>([]);
+  const [memory, setMemory] = useState<AIMemoryStatus | null>(null);
+  const [showMemory, setShowMemory] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const [showAttachPlan, setShowAttachPlan] = useState(false);
+  const [approvingPlan, setApprovingPlan] = useState(false);
+  const [attachingPlan, setAttachingPlan] = useState(false);
   const [messages, setMessages]     = useState<AIMessage[]>([]);
   const [pendingProposal, setPendingProposal] = useState<AIProposal | null>(null);
   const [input, setInput]           = useState("");
@@ -987,13 +1093,32 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   // scrollIntoView scrolled every scrollable ancestor too, so on a small
   // screen the console's top bar — which model and revision the assistant
   // works in — left the view right as the revision changed (2026-10-25).
+  //
+  // The chat follows the AI (owner, 2026-11-13): a new message or plan card
+  // brings the view down to it — to the start of the AI's answer when the
+  // answer is taller than the view, else to the end — and while a turn
+  // streams, the view keeps to the end unless the developer scrolled up to
+  // read.
+  const atBottom = useRef(true);
+  const shownCount = useRef(0);
   useEffect(() => {
     const list = messagesRef.current;
-    if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+    if (!list) return;
+    const grew = messages.length > shownCount.current;
+    shownCount.current = messages.length;
+    if (!grew && !pendingProposal && !atBottom.current) return;
+    const start = list.querySelector<HTMLElement>("[data-turn-start]");
+    const top = start && list.scrollHeight - start.offsetTop > list.clientHeight ? start.offsetTop - 12 : list.scrollHeight;
+    list.scrollTo({ top, behavior: "smooth" });
+  }, [messages, pendingProposal]);
+  useEffect(() => {
+    const list = messagesRef.current;
+    if (list && atBottom.current) list.scrollTo({ top: list.scrollHeight });
+  }, [streamingContent, toolStatus, thinking, error, taskPlan]);
 
   // Load session messages when switching sessions.
   const loadSession = async (id: string) => {
+    rememberOpenSession(id);
     setSessionId(id);
     setError(null);
     setPendingProposal(null);
@@ -1003,11 +1128,41 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     setCurrentSession(data.session);
     setUsage(data.usage ?? null);
     setTaskPlan(data.task_plan ?? null);
+    setEarlierPlans(data.earlier_plans ?? []);
+    setMemory(data.memory ?? null);
+    setShowAttachPlan(false);
     setMessages(data.messages ?? []);
     setDocuments(data.documents ?? []);
     const lastSent = (data.messages ?? []).filter(m => m.role === "user").at(-1)?.created_at;
     setSentDocIds(new Set((data.documents ?? []).filter(d => lastSent && d.created_at <= lastSent).map(d => d.id)));
+    // A plan still waiting for Execute comes back with its session: after a
+    // reload or a switch of sessions it was gone from the chat, and the
+    // work could not go on (2026-11-13).
+    try {
+      const pending = (await api.aiListProposals(id)).find(p => p.status === "pending");
+      if (pending) {
+        setPendingProposal(pending);
+        setProposalWarnings(pending.warnings ?? []);
+      }
+    } catch {
+      // The Activity panel still lists it.
+    }
   };
+
+  // The session that was open comes back after a reload (it is remembered
+  // for this browser tab, and only reopened when it is one of this model's).
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || sessionId || sessions.length === 0) return;
+    let remembered = "";
+    try { remembered = sessionStorage.getItem(OPEN_SESSION_KEY) ?? ""; } catch { /* storage unavailable */ }
+    if (!remembered || !sessions.some(s => s.id === remembered)) {
+      restored.current = true;
+      return;
+    }
+    const t = setTimeout(() => { restored.current = true; void loadSession(remembered); }, 0);
+    return () => clearTimeout(t);
+  }, [sessions, sessionId]);
 
   // Create a new session: it continues the developer's open AI draft, or
   // with newDraft makes the next draft on its first confirmed proposal.
@@ -1015,10 +1170,17 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     mutationFn: () => api.aiCreateSession(revisionId),
     onSuccess: (sess) => {
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
+      rememberOpenSession(sess.id);
       setSessionId(sess.id);
       setCurrentSession(sess);
       setMessages([]);
       setDocuments([]);
+      // A new session starts with no plan and an empty memory; a plan of
+      // another session can be attached (optional).
+      setTaskPlan(null);
+      setEarlierPlans([]);
+      setMemory(null);
+      setShowAttachPlan(false);
       setPendingProposal(null);
       setStreamingContent("");
       setToolStatus(null);
@@ -1070,7 +1232,15 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
       refreshRevisions();
       qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
     } catch (e) {
-      setError((e as Error).message);
+      // The name is taken (a session promoted before goes on and offers its
+      // title again): the server's next free name goes in the box.
+      const body = (e as { body?: { code?: string; suggested_name?: string } }).body;
+      if (body?.code === "REVISION_NAME_TAKEN" && body.suggested_name) {
+        setError(`A revision is already named “${(promoteName ?? "").trim()}” — the name is now “${body.suggested_name}”; press Use as working revision again, or change it.`);
+        setPromoteName(body.suggested_name);
+      } else {
+        setError((e as Error).message);
+      }
     } finally {
       setDraftBusy(false);
     }
@@ -1117,6 +1287,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         const sess = await api.aiCreateSession(revisionId);
         qc.invalidateQueries({ queryKey: ["ai-sessions"] });
         sid = sess.id;
+        rememberOpenSession(sid);
         setSessionId(sid);
         setCurrentSession(sess);
         setMessages([]);
@@ -1138,7 +1309,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const onPasteMessage = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const text = e.clipboardData.getData("text/plain");
     const table = parsePastedTable(text);
-    if (!table || promoted || thinking || uploading) return;
+    if (!table || thinking || uploading) return;
     e.preventDefault();
     const taken = new Set(documents.map(d => d.filename));
     let n = 1;
@@ -1173,16 +1344,11 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   // needing explicit confirmation; this only removes the typing. Capped so
   // a model that keeps emitting full batches can't loop forever; any manual
   // message resets the budget.
-  const autoContinueRounds = useRef(0);
-  const AUTO_CONTINUE_LIMIT = 20;
-  const AUTO_CONTINUE_PROMPT =
-    "Continue with the remaining steps of the task. If the task is already complete, say so and stop proposing.";
 
   // Send a message.
   const sendMessage = async () => {
     const content = input.trim();
     if (!content || thinking) return;
-    autoContinueRounds.current = 0; // manual input resets the auto budget
 
     // Ensure we have a session.
     let sid = sessionId;
@@ -1211,14 +1377,15 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   };
 
   // sendContent runs one chat turn (streaming) for an existing session —
-  // shared by manual sends and the batch auto-continue.
-  const sendContent = async (sid: string, content: string) => {
+  // shared by manual sends and the turn that goes on by itself after a
+  // confirmed plan ran (goOn: the server writes that turn's message).
+  const sendContent = async (sid: string, content: string, goOn = false) => {
     // Optimistically add the user message.
     const optimistic: AIMessage = {
       id: `opt-${Date.now()}`,
       session_id: sid,
       role: "user",
-      content,
+      content: goOn ? `${CONTINUE_PREFIX}Plan confirmed — going on` : content,
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, optimistic]);
@@ -1256,10 +1423,16 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setProposalWarnings(event.warnings ?? []);
             if (event.session) setCurrentSession(event.session);
             if (event.usage) setUsage(event.usage);
+            if (event.memory) setMemory(event.memory);
             qc.invalidateQueries({ queryKey: ["ai-proposals", sid] });
             break;
           case "task_plan":
             setTaskPlan(event.task_plan ?? null);
+            break;
+          case "memory":
+            if (event.memory) setMemory(event.memory);
+            // A note saved before the reply (an attachment gone through, the
+            // memory compacted) shows once the turn ends.
             break;
           case "done":
             setStreamingContent("");
@@ -1269,13 +1442,15 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             if (event.session) setCurrentSession(event.session);
             if (event.usage) setUsage(event.usage);
             if (event.task_plan !== undefined) setTaskPlan(event.task_plan ?? null);
+            if (event.earlier_plans) setEarlierPlans(event.earlier_plans);
+            if (event.memory) setMemory(event.memory);
             break;
           case "error":
             setError(event.error ?? "Something went wrong");
             setMessages(prev => prev.filter(m => m.id !== optimistic.id));
             break;
         }
-      }, revisionId, ctrl.signal);
+      }, revisionId, ctrl.signal, goOn);
       // The auto-generated title lands asynchronously shortly after the
       // first send — refetch the list now and once more after the namer's
       // window so the "Session" placeholder becomes the real name.
@@ -1288,10 +1463,6 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         setTimeout(() => {
           api.aiGetSession(sid).then(data => setMessages(data.messages ?? [])).catch(() => undefined);
         }, 800);
-      } else if ((e as { code?: string }).code === "SESSION_PROMOTED") {
-        setCurrentSession(prev => (prev ? { ...prev, promoted_at: prev.promoted_at ?? new Date().toISOString() } : prev));
-        setMessages(prev => prev.filter(m => m.id !== optimistic.id));
-        setInput(content);
       } else {
         setError((e as Error).message);
         // Remove optimistic message on failure.
@@ -1309,7 +1480,57 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   };
   const stopTurn = () => abortRef.current?.abort();
   const elapsed = turnStartedAt == null ? "" : formatElapsed(nowTick - turnStartedAt);
-  const promoted = !!currentSession?.promoted_at;
+
+  // Compacts the memory now, at the developer's request.
+  const compactMemory = async () => {
+    if (!sessionId) return;
+    setCompacting(true);
+    setError(null);
+    try {
+      const resp = await api.aiCompactMemory(sessionId);
+      setMemory(resp.memory);
+      setMessages(resp.messages ?? []);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCompacting(false);
+    }
+  };
+  // Approves the plan that waits; the AI then builds its first stage by
+  // itself (owner, 2026-11-13).
+  const approvePlan = async () => {
+    if (!sessionId) return;
+    setApprovingPlan(true);
+    setError(null);
+    try {
+      const resp = await api.aiApprovePlan(sessionId);
+      setTaskPlan(resp.task_plan);
+      void sendContent(sessionId, "", true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setApprovingPlan(false);
+    }
+  };
+  // Attaches a plan of another session (optional, never automatic).
+  const attachPlan = async (ref: { session_id: string; index: number }, attachments: boolean) => {
+    if (!sessionId) return;
+    setAttachingPlan(true);
+    setError(null);
+    try {
+      const resp = await api.aiAttachPlan(sessionId, { session_id: ref.session_id, index: ref.index, attachments });
+      setTaskPlan(resp.task_plan);
+      setEarlierPlans(resp.earlier_plans ?? []);
+      setMessages(resp.messages ?? []);
+      setDocuments(resp.documents ?? []);
+      setMemory(resp.memory);
+      setShowAttachPlan(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAttachingPlan(false);
+    }
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1455,7 +1676,20 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             <strong style={{ color: "var(--color-text)" }}>{sessionModel?.model_name ?? "…"}</strong>
             <span>· revision:</span>
             <strong style={{ color: "var(--color-text)" }}>{revisionName || demo?.revision || "active"}</strong>
-            {currentSession?.draft_revision_id && <span>· writes go to your AI draft revision</span>}
+            {/* The draft's two actions sit on this line: the banner they had
+                stayed on screen for the whole session (owner, 2026-11-13). */}
+            {currentSession?.draft_revision_id && (
+              <span title="Every plan of this session goes into its AI draft until you use it as your working revision or discard it. It goes live only when you Set active in Developer › Developer Models; a new session starts its own draft.">
+                · writes go to your AI draft:
+              </span>
+            )}
+            {currentSession?.draft_revision_id && promoteName === null && (
+              <>
+                <button type="button" className="mvx-link-button" disabled={draftBusy}
+                  onClick={() => setPromoteName((currentSession.title ?? "").trim().slice(0, 80))}>use as working revision</button>
+                <button type="button" className="mvx-link-button" disabled={draftBusy} onClick={discardDraft}>discard</button>
+              </>
+            )}
             {usage && usage.llm_calls > 0 && (
               <span title={`Input ${usage.input_tokens.toLocaleString()}, read from cache ${usage.cache_read_tokens.toLocaleString()}, written to cache ${usage.cache_write_tokens.toLocaleString()}, output ${usage.output_tokens.toLocaleString()}`}>
                 <Txt>{`· ${usage.llm_calls}${currentSession?.call_budget ? ` of ${currentSession.call_budget}` : ""} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in, ${fmtTokens(usage.output_tokens)} out`}</Txt>
@@ -1466,11 +1700,53 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               <CallBudgetControl sessionId={sessionId} budget={currentSession?.call_budget}
                 onChange={b => setCurrentSession(s => (s ? { ...s, call_budget: b ?? undefined } : s))} />
             )}
+            {memory && <MemoryGauge memory={memory} open={showMemory} onToggle={() => setShowMemory(v => !v)} />}
+            <span aria-hidden>·</span>
+            <button type="button" className="mvx-link-button" aria-expanded={showAttachPlan} disabled={thinking}
+              title="Optional: go on in this session with a plan of another of your sessions"
+              onClick={() => setShowAttachPlan(v => !v)}>
+              Attach a plan…
+            </button>
+          </div>
+        )}
+        {/* Naming the draft as it becomes the working revision: shown only
+            while the developer does that. */}
+        {currentSession?.draft_revision_id && promoteName !== null && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 24px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+            <span style={{ flex: 1 }}><Txt>{"Name the revision your AI draft becomes (it goes live only when you Set active in Developer Models):"}</Txt></span>
+            <TextInput
+              aria-label="Name of the revision"
+              value={promoteName}
+              onChange={(e) => setPromoteName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") promoteDraft(); if (e.key === "Escape") setPromoteName(null); }}
+              placeholder="Revision name (blank keeps the draft's)"
+              autoFocus
+              style={{ width: 240 }}
+            />
+            <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
+              Use as working revision
+            </Button>
+            <Button size="sm" disabled={draftBusy} onClick={() => setPromoteName(null)}>
+              Cancel
+            </Button>
           </div>
         )}
 
-        {taskPlan && (taskPlan.stages?.length ?? 0) > 0 && <TaskPlanCard plan={taskPlan} />}
+        {sessionId && showMemory && memory && <MemoryPanel memory={memory} busy={compacting} onCompact={() => { void compactMemory(); }} />}
+        {sessionId && showAttachPlan && (
+          <AttachPlanPanel sessionId={sessionId} hasPlan={(taskPlan?.stages?.length ?? 0) > 0} busy={attachingPlan}
+            onAttach={(ref, files) => { void attachPlan(ref, files); }} onClose={() => setShowAttachPlan(false)} />
+        )}
+
+        {taskPlan && (taskPlan.stages?.length ?? 0) > 0 && (
+          <TaskPlanCard plan={taskPlan} onReview={() => {
+            const list = messagesRef.current;
+            const card = list?.querySelector<HTMLElement>("[data-plan-review]");
+            if (list && card) list.scrollTo({ top: card.offsetTop - 12, behavior: "smooth" });
+          }} />
+        )}
         {taskPlan && (taskPlan.decisions?.length ?? 0) > 0 && <DecisionsCard decisions={taskPlan.decisions ?? []} />}
+        {earlierPlans.length > 0 && <EarlierPlansCard plans={earlierPlans} />}
         {sessionId && <WorkbookMapCard sessionId={sessionId} turns={messages.length} />}
 
         {showActivity && sessionId && (
@@ -1482,45 +1758,12 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             by every new session). AI writes always land here, never in an
             existing revision; promoting makes it the working revision, never
             the live one. */}
-        {currentSession?.draft_revision_id && (
-          <div className="mvx-context-banner" style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 0, borderLeft: "none", borderRight: "none", borderTop: "none" }}>
-            <RevisionBadge status="draft" label="AI draft" />
-            <span style={{ flex: 1, fontSize: 12 }}>
-              This session's AI draft — every plan of the session goes here until you use it as your working revision or discard it. It goes live only when you Set active in Models; a new session starts its own draft.
-            </span>
-            {promoteName === null ? (
-              <>
-                <Button size="sm" variant="primary" disabled={draftBusy} onClick={() => setPromoteName((currentSession.title ?? "").trim().slice(0, 80))}>
-                  Use as working revision
-                </Button>
-                <Button size="sm" disabled={draftBusy} onClick={discardDraft}>
-                  Discard
-                </Button>
-              </>
-            ) : (
-              <>
-                <TextInput
-                  aria-label="Name of the revision"
-                  value={promoteName}
-                  onChange={(e) => setPromoteName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") promoteDraft(); if (e.key === "Escape") setPromoteName(null); }}
-                  placeholder="Revision name (blank keeps the draft's)"
-                  autoFocus
-                  style={{ width: 240 }}
-                />
-                <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
-                  Use as working revision
-                </Button>
-                <Button size="sm" disabled={draftBusy} onClick={() => setPromoteName(null)}>
-                  Cancel
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-
         {/* Messages */}
-        <div ref={messagesRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+        <div ref={messagesRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px", position: "relative" }}
+          onScroll={e => {
+            const el = e.currentTarget;
+            atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+          }}>
           {messages.length === 0 && !sessionId && (
             <div style={{ textAlign: "center", color: "var(--color-text-muted)", marginTop: 60 }}>
               <Bot size={32} aria-hidden="true" style={{ marginBottom: 12, color: "var(--color-text-subtle)" }} />
@@ -1533,9 +1776,13 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             </div>
           )}
 
-          {messages.filter(m => m.role !== "tool").map(msg => (
-            <MessageBubble key={msg.id} msg={msg} />
-          ))}
+          <MessageList messages={messages} />
+
+          {/* The plan waiting for approval: reviewed and approved here. */}
+          {taskPlan?.pending_approval && (taskPlan.stages?.length ?? 0) > 0 && sessionId && (
+            <PlanReviewCard plan={taskPlan} approving={approvingPlan} onApprove={thinking ? undefined : () => { void approvePlan(); }}
+              onChange={() => inputRef.current?.focus()} />
+          )}
 
           {/* Pending proposal — show after the last assistant message */}
           {pendingProposal && sessionId && proposalWarnings.length > 0 && (
@@ -1560,15 +1807,11 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                 // A confirmed plan's first step makes the session's draft.
                 if (session && session.draft_revision_id !== currentSession?.draft_revision_id) refreshRevisions();
                 qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
-                // A fully-executed maximum-size batch means the plan very
-                // likely continues — ask for the next batch automatically.
-                if (
-                  updated.status === "executed" &&
-                  (updated.steps?.length ?? 0) >= MAX_PROPOSAL_STEPS &&
-                  autoContinueRounds.current < AUTO_CONTINUE_LIMIT
-                ) {
-                  autoContinueRounds.current += 1;
-                  void sendContent(sessionId, AUTO_CONTINUE_PROMPT);
+                // A confirmed plan that ran: the AI goes on with the next step
+                // by itself (owner, 2026-11-13) — fixing failed steps first.
+                // Every plan it proposes still waits for Execute.
+                if (updated.status === "executed" || updated.status === "partial") {
+                  void sendContent(sessionId, "", true);
                 }
               }}
             />
@@ -1604,7 +1847,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)",
             outline: dragOver ? "2px dashed var(--color-brand-500)" : undefined, outlineOffset: -6 }}
           onDragOver={e => {
-            if (!e.dataTransfer.types.includes("Files") || promoted || thinking) return;
+            if (!e.dataTransfer.types.includes("Files") || thinking) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
             setDragOver(true);
@@ -1614,7 +1857,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             if (!e.dataTransfer.types.includes("Files")) return;
             e.preventDefault();
             setDragOver(false);
-            if (promoted || thinking || uploading) return;
+            if (thinking || uploading) return;
             const files = Array.from(e.dataTransfer.files);
             const accepted = files.filter(f => ATTACHABLE.split(",").some(ext => f.name.toLowerCase().endsWith(ext)));
             const refused = files.filter(f => !accepted.includes(f)).map(f => f.name);
@@ -1625,13 +1868,6 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             });
           }}
         >
-          {promoted && (
-            <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
-              border: "1px solid var(--color-info-border)", background: "var(--color-info-bg)" }}>
-              <span style={{ flex: 1 }}>This session's draft is now your working revision, so the session is finished. Start a new session to keep building — it works on your working revision.</span>
-              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate()}>New session</Button>
-            </div>
-          )}
           {sessionId && <SessionExports sessionId={sessionId} />}
           {sessionId && <SessionConversions sessionId={sessionId} />}
           {/* Files sent earlier stay in the session, out of the way. */}
@@ -1696,8 +1932,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               onPaste={onPasteMessage}
-              placeholder={promoted ? "This session is finished — start a new session" : sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
-              disabled={thinking || promoted}
+              placeholder={sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
+              disabled={thinking}
               rows={2}
               style={{ flex: 1, resize: "none" }}
               aria-label="Message"
@@ -1714,7 +1950,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             ) : (
               <Button
                 variant="primary"
-                disabled={!input.trim() || promoted}
+                disabled={!input.trim()}
                 onClick={sendMessage}
                 style={{ flexShrink: 0, height: 42 }}
               >

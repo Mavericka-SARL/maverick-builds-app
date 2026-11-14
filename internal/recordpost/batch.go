@@ -26,6 +26,12 @@ type tablePosting struct {
 	refusals  map[string]cellRefusal // PostingRefusal's answer for a cell
 	guards    map[string]cellGuard   // what posting into a cell found
 	memo      *writeguard.Memo
+	// skipped counts the postings the guard kept out, by why: a Sync reports
+	// them instead of an "ok" that hid a period lock (2026-11-13).
+	skipped map[string]int
+	// cellLocks are the locks over mapping i's metric (lockedCell), read
+	// once a posting would leave a cell.
+	cellLocks map[int]*writeguard.CellLocks
 }
 
 func (ps *Poster) newTablePosting(ctx context.Context, form *crudapp.FormDef) (*tablePosting, error) {
@@ -36,6 +42,7 @@ func (ps *Poster) newTablePosting(ctx context.Context, form *crudapp.FormDef) (*
 	tp := &tablePosting{
 		form: form, mappings: mappings, period: ps.periodResolver(ctx),
 		refusals: map[string]cellRefusal{}, guards: map[string]cellGuard{}, memo: writeguard.NewMemo(),
+		skipped: map[string]int{}, cellLocks: map[int]*writeguard.CellLocks{},
 	}
 	for _, m := range mappings {
 		tp.revisions = append(tp.revisions, ps.postingRevision(ctx, m))
@@ -66,6 +73,9 @@ type cellGuard struct {
 	// noLeaf: the record names a code the dimension does not have, a parent
 	// or a calculated member. Its posting is retracted.
 	noLeaf bool
+	// reason says why a skipped cell takes no posting (a workflow lock, a
+	// closed period, the creator's access), for a Sync's report.
+	reason string
 }
 
 // postingRecord is a record to post, as it was read: its status, data and
@@ -125,6 +135,32 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 	for i, m := range tp.mappings {
 		var retract []postingRecord
 		var rows []postingRow
+		// What each record posts now: a posting in a cell a workflow locks
+		// stays there (locked.go). A sync, a re-post after the posting was
+		// changed, or a status a workflow set used to move or withdraw it.
+		now, err := ps.postedNow(ctx, m, recs)
+		if err != nil {
+			ps.Log.Error().Err(err).Str("mapping_id", m.id).Msg("posting: reading what the records post now failed — nothing posted")
+			tp.skipped["a check kept failing; try again"] += len(recs)
+			continue
+		}
+		stays := func(rec postingRecord, next *plannedPosting) bool {
+			p := now[rec.id]
+			if p == nil || samePosting(p, next) {
+				return false
+			}
+			reason, err := ps.lockedCell(ctx, tp, i, p.members)
+			switch {
+			case err != nil:
+				ps.Log.Error().Err(err).Str("mapping_id", m.id).Str("record_id", rec.id).Msg("posting: lock check kept failing — the posting is kept")
+				tp.skipped["a check kept failing; try again"]++
+				return true
+			case reason != "":
+				tp.skipped[reason]++
+				return true
+			}
+			return false
+		}
 		for _, rec := range recs {
 			// A record with no numeric value in the source field contributes
 			// nothing, like one whose status is not eligible: its posting is
@@ -133,7 +169,9 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 			// value in the metric until something else recomputed it.
 			val, hasValue := m.value(rec.data)
 			if !m.postsAt(hasStatus, rec.status) || !hasValue {
-				retract = append(retract, rec)
+				if !stays(rec, nil) {
+					retract = append(retract, rec)
+				}
 				continue
 			}
 			// A record leaving a mapped field empty — saved before such a
@@ -144,15 +182,23 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 			if empty := m.emptyDims(rec.data); len(empty) > 0 {
 				ps.Log.Warn().Str("mapping_id", m.id).Str("record_id", rec.id).Strs("empty_dimensions", empty).
 					Msg("posting: a mapped field is empty — nothing posted")
-				retract = append(retract, rec)
+				if !stays(rec, nil) {
+					retract = append(retract, rec)
+				}
 				continue
 			}
 			members := m.members(rec.data, tp.period)
 			g, decided := ps.guard(ctx, tp, i, firstNonEmpty(rec.creator, userID), members, rec.id)
 			switch {
-			case !decided || g.skip:
+			case !decided:
+				tp.skipped["a check kept failing; try again"]++
+			case g.skip:
+				tp.skipped[firstNonEmpty(g.reason, "the record's creator may not write there")]++
 			case g.noLeaf:
-				retract = append(retract, rec)
+				if !stays(rec, nil) {
+					retract = append(retract, rec)
+				}
+			case stays(rec, &plannedPosting{value: val, members: members}):
 			default:
 				dims, _ := json.Marshal(members)
 				rows = append(rows, postingRow{id: rec.id, readAt: rec.updatedAt, dims: string(dims), value: val})
@@ -204,7 +250,7 @@ func (ps *Poster) guard(ctx context.Context, tp *tablePosting, i int, guardUser 
 	}
 	if access == "hidden" || access == "read" {
 		ps.Log.Warn().Str("mapping_id", m.id).Str("metric_id", m.targetMetricID).Msg("posting rejected, the record's creator lacks write access to the metric")
-		tp.guards[key] = cellGuard{skip: true}
+		tp.guards[key] = cellGuard{skip: true, reason: "the record's creator may not write the metric it posts into"}
 		return tp.guards[key], true
 	}
 	// A record naming a code the dimension does not have, a parent or a
@@ -244,6 +290,7 @@ func (ps *Poster) guard(ctx context.Context, tp *tablePosting, i int, guardUser 
 	} else if reason != "" {
 		ps.Log.Warn().Str("mapping_id", m.id).Str("reason", reason).Msg("posting rejected by write guard")
 		g.skip = true
+		g.reason = reason
 	}
 	tp.guards[key] = g
 	return g, true

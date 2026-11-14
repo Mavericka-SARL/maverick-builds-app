@@ -77,6 +77,14 @@ type Handler interface {
 	//
 	// PATCH /api/admin/model-links/{id}
 	AdminSwitchModelLink(ctx context.Context, req *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (AdminSwitchModelLinkRes, error)
+	// ApproveAiPlan implements approveAiPlan operation.
+	//
+	// A new plan, and one re-cut at the developer's request, waits (task_plan.pending_approval);
+	// proposals for it are refused until it is approved — here, or by a reply that approves it. The
+	// console then sends a message with continue true, and the AI proposes the first open stage.
+	//
+	// POST /api/ai/sessions/{id}/plan/approve
+	ApproveAiPlan(ctx context.Context, params ApproveAiPlanParams) (ApproveAiPlanRes, error)
 	// ArchiveWorkflow implements archiveWorkflow operation.
 	//
 	// Archive a workflow definition.
@@ -94,12 +102,21 @@ type Handler interface {
 	//
 	// POST /api/developer/dashboards/{id}/arrange
 	ArrangeDashboard(ctx context.Context, req *ArrangeDashboardReq, params ArrangeDashboardParams) (ArrangeDashboardRes, error)
+	// AttachAiPlan implements attachAiPlan operation.
+	//
+	// Optional, never automatic: a new session starts with no plan. The plan under way here, if any, is
+	// set aside in this session. With attachments, the files of the plan's session come along with their
+	// analyses and the parts read, so they are not gone through again. The next turn checks which of the
+	// plan's open stages the model already holds.
+	//
+	// POST /api/ai/sessions/{id}/attach-plan
+	AttachAiPlan(ctx context.Context, req *AttachAiPlanReq, params AttachAiPlanParams) (AttachAiPlanRes, error)
 	// BackfillFormMapping implements backfillFormMapping operation.
 	//
 	// Re-apply a table-to-metric mapping against all already-submitted records.
 	//
 	// POST /api/developer/form-integrations/{id}/backfill
-	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error)
+	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*PostingReport, error)
 	// CancelIntegrationRun implements cancelIntegrationRun operation.
 	//
 	// Cancel a queued run immediately, or request cooperative cancellation of a running one.
@@ -149,6 +166,13 @@ type Handler interface {
 	//
 	// DELETE /api/admin/ai-settings/key
 	ClearTenantAIKey(ctx context.Context) (ClearTenantAIKeyRes, error)
+	// CompactAiSessionMemory implements compactAiSessionMemory operation.
+	//
+	// Compact the session's memory now — the earlier conversation becomes a summary — and say so in
+	// the session.
+	//
+	// POST /api/ai/sessions/{id}/memory/compact
+	CompactAiSessionMemory(ctx context.Context, params CompactAiSessionMemoryParams) (CompactAiSessionMemoryRes, error)
 	// CompleteTask implements completeTask operation.
 	//
 	// Approve or reject a workflow step.
@@ -171,6 +195,16 @@ type Handler interface {
 	//
 	// POST /api/business-admin/copy-values
 	CopyBAValues(ctx context.Context, req *CopyBAValuesReq) (CopyBAValuesRes, error)
+	// CopyFormRecords implements copyFormRecords operation.
+	//
+	// New records like the ones named, with the date field `field` set to `value` — last month's
+	// intercompany matches and loans brought into this month's close. The copies are the caller's own,
+	// made as a file import makes records: every one checked, all or none (422 lists the refused ones),
+	// new codes, drafts in a table with a status, posted as one batch. For someone who may add records
+	// to the table; a table whose records carry a code typed from outside cannot be copied.
+	//
+	// POST /api/forms/{id}/records/copy
+	CopyFormRecords(ctx context.Context, req *CopyFormRecordsReq, params CopyFormRecordsParams) (CopyFormRecordsRes, error)
 	// CreateAPIToken implements createAPIToken operation.
 	//
 	// Make a personal API token for a script; the answer carries the token, once.
@@ -621,9 +655,10 @@ type Handler interface {
 	DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (DownloadAiConversionRes, error)
 	// DownloadExportIntegration implements downloadExportIntegration operation.
 	//
-	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
-	// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
-	// (hidden members and metrics left out). Recorded in the integration's run history.
+	// Download a file_export integration — the grid's values (leaf-level; with include_totals also the
+	// totals the grid serves) as CSV, XLSX or JSON in its spec's layout, built from the caller's own
+	// view of the grid (hidden members and metrics left out); with sheets, more grids in one workbook.
+	// Recorded in the integration's run history.
 	//
 	// GET /api/integrations/{id}/export
 	DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error)
@@ -712,6 +747,12 @@ type Handler interface {
 	//
 	// GET /api/ai/sessions/{id}
 	GetAiSession(ctx context.Context, params GetAiSessionParams) (GetAiSessionRes, error)
+	// GetAiSessionMemory implements getAiSessionMemory operation.
+	//
+	// How full the session's memory is and what it holds.
+	//
+	// GET /api/ai/sessions/{id}/memory
+	GetAiSessionMemory(ctx context.Context, params GetAiSessionMemoryParams) (GetAiSessionMemoryRes, error)
 	// GetAiSettings implements getAiSettings operation.
 	//
 	// Get the caller's saved LLM provider settings.
@@ -726,6 +767,16 @@ type Handler interface {
 	//
 	// GET /api/ai/sessions/{id}/workbook-map
 	GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (GetAiWorkbookMapRes, error)
+	// GetApprovalChanges implements getApprovalChanges operation.
+	//
+	// When a run whose context names Dimension members (a period) finishes approved, the inputs and
+	// calculated values of that scope are kept. An input outside the lock (a tax rate, a posting account,
+	//  a setting) can still move them; this lists, for the selected model's application, each approved
+	// run whose figures differ now: how many, and up to five examples (a metric or member hidden from
+	// the caller is left out of the examples). For anyone who opens the model.
+	//
+	// GET /api/workflow/approval-changes
+	GetApprovalChanges(ctx context.Context, params GetApprovalChangesParams) (*GetApprovalChangesOK, error)
 	// GetAuditSettings implements getAuditSettings operation.
 	//
 	// The audit retention policy (administrators; enterprise).
@@ -946,6 +997,14 @@ type Handler interface {
 	//
 	// GET /api/workflow/history
 	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	// GetWorkflowInstance implements getWorkflowInstance operation.
+	//
+	// For whoever may administer the run (the application's business admins and developers) or took part
+	// in it (started it, acted on a step, was notified of it); 404 for anyone else and for a test run. A
+	// reopened run reads "reopened", with when, by whom and why.
+	//
+	// GET /api/workflow/instances/{id}
+	GetWorkflowInstance(ctx context.Context, params GetWorkflowInstanceParams) (GetWorkflowInstanceRes, error)
 	// GetWorkflowInstances implements getWorkflowInstances operation.
 	//
 	// List the most recent 20 executions started from a workflow definition.
@@ -1121,6 +1180,12 @@ type Handler interface {
 	//
 	// POST /api/ai/settings/models
 	ListAiModels(ctx context.Context, req OptListAiModelsReq) (*ListAiModelsOK, error)
+	// ListAiPlans implements listAiPlans operation.
+	//
+	// The plans of the developer's sessions in the model, to attach one to a session.
+	//
+	// GET /api/ai/plans
+	ListAiPlans(ctx context.Context, params ListAiPlansParams) ([]AiPlanRef, error)
 	// ListAiProposals implements listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -1574,9 +1639,12 @@ type Handler interface {
 	RenameRevision(ctx context.Context, req *RenameRevisionReq, params RenameRevisionParams) (RenameRevisionRes, error)
 	// ReopenWorkflowInstance implements reopenWorkflowInstance operation.
 	//
-	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
-	// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
-	// required: it goes into the audit log and the message the people involved receive.
+	// Releases what an approved run locks. The run is reopened: it reads "reopened" in history and
+	// status widgets (stored as cancelled with reopened_at, so its scope is released); its steps,
+	// decisions, posted values and approved records stay. Who may: the roles its definition names in
+	// reopen_roles, or — none named — the people who may cancel a run (the application's business
+	// admins and developers). A reason is required: it goes into the audit log and the message the
+	// people involved receive.
 	//
 	// POST /api/workflow/instances/{id}/reopen
 	ReopenWorkflowInstance(ctx context.Context, req *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error)
@@ -1780,11 +1848,12 @@ type Handler interface {
 	// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 	// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
 	// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-	// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
-	// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
-	// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
-	// streaming has started — after streaming begins, limit hits are only reported via an "error"
-	// event since the HTTP status is already sent).
+	// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
+	// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
+	// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
+	// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
+	// if exceeded before any streaming has started — after streaming begins, limit hits are only
+	// reported via an "error" event since the HTTP status is already sent).
 	//
 	// POST /api/ai/sessions/{id}/messages
 	SendAiMessage(ctx context.Context, req *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error)
@@ -1888,7 +1957,9 @@ type Handler interface {
 	// For an administrator of the table's application (a business_admin of its workspace, a developer or
 	// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
 	// other people's included. 403 for a caller who reaches the table without administering it, 404 for
-	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
+	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has. The
+	// answer says how many postings a workflow lock, a closed period or a creator's access kept out, and
+	// why (status "partial").
 	//
 	// POST /api/forms/{id}/sync
 	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error)

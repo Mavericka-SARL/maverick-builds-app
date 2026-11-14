@@ -36,8 +36,8 @@ type Session struct {
 	// request, renameable. Empty = unnamed (client falls back to the date).
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
-	// PromotedAt is set once the session's draft was promoted: the session
-	// is finished, and its next message is refused (start a new session).
+	// PromotedAt is when the session's draft was last taken as the working
+	// revision; the session goes on, its next confirmed plan in a fresh draft.
 	PromotedAt *time.Time `json:"promoted_at,omitempty"`
 	// CallBudget caps the session's provider calls (migration 180); nil is
 	// the deployment's per-session cap.
@@ -142,8 +142,8 @@ func (s *ChatStore) SetDraftRevisionID(ctx context.Context, sessionID, revisionI
 	return err
 }
 
-// MarkPromoted records that the session's draft was promoted: the session
-// is finished.
+// MarkPromoted records that the session's draft was promoted; the session
+// goes on.
 func (s *ChatStore) MarkPromoted(ctx context.Context, sessionID string) (time.Time, error) {
 	var at time.Time
 	err := s.pool.QueryRow(ctx, `UPDATE ai_assistant.session SET promoted_at=now() WHERE id=$1::uuid RETURNING promoted_at`, sessionID).Scan(&at)
@@ -171,10 +171,10 @@ func (s *ChatStore) EarlierSessions(ctx context.Context, sessionID, carriedFrom 
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// FinishDraftSessions finishes userID's other sessions working in
+// FinishDraftSessions releases userID's other sessions working in
 // revisionID, a draft just taken as the working revision: each is marked
-// promoted and loses its draft, as the promoting session does. It returns
-// their ids.
+// promoted and loses its draft, as the promoting session does, and goes on
+// with a fresh one. It returns their ids.
 func (s *ChatStore) FinishDraftSessions(ctx context.Context, revisionID, userID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		UPDATE ai_assistant.session SET draft_revision_id = NULL, promoted_at = now()

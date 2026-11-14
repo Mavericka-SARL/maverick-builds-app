@@ -3,10 +3,12 @@ package aiassistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -134,6 +136,12 @@ func (e *WriteExecutor) deleteFormDef(ctx context.Context, raw json.RawMessage) 
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, id).Scan(&records)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM model.form_metric_mapping WHERE form_id=$1::uuid`, id).Scan(&integrations)
+	// Its postings' values in a period a workflow locks stay there.
+	if msg, err := recordpost.TableDeleteRefusal(ctx, e.pool, id); err != nil {
+		return "", "", err
+	} else if msg != "" {
+		return "", "", errors.New(msg)
+	}
 	// Its posted totals go too; promoting the draft recalculates them.
 	if _, err := crudapp.NewStoreOn(e.pool).DeleteForm(ctx, id); err != nil {
 		return "", "", fmt.Errorf("delete form: %w", err)
@@ -673,6 +681,17 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	}); err != nil {
 		return "", "", err
 	}
+	// A change that would move, add up again or withdraw values the
+	// posting holds in a period a workflow locks waits for the period to be
+	// reopened, as the console's.
+	if msg, err := recordpost.MappingChangeRefusal(ctx, e.pool, p.FormIntegrationID, recordpost.MappingChange{
+		TargetMetricID: p.TargetMetricID, SourceField: p.SourceField, Aggregation: p.Aggregation,
+		PostingStatuses: p.PostingStatuses, DimensionMappings: p.DimensionMappings, RowFilter: filter, Live: *p.LivePosting,
+	}); err != nil {
+		return "", "", err
+	} else if msg != "" {
+		return "", "", errors.New(msg)
+	}
 	dimJSON, _ := json.Marshal(p.DimensionMappings)
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.form_metric_mapping SET
@@ -689,6 +708,12 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 		msg += fmt.Sprintf(" (renamed from '%s')", curName)
 	}
 	if p.TargetMetricID != cur.TargetMetricID {
+		// The old metric's posted values go, as on the console's retarget:
+		// the re-post writes only the new metric's, and they stayed in the
+		// old one with nothing to take them out (2026-11-14).
+		if _, err := crudapp.NewStoreOn(e.pool).DeleteMappingPostings(ctx, []string{p.FormIntegrationID}, p.TargetMetricID); err != nil {
+			return "", "", fmt.Errorf("withdraw the old metric's postings: %w", err)
+		}
 		var metricName string
 		_ = e.pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, p.TargetMetricID).Scan(&metricName)
 		note, err := e.typedSetAsideNote(ctx, p.TargetMetricID, metricName)
@@ -724,6 +749,12 @@ func (e *WriteExecutor) deleteFormIntegration(ctx context.Context, raw json.RawM
 	_, name, err := e.loadIntegration(ctx, &p.FormIntegrationID)
 	if err != nil {
 		return "", "", err
+	}
+	// Its values in a period a workflow locks stay there.
+	if msg, err := recordpost.PostingDeleteRefusal(ctx, e.pool, p.FormIntegrationID); err != nil {
+		return "", "", err
+	} else if msg != "" {
+		return "", "", errors.New(msg)
 	}
 	// Its posted totals go too, as on the developer's delete; promoting the
 	// draft recalculates them.

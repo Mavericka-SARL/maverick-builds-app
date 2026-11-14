@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type WorkflowStatusStep } from "../../api/client";
-import { LoadingState } from "../../ui";
+import { InlineAlert, LoadingState, Txt } from "../../ui";
 import { useDateFormat } from "../dateFormat";
 import { momentDate } from "../dateSerial";
 
@@ -50,6 +50,7 @@ export function WorkflowStatusWidget({ name }: { name: string }) {
     : inst.status === "running" ? `Running since ${date(inst.started_at)}`
     : inst.status === "completed" ? `Completed on ${date(inst.completed_at ?? inst.started_at)}`
     : inst.status === "cancelled" ? `Cancelled — started ${date(inst.started_at)}`
+    : inst.status === "reopened" ? `Reopened after approval — started ${date(inst.started_at)}`
     : `${inst.status[0].toUpperCase()}${inst.status.slice(1)} — started ${date(inst.started_at)}`;
   return (
     <section className="mvx-wfstatus" aria-label={`${data.workflow} status`}>
@@ -57,6 +58,11 @@ export function WorkflowStatusWidget({ name }: { name: string }) {
         <strong>{data.workflow}</strong>
         <span className="mvx-admin-muted">{headline}</span>
       </header>
+      {(inst?.changed_since_approval ?? 0) > 0 && (
+        <InlineAlert tone="warning">
+          <Txt>{inst!.changed_since_approval}</Txt> <Txt>approved figure</Txt><Txt>{inst!.changed_since_approval === 1 ? "" : "s"}</Txt> <Txt>changed since approval: something outside the lock moved </Txt>{inst!.changed_since_approval === 1 ? "it" : "them"} (an input without the period, or a change to the model).
+        </InlineAlert>
+      )}
       <ol className="mvx-wfstatus__steps">
         {data.steps.map(s => {
           const d = s.state === "current" ? due(s.due_at) : null;

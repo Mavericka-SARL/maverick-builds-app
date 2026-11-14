@@ -127,14 +127,17 @@ func TurnBrief(m RequestMode, plan *TaskPlan) string {
 		switch {
 		case len(plan.Stages) == 0:
 			// Decisions only: they say all there is.
+		case plan.AwaitsApproval():
+			b.WriteString(PlanApprovalBrief)
 		case plan.Current() >= 0 && m.Mode == ModeDirect:
 			b.WriteString("The developer's order comes first: do exactly what it asks now, whether or not it is the CURRENT stage, and never argue it with the plan or add the plan's work to it. " +
 				"The plan stays as it is and goes on after; mark a stage the order finishes with update_task_plan.\n")
 		case plan.Current() >= 0:
-			b.WriteString("Work on the CURRENT stage: one proposal for it (or for its next part), then check it and mark it with update_task_plan. A new goal: plan_task adds its stages after these.\n")
+			b.WriteString("Work on the CURRENT stage: one proposal for it (or for its next part), then check it and mark it with update_task_plan. " +
+				"This plan is this request's: never plan it again. A different request: plan_task with new_request: true (this plan is set aside); unsure whether it is one: ask the developer.\n")
 		default:
 			b.WriteString("Every stage is done or skipped: report what was built and checked, and what the developer has to do (a business admin's access rules, values to type); " +
-				"for another goal, suggest a new session.\n")
+				"a further request gets its own plan here, in this session (plan_task).\n")
 		}
 	}
 	return b.String()
@@ -152,7 +155,7 @@ needs: the files it names (a month's actuals, a workbook), the values it depends
 attached, a period the attached data does not hold — is asked for before planning, never planned around. Before building anything that takes more
 than one plan, call plan_task {"goal", "stages": [{"title", "items": [what the stage delivers, named], "check": how you
 will check it}]}: stages in build order (what a later stage reads comes first), each one proposal of at most a few
-dozen steps. Then propose the current stage; once it is confirmed, check it as the stage says (compare_with_sheet,
+dozen steps. Then propose the current stage; once it is confirmed, check it as the stage says (check_sheet,
 describe_dashboard, list_*), mark it with update_task_plan {"stage", "status", "note"} and propose the next. Take
 ordinary defaults yourself and list them in your reply; ask only where the workbook leaves a choice that changes
 numbers (then propose the rest). Report at the end of each stage: what it built, what the check showed, what is next.
@@ -191,7 +194,7 @@ var playbooks = map[string]string{
    - inputs: load_sheet (or import_file_data on the workbook), never typed — not into a plan, not into a file;
    - calculations: plan_sheet translates the sheet's formulas; propose ONE sheet_plan step with fixes only for the
      rows it could not translate (it names the month a formula changes);
-   - proof: compare_with_sheet every row of the module, all periods; the workbook map keeps what matched.
+   - proof: check_sheet each sheet of the module (every cell, totals included); its map is saved and checked again.
    Approve coherent changes: one proposal per module where it fits, not dozens of small edits.
 5. Every metric shown gets the workbook's row text as its label, its number format (decimals, currency,
    percentages in percent units); the workbook's own tests and guards stay in the formulas. Every metric and
@@ -213,7 +216,8 @@ Know-how from earlier builds:
   propose_actions.
 `,
 	"workbook_fix": `### Playbook: numbers that must match a workbook
-1. compare_with_sheet the whole sheet first ("rows": every row) to see what differs and from which period.
+1. check_sheet the sheet first: it says whether the map reads the sheet wrongly (mapping problems — fix the map) or
+   the model's values differ (value problems), and which rows, columns or members.
 2. Read the differing rows' workbook formulas (read_attached_sheet) and the model's; find the root cause, which is
    often one shared input or test feeding many rows: fix it there, once.
 3. Copy the workbook's own logic (its closed-month test, its guards); never type a workbook value into a
@@ -225,7 +229,7 @@ Know-how from earlier builds:
 `,
 	"pages": `### Playbook: dashboards
 1. A dashboard per sheet people read, or a place on a dashboard with the sheets it belongs with; KPI dashboards show what the
-   workbook's dashboard sheet shows (compare_with_sheet its rows to pick the metrics).
+   workbook's dashboard sheet shows (read_attached_sheet its rows to pick the metrics).
 2. Each dashboard in the plan that creates it: its widgets, arrange_dashboard, reorder_dashboards, and
    set_role_dashboards for the roles that use it.
 3. Grids show labelled metrics (the workbook's row text), the workbook's formats, a title with the unit; charts

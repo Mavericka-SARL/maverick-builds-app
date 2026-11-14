@@ -1,7 +1,9 @@
 import { useState, useCallback, useMemo, useRef, type MutableRefObject } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
-import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt, Checkbox } from "../../ui";
+import { RunParametersDialog } from "../RunParametersDialog";
+import { runParametersOf, replaceByFields, type RunParameter } from "../runParameters";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
 import { fileToBase64 } from "../business/blobUtils";
 import { ShapeStep, type Shaped, type ShapeSource } from "./ShapeStep";
@@ -96,9 +98,12 @@ interface WizardConfig {
   // A saved integration's workbook sheet, which the upload step opens a
   // workbook on.
   sheet?: string;
-  // A table's load: the field whose values the file replaces (its period) —
-  // the table's records holding one are deleted as the file's are added.
+  // A table's load: the fields whose values the file replaces (its period;
+  // an entity and a period), comma-joined — the table's records holding the
+  // file's combination are deleted as the file's are added.
   replaceBy?: string;
+  // Fixed-value columns the saved loader asks for at each upload.
+  askColumns?: string[];
 }
 
 interface CommitResult {
@@ -420,9 +425,22 @@ function sheetOf(pf?: ParsedFile | null): { sheet?: string } {
 // savedMode is the import mode a saved integration keeps: a grid's, from
 // a file as well as a sheet. A file integration used to keep none and run
 // as incremental, whatever was chosen (2026-10-21).
-function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"]; replace_by?: string } {
-  if (cfg.targetType === "form") return cfg.replaceBy ? { replace_by: cfg.replaceBy } : {};
+function savedMode(cfg: WizardConfig): { import_mode?: WizardConfig["importMode"]; replace_by?: string[] } {
+  if (cfg.targetType === "form") return replaceByFields(cfg.replaceBy).length ? { replace_by: replaceByFields(cfg.replaceBy) } : {};
   return cfg.targetType === "grid" || cfg.source === "google_sheets" ? { import_mode: cfg.importMode } : {};
+}
+
+// savedParameters are the values a saved loader asks for at each upload:
+// the fixed-value columns marked so, each required (its value here is only
+// this file's). A date-looking value asks for a date.
+function savedParameters(cfg: WizardConfig): { parameters: RunParameter[] } {
+  const constants = cfg.reshape?.constants ?? {};
+  return {
+    parameters: (cfg.askColumns ?? []).filter(c => c in constants).map(c => ({
+      column: c, label: c, required: true,
+      type: /^\d{4}-\d{2}-\d{2}$/.test(constants[c] ?? "") ? "date" as const : "text" as const,
+    })),
+  };
 }
 
 // What a full reload clears: the grid it imports into — every metric of it,
@@ -582,18 +600,21 @@ function UploadStep({
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
           <Field
             label="When a file is loaded again"
-            description="A month's file loaded twice, or its corrected copy, otherwise adds its records again."
+            description="A month's file loaded twice, or its corrected copy, otherwise adds its records again. Tick more than one field (entity and period) to replace only that combination."
           >
-            <Select
-              data-testid="import-replace-by"
-              value={config.replaceBy ?? ""}
-              onChange={e => onConfigChange({ ...config, replaceBy: e.target.value || undefined })}
-            >
-              <option value="">Add its records to the earlier ones</option>
-              {replaceFieldsOf(forms.find(f => f.id === config.targetId)).map(f => (
-                <option key={f.name} value={f.name}>{`Replace the records with the same ${f.label || f.name}`}</option>
-              ))}
-            </Select>
+            <div data-testid="import-replace-by" style={{ display: "grid", gap: 4 }}>
+              {replaceFieldsOf(forms.find(f => f.id === config.targetId)).map(f => {
+                const chosen = replaceByFields(config.replaceBy);
+                return (
+                  <Checkbox key={f.name} label={`Replace the records with the same ${f.label || f.name}`} checked={chosen.includes(f.name)}
+                    onChange={e => {
+                      const next = e.target.checked ? [...chosen.filter(n => n !== f.name), f.name] : chosen.filter(n => n !== f.name);
+                      onConfigChange({ ...config, replaceBy: next.length ? next.join(",") : undefined });
+                    }} />
+                );
+              })}
+              <span className="mvx-admin-muted" style={{ fontSize: 12 }}>None ticked: a file's records are added to the earlier ones.</span>
+            </div>
           </Field>
         </div>
       )}
@@ -1220,6 +1241,7 @@ function CommitStep({
             column_map: columnMapOf(mappings),
             ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
             ...savedMode(config),
+            ...savedParameters(config),
             ...sheetOf(parsedFile),
           });
         } catch { /* draft stays a draft; the import result stands */ }
@@ -1320,7 +1342,7 @@ function CommitStep({
             ["Target", config.targetLabel || config.targetId],
             config.revisionName ? ["Revision", config.revisionName] : null,
             config.targetType === "grid" ? ["Import mode", IMPORT_MODE_LABEL[config.importMode] ?? config.importMode] : null,
-            config.targetType === "form" && config.replaceBy ? ["When loaded again", `Replaces the records with the same ${config.replaceBy}`] : null,
+            config.targetType === "form" && config.replaceBy ? ["When loaded again", `Replaces the records with the same ${replaceByFields(config.replaceBy).join(" and ")}`] : null,
             config.integrationId ? ["Integration", config.integrationName ?? config.integrationId] : null,
             ["Rows to import", String(rowsToImport.length)],
             ["Columns mapped", String(mappings.filter(m => m.targetField).length)],
@@ -1644,9 +1666,9 @@ function ImportWizard({
   const saveChanges = useMutation({
     mutationFn: async () => {
       const it = config.editIntegration!;
-      const { reshape: _old, column_map: _oldMap, replace_by: _oldReplace, ...rest } = it.config;
-      void _old; void _oldMap; void _oldReplace;
-      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config), ...sheetOf(sourceFile) });
+      const { reshape: _old, column_map: _oldMap, replace_by: _oldReplace, parameters: _oldParams, ...rest } = it.config;
+      void _old; void _oldMap; void _oldReplace; void _oldParams;
+      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap(), ...savedMode(config), ...savedParameters(config), ...sheetOf(sourceFile) });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-integrations"] }); onClose(); },
   });
@@ -1698,6 +1720,7 @@ function ImportWizard({
           // input at all — the server re-fetches the sheet.
           ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl } : {}),
           ...savedMode(config),
+          ...savedParameters(config),
           ...sheetOf(sourceFile),
         })
       ),
@@ -1735,6 +1758,8 @@ function ImportWizard({
           isCsv={sourceFile.ext === "csv"}
           reshape={config.reshape ?? {}}
           onReshapeChange={reshape => setConfig(c => ({ ...c, reshape }))}
+          asked={config.askColumns ?? []}
+          onAskedChange={config.targetType === "dimension" ? undefined : askColumns => setConfig(c => ({ ...c, askColumns }))}
           onNext={handleShaped}
           onBack={() => setStep("upload")}
         />
@@ -1952,7 +1977,8 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     ...(d.config?.import_mode ? { importMode: d.config.import_mode as WizardConfig["importMode"] } : {}),
-                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
+                    ...(d.config?.replace_by ? { replaceBy: replaceByFields(d.config.replace_by).join(",") } : {}),
+                    ...(runParametersOf(d.config).length ? { askColumns: runParametersOf(d.config).map(p => p.column) } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
@@ -1978,7 +2004,8 @@ function SavedIntegrationsList({
                   leadingIcon={<Play size={13} />}
                   onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id,
                     ...(d.config?.column_map ? { savedColumnMap: d.config.column_map } : {}),
-                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
+                    ...(d.config?.replace_by ? { replaceBy: replaceByFields(d.config.replace_by).join(",") } : {}),
+                    ...(runParametersOf(d.config).length ? { askColumns: runParametersOf(d.config).map(p => p.column) } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}) })}
                 >
                   Run Import
@@ -1994,7 +2021,8 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     importMode: (d.config?.import_mode as WizardConfig["importMode"] | undefined) ?? (d.type === "google_sheets" ? "replace" : "incremental"),
-                    ...(d.config?.replace_by ? { replaceBy: d.config.replace_by } : {}),
+                    ...(d.config?.replace_by ? { replaceBy: replaceByFields(d.config.replace_by).join(",") } : {}),
+                    ...(runParametersOf(d.config).length ? { askColumns: runParametersOf(d.config).map(p => p.column) } : {}),
                     ...(d.config?.sheet ? { sheet: d.config.sheet } : {}),
                     ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
@@ -2050,9 +2078,14 @@ function RunReshapedIntegration({ integration }: { integration: IntegrationDef }
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const importKey = useImportKey();
+  // Values the loader asks for at each upload ("Period end").
+  const params = runParametersOf(integration.config);
+  const [askParams, setAskParams] = useState(false);
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const run = useMutation({
     mutationFn: (file: { csv?: string; xlsx_base64?: string }) =>
-      api.runIntegration(integration.id, file, undefined, undefined, undefined, importKey.keyFor(JSON.stringify([integration.id, file]))),
+      api.runIntegration(integration.id, params.length ? { ...file, parameters: paramValues } : file, undefined, undefined, undefined,
+        importKey.keyFor(JSON.stringify([integration.id, file, params.length ? paramValues : null]))),
     onSuccess: () => importKey.done(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["integration-runs", integration.id] });
@@ -2074,9 +2107,11 @@ function RunReshapedIntegration({ integration }: { integration: IntegrationDef }
       <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm,text/csv" style={{ display: "none" }} onChange={pick}
         aria-label={`File for ${integration.name}`} />
       <Button size="sm" leadingIcon={<Play size={13} />} loading={run.isPending} loadingLabel="Importing…"
-        onClick={() => fileRef.current?.click()}>
+        onClick={() => params.length ? setAskParams(true) : fileRef.current?.click()}>
         Run with a file
       </Button>
+      <RunParametersDialog open={askParams} title={integration.name} params={params} values={paramValues} onChange={setParamValues}
+        onCancel={() => setAskParams(false)} onChoose={() => { setAskParams(false); fileRef.current?.click(); }} />
       {run.isSuccess && (
         <span className="mvx-admin-muted" style={{ fontSize: 12 }} role="status">
           {run.data.rows_imported} row(s) imported

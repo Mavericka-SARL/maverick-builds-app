@@ -97,6 +97,14 @@ type Invoker interface {
 	//
 	// PATCH /api/admin/model-links/{id}
 	AdminSwitchModelLink(ctx context.Context, request *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (AdminSwitchModelLinkRes, error)
+	// ApproveAiPlan invokes approveAiPlan operation.
+	//
+	// A new plan, and one re-cut at the developer's request, waits (task_plan.pending_approval);
+	// proposals for it are refused until it is approved — here, or by a reply that approves it. The
+	// console then sends a message with continue true, and the AI proposes the first open stage.
+	//
+	// POST /api/ai/sessions/{id}/plan/approve
+	ApproveAiPlan(ctx context.Context, params ApproveAiPlanParams) (ApproveAiPlanRes, error)
 	// ArchiveWorkflow invokes archiveWorkflow operation.
 	//
 	// Archive a workflow definition.
@@ -114,12 +122,21 @@ type Invoker interface {
 	//
 	// POST /api/developer/dashboards/{id}/arrange
 	ArrangeDashboard(ctx context.Context, request *ArrangeDashboardReq, params ArrangeDashboardParams) (ArrangeDashboardRes, error)
+	// AttachAiPlan invokes attachAiPlan operation.
+	//
+	// Optional, never automatic: a new session starts with no plan. The plan under way here, if any, is
+	// set aside in this session. With attachments, the files of the plan's session come along with their
+	// analyses and the parts read, so they are not gone through again. The next turn checks which of the
+	// plan's open stages the model already holds.
+	//
+	// POST /api/ai/sessions/{id}/attach-plan
+	AttachAiPlan(ctx context.Context, request *AttachAiPlanReq, params AttachAiPlanParams) (AttachAiPlanRes, error)
 	// BackfillFormMapping invokes backfillFormMapping operation.
 	//
 	// Re-apply a table-to-metric mapping against all already-submitted records.
 	//
 	// POST /api/developer/form-integrations/{id}/backfill
-	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error)
+	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*PostingReport, error)
 	// CancelIntegrationRun invokes cancelIntegrationRun operation.
 	//
 	// Cancel a queued run immediately, or request cooperative cancellation of a running one.
@@ -169,6 +186,13 @@ type Invoker interface {
 	//
 	// DELETE /api/admin/ai-settings/key
 	ClearTenantAIKey(ctx context.Context) (ClearTenantAIKeyRes, error)
+	// CompactAiSessionMemory invokes compactAiSessionMemory operation.
+	//
+	// Compact the session's memory now — the earlier conversation becomes a summary — and say so in
+	// the session.
+	//
+	// POST /api/ai/sessions/{id}/memory/compact
+	CompactAiSessionMemory(ctx context.Context, params CompactAiSessionMemoryParams) (CompactAiSessionMemoryRes, error)
 	// CompleteTask invokes completeTask operation.
 	//
 	// Approve or reject a workflow step.
@@ -191,6 +215,16 @@ type Invoker interface {
 	//
 	// POST /api/business-admin/copy-values
 	CopyBAValues(ctx context.Context, request *CopyBAValuesReq) (CopyBAValuesRes, error)
+	// CopyFormRecords invokes copyFormRecords operation.
+	//
+	// New records like the ones named, with the date field `field` set to `value` — last month's
+	// intercompany matches and loans brought into this month's close. The copies are the caller's own,
+	// made as a file import makes records: every one checked, all or none (422 lists the refused ones),
+	// new codes, drafts in a table with a status, posted as one batch. For someone who may add records
+	// to the table; a table whose records carry a code typed from outside cannot be copied.
+	//
+	// POST /api/forms/{id}/records/copy
+	CopyFormRecords(ctx context.Context, request *CopyFormRecordsReq, params CopyFormRecordsParams) (CopyFormRecordsRes, error)
 	// CreateAPIToken invokes createAPIToken operation.
 	//
 	// Make a personal API token for a script; the answer carries the token, once.
@@ -641,9 +675,10 @@ type Invoker interface {
 	DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (DownloadAiConversionRes, error)
 	// DownloadExportIntegration invokes downloadExportIntegration operation.
 	//
-	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
-	// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
-	// (hidden members and metrics left out). Recorded in the integration's run history.
+	// Download a file_export integration — the grid's values (leaf-level; with include_totals also the
+	// totals the grid serves) as CSV, XLSX or JSON in its spec's layout, built from the caller's own
+	// view of the grid (hidden members and metrics left out); with sheets, more grids in one workbook.
+	// Recorded in the integration's run history.
 	//
 	// GET /api/integrations/{id}/export
 	DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error)
@@ -732,6 +767,12 @@ type Invoker interface {
 	//
 	// GET /api/ai/sessions/{id}
 	GetAiSession(ctx context.Context, params GetAiSessionParams) (GetAiSessionRes, error)
+	// GetAiSessionMemory invokes getAiSessionMemory operation.
+	//
+	// How full the session's memory is and what it holds.
+	//
+	// GET /api/ai/sessions/{id}/memory
+	GetAiSessionMemory(ctx context.Context, params GetAiSessionMemoryParams) (GetAiSessionMemoryRes, error)
 	// GetAiSettings invokes getAiSettings operation.
 	//
 	// Get the caller's saved LLM provider settings.
@@ -746,6 +787,16 @@ type Invoker interface {
 	//
 	// GET /api/ai/sessions/{id}/workbook-map
 	GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (GetAiWorkbookMapRes, error)
+	// GetApprovalChanges invokes getApprovalChanges operation.
+	//
+	// When a run whose context names Dimension members (a period) finishes approved, the inputs and
+	// calculated values of that scope are kept. An input outside the lock (a tax rate, a posting account,
+	//  a setting) can still move them; this lists, for the selected model's application, each approved
+	// run whose figures differ now: how many, and up to five examples (a metric or member hidden from
+	// the caller is left out of the examples). For anyone who opens the model.
+	//
+	// GET /api/workflow/approval-changes
+	GetApprovalChanges(ctx context.Context, params GetApprovalChangesParams) (*GetApprovalChangesOK, error)
 	// GetAuditSettings invokes getAuditSettings operation.
 	//
 	// The audit retention policy (administrators; enterprise).
@@ -966,6 +1017,14 @@ type Invoker interface {
 	//
 	// GET /api/workflow/history
 	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	// GetWorkflowInstance invokes getWorkflowInstance operation.
+	//
+	// For whoever may administer the run (the application's business admins and developers) or took part
+	// in it (started it, acted on a step, was notified of it); 404 for anyone else and for a test run. A
+	// reopened run reads "reopened", with when, by whom and why.
+	//
+	// GET /api/workflow/instances/{id}
+	GetWorkflowInstance(ctx context.Context, params GetWorkflowInstanceParams) (GetWorkflowInstanceRes, error)
 	// GetWorkflowInstances invokes getWorkflowInstances operation.
 	//
 	// List the most recent 20 executions started from a workflow definition.
@@ -1141,6 +1200,12 @@ type Invoker interface {
 	//
 	// POST /api/ai/settings/models
 	ListAiModels(ctx context.Context, request OptListAiModelsReq) (*ListAiModelsOK, error)
+	// ListAiPlans invokes listAiPlans operation.
+	//
+	// The plans of the developer's sessions in the model, to attach one to a session.
+	//
+	// GET /api/ai/plans
+	ListAiPlans(ctx context.Context, params ListAiPlansParams) ([]AiPlanRef, error)
 	// ListAiProposals invokes listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -1594,9 +1659,12 @@ type Invoker interface {
 	RenameRevision(ctx context.Context, request *RenameRevisionReq, params RenameRevisionParams) (RenameRevisionRes, error)
 	// ReopenWorkflowInstance invokes reopenWorkflowInstance operation.
 	//
-	// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
-	// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
-	// required: it goes into the audit log and the message the people involved receive.
+	// Releases what an approved run locks. The run is reopened: it reads "reopened" in history and
+	// status widgets (stored as cancelled with reopened_at, so its scope is released); its steps,
+	// decisions, posted values and approved records stay. Who may: the roles its definition names in
+	// reopen_roles, or — none named — the people who may cancel a run (the application's business
+	// admins and developers). A reason is required: it goes into the audit log and the message the
+	// people involved receive.
 	//
 	// POST /api/workflow/instances/{id}/reopen
 	ReopenWorkflowInstance(ctx context.Context, request *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error)
@@ -1800,11 +1868,12 @@ type Invoker interface {
 	// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 	// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
 	// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-	// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
-	// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
-	// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
-	// streaming has started — after streaming begins, limit hits are only reported via an "error"
-	// event since the HTTP status is already sent).
+	// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
+	// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
+	// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
+	// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
+	// if exceeded before any streaming has started — after streaming begins, limit hits are only
+	// reported via an "error" event since the HTTP status is already sent).
 	//
 	// POST /api/ai/sessions/{id}/messages
 	SendAiMessage(ctx context.Context, request *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error)
@@ -1908,7 +1977,9 @@ type Invoker interface {
 	// For an administrator of the table's application (a business_admin of its workspace, a developer or
 	// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
 	// other people's included. 403 for a caller who reaches the table without administering it, 404 for
-	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
+	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has. The
+	// answer says how many postings a workflow lock, a closed period or a creator's access kept out, and
+	// why (status "partial").
 	//
 	// POST /api/forms/{id}/sync
 	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error)
@@ -3438,6 +3509,134 @@ func (c *Client) sendAdminSwitchModelLink(ctx context.Context, request *AdminSwi
 	return result, nil
 }
 
+// ApproveAiPlan invokes approveAiPlan operation.
+//
+// A new plan, and one re-cut at the developer's request, waits (task_plan.pending_approval);
+// proposals for it are refused until it is approved — here, or by a reply that approves it. The
+// console then sends a message with continue true, and the AI proposes the first open stage.
+//
+// POST /api/ai/sessions/{id}/plan/approve
+func (c *Client) ApproveAiPlan(ctx context.Context, params ApproveAiPlanParams) (ApproveAiPlanRes, error) {
+	res, err := c.sendApproveAiPlan(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendApproveAiPlan(ctx context.Context, params ApproveAiPlanParams) (res ApproveAiPlanRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("approveAiPlan"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/plan/approve"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ApproveAiPlanOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/plan/approve"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ApproveAiPlanOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeApproveAiPlanResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ArchiveWorkflow invokes archiveWorkflow operation.
 //
 // Archive a workflow definition.
@@ -3698,17 +3897,149 @@ func (c *Client) sendArrangeDashboard(ctx context.Context, request *ArrangeDashb
 	return result, nil
 }
 
+// AttachAiPlan invokes attachAiPlan operation.
+//
+// Optional, never automatic: a new session starts with no plan. The plan under way here, if any, is
+// set aside in this session. With attachments, the files of the plan's session come along with their
+// analyses and the parts read, so they are not gone through again. The next turn checks which of the
+// plan's open stages the model already holds.
+//
+// POST /api/ai/sessions/{id}/attach-plan
+func (c *Client) AttachAiPlan(ctx context.Context, request *AttachAiPlanReq, params AttachAiPlanParams) (AttachAiPlanRes, error) {
+	res, err := c.sendAttachAiPlan(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendAttachAiPlan(ctx context.Context, request *AttachAiPlanReq, params AttachAiPlanParams) (res AttachAiPlanRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("attachAiPlan"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/attach-plan"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, AttachAiPlanOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/attach-plan"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeAttachAiPlanRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, AttachAiPlanOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeAttachAiPlanResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // BackfillFormMapping invokes backfillFormMapping operation.
 //
 // Re-apply a table-to-metric mapping against all already-submitted records.
 //
 // POST /api/developer/form-integrations/{id}/backfill
-func (c *Client) BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error) {
+func (c *Client) BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*PostingReport, error) {
 	res, err := c.sendBackfillFormMapping(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendBackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (res *BackfillFormMappingOK, err error) {
+func (c *Client) sendBackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (res *PostingReport, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("backfillFormMapping"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -4665,6 +4996,133 @@ func (c *Client) sendClearTenantAIKey(ctx context.Context) (res ClearTenantAIKey
 	return result, nil
 }
 
+// CompactAiSessionMemory invokes compactAiSessionMemory operation.
+//
+// Compact the session's memory now — the earlier conversation becomes a summary — and say so in
+// the session.
+//
+// POST /api/ai/sessions/{id}/memory/compact
+func (c *Client) CompactAiSessionMemory(ctx context.Context, params CompactAiSessionMemoryParams) (CompactAiSessionMemoryRes, error) {
+	res, err := c.sendCompactAiSessionMemory(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendCompactAiSessionMemory(ctx context.Context, params CompactAiSessionMemoryParams) (res CompactAiSessionMemoryRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("compactAiSessionMemory"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/memory/compact"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CompactAiSessionMemoryOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/memory/compact"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, CompactAiSessionMemoryOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCompactAiSessionMemoryResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // CompleteTask invokes completeTask operation.
 //
 // Approve or reject a workflow step.
@@ -5067,6 +5525,139 @@ func (c *Client) sendCopyBAValues(ctx context.Context, request *CopyBAValuesReq)
 
 	stage = "DecodeResponse"
 	result, err := decodeCopyBAValuesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CopyFormRecords invokes copyFormRecords operation.
+//
+// New records like the ones named, with the date field `field` set to `value` — last month's
+// intercompany matches and loans brought into this month's close. The copies are the caller's own,
+// made as a file import makes records: every one checked, all or none (422 lists the refused ones),
+// new codes, drafts in a table with a status, posted as one batch. For someone who may add records
+// to the table; a table whose records carry a code typed from outside cannot be copied.
+//
+// POST /api/forms/{id}/records/copy
+func (c *Client) CopyFormRecords(ctx context.Context, request *CopyFormRecordsReq, params CopyFormRecordsParams) (CopyFormRecordsRes, error) {
+	res, err := c.sendCopyFormRecords(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendCopyFormRecords(ctx context.Context, request *CopyFormRecordsReq, params CopyFormRecordsParams) (res CopyFormRecordsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("copyFormRecords"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/forms/{id}/records/copy"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CopyFormRecordsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/forms/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/records/copy"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCopyFormRecordsRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, CopyFormRecordsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCopyFormRecordsResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -13018,9 +13609,10 @@ func (c *Client) sendDownloadAiConversion(ctx context.Context, params DownloadAi
 
 // DownloadExportIntegration invokes downloadExportIntegration operation.
 //
-// Download a file_export integration — the grid's leaf-level values (inputs and calculated
-// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
-// (hidden members and metrics left out). Recorded in the integration's run history.
+// Download a file_export integration — the grid's values (leaf-level; with include_totals also the
+// totals the grid serves) as CSV, XLSX or JSON in its spec's layout, built from the caller's own
+// view of the grid (hidden members and metrics left out); with sheets, more grids in one workbook.
+// Recorded in the integration's run history.
 //
 // GET /api/integrations/{id}/export
 func (c *Client) DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error) {
@@ -13087,6 +13679,27 @@ func (c *Client) sendDownloadExportIntegration(ctx context.Context, params Downl
 	}
 	pathParts[2] = "/export"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "bar" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "bar",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Bar.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -14956,6 +15569,132 @@ func (c *Client) sendGetAiSession(ctx context.Context, params GetAiSessionParams
 	return result, nil
 }
 
+// GetAiSessionMemory invokes getAiSessionMemory operation.
+//
+// How full the session's memory is and what it holds.
+//
+// GET /api/ai/sessions/{id}/memory
+func (c *Client) GetAiSessionMemory(ctx context.Context, params GetAiSessionMemoryParams) (GetAiSessionMemoryRes, error) {
+	res, err := c.sendGetAiSessionMemory(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetAiSessionMemory(ctx context.Context, params GetAiSessionMemoryParams) (res GetAiSessionMemoryRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getAiSessionMemory"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/memory"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetAiSessionMemoryOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/memory"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetAiSessionMemoryOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetAiSessionMemoryResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetAiSettings invokes getAiSettings operation.
 //
 // Get the caller's saved LLM provider settings.
@@ -15184,6 +15923,140 @@ func (c *Client) sendGetAiWorkbookMap(ctx context.Context, params GetAiWorkbookM
 
 	stage = "DecodeResponse"
 	result, err := decodeGetAiWorkbookMapResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetApprovalChanges invokes getApprovalChanges operation.
+//
+// When a run whose context names Dimension members (a period) finishes approved, the inputs and
+// calculated values of that scope are kept. An input outside the lock (a tax rate, a posting account,
+//
+//	a setting) can still move them; this lists, for the selected model's application, each approved
+//
+// run whose figures differ now: how many, and up to five examples (a metric or member hidden from
+// the caller is left out of the examples). For anyone who opens the model.
+//
+// GET /api/workflow/approval-changes
+func (c *Client) GetApprovalChanges(ctx context.Context, params GetApprovalChangesParams) (*GetApprovalChangesOK, error) {
+	res, err := c.sendGetApprovalChanges(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetApprovalChanges(ctx context.Context, params GetApprovalChangesParams) (res *GetApprovalChangesOK, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getApprovalChanges"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/workflow/approval-changes"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetApprovalChangesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/workflow/approval-changes"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "instance_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "instance_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.InstanceID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetApprovalChangesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetApprovalChangesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -19093,6 +19966,133 @@ func (c *Client) sendGetWorkflowHistory(ctx context.Context) (res []WorkflowInst
 	return result, nil
 }
 
+// GetWorkflowInstance invokes getWorkflowInstance operation.
+//
+// For whoever may administer the run (the application's business admins and developers) or took part
+// in it (started it, acted on a step, was notified of it); 404 for anyone else and for a test run. A
+// reopened run reads "reopened", with when, by whom and why.
+//
+// GET /api/workflow/instances/{id}
+func (c *Client) GetWorkflowInstance(ctx context.Context, params GetWorkflowInstanceParams) (GetWorkflowInstanceRes, error) {
+	res, err := c.sendGetWorkflowInstance(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetWorkflowInstance(ctx context.Context, params GetWorkflowInstanceParams) (res GetWorkflowInstanceRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getWorkflowInstance"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/workflow/instances/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetWorkflowInstanceOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/workflow/instances/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetWorkflowInstanceOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetWorkflowInstanceResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetWorkflowInstances invokes getWorkflowInstances operation.
 //
 // List the most recent 20 executions started from a workflow definition.
@@ -21734,6 +22734,134 @@ func (c *Client) sendListAiModels(ctx context.Context, request OptListAiModelsRe
 
 	stage = "DecodeResponse"
 	result, err := decodeListAiModelsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListAiPlans invokes listAiPlans operation.
+//
+// The plans of the developer's sessions in the model, to attach one to a session.
+//
+// GET /api/ai/plans
+func (c *Client) ListAiPlans(ctx context.Context, params ListAiPlansParams) ([]AiPlanRef, error) {
+	res, err := c.sendListAiPlans(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListAiPlans(ctx context.Context, params ListAiPlansParams) (res []AiPlanRef, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAiPlans"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/ai/plans"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListAiPlansOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/ai/plans"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "exclude" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "exclude",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Exclude.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListAiPlansOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListAiPlansResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -29933,9 +31061,12 @@ func (c *Client) sendRenameRevision(ctx context.Context, request *RenameRevision
 
 // ReopenWorkflowInstance invokes reopenWorkflowInstance operation.
 //
-// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
-// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
-// required: it goes into the audit log and the message the people involved receive.
+// Releases what an approved run locks. The run is reopened: it reads "reopened" in history and
+// status widgets (stored as cancelled with reopened_at, so its scope is released); its steps,
+// decisions, posted values and approved records stay. Who may: the roles its definition names in
+// reopen_roles, or — none named — the people who may cancel a run (the application's business
+// admins and developers). A reason is required: it goes into the audit log and the message the
+// people involved receive.
 //
 // POST /api/workflow/instances/{id}/reopen
 func (c *Client) ReopenWorkflowInstance(ctx context.Context, request *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (ReopenWorkflowInstanceRes, error) {
@@ -33507,11 +34638,12 @@ func (c *Client) sendScimServiceProviderConfig(ctx context.Context) (res ScimSer
 // Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 // "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
 // limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
-// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
-// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
-// streaming has started — after streaming begins, limit hits are only reported via an "error"
-// event since the HTTP status is already sent).
+// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
+// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
+// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
+// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
+// if exceeded before any streaming has started — after streaming begins, limit hits are only
+// reported via an "error" event since the HTTP status is already sent).
 //
 // POST /api/ai/sessions/{id}/messages
 func (c *Client) SendAiMessage(ctx context.Context, request *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error) {
@@ -35229,7 +36361,9 @@ func (c *Client) sendSwitchModelLinkSource(ctx context.Context, request *SwitchM
 // For an administrator of the table's application (a business_admin of its workspace, a developer or
 // tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
 // other people's included. 403 for a caller who reaches the table without administering it, 404 for
-// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
+// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has. The
+// answer says how many postings a workflow lock, a closed period or a creator's access kept out, and
+// why (status "partial").
 //
 // POST /api/forms/{id}/sync
 func (c *Client) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error) {

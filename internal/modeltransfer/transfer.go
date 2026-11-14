@@ -251,7 +251,9 @@ type Form struct {
 	KeepsDimensionID string `json:"keeps_dimension_id,omitempty"`
 	MemberLabelField string `json:"member_label_field,omitempty"`
 	MemberRootLabel  string `json:"member_root_label,omitempty"`
-	EditAccess       string `json:"edit_access,omitempty"`
+	// MemberLabelWithCode: members are labelled code first.
+	MemberLabelWithCode bool   `json:"member_label_with_code,omitempty"`
+	EditAccess          string `json:"edit_access,omitempty"`
 	// CreateRoles: who may add records, by role name (none: anyone).
 	CreateRoles []string `json:"create_roles,omitempty"`
 }
@@ -318,6 +320,9 @@ type Workflow struct {
 	// StartRoles: who may start it by hand, role names as its steps'
 	// assignee_roles; absent or empty, anyone.
 	StartRoles []string `json:"start_roles,omitempty"`
+	// ReopenRoles: who may reopen an approved run; absent or empty, the
+	// application's administrators.
+	ReopenRoles []string `json:"reopen_roles,omitempty"`
 }
 
 type AutomationRule struct {
@@ -795,7 +800,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only,
 		       COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''),
-		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles
+		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles, member_label_with_code
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -803,7 +808,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.MemberLabelWithCode); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -890,7 +895,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT wd.id::text, wd.name, COALESCE(wd.description,''), wd.trigger_event,
 		       COALESCE(wd.subject_type,''), COALESCE(wd.subject_config,'{}'::jsonb),
-		       wd.steps, wd.context_schema, wd.status, wd.single_active_instance, wd.approver_may_start, wd.start_roles
+		       wd.steps, wd.context_schema, wd.status, wd.single_active_instance, wd.approver_may_start, wd.start_roles,
+		       wd.reopen_roles
 		FROM workflow.workflow_def wd
 		WHERE wd.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (wd.revision_id=$2::uuid OR wd.revision_id IS NULL)
@@ -902,7 +908,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var wf Workflow
 		if err := rows.Scan(&wf.ID, &wf.Name, &wf.Description, &wf.TriggerEvent,
-			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status, &wf.SingleActiveInstance, &wf.ApproverMayStart, &wf.StartRoles); err != nil {
+			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status, &wf.SingleActiveInstance, &wf.ApproverMayStart, &wf.StartRoles,
+			&wf.ReopenRoles); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -2353,10 +2360,11 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			labelField, rootLabel = "", ""
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb))
+			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb), $12)
 			RETURNING id::text`,
-			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel, rolesArg(f.CreateRoles)).Scan(&newID); err != nil {
+			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel, rolesArg(f.CreateRoles),
+			f.MemberLabelWithCode && keeps != "").Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -2503,14 +2511,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO workflow.workflow_def
 			  (application_id, revision_id, name, description, trigger_event, subject_type, subject_config,
-			   steps, context_schema, status, created_by, updated_by, single_active_instance, approver_may_start, start_roles)
+			   steps, context_schema, status, created_by, updated_by, single_active_instance, approver_may_start, start_roles,
+			   reopen_roles)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, COALESCE($7::jsonb,'{}'::jsonb),
 			        COALESCE($8::jsonb,'[]'::jsonb), COALESCE($9::jsonb,'[]'::jsonb), $10, $11::uuid, $11::uuid,
-			        COALESCE($12::boolean, true), COALESCE($13::boolean, false), $14::jsonb)
+			        COALESCE($12::boolean, true), COALESCE($13::boolean, false), $14::jsonb, $15::jsonb)
 			RETURNING id::text`,
 			appID, revisionID, wf.Name, wf.Description, wf.TriggerEvent, wf.SubjectType, jsonArg(subject),
 			jsonArg(wf.Steps), jsonArg(schema), status, importerID, wf.SingleActiveInstance, wf.ApproverMayStart,
-			startRolesArg(wf.StartRoles)).Scan(&newID); err != nil {
+			startRolesArg(wf.StartRoles), startRolesArg(wf.ReopenRoles)).Scan(&newID); err != nil {
 			return "", fmt.Errorf("workflow %q: %w", wf.Name, err)
 		}
 		wfMap[wf.ID] = newID

@@ -121,3 +121,31 @@ func (s *DocumentStore) DeleteDocument(ctx context.Context, sessionID, documentI
 	`, documentID, sessionID)
 	return err
 }
+
+// CopyDocuments copies the documents of session from into session to —
+// their text and kept bytes — except those whose file name to already has.
+// It returns the file names copied.
+func (s *DocumentStore) CopyDocuments(ctx context.Context, from, to string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		INSERT INTO ai_assistant.document (session_id, filename, mime_type, char_count, truncated, content, raw_data)
+		SELECT $2::uuid, d.filename, d.mime_type, d.char_count, d.truncated, d.content, d.raw_data
+		FROM ai_assistant.document d
+		WHERE d.session_id = $1::uuid
+		  AND NOT EXISTS (SELECT 1 FROM ai_assistant.document t WHERE t.session_id = $2::uuid AND lower(t.filename) = lower(d.filename))
+		  AND d.created_at = (SELECT max(x.created_at) FROM ai_assistant.document x WHERE x.session_id = d.session_id AND lower(x.filename) = lower(d.filename))
+		ORDER BY d.created_at
+		RETURNING filename`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}

@@ -33,7 +33,7 @@ func TestPlanWarnsOfEmptyInputs(t *testing.T) {
 		t.Errorf("a plan creating inputs, building no page, was warned: %q", got)
 	}
 	got := emptyInputWarnings(ctx, tx, d.modelID, d.revID, []aiassistant.ProposalStep{step("add_dashboard_widget")})
-	if len(got) != 1 || !strings.Contains(got[0], "(headcount)") || !strings.Contains(got[0], "compare_with_sheet") {
+	if len(got) != 1 || !strings.Contains(got[0], "(headcount)") || !strings.Contains(got[0], "check_sheet") {
 		t.Errorf("warnings %q, want one naming headcount alone (the plan's other inputs hold values)", got)
 	}
 }

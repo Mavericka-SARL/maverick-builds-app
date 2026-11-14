@@ -540,6 +540,11 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/ai/sessions/{id}/promote-draft", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/discard-draft", "developer", dev(h.aiSessionDetail))
 	register("GET", "/api/ai/sessions/{id}/proposals", "developer", dev(h.aiSessionDetail))
+	register("GET", "/api/ai/sessions/{id}/memory", "developer", dev(h.aiSessionDetail))
+	register("POST", "/api/ai/sessions/{id}/memory/compact", "developer", dev(h.aiSessionDetail))
+	register("POST", "/api/ai/sessions/{id}/attach-plan", "developer", dev(h.aiSessionDetail))
+	register("POST", "/api/ai/sessions/{id}/plan/approve", "developer", dev(h.aiSessionDetail))
+	register("GET", "/api/ai/plans", "developer", dev(h.aiPlanRefs))
 	register("POST", "/api/ai/sessions/{id}/documents", "developer", dev(h.aiSessionDetail))
 	register("DELETE", "/api/ai/sessions/{id}/documents/{docId}", "developer", dev(h.aiSessionDetail))
 	register("GET", "/api/ai/sessions/{id}/workbook-map", "developer", dev(h.aiWorkbookMap))
@@ -658,10 +663,15 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/workflow/definitions", "any", cors(h.workflowDefinitions))
 	register("GET", "/api/workflow/definitions/{id}", "any", cors(h.workflowDefinition))
 	register("GET", "/api/workflow/status", "any", cors(h.workflowStatus))
+	register("GET", "/api/workflow/approval-changes", "any", cors(h.approvalChanges))
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
+	register("GET", "/api/workflow/instances/{id}", "any", cors(h.workflowInstanceGet))
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
 	register("POST", "/api/workflow/instances/{id}/cancel", "developer_or_business_admin", baOrDev(h.workflowInstanceCancel))
-	register("POST", "/api/workflow/instances/{id}/reopen", "developer_or_business_admin", baOrDev(h.workflowInstanceReopen))
+	// Open to anyone signed in: the handler decides — a role the definition
+	// names in reopen_roles (a CFO who released a close), else the people who
+	// may cancel a run (workflowInstanceReopenable).
+	register("POST", "/api/workflow/instances/{id}/reopen", "any", cors(h.workflowInstanceReopen))
 	register("GET", "/api/notifications", "any", cors(h.notifications))
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
 	register("DELETE", "/api/notifications", "any", cors(h.deleteNotifications))
@@ -732,6 +742,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/forms/{id}/export", "any", cors(h.formsRouter))
 	register("POST", "/api/forms/{id}/import", "any", cors(h.formsRouter))
 	register("POST", "/api/forms/{id}/sync", "any", cors(h.formsRouter))
+	register("POST", "/api/forms/{id}/records/copy", "any", cors(h.formsRouter))
 	register("GET", "/api/forms/{id}/records", "any", cors(h.formsRouter))
 	register("POST", "/api/forms/{id}/records", "any", cors(h.formsRouter))
 	register("POST", "/api/forms/{id}/records/query", "any", cors(h.formsRouter))
@@ -5265,7 +5276,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		),
 		new_forms AS (
 			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
+				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
 			SELECT f.model_id, f.name, f.label,
 				COALESCE((
 					SELECT jsonb_agg(
@@ -5277,7 +5288,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				), '[]'::jsonb),
 				$2::uuid, f.own_records_only,
 				f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-				f.member_label_field, f.member_root_label, f.create_roles
+				f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code
 			FROM model.form_def f
 			WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 			RETURNING id AS new_id, name
@@ -5487,7 +5498,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			INSERT INTO workflow.workflow_def
 			  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
 			   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
-			   single_active_instance, approver_may_start, start_roles)
+			   single_active_instance, approver_may_start, start_roles, reopen_roles)
 			SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 				-- subject_config binds the workflow to a form ({"form_id"}) or a
 				-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -5512,7 +5523,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 					FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 				), '[]'::jsonb),
 				$2::uuid,
-				wd.single_active_instance, wd.approver_may_start, wd.start_roles
+				wd.single_active_instance, wd.approver_may_start, wd.start_roles, wd.reopen_roles
 			FROM workflow.workflow_def wd
 			WHERE wd.application_id = (SELECT application_id FROM app)
 			  AND wd.revision_id = $3::uuid
@@ -6492,11 +6503,12 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 	appID, _ := ctx.Value(appIDCtxKey).(string)
 
 	rows, err := h.db.Query(ctx, `
-		SELECT wi.id::text, wd.name, wi.status::text, wi.context,
+		SELECT wi.id::text, wd.name, CASE WHEN wi.reopened_at IS NOT NULL THEN 'reopened' ELSE wi.status::text END, wi.context,
 		       wi.started_at::text,
 		       CASE WHEN wi.completed_at IS NOT NULL THEN wi.completed_at::text END,
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
-		       `+writeguard.ReopenableSQL+`
+		       (`+writeguard.ReopenableSQL+` AND (jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) = 0
+		        OR `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`))
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		JOIN core.application app ON app.id = wd.application_id
@@ -6677,13 +6689,19 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.Query(ctx, `
-		SELECT wi.id::text, wd.name, wi.status::text, wi.context,
+		SELECT wi.id::text, wd.name, CASE WHEN wi.reopened_at IS NOT NULL THEN 'reopened' ELSE wi.status::text END, wi.context,
 		       wi.started_at::text,
 		       CASE WHEN wi.completed_at IS NOT NULL THEN wi.completed_at::text END,
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
-		       wd.application_id::text
+		       wd.application_id::text,
+		       -- Reopen is offered here to whoever holds a role the definition
+		       -- names as reopening it (a CFO who released a close); the
+		       -- administrators' Reopen is in Business Admin › History.
+		       (`+writeguard.ReopenableSQL+` AND jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) > 0
+		        AND `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`)
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		`+writeguard.LastApprovalJoinSQL+`
 		WHERE `+myHistoryReachSQL+`
 		  AND ($2 = '' OR wd.application_id::text = $2)
 		  AND ($3 = '' OR wi.id::text = $3)
@@ -6715,7 +6733,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inst historyInstance
 		var ctxJSON, schemaJSON []byte
-		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.ApplicationID); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.ApplicationID, &inst.Reopenable); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -9932,16 +9950,20 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 		}
 		// A table loader's replace_by must be a field it may replace by.
 		var rb struct {
-			ReplaceBy string `json:"replace_by"`
+			ReplaceBy replaceBySpec `json:"replace_by"`
 		}
-		if json.Unmarshal(body.Config, &rb) == nil && strings.TrimSpace(rb.ReplaceBy) != "" {
+		if err := json.Unmarshal(body.Config, &rb); err != nil && strings.Contains(err.Error(), "replace_by") {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(string(rb.ReplaceBy)) != "" {
 			var targetType, targetID string
 			_ = h.db.QueryRow(ctx, `SELECT target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&targetType, &targetID)
 			if targetType != "form" {
 				jsonErr(w, fmt.Errorf("replace_by applies to a table's loader; a grid's import_mode says what a file replaces"), http.StatusBadRequest)
 				return
 			}
-			if err := h.checkReplaceBy(ctx, targetID, rb.ReplaceBy); err != nil {
+			if err := h.checkReplaceBy(ctx, targetID, string(rb.ReplaceBy)); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -10221,8 +10243,13 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		// run's workbook names none: the one it was built from.
 		Sheet string `json:"sheet"`
 		// ReplaceBy (a table's loader) names the field whose values a file
-		// replaces: loading July again replaces July's records.
-		ReplaceBy string `json:"replace_by"`
+		// replaces: loading July again replaces July's records. Several
+		// fields replace by their combination (an entity's month).
+		ReplaceBy replaceBySpec `json:"replace_by"`
+		// Parameters are values the person gives at each run, stamped on
+		// every row as a column ("Period end"): what the file means but
+		// does not say, and changes from one run to the next.
+		Parameters []runParameter `json:"parameters"`
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
 	// ?dry_run=true reads and checks the file as the run would and imports
@@ -10270,7 +10297,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		header, rows, shapeStats, err = importpkg.ReadShapedStats("file.csv", data, "", cfg.Reshape)
 	} else {
-		header, rows, fileName, mapped, shapeStats, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet)
+		header, rows, fileName, mapped, shapeStats, err = parseRunFile(w, r, cfg.Reshape, cfg.Sheet, cfg.Parameters)
 	}
 	ctx = withSkippedNote(ctx, shapeStats)
 	if note := shapeStats.Note(); note != "" {
@@ -10361,7 +10388,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, cfg.ReplaceBy, recordJob)
+		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, string(cfg.ReplaceBy), recordJob)
 		imported, rowErrs := res.Created, res.Errors
 		if dryRun && iErr == nil {
 			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
@@ -10573,7 +10600,24 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		jsonOK(w, map[string]any{"id": newID, "status": "created", "typed_set_aside": setAside})
+		// The records already in the table post too, in the background, as
+		// after a change to a mapping: a new posting stayed empty until
+		// someone ran Post records or Sync (2026-11-13). A lock or an access
+		// rule that keeps postings out is logged; Sync reports it.
+		if livePosting {
+			userID := h.resolveUserID(r)
+			go func(ctx context.Context) {
+				n, skipped, reasons, err := h.backfillFormMapping(ctx, newID, userID)
+				switch {
+				case err != nil:
+					h.log.Warn().Err(err).Str("mapping_id", newID).Msg("posting the existing records of a new mapping failed")
+				case skipped > 0:
+					h.log.Warn().Int("records", n).Int("postings_skipped", skipped).Str("reason", reasons[0].Reason).
+						Str("mapping_id", newID).Msg("a new mapping's existing records: postings kept out")
+				}
+			}(context.WithoutCancel(ctx))
+		}
+		jsonOK(w, map[string]any{"id": newID, "status": "created", "typed_set_aside": setAside, "posts_existing_records": livePosting})
 		return
 	}
 
@@ -10635,7 +10679,7 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 	}
 
 	if subPath == "backfill" && r.Method == http.MethodPost {
-		count, err := h.backfillFormMapping(ctx, mappingID, h.resolveUserID(r))
+		count, skipped, reasons, err := h.backfillFormMapping(ctx, mappingID, h.resolveUserID(r))
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -10646,10 +10690,10 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 				Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormIntegrationBackfilled,
 				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 				ApplicationID: appID, ResourceType: "form_metric_mapping", ResourceID: mappingID, RevisionID: revisionID,
-				Metadata: map[string]string{"records_processed": strconv.Itoa(count)},
+				Metadata: map[string]string{"records_processed": strconv.Itoa(count), "postings_skipped": strconv.Itoa(skipped)},
 			})
 		}
-		jsonOK(w, map[string]any{"status": "ok", "records_processed": count})
+		jsonOK(w, postingReport(map[string]any{"records_processed": count}, skipped, reasons))
 		return
 	}
 
@@ -10716,6 +10760,19 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		if body.LivePosting != nil {
 			livePosting = *body.LivePosting
 		}
+		// A change that would move, add up again or withdraw values the
+		// posting holds in a period a workflow locks waits for the period
+		// to be reopened.
+		if msg, err := recordpost.MappingChangeRefusal(ctx, h.db.For(ctx), mappingID, recordpost.MappingChange{
+			TargetMetricID: body.TargetMetricID, SourceField: body.SourceField, Aggregation: body.Aggregation,
+			PostingStatuses: body.PostingStatuses, DimensionMappings: body.DimensionMappings, RowFilter: body.RowFilter, Live: livePosting,
+		}); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if msg != "" {
+			jsonErr(w, errors.New(msg), http.StatusConflict)
+			return
+		}
 		if _, err := h.db.Exec(ctx, `
 			UPDATE model.form_metric_mapping SET
 			  grid_id=NULLIF($2,'')::uuid, name=$3, source_field=$4,
@@ -10745,10 +10802,13 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		auditActor, _ := h.resolveActor(ctx, r)
 		revisionID, appID := h.formIntegrationScope(ctx, mappingID)
 		go func(ctx context.Context) {
-			count, err := h.backfillFormMapping(ctx, mappingID, userID)
+			count, skipped, _, err := h.backfillFormMapping(ctx, mappingID, userID)
 			if err != nil {
 				h.log.Warn().Err(err).Str("mapping_id", mappingID).Msg("re-apply after mapping update failed")
 				return
+			}
+			if skipped > 0 {
+				h.log.Warn().Int("postings_skipped", skipped).Str("mapping_id", mappingID).Msg("re-apply after mapping update: postings kept out by a lock or access")
 			}
 			if auditActor != nil {
 				auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -10780,6 +10840,14 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		jsonOK(w, resp)
 	case http.MethodDelete:
 		revisionID, appID := h.formIntegrationScope(ctx, mappingID)
+		// Its values in a period a workflow locks stay there.
+		if msg, err := recordpost.PostingDeleteRefusal(ctx, h.db.For(ctx), mappingID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if msg != "" {
+			jsonErr(w, errors.New(msg), http.StatusConflict)
+			return
+		}
 		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappings(ctx, []string{mappingID})
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -11431,30 +11499,57 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 			OwnRecordsOnly bool `json:"own_records_only"`
 			tableSettings
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if err != nil || json.Unmarshal(raw, &body) != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		if err := crudapp.UnknownFieldOptions(rawField(raw, "fields")); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		if err := crudapp.ValidateFields(body.Fields); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		form, err := store.CreateForm(ctx, modelID, revisionID, body.Name, body.Label, body.Fields)
+		// The table and its settings are made together or not at all: a
+		// setting refused (a member label field that is not a text field)
+		// used to answer 400 "the table was created, but …" with the table
+		// left behind (2026-11-13).
+		tx, err := h.db.Begin(ctx)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+		txStore := crudapp.NewStoreOn(tx)
+		form, err := txStore.CreateForm(ctx, modelID, revisionID, body.Name, body.Label, body.Fields)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		if body.OwnRecordsOnly {
-			if err := store.SetOwnRecordsOnly(ctx, form.ID, true); err != nil {
+			if err := txStore.SetOwnRecordsOnly(ctx, form.ID, true); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			form.OwnRecordsOnly = true
 		}
-		if code, err := h.applyTableSettings(ctx, form, body.tableSettings); err != nil {
-			// The table is made; what it may not keep is said.
-			jsonErr(w, fmt.Errorf("the table was created, but %w", err), code)
+		added, err := recordpost.ApplyTableSettingsOn(ctx, tx, form, body.tableSettings)
+		var se *recordpost.SettingError
+		if errors.As(err, &se) {
+			jsonErr(w, err, se.Status)
 			return
+		} else if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(ctx); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if added > 0 {
+			go h.recalcDimensionDependents(context.WithoutCancel(ctx), form.KeepsDimensionID) //nolint:contextcheck
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			var appID string
@@ -11641,6 +11736,12 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /api/forms/{id}/records/copy — copies of records with a date field moved (record_copy.go)
+	if len(parts) == 2 && parts[1] == "records/copy" && r.Method == http.MethodPost {
+		h.recordsCopy(w, r, formID)
+		return
+	}
+
 	// /api/forms/{id}/sync — re-apply all live mappings for every record in this form
 	if len(parts) == 2 && parts[1] == "sync" && r.Method == http.MethodPost {
 		// A sync re-posts every record of the form, other people's
@@ -11670,14 +11771,15 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		mappings, totalProcessed := h.repostTable(ctx, formID, act.UserID)
+		res := h.repostTable(ctx, formID, act.UserID)
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormSynced,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
-			Metadata: map[string]string{"mappings": strconv.Itoa(mappings), "records_processed": strconv.Itoa(totalProcessed)},
+			Metadata: map[string]string{"mappings": strconv.Itoa(res.Mappings), "records_processed": strconv.Itoa(res.Processed),
+				"postings_skipped": strconv.Itoa(res.Skipped)},
 		})
-		jsonOK(w, map[string]any{"status": "ok", "mappings": mappings, "records_processed": totalProcessed})
+		jsonOK(w, postingReport(map[string]any{"mappings": res.Mappings, "records_processed": res.Processed}, res.Skipped, res.SkippedReasons))
 		return
 	}
 
@@ -11760,6 +11862,16 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, errors.New(msg), code)
 				return
 			}
+			// A record added under an approved or rejected record is an
+			// administrator's, and sends that record back to draft.
+			parentMsg, decidedParent, err := h.parentRefusal(ctx, &scope, body.Data)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			} else if parentMsg != "" {
+				jsonErr(w, errors.New(parentMsg), http.StatusForbidden)
+				return
+			}
 			// A record of a table keeping a dimension is a new member: within
 			// the edition's members per dimension.
 			if scope.form.KeepsDimension() {
@@ -11779,6 +11891,9 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
+			}
+			if decidedParent != nil {
+				h.reopenParents(ctx, &scope, act, body.Data)
 			}
 			scope.permit(rec)
 			bgCtx := context.WithoutCancel(ctx)
@@ -11815,6 +11930,10 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, []any{})
 			return
 		}
+		if err := h.prefetchParents(ctx, &scope, records); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 		for _, rec := range records {
 			scope.permit(rec)
 		}
@@ -11840,8 +11959,17 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			OwnRecordsOnly *bool `json:"own_records_only"`
 			tableSettings
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if err != nil {
 			jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
+			return
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
+			return
+		}
+		if err := crudapp.UnknownFieldOptions(rawField(raw, "fields")); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		before, err := store.GetForm(ctx, formID)
@@ -11917,6 +12045,14 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"status": "ok", "codes_assigned": change.CodesAssigned, "status_field_changed": change.StatusChanged})
 	case http.MethodDelete:
 		appID, _ := h.appIDFromFormID(ctx, formID)
+		// Its postings' values in a period a workflow locks stay there.
+		if msg, err := recordpost.TableDeleteRefusal(ctx, h.db.For(ctx), formID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if msg != "" {
+			jsonErr(w, errors.New(msg), http.StatusConflict)
+			return
+		}
 		posted, err := store.DeleteForm(ctx, formID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -11994,6 +12130,15 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("status must be one of draft, submitted, approved, rejected"), http.StatusBadRequest)
 			return
 		}
+		if access.ParentDecided && !access.Admin {
+			msg, _, err := h.parentRefusal(ctx, &scope, rec.Data)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			jsonErr(w, errors.New(msg), http.StatusForbidden)
+			return
+		}
 		if !access.CanUpdate(oldStatus, newStatus) {
 			if newStatus != oldStatus && rec.Permissions.Edit {
 				jsonErr(w, fmt.Errorf("forbidden: you may not move this record from %s to %s", oldStatus, newStatus), http.StatusForbidden)
@@ -12019,6 +12164,15 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if code != 0 {
 			jsonErr(w, errors.New(msg), code)
+			return
+		}
+		// Moved under an approved or rejected record: the same rule.
+		parentMsg, decidedParent, err := h.parentRefusal(ctx, &scope, rec.Data, data)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if parentMsg != "" {
+			jsonErr(w, errors.New(parentMsg), http.StatusForbidden)
 			return
 		}
 		keptChanged := false
@@ -12058,6 +12212,9 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			ApplicationID: appID, ResourceType: "form_record", ResourceID: recordID,
 			Metadata: meta,
 		})
+		if decidedParent != nil {
+			h.reopenParents(ctx, &scope, act, rec.Data, data)
+		}
 		rec.Data, rec.Status = data, newStatus
 		scope.permit(rec)
 		jsonOK(w, map[string]any{"status": "ok", "record": rec})
@@ -12066,6 +12223,15 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		rec, scope, access, err := h.reachRecord(ctx, act, store, recordID)
 		if err != nil {
 			jsonRecordErr(w, err, "record")
+			return
+		}
+		if access.ParentDecided && !access.Admin {
+			msg, _, err := h.parentRefusal(ctx, &scope, rec.Data)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			jsonErr(w, errors.New(msg), http.StatusForbidden)
 			return
 		}
 		if !access.CanDelete(rec.Status) {
@@ -12108,6 +12274,9 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if len(postings) > 0 {
 			bgCtx, userID := context.WithoutCancel(ctx), act.UserID
 			go h.retractPostings(bgCtx, postings, userID)
+		}
+		if access.ParentDecided {
+			h.reopenParents(ctx, &scope, act, rec.Data)
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordDeleted,
@@ -13538,8 +13707,33 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// else a calculated member ({RF} - {LY}).
 				Formula *string `json:"formula"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			if err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+				return
+			}
+			var sent map[string]json.RawMessage
+			if json.Unmarshal(raw, &body) != nil || json.Unmarshal(raw, &sent) != nil {
+				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+				return
+			}
+			// A PATCH changes what it names. Until 2026-11-13 it replaced the
+			// whole member: {"label": …} alone emptied the code and dropped
+			// the parent, formulas still named the old code, and an approved
+			// period's statements moved (net profit 471.5 → −90.5 in the
+			// consolidation kit). The console sends code, label and parent
+			// every time, so it behaves as before.
+			if err := h.fillUnsentMemberFields(ctx, subID, sent, &body.Code, &body.Label, &body.ParentMemberID,
+				&body.PeriodStart, &body.PeriodEnd); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					jsonErr(w, fmt.Errorf("member not found"), http.StatusNotFound)
+					return
+				}
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			if strings.TrimSpace(body.Code) == "" {
+				jsonErr(w, fmt.Errorf("MEMBER_CODE_REQUIRED: a member's code cannot be empty; formulas, filters and stored values name members by their code"), http.StatusBadRequest)
 				return
 			}
 			if body.Properties != nil {
@@ -18101,6 +18295,46 @@ func (h *handler) memberPeriod(ctx context.Context, dimID, start, end string) (t
 	return modeledit.MemberPeriod(ctx, h.db.For(ctx), dimID, start, end)
 }
 
+// rawField is one top-level key of a JSON object body, as sent (nil when
+// absent or the body is no object).
+func rawField(body []byte, key string) json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		return nil
+	}
+	return m[key]
+}
+
+// fillUnsentMemberFields gives the fields a member PATCH did not send their
+// stored values: code, label, parent (an explicit null moves the member to
+// the top) and, for a dated period, its start and end.
+func (h *handler) fillUnsentMemberFields(ctx context.Context, memberID string, sent map[string]json.RawMessage,
+	code, label *string, parent **string, start, end *string) error {
+	var curCode, curLabel string
+	var curParent, curStart, curEnd *string
+	if err := h.db.QueryRow(ctx, `
+		SELECT code, label, parent_member_id::text, to_char(period_start, 'YYYY-MM-DD'), to_char(period_end, 'YYYY-MM-DD')
+		FROM model.dimension_member WHERE id = $1::uuid`, memberID,
+	).Scan(&curCode, &curLabel, &curParent, &curStart, &curEnd); err != nil {
+		return err
+	}
+	if _, ok := sent["code"]; !ok {
+		*code = curCode
+	}
+	if _, ok := sent["label"]; !ok {
+		*label = curLabel
+	}
+	if _, ok := sent["parent_member_id"]; !ok {
+		*parent = curParent
+	}
+	_, hasStart := sent["period_start"]
+	_, hasEnd := sent["period_end"]
+	if !hasStart && !hasEnd && curStart != nil && curEnd != nil {
+		*start, *end = *curStart, *curEnd
+	}
+	return nil
+}
+
 // writeTimeMember: see modeledit.WriteTimeMember.
 func (h *handler) writeTimeMember(ctx context.Context, dimID, memberID, code, label string, p timedim.Period, dated bool, parentID *string) (string, error) {
 	return modeledit.WriteTimeMember(ctx, h.db, dimID, memberID, code, label, p, dated, parentID)
@@ -19736,7 +19970,10 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 			// Whether its approver may start it; absent = unchanged.
 			ApproverMayStart *bool `json:"approver_may_start"`
 			// Who may start it (role names); absent = unchanged, [] = anyone.
-			StartRoles    *[]string       `json:"start_roles"`
+			StartRoles *[]string `json:"start_roles"`
+			// Who may reopen an approved run (role names); absent =
+			// unchanged, [] = the application's administrators.
+			ReopenRoles   *[]string       `json:"reopen_roles"`
 			Steps         json.RawMessage `json:"steps"`
 			ContextSchema json.RawMessage `json:"context_schema"`
 		}
@@ -19787,6 +20024,13 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 				return
 			}
 			updated.StartRoles = workflow.CleanStartRoles(*body.StartRoles)
+		}
+		if body.ReopenRoles != nil {
+			if err := ws.SetWorkflowDefReopenRoles(ctx, defID, *body.ReopenRoles); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			updated.ReopenRoles = workflow.CleanStartRoles(*body.ReopenRoles)
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryModelChange, EventType: auditlog.EventWorkflowDefUpdated,

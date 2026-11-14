@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type HistoryInstance, type HistoryStep } from "../../api/client";
-import { LoadingState, EmptyState, StatusBadge, type DesignTone } from "../../ui";
+import { Button, LoadingState, EmptyState, StatusBadge, type DesignTone } from "../../ui";
+import { useReopenRun } from "../useReopenRun";
 import { StepTypeIcon } from "./WorkflowInboxTab";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { useDateFormat } from "../dateFormat";
@@ -11,6 +12,7 @@ const WF_STATUS_TONE: Record<string, DesignTone> = {
   running: "info",
   completed: "success",
   cancelled: "neutral",
+  reopened: "warning",
   failed: "danger",
 };
 const WF_DECISION_TONE: Record<string, DesignTone> = { approve: "success", reject: "danger" };
@@ -22,6 +24,9 @@ const WF_STEP_STATUS_TONE: Record<string, DesignTone> = {
 
 export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: string }) {
   const dateFormat = useDateFormat();
+  // Offered for runs whose definition names a role of the person as the one
+  // that reopens them (a CFO who released a close).
+  const reopenRun = useReopenRun();
   const { data: instances = [], isLoading } = useQuery({
     queryKey: ["my-wf-history"],
     queryFn: api.getMyWorkflowHistory,
@@ -39,6 +44,8 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
 
   return (
     <div className="mvx-admin-stack">
+      {reopenRun.error && <p className="mvx-admin-error">{reopenRun.error}</p>}
+      {reopenRun.confirmElement}
       {instances.map((inst: HistoryInstance) => (
         <div
           key={inst.id}
@@ -57,6 +64,12 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
             </div>
             <span className="mvx-admin-muted">{momentDate(inst.started_at, dateFormat)}</span>
             <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
+            {inst.reopenable && (
+              <Button size="sm" variant="ghost" disabled={reopenRun.pending}
+                aria-label={`Reopen ${inst.workflow_name}`} onClick={() => reopenRun.askReopen(inst.id, `"${inst.workflow_name}"`)}>
+                Reopen
+              </Button>
+            )}
           </div>
           <div className="mvx-admin-object__body" style={{ gap: 6 }}>
             <TaskContextSummary contextDisplay={inst.context_display} context={inst.context} />

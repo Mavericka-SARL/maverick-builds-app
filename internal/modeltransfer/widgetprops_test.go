@@ -169,7 +169,7 @@ var widgetPropRefs = map[string]string{
 	"context":   "data",
 	"kpi_scope": "names a dimension", "kpi_context_mode": "data", "confirm_text": "data",
 	"sync_context": "data", "show_members": "dimension-keyed", "rows_collapsed": "data", "multi_select": "data",
-	"hide_search": "data", "button_corners": "data", "new_record_button": "data",
+	"hide_search": "data", "button_corners": "data", "new_record_button": "data", "hide_empty_rows": "data",
 	// A board's and a records widget's settings name the table's fields.
 	"board": "data", "record_filters": "data", "record_columns": "data", "record_sort": "data",
 	"kpi_compare": "names a dimension", "kpi_good": "data", "number_scale": "data",

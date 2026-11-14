@@ -158,7 +158,7 @@ func TestRowFilterPostsTheRecordsThatMeetIt(t *testing.T) {
 	}
 	// Changed, the filter takes effect on what is saved once re-posted.
 	set(`[{"field":"region","is_not":["EU"]}]`)
-	if _, err := ps.Backfill(ctx, f.mapping, f.userID); err != nil {
+	if _, _, err := ps.Backfill(ctx, f.mapping, f.userID); err != nil {
 		t.Fatal(err)
 	}
 	if eu, us := f.spend(t, "EU"), f.spend(t, "US"); eu != 0 || us != 20 {

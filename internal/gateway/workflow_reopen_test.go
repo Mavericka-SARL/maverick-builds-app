@@ -115,8 +115,25 @@ func TestReopenApprovedWorkflowRun(t *testing.T) {
 	}
 
 	status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", f.baSub, map[string]string{"reason": "March was locked with a wrong figure"})
-	if status != http.StatusOK || body["notified"] != float64(1) {
-		t.Fatalf("business admin reopen: %d %v, want 200 telling the developer who started it", status, body)
+	if status != http.StatusOK || body["notified"] != float64(1) || body["status"] != "reopened" {
+		t.Fatalf("business admin reopen: %d %v, want 200 reopened, telling the developer who started it", status, body)
+	}
+	// Recorded as a reopen, not a cancel (2026-11-13): when, by whom, why,
+	// and the notification is a reopen's.
+	if got := q(`SELECT COALESCE(reopen_reason,'') || '|' || (reopened_at IS NOT NULL)::text || '|' || COALESCE(reopened_by::text,'')
+		FROM workflow.workflow_instance WHERE id = $1::uuid`, inst); !strings.HasPrefix(got, "March was locked with a wrong figure|true|") || strings.HasSuffix(got, "|") {
+		t.Errorf("reopen record %q, want the reason, a time and who", got)
+	}
+	if got := q(`SELECT template_id FROM notification.notification WHERE resource_id = $1 AND channel = 'in_app' LIMIT 1`, inst); got != workflow.ReopenedTemplate {
+		t.Errorf("notification template %q, want %s", got, workflow.ReopenedTemplate)
+	}
+	// One run, read by its id: the developer who started it, as reopened.
+	if status, body := f.do(t, "GET", "/api/workflow/instances/"+inst, f.devSub, nil); status != http.StatusOK ||
+		body["status"] != "reopened" || body["reopen_reason"] != "March was locked with a wrong figure" {
+		t.Errorf("GET the reopened run: %d %v, want 200 reopened with its reason", status, body)
+	}
+	if status, _ := f.do(t, "GET", "/api/workflow/instances/"+inst, "wfreopen-user", nil); status != http.StatusNotFound {
+		t.Errorf("GET the run as someone who took no part in it: %d, want 404", status)
 	}
 	if got := statusOf(inst); got != "cancelled/cancelled" {
 		t.Errorf("after reopen: %s, want cancelled/cancelled", got)
@@ -145,6 +162,31 @@ func TestReopenApprovedWorkflowRun(t *testing.T) {
 	rejected := run("reject")
 	if status, body := f.do(t, "POST", "/api/workflow/instances/"+rejected+"/reopen", f.baSub, map[string]string{"reason": "x"}); status != http.StatusConflict {
 		t.Errorf("reopen of a rejected run: %d %v, want 409", status, body)
+	}
+
+	// Who may reopen (owner decision 2026-11-13): named roles only, when the
+	// definition names any — the administrators lose it, a role holder who
+	// administers nothing gains it.
+	if err := ws.SetWorkflowDefReopenRoles(ctx, def.ID, []string{" business_user ", "business_user"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := q(`SELECT reopen_roles::text FROM workflow.workflow_def WHERE id = $1::uuid`, def.ID); got != `["business_user"]` {
+		t.Errorf("stored reopen roles %s, want cleaned [\"business_user\"]", got)
+	}
+	inst = run("approve")
+	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", f.baSub, map[string]string{"reason": "x"}); status != http.StatusForbidden ||
+		!strings.Contains(body["error"].(string), "business_user") {
+		t.Errorf("business admin without the reopen role: %d %v, want 403 naming the role", status, body)
+	}
+	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", "wfreopen-user", map[string]string{"reason": "the CFO takes it back"}); status != http.StatusOK {
+		t.Errorf("holder of the reopen role: %d %v, want 200", status, body)
+	}
+	if err := ws.SetWorkflowDefReopenRoles(ctx, def.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	inst = run("approve")
+	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", "wfreopen-user", map[string]string{"reason": "x"}); status != http.StatusForbidden && status != http.StatusNotFound {
+		t.Errorf("no reopen roles named, a business user: %d %v, want refused", status, body)
 	}
 }
 

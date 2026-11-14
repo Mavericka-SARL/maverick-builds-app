@@ -76,11 +76,11 @@ func dropExamples(s string) string {
 
 // sheetTools are the tools a sheet turn keeps.
 var sheetTools = map[string]bool{
-	"analyse_workbook": true, "check_grid_completeness": true, "compare_with_sheet": true, "get_model_summary": true,
+	"analyse_workbook": true, "check_grid_completeness": true, "compare_with_sheet": true, "check_sheet": true, "get_model_summary": true,
 	"list_dimensions": true, "list_grids": true, "list_metrics": true, "list_revisions": true, "load_sheet": true,
 	"plan_sheet": true, "prepare_converted_file": true, "preview_file_import": true, "propose_actions": true,
 	"read_attached_sheet": true, "read_manual": true, "validate_formulas": true, "workbook_map": true,
-	PlanTaskTool: true, UpdateTaskPlanTool: true, SetTargetModelTool: true, UpdateTargetModelTool: true,
+	PlanTaskTool: true, UpdateTaskPlanTool: true, SetTargetModelTool: true, UpdateTargetModelTool: true, RememberTool: true,
 }
 
 // SheetStageTools keeps, of tools, those a sheet turn uses.

@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
-import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, RefreshCw } from "lucide-react";
+import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, RefreshCw, Copy } from "lucide-react";
 import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type FormRecord, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
 import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
-import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
+import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, syncResultMessage, type SyncMessage } from "./formPermissions";
 import { cellClass, defaultsOf, describeFilter, filterOps, inSentence, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
 import { RecordStatusBadge } from "./RecordFieldInput";
 import { useDateFormat } from "../dateFormat";
@@ -277,12 +277,10 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
     onSuccess: (data) => {
       invalidateModelData(qc);
       qc.invalidateQueries({ queryKey: ["records"] });
-      if (data.mappings === 0) {
-        setSyncMsg({ tone: "success", text: "No active integrations are set up for this table." });
-      } else {
-        setSyncMsg({ tone: "success", text: `Synced — ${data.records_processed} record(s) across ${data.mappings} integration(s).` });
-      }
-      setTimeout(() => setSyncMsg(null), 5000);
+      const msg = syncResultMessage(data);
+      setSyncMsg(msg);
+      // A warning stays until it is read; it says what was not posted.
+      if (msg.tone === "success") setTimeout(() => setSyncMsg(null), 5000);
     },
     onError: (err: Error) => {
       setSyncMsg(syncFailure(err));
@@ -299,6 +297,28 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
     onSuccess: ({ blob, filename }) => downloadBlob(blob, filename),
   });
 
+  // Copy the records the list shows into another period (their date field
+  // moved): last month's matches and loans brought into this month's close.
+  const dateFields = (form?.fields ?? []).filter(fd => fd.type === "date");
+  const typedCode = (form?.fields ?? []).some(fd => fd.type === "text" && fd.code);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyField, setCopyField] = useState("");
+  const [copyValue, setCopyValue] = useState("");
+  const [copyMsg, setCopyMsg] = useState<SyncMessage | null>(null);
+  const copyRecords = useMutation({
+    mutationFn: () => api.copyRecords(formId, records.map(r => r.id), copyField || dateFields[0]?.name || "", copyValue),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["records"] });
+      invalidateModelData(qc);
+      setCopyOpen(false);
+      setCopyMsg({ tone: "success", text: `Copied ${data.copied} record${data.copied === 1 ? "" : "s"}.` });
+      setTimeout(() => setCopyMsg(null), 5000);
+    },
+    onError: (e) => {
+      const errs = (e as ApiError).body?.errors as FormImportRowError[] | undefined;
+      setCopyMsg({ tone: "danger", text: errs?.length ? `Nothing was copied: ${errs[0].message}` : (e as Error).message });
+    },
+  });
   const importRecords = useMutation({
     mutationFn: async (file: File) => {
       if (file.name.toLowerCase().endsWith(".csv")) {
@@ -357,6 +377,8 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
               ...(canCreate ? [{ label: importRecords.isPending ? "Importing…" : "Import", icon: <Upload size={14} />, disabled: importRecords.isPending, onSelect: () => importRef.current?.click() }] : []),
               // Sync re-posts the records into the grids: only a table that posts into one has it.
               ...(canSync && form.posts ? [{ label: syncForm.isPending ? "Syncing…" : "Sync to grid", icon: <RefreshCw size={14} />, disabled: syncForm.isPending, onSelect: () => { setSyncMsg(null); syncForm.mutate(); } }] : []),
+              // Copies are new records: offered to a caller who may create one, in a table with a date field and server-given codes.
+              ...(canCreate && dateFields.length > 0 && !typedCode && records.length > 0 ? [{ label: "Copy to another period…", icon: <Copy size={14} />, onSelect: () => { setCopyMsg(null); setCopyOpen(true); } }] : []),
             ]} />
             {canCreate && (
               <input
@@ -374,6 +396,28 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
             )}
           </div>
         </div>
+        <Dialog open={copyOpen} onClose={() => setCopyOpen(false)} title={`Copy ${records.length} record${records.length === 1 ? "" : "s"} to another period`} width={440}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <p style={{ margin: 0, fontSize: 13 }}>The records this list shows are copied as new records of yours, with new codes<Txt>{createStatusesOf(form).length ? ", as drafts" : ""}</Txt><Txt>. Only the date below changes.</Txt></p>
+            {dateFields.length > 1 && (
+              <Field label="Date to move">
+                <Select value={copyField || dateFields[0].name} onChange={e => setCopyField(e.target.value)}>
+                  {dateFields.map(fd => <option key={fd.name} value={fd.name}>{fd.label || fd.name}</option>)}
+                </Select>
+              </Field>
+            )}
+            <Field label={`New ${(dateFields.find(fd => fd.name === (copyField || dateFields[0]?.name))?.label ?? "date").toLowerCase()}`}>
+              <TextInput type="date" value={copyValue} onChange={e => setCopyValue(e.target.value)} aria-label="New date" />
+            </Field>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <Button variant="ghost" onClick={() => setCopyOpen(false)}>Cancel</Button>
+              <Button disabled={!copyValue || copyRecords.isPending} onClick={() => copyRecords.mutate()}>{copyRecords.isPending ? "Copying…" : "Copy"}</Button>
+            </div>
+          </div>
+        </Dialog>
+        {copyMsg && (
+          <InlineAlert tone={copyMsg.tone}>{copyMsg.text}</InlineAlert>
+        )}
         {syncMsg && (
           <InlineAlert tone={syncMsg.tone}>
             {syncMsg.text}

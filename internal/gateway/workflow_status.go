@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/mavericks-engine/mavericks/internal/approvalsnap"
 )
 
 // ── GET /api/workflow/status?name=<workflow> ───────────────────────────────
@@ -56,6 +58,9 @@ func (h *handler) workflowStatus(w http.ResponseWriter, r *http.Request) {
 		Status      string     `json:"status"`
 		StartedAt   time.Time  `json:"started_at"`
 		CompletedAt *time.Time `json:"completed_at,omitempty"`
+		// ChangedSinceApproval: how many approved figures of an approved run
+		// moved since (approvalsnap); 0 for any other run.
+		ChangedSinceApproval int `json:"changed_since_approval,omitempty"`
 	}
 	out := struct {
 		Workflow string       `json:"workflow"`
@@ -81,11 +86,17 @@ func (h *handler) workflowStatus(w http.ResponseWriter, r *http.Request) {
 	var inst instanceOut
 	steps := defSteps
 	if err := h.db.QueryRow(ctx, `
-		SELECT id::text, status::text, started_at, completed_at, COALESCE(steps_snapshot, $2::jsonb)
+		SELECT id::text, CASE WHEN reopened_at IS NOT NULL THEN 'reopened' ELSE status::text END,
+		       started_at, completed_at, COALESCE(steps_snapshot, $2::jsonb)
 		FROM workflow.workflow_instance
 		WHERE workflow_def_id=$1::uuid AND NOT COALESCE(test_run, false)
 		ORDER BY started_at DESC LIMIT 1`, defID, defSteps).Scan(&instanceID, &inst.Status, &inst.StartedAt, &inst.CompletedAt, &steps); err == nil {
 		out.Instance = &inst
+		if inst.Status == "completed" {
+			if runs, err := approvalsnap.Changes(ctx, h.db.For(ctx), appID, instanceID, 0); err == nil && len(runs) > 0 {
+				inst.ChangedSinceApproval = runs[0].Changed
+			}
+		}
 	}
 
 	type stepRow struct {

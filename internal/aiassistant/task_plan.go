@@ -37,6 +37,23 @@ type TaskPlan struct {
 	// Target is the TO-BE model of a build from a workbook (target_model.go),
 	// recorded before the plan and kept with it.
 	Target *TargetModel `json:"target,omitempty"`
+	// PendingApproval: the plan is the developer's to approve before anything
+	// is built (owner, 2026-11-13: "AI developer has not presented for
+	// approval the general plan, only the first stage"). A new plan, and one
+	// re-cut at the developer's request, waits; ApprovedAt is when they
+	// approved it. A plan from before approval existed has neither and runs.
+	PendingApproval bool       `json:"pending_approval,omitempty"`
+	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
+}
+
+// AwaitsApproval reports whether the plan waits for the developer's
+// approval: nothing is proposed for it until then.
+func (p *TaskPlan) AwaitsApproval() bool { return p != nil && p.PendingApproval && len(p.Stages) > 0 }
+
+// Approve records the developer's approval of the plan.
+func (p *TaskPlan) Approve() {
+	now := time.Now().UTC()
+	p.PendingApproval, p.ApprovedAt = false, &now
 }
 
 // MarshalJSON writes stages as an array, never null: a plan can hold only
@@ -404,7 +421,7 @@ func (p *TaskPlan) renderStages() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Goal: %s\n", p.Goal)
 	if p.CarriedFrom != "" {
-		b.WriteString("(Carried over from an earlier session in this draft: go on from the CURRENT stage.)\n")
+		b.WriteString("(Attached from another session: go on from the CURRENT stage.)\n")
 	}
 	cur := p.Current()
 	// A long plan shows its counts, the stages around the current one and

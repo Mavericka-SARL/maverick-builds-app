@@ -71,7 +71,8 @@ posting runs the gateway's own posting code the same way.
 | `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
 | `preview_file_import` | a dry run of importing an attached spreadsheet: its first rows as read, its columns and first rows after the reshape and column map, every row that would fail and why, what would be imported. Writes nothing |
 | `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments; or any lines of an attached CSV file, with its line count. Writes nothing |
-| `compare_with_sheet` | one row of an attached sheet against the metric it became, period by period along the time dimension at the members named for its other dimensions: how many periods match and each that differs, sheet value and model value. A percentage metric matches the sheet's fraction. The plan check also warns when a plan creates input metrics that hold no value and nothing loads |
+| `check_sheet` | a sheet of an attached file against the model **cell by cell**, in one call: every number becomes a model coordinate (a metric, one member per dimension, a period at any level) through a map in the import's own terms (`reshape` + `column_map`), and is read from the model by the engine's own rules (`query.MetricValuesAtPoints`, the read charts and workflow conditions use) — a parent member, a blank key cell or an FY/quarter column at the model's total. Months are read from their header dates, never by position. The answer separates **mapping problems** (the map reads the sheet wrongly — a whole column, every cell of one member, one scale everywhere, a value no member has: fixed in the map, never in the data) from **value problems** (rows, with whether the sheet's cells are inputs or formulas; rows alike said once, e.g. "96 rows: the sheet is a constant multiple of the model"), names totals that differ only through the cells under them, and lists numbers no block reads (a total column beside months is named as the period that holds them). The map an executed import loaded a sheet with is saved (source `load`); maps given to it are saved too (`ai_assistant.sheet_map`, migration 185), as blocks of a sheet, and checked again by the server after every plan. Read-only |
+| `compare_with_sheet` | ONE row of an attached sheet against the metric it became, period by period (each column's period read from the header above it; the row ends at a column whose header is no period) at the members named for its other dimensions: how many periods match and each that differs, sheet value and model value. A percentage metric matches the sheet's fraction. The plan check also warns when a plan creates input metrics that hold no value and nothing loads |
 | `prepare_converted_file` | saves an attached spreadsheet reshaped and column-mapped into the import layout, for the developer to download as CSV or Excel from the chat. Imports nothing |
 | `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
 | `get_integration`, `list_integration_runs` | a REST API connector in full (typed config, connection, schedule, switches, tested state) and run history with error codes |
@@ -365,22 +366,110 @@ workbook, 2026-11-08/09; `internal/gateway/ai_build_guards.go`, `ai_turn.go`):
   or a source named as input is not an item, and that "rows 6-39" is covered
   row by row.
 - *The server checks values after each confirmed plan*: in a session with an
-  attached file, the next turn starts by comparing again every row the
-  session compared (`compare_with_sheet`), naming the rows that matched at
-  their last comparison and differ now, the rows that differ, and the metrics
-  the plan made or changed that nothing compared yet (`stageValueCheck`). The
+  attached file, the next turn starts by saving the maps the plan's imports
+  loaded sheets with and checking every saved sheet map cell by cell
+  (`check_sheet`, 2026-11-14 — pairing columns with periods by position had
+  read a correct Actuals sheet's FY column as the next January and reported
+  all 103 rows different); sheets without a map are compared again row by
+  row (`compare_with_sheet`), naming the rows that matched at their last
+  comparison and differ now, the rows that differ, and the metrics the plan
+  made or changed that nothing compared yet (`stageValueCheck`). Mapping
+  problems are fixed in the map, never by changing data. A stage or a reply
+  calling a mapped sheet done is judged by its blocks' last checks in the
+  draft (`SheetMapVerdicts`). The check runs only after a plan that can change
+  values (`StepChangesValues`: a plan of only dashboards, widgets, roles,
+  workflows, tags or ordering is not followed by one); a block that matches
+  as at its last check is named in one line, not shown again with its hints,
+  and a block of text fields (an owner, a status) is left out. The
   note is shown in the chat and given to the model with the developer's
   message.
 
-**A session carries its own work on** (`aiCreateSession`, `CarryTaskPlan`,
-`EarlierSessions`). A build runs in one session, its draft and its task plan
-together; nothing has to be handed over. A new session starts a fresh draft:
+**Thinking multidimensionally** (`aiassistant/dimensional_names.go`, owner
+2026-11-13). Every turn's prompt carries `MultidimensionalRule`: a measure is
+one metric, a version (Actual, Budget, Forecast, scenarios), a period or a
+member is a dimension's member. `FlatMetricProblems` sends back a plan whose
+input metrics (`is_input`, or no formula) hold a version at the start or end
+of the name, or a period anywhere (2027, fy27, q1, h1, jan) — with the measure
+and the dimensions to use — and asks once about inputs that differ only by
+members of one dimension of the revision (revenue_emea / revenue_apac).
+Comparisons (variance, vs, accuracy), flags and controls (is_actual,
+actual_through_month), calculated metrics and names the developer's message
+spells out are left alone. `CheckTarget` refuses a target model whose input or
+actuals sheets name metrics that way.
 
-- it takes over the task plan of the developer's previous session in the
-  model only when that plan is unfinished and that session's draft became the
-  working revision (`carried_from`) — then the work the plan did is in what the
-  new draft copies; a confirmed plan marks the current stage in progress and
-  counts its plans and steps (`RecordConfirmed`);
+**The plan is approved before it is built** (owner 2026-11-13). A new plan,
+and one re-cut at the developer's request, is saved with
+`pending_approval` (`plan_task`); `TurnBrief` then asks for the whole plan to
+be presented, a `propose_actions` for it is refused
+(`PlanAwaitsApprovalResult`) and the turn ends on the presentation with no
+nudge to propose. `POST /api/ai/sessions/{id}/plan/approve`, or a reply that
+is an approval as a whole message (`ApprovesPlan`), approves it; after the
+button the console sends `{"continue": true}` and `PlanApprovedMessage` asks
+for stage 1. A direct order while an earlier plan waits still runs; a plan
+made in the same turn always waits. Plans from before approval existed, and
+attached plans, run as they are.
+
+**The architecture scheme** (owner 2026-11-13). The target model
+(`set_target_model`) is the plan's architecture: dimensions, each grid
+(`sheets[].grid`) with its dimensions and metrics, and the dashboards
+(`pages`: `{name, audience, grids, guide}`; a name alone still reads). Every
+dashboard names the grids it shows, by the target's grid names, or is a
+`guide` (`checkPages`, in `CheckTarget` and `update_target_model`, which can
+now add or replace pages); a target saved before that lists its unlinked
+dashboards in every turn's render, asking the AI to link them. It is asked for
+before `plan_task` for every build of a model or module (one `sheets` entry per
+area without a workbook). The console (`AIArchitecture.tsx`) shows a plan
+waiting for approval as `PlanReviewCard` in the conversation — goal, stages,
+the scheme drawn in place (dimensions → grids → dashboards, lines, hover) —
+and the plan strip opens to the same scheme once approved. With the card
+showing the plan, the AI's reply explains the design choices instead of
+listing the stages again (`PlanSavedForApproval`).
+
+**Going on after a confirmed plan** (`gateway/ai_continue.go`, owner
+2026-11-13). Once a confirmed plan has run (executed or partial), the console
+sends `{"continue": true}`; the server writes the turn's message
+(`ContinuationMessage`, prefixed `▶ `): what ran and failed, then fix the
+failures first, the next part of the current stage or the next stage, or —
+with no plan — the next step of the request, or a recommended next step once
+it is done. The turn reads as delegated with no classifier call and records
+no decision. Refused (409) when the session's last plan has not run.
+
+**One plan per request** (`plan_task`, owner 2026-11-13). While a plan is
+under way it is the request's: `plan_task` again is refused unless the
+developer asked to change it (`replace: true` re-cuts the open stages) or made
+a different request (`new_request: true` sets the open plan aside in the
+session's `earlier_plans`); `resume_plan: n` takes one up again. A finished
+plan moves to `earlier_plans` when the next one starts.
+
+**The session's memory** (`aiassistant/memory.go`, `gateway/ai_memory.go`,
+migration 184). Each attachment is gone through once when it arrives
+(`analyseAttachments`: a workbook by `AnalyseWorkbook`, a CSV by its overview,
+any other file by one call of the session's model) and the analysis kept;
+later turns get the analysis, not the file (`documentsSection`). The read
+tools that read an attachment (`read_attached_sheet`, `analyse_workbook`)
+answer from memory for a part read before (`memoryReads`) — the file is read
+again only when the developer's message asks for it (`AsksToReread`,
+`rereadFiles`). `remember` keeps the AI's notes. The memory's size is what the
+session carries into each call — analyses, notes, summary and the
+conversation as sent (`MemoryStatus`; `AI_MEMORY_TOKENS`, 120,000 by
+default); at 85% the turn starts by compacting it (`compactMemory`): the
+conversation before the last two developer messages becomes a summary
+(`CompactMemoryPrompt`), reads of sheets no open stage needs are shortened,
+and the developer is told. `POST /api/ai/sessions/{id}/memory/compact`
+compacts at once; `GET …/memory` reports it.
+
+**A session carries its own work on** (`aiCreateSession`, `aiAttachPlan`,
+`EarlierSessions`; owner, 2026-11-13). A build runs in one session, its draft
+and its task plan together, as long as the developer likes — nothing pushes
+them to a new session: a promoted session goes on, its next confirmed plan in a
+fresh draft. A new session starts a fresh draft and no plan:
+
+- the developer may attach a plan of another of their sessions in the model
+  (`POST /api/ai/sessions/{id}/attach-plan`; `GET /api/ai/plans` lists them):
+  it becomes the session's plan (`carried_from`), the plan under way is set
+  aside, and with `attachments` that session's files come along with their
+  analyses and reads; never automatic. A confirmed plan marks the current
+  stage in progress and counts its plans and steps (`RecordConfirmed`);
 - the value check reads the comparisons of the sessions the plan came from, and
   a session's first turn opens with a handover check of those rows;
 - with a call budget set, from 70% of it the model is asked to finish the part
@@ -471,7 +560,8 @@ module's sheets whole and the others one line each.
 **Bulk tools for routine work.** `analyse_workbook` (the whole workbook and
 its dependencies), `load_sheet` (inputs, matched to metrics and members),
 `plan_sheet` and the `sheet_plan` step (formulas translated on the server),
-`compare_with_sheet` (many rows over all their periods) and `workbook_map`
+`check_sheet` (a whole sheet cell by cell through its import map),
+`compare_with_sheet` (rows over their periods) and `workbook_map`
 (what each row became and how it compared). The translator reads **every
 period**: runs of periods that translate alike become one formula, a first
 period that differs an opening rule, later changes an `IF` on the month

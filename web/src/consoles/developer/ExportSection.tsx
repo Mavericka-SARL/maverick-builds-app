@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import {
-  api, type DevDimension, type DevMetric, type ExportPreview, type ExportSpec, type GridDef, type IntegrationDef,
+  api, type DevDimension, type DevMetric, type ExportPreview, type ExportSpec, type ExportPackSheet, type GridDef, type IntegrationDef,
 } from "../../api/client";
 import {
   Button, Checkbox, Dialog, EmptyState, Field, FilterChip, IconButton, InlineAlert, SectionHeader, SegmentedControl,
@@ -358,7 +358,35 @@ function ExportEditor({ revisionId, grids, existing, onClose, onSaved }: {
           )}
           <Checkbox label="Include combinations without values" checked={!!spec.include_empty_rows}
             onChange={e => set({ include_empty_rows: e.target.checked || undefined })} />
+          <Checkbox label="Include totals (parent members, such as a consolidated column)" checked={!!spec.include_totals}
+            onChange={e => set({ include_totals: e.target.checked || undefined })} />
+          <Checkbox label="Follow the dashboard's selector bar (the period being looked at)" checked={!!spec.follow_selector}
+            onChange={e => set({ follow_selector: e.target.checked || undefined })} />
         </div>
+        {format === "xlsx" && (
+          <Field label="More sheets" description="A pack in one workbook: each sheet is another grid of this revision, as the downloader sees it, with every dimension as a column unless its layout says otherwise.">
+            <div style={{ display: "grid", gap: 6 }}>
+              {(spec.sheets ?? []).map((sh, i) => {
+                const put = (patch: Partial<ExportPackSheet>) =>
+                  set({ sheets: (spec.sheets ?? []).map((x, j) => j === i ? { ...x, ...patch } : x) });
+                return (
+                  <div key={i} className="mvx-admin-inline-form" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <Select aria-label={`Sheet ${i + 2} grid`} value={sh.grid} onChange={e => put({ grid: e.target.value })} style={{ width: 200 }}>
+                      <option value="">Grid…</option>
+                      {grids.filter(g => g.id !== gridId).map(g => <option key={g.id} value={g.name}>{g.name}</option>)}
+                    </Select>
+                    <TextInput aria-label={`Sheet ${i + 2} name`} value={sh.sheet_name ?? ""} placeholder={sh.grid || "Sheet name"} style={{ width: 160 }}
+                      onChange={e => put({ sheet_name: e.target.value || undefined })} />
+                    <Checkbox label="Totals" checked={!!sh.include_totals} onChange={e => put({ include_totals: e.target.checked || undefined })} />
+                    <IconButton aria-label={`Remove sheet ${i + 2}`} onClick={() => set({ sheets: (spec.sheets ?? []).filter((_, j) => j !== i) })}><Trash2 size={13} /></IconButton>
+                  </div>
+                );
+              })}
+              <Button size="sm" variant="ghost" leadingIcon={<Plus size={13} />} style={{ justifySelf: "start" }}
+                onClick={() => set({ sheets: [...(spec.sheets ?? []), { grid: "" }] })}>Add a sheet</Button>
+            </div>
+          </Field>
+        )}
 
         {preview && preview.default_header.length > 0 && (
           <Field label="Column names" description="Rename a column as it should appear in the file; leave blank to keep it.">

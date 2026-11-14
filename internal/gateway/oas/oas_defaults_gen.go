@@ -184,6 +184,14 @@ func (s *ExportSpec) setDefaults() {
 		val := string("Data")
 		s.SheetName.SetTo(val)
 	}
+	{
+		val := bool(false)
+		s.IncludeTotals.SetTo(val)
+	}
+	{
+		val := bool(false)
+		s.FollowSelector.SetTo(val)
+	}
 }
 
 // setDefaults set default value of fields.

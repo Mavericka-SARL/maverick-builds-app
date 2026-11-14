@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -120,6 +122,10 @@ type FormDef struct {
 	// MemberRootLabel, when set, labels the total member (code RootMemberCode)
 	// every record's member sits under.
 	MemberRootLabel string `json:"member_root_label,omitempty"`
+	// MemberLabelWithCode labels each member with its record's code before
+	// its label field ("IC03 · Intragroup loan principal"), so records with
+	// the same text tell apart in grids (migration 183).
+	MemberLabelWithCode bool `json:"member_label_with_code,omitempty"`
 	// EditAccess is who may change and delete the table's records:
 	// EditCreator (their creator and the application's administrators) or
 	// EditEveryone (everyone who sees them).
@@ -190,16 +196,21 @@ func (f *FormDef) MemberCode(data map[string]any) string {
 }
 
 // MemberLabel is the label of the member a record holding data is: its
-// label field, else its code.
+// label field, else its code — the code first when the table says so
+// (MemberLabelWithCode).
 func (f *FormDef) MemberLabel(data map[string]any) string {
+	code := f.MemberCode(data)
 	if f.MemberLabelField != "" {
 		if v, ok := data[f.MemberLabelField]; ok && v != nil {
 			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+				if f.MemberLabelWithCode && code != "" && s != code {
+					return code + " · " + s
+				}
 				return s
 			}
 		}
 	}
-	return f.MemberCode(data)
+	return code
 }
 
 // EveryoneEdits reports whether everyone who sees the table's records may
@@ -314,7 +325,8 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 // formDefColumns are what GetForm and ListForms read of a model.form_def row.
 const formDefColumns = `id::text, model_id::text, name, label, fields, own_records_only,
 	COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''), edit_access, create_roles, created_at,
-	EXISTS (SELECT 1 FROM model.form_def k WHERE k.model_id = form_def.model_id AND k.keeps_dimension_id IS NOT NULL)`
+	EXISTS (SELECT 1 FROM model.form_def k WHERE k.model_id = form_def.model_id AND k.keeps_dimension_id IS NOT NULL),
+	member_label_with_code`
 
 func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var f FormDef
@@ -323,7 +335,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	err := s.db.QueryRow(ctx, `
 		SELECT `+formDefColumns+`
 		FROM model.form_def WHERE id = $1::uuid
-	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps)
+	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("form %s not found", formID)
 	}
@@ -354,7 +366,7 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	for rows.Next() {
 		var f FormDef
 		var fieldsJSON []byte
-		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps); err != nil {
+		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fieldsJSON, &f.Fields)
@@ -841,4 +853,69 @@ func scanRecord(row rowScanner) (*FormRecord, error) {
 	}
 	_ = json.Unmarshal(dataJSON, &r.Data)
 	return &r, nil
+}
+
+// fieldOptionKeys are the keys a field definition may carry: FormField's.
+var fieldOptionKeys = func() map[string]bool {
+	keys := map[string]bool{}
+	t := reflect.TypeOf(FormField{})
+	for i := 0; i < t.NumField(); i++ {
+		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
+}()
+
+// UnknownFieldOptions says which key of a table's field definitions is no
+// option of a field (nil when none is): {"prefix": "IC"} on an auto-code
+// field used to be dropped in silence, and the codes came out 0001 instead
+// of IC01 (2026-11-13). fields is the request's "fields" array as sent.
+func UnknownFieldOptions(fields json.RawMessage) error {
+	if len(fields) == 0 || string(fields) == "null" {
+		return nil
+	}
+	var defs []map[string]json.RawMessage
+	if err := json.Unmarshal(fields, &defs); err != nil {
+		return nil // the typed decode says what is wrong with it
+	}
+	for i, d := range defs {
+		keys := make([]string, 0, len(d))
+		for k := range d {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var bad []string
+		for _, k := range keys {
+			if fieldOptionKeys[k] {
+				continue
+			}
+			item := fmt.Sprintf("%q", k)
+			for _, known := range sortedFieldOptionKeys() {
+				if strings.Contains(known, strings.ToLower(k)) {
+					item += fmt.Sprintf(" (did you mean %q?)", known)
+					break
+				}
+			}
+			bad = append(bad, item)
+		}
+		if len(bad) > 0 {
+			name := fmt.Sprintf("field %d", i+1)
+			var n string
+			if json.Unmarshal(d["name"], &n) == nil && n != "" {
+				name = fmt.Sprintf("field %q", n)
+			}
+			return fmt.Errorf("%s: no option of a field: %s", name, strings.Join(bad, ", "))
+		}
+	}
+	return nil
+}
+
+func sortedFieldOptionKeys() []string {
+	out := make([]string, 0, len(fieldOptionKeys))
+	for k := range fieldOptionKeys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

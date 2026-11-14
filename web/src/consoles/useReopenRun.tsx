@@ -16,7 +16,7 @@ export function useReopenRun() {
   const reopen = useMutation({
     mutationFn: ({ instanceId, reason }: { instanceId: string; reason: string }) => api.reopenWorkflowInstance(instanceId, reason),
     onSuccess: () => {
-      for (const key of ["executions", "workflow-instances", "tasks", "wf-history"]) {
+      for (const key of ["executions", "workflow-instances", "tasks", "wf-history", "my-wf-history", "workflow-status"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
     },

@@ -87,12 +87,47 @@ func writeCSV(w io.Writer, t *Table) error {
 }
 
 func writeXLSX(w io.Writer, t *Table) error {
+	return WritePack(w, []*Table{t})
+}
+
+// WritePack writes tables as one workbook, a sheet each, in order (a
+// reporting pack); a sheet name used twice gets a number.
+func WritePack(w io.Writer, tables []*Table) error {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
-	sheet := t.spec.SheetName
-	if err := f.SetSheetName("Sheet1", sheet); err != nil {
-		return err
+	used := map[string]bool{}
+	for i, t := range tables {
+		name := t.spec.SheetName
+		if name == "" {
+			name = "Data"
+		}
+		if len(name) > 31 {
+			name = name[:31]
+		}
+		for n := 2; used[strings.ToLower(name)]; n++ {
+			suffix := fmt.Sprintf(" (%d)", n)
+			base := t.spec.SheetName
+			if len(base)+len(suffix) > 31 {
+				base = base[:31-len(suffix)]
+			}
+			name = base + suffix
+		}
+		used[strings.ToLower(name)] = true
+		if i == 0 {
+			if err := f.SetSheetName("Sheet1", name); err != nil {
+				return err
+			}
+		} else if _, err := f.NewSheet(name); err != nil {
+			return err
+		}
+		if err := writeXLSXSheet(f, name, t); err != nil {
+			return err
+		}
 	}
+	return f.Write(w)
+}
+
+func writeXLSXSheet(f *excelize.File, sheet string, t *Table) error {
 	sw, err := f.NewStreamWriter(sheet)
 	if err != nil {
 		return err
@@ -139,10 +174,7 @@ func writeXLSX(w io.Writer, t *Table) error {
 		}
 		rowNum++
 	}
-	if err := sw.Flush(); err != nil {
-		return err
-	}
-	return f.Write(w)
+	return sw.Flush()
 }
 
 // writeJSON writes an array of objects keyed by the header, in column

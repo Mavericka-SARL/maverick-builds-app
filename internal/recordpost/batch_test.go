@@ -118,7 +118,8 @@ func TestSyncPostsWithinTheCreatorsAccess(t *testing.T) {
 	}
 	check := func(step string, wantEU, wantUS float64) {
 		t.Helper()
-		if mappings, processed := ps.RepostTable(ctx, f.form.ID, f.userID); mappings != 1 || processed != 4 {
+		if res := ps.RepostTable(ctx, f.form.ID, f.userID); res.Mappings != 1 || res.Processed != 4 {
+			mappings, processed := res.Mappings, res.Processed
 			t.Fatalf("%s: sync went through %d mappings, %d postings; want 1, 4", step, mappings, processed)
 		}
 		for region, want := range map[string]float64{"EU": wantEU, "US": wantUS} {
@@ -215,7 +216,13 @@ func TestASyncChecksEachCreatorsOwnAccess(t *testing.T) {
 	f.exec(t, `INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid,'dimension_member',$2,'hidden')`, f.userID, us)
 	f.exec(t, `UPDATE runtime.form_record SET data = jsonb_set(data, '{amount}', to_jsonb((data->>'amount')::numeric + 100)), updated_at = now()
 		WHERE form_id=$1::uuid`, f.form.ID)
-	ps.RepostTable(ctx, f.form.ID, f.userID)
+	// The sync says what the guard kept out instead of a plain "ok": the
+	// creator's record in the hidden US (2026-11-13: a released period's
+	// lock was hidden this way).
+	res := ps.RepostTable(ctx, f.form.ID, f.userID)
+	if res.Skipped != 1 || len(res.SkippedReasons) != 1 || res.SkippedReasons[0].Postings != 1 || res.SkippedReasons[0].Reason == "" {
+		t.Errorf("sync with one posting kept out: %+v; want 1 skipped with its reason", res)
+	}
 	for creator, want := range map[string]float64{f.userID: 110 + 20, other: 101 + 102} {
 		got := f.count(t, `SELECT COALESCE(sum(p.posted_value), 0) FROM runtime.form_record_posting p
 			JOIN runtime.form_record r ON r.id = p.form_record_id WHERE p.mapping_id=$1::uuid AND r.created_by=$2::uuid`, f.mapping, creator)

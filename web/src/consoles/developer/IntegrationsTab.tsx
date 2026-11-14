@@ -262,7 +262,10 @@ function FormMappingCard({
     setBackfillMsg("Running…");
     try {
       const res = await api.backfillFormMapping(mapping.id);
-      setBackfillMsg(`Done — ${res.records_processed} record(s) processed`);
+      const skipped = res.postings_skipped ?? 0;
+      setBackfillMsg(skipped
+        ? `Done — ${res.records_processed} record(s) processed; ${skipped} posting(s) not made: ${res.skipped_reasons?.[0]?.reason ?? "kept out"}`
+        : `Done — ${res.records_processed} record(s) processed`);
       qc.invalidateQueries({ queryKey: ["form-mappings"] });
     } catch {
       setBackfillMsg("Backfill failed");

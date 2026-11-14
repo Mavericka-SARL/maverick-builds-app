@@ -19,6 +19,10 @@ func sideCall(req providers.ChatRequest) (providers.ChatResponse, bool) {
 		return answer(`{"mode": "direct", "tasks": []}`)
 	case strings.HasPrefix(req.SystemPrompt, coverageSystemPrompt):
 		return answer(`{"missing": [], "extra": []}`)
+	case req.SystemPrompt == attachmentAnalysisPrompt:
+		return answer("ANALYSIS: a test attachment")
+	case req.SystemPrompt == aiassistant.CompactMemoryPrompt:
+		return answer("SUMMARY: the earlier conversation")
 	}
 	return providers.ChatResponse{}, false
 }

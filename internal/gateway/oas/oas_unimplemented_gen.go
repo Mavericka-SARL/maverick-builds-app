@@ -109,6 +109,17 @@ func (UnimplementedHandler) AdminSwitchModelLink(ctx context.Context, req *Admin
 	return r, ht.ErrNotImplemented
 }
 
+// ApproveAiPlan implements approveAiPlan operation.
+//
+// A new plan, and one re-cut at the developer's request, waits (task_plan.pending_approval);
+// proposals for it are refused until it is approved — here, or by a reply that approves it. The
+// console then sends a message with continue true, and the AI proposes the first open stage.
+//
+// POST /api/ai/sessions/{id}/plan/approve
+func (UnimplementedHandler) ApproveAiPlan(ctx context.Context, params ApproveAiPlanParams) (r ApproveAiPlanRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ArchiveWorkflow implements archiveWorkflow operation.
 //
 // Archive a workflow definition.
@@ -132,12 +143,24 @@ func (UnimplementedHandler) ArrangeDashboard(ctx context.Context, req *ArrangeDa
 	return r, ht.ErrNotImplemented
 }
 
+// AttachAiPlan implements attachAiPlan operation.
+//
+// Optional, never automatic: a new session starts with no plan. The plan under way here, if any, is
+// set aside in this session. With attachments, the files of the plan's session come along with their
+// analyses and the parts read, so they are not gone through again. The next turn checks which of the
+// plan's open stages the model already holds.
+//
+// POST /api/ai/sessions/{id}/attach-plan
+func (UnimplementedHandler) AttachAiPlan(ctx context.Context, req *AttachAiPlanReq, params AttachAiPlanParams) (r AttachAiPlanRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // BackfillFormMapping implements backfillFormMapping operation.
 //
 // Re-apply a table-to-metric mapping against all already-submitted records.
 //
 // POST /api/developer/form-integrations/{id}/backfill
-func (UnimplementedHandler) BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (r *BackfillFormMappingOK, _ error) {
+func (UnimplementedHandler) BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (r *PostingReport, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -211,6 +234,16 @@ func (UnimplementedHandler) ClearTenantAIKey(ctx context.Context) (r ClearTenant
 	return r, ht.ErrNotImplemented
 }
 
+// CompactAiSessionMemory implements compactAiSessionMemory operation.
+//
+// Compact the session's memory now — the earlier conversation becomes a summary — and say so in
+// the session.
+//
+// POST /api/ai/sessions/{id}/memory/compact
+func (UnimplementedHandler) CompactAiSessionMemory(ctx context.Context, params CompactAiSessionMemoryParams) (r CompactAiSessionMemoryRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // CompleteTask implements completeTask operation.
 //
 // Approve or reject a workflow step.
@@ -239,6 +272,19 @@ func (UnimplementedHandler) ConfirmAiProposal(ctx context.Context, params Confir
 //
 // POST /api/business-admin/copy-values
 func (UnimplementedHandler) CopyBAValues(ctx context.Context, req *CopyBAValuesReq) (r CopyBAValuesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// CopyFormRecords implements copyFormRecords operation.
+//
+// New records like the ones named, with the date field `field` set to `value` — last month's
+// intercompany matches and loans brought into this month's close. The copies are the caller's own,
+// made as a file import makes records: every one checked, all or none (422 lists the refused ones),
+// new codes, drafts in a table with a status, posted as one batch. For someone who may add records
+// to the table; a table whose records carry a code typed from outside cannot be copied.
+//
+// POST /api/forms/{id}/records/copy
+func (UnimplementedHandler) CopyFormRecords(ctx context.Context, req *CopyFormRecordsReq, params CopyFormRecordsParams) (r CopyFormRecordsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -882,9 +928,10 @@ func (UnimplementedHandler) DownloadAiConversion(ctx context.Context, params Dow
 
 // DownloadExportIntegration implements downloadExportIntegration operation.
 //
-// Download a file_export integration — the grid's leaf-level values (inputs and calculated
-// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
-// (hidden members and metrics left out). Recorded in the integration's run history.
+// Download a file_export integration — the grid's values (leaf-level; with include_totals also the
+// totals the grid serves) as CSV, XLSX or JSON in its spec's layout, built from the caller's own
+// view of the grid (hidden members and metrics left out); with sheets, more grids in one workbook.
+// Recorded in the integration's run history.
 //
 // GET /api/integrations/{id}/export
 func (UnimplementedHandler) DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (r DownloadExportIntegrationRes, _ error) {
@@ -1015,6 +1062,15 @@ func (UnimplementedHandler) GetAiSession(ctx context.Context, params GetAiSessio
 	return r, ht.ErrNotImplemented
 }
 
+// GetAiSessionMemory implements getAiSessionMemory operation.
+//
+// How full the session's memory is and what it holds.
+//
+// GET /api/ai/sessions/{id}/memory
+func (UnimplementedHandler) GetAiSessionMemory(ctx context.Context, params GetAiSessionMemoryParams) (r GetAiSessionMemoryRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetAiSettings implements getAiSettings operation.
 //
 // Get the caller's saved LLM provider settings.
@@ -1032,6 +1088,21 @@ func (UnimplementedHandler) GetAiSettings(ctx context.Context) (r *AiLLMSettings
 //
 // GET /api/ai/sessions/{id}/workbook-map
 func (UnimplementedHandler) GetAiWorkbookMap(ctx context.Context, params GetAiWorkbookMapParams) (r GetAiWorkbookMapRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetApprovalChanges implements getApprovalChanges operation.
+//
+// When a run whose context names Dimension members (a period) finishes approved, the inputs and
+// calculated values of that scope are kept. An input outside the lock (a tax rate, a posting account,
+//
+//	a setting) can still move them; this lists, for the selected model's application, each approved
+//
+// run whose figures differ now: how many, and up to five examples (a metric or member hidden from
+// the caller is left out of the examples). For anyone who opens the model.
+//
+// GET /api/workflow/approval-changes
+func (UnimplementedHandler) GetApprovalChanges(ctx context.Context, params GetApprovalChangesParams) (r *GetApprovalChangesOK, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1354,6 +1425,17 @@ func (UnimplementedHandler) GetWorkflowHistory(ctx context.Context) (r []Workflo
 	return r, ht.ErrNotImplemented
 }
 
+// GetWorkflowInstance implements getWorkflowInstance operation.
+//
+// For whoever may administer the run (the application's business admins and developers) or took part
+// in it (started it, acted on a step, was notified of it); 404 for anyone else and for a test run. A
+// reopened run reads "reopened", with when, by whom and why.
+//
+// GET /api/workflow/instances/{id}
+func (UnimplementedHandler) GetWorkflowInstance(ctx context.Context, params GetWorkflowInstanceParams) (r GetWorkflowInstanceRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetWorkflowInstances implements getWorkflowInstances operation.
 //
 // List the most recent 20 executions started from a workflow definition.
@@ -1595,6 +1677,15 @@ func (UnimplementedHandler) ListAiConversions(ctx context.Context, params ListAi
 //
 // POST /api/ai/settings/models
 func (UnimplementedHandler) ListAiModels(ctx context.Context, req OptListAiModelsReq) (r *ListAiModelsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListAiPlans implements listAiPlans operation.
+//
+// The plans of the developer's sessions in the model, to attach one to a session.
+//
+// GET /api/ai/plans
+func (UnimplementedHandler) ListAiPlans(ctx context.Context, params ListAiPlansParams) (r []AiPlanRef, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2249,9 +2340,12 @@ func (UnimplementedHandler) RenameRevision(ctx context.Context, req *RenameRevis
 
 // ReopenWorkflowInstance implements reopenWorkflowInstance operation.
 //
-// Releases what an approved run locks. The run becomes cancelled; its steps, decisions, posted
-// values and approved records stay. The same people who may cancel a run may reopen it. A reason is
-// required: it goes into the audit log and the message the people involved receive.
+// Releases what an approved run locks. The run is reopened: it reads "reopened" in history and
+// status widgets (stored as cancelled with reopened_at, so its scope is released); its steps,
+// decisions, posted values and approved records stay. Who may: the roles its definition names in
+// reopen_roles, or — none named — the people who may cancel a run (the application's business
+// admins and developers). A reason is required: it goes into the audit log and the message the
+// people involved receive.
 //
 // POST /api/workflow/instances/{id}/reopen
 func (UnimplementedHandler) ReopenWorkflowInstance(ctx context.Context, req *ReopenWorkflowInstanceReq, params ReopenWorkflowInstanceParams) (r ReopenWorkflowInstanceRes, _ error) {
@@ -2541,11 +2635,12 @@ func (UnimplementedHandler) ScimServiceProviderConfig(ctx context.Context) (r Sc
 // Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
 // "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
 // limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
-// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
-// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
-// streaming has started — after streaming begins, limit hits are only reported via an "error"
-// event since the HTTP status is already sent).
+// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
+// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
+// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
+// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
+// if exceeded before any streaming has started — after streaming begins, limit hits are only
+// reported via an "error" event since the HTTP status is already sent).
 //
 // POST /api/ai/sessions/{id}/messages
 func (UnimplementedHandler) SendAiMessage(ctx context.Context, req *AiSendMessageRequest, params SendAiMessageParams) (r SendAiMessageRes, _ error) {
@@ -2691,7 +2786,9 @@ func (UnimplementedHandler) SwitchModelLinkSource(ctx context.Context, req *Swit
 // For an administrator of the table's application (a business_admin of its workspace, a developer or
 // tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
 // other people's included. 403 for a caller who reaches the table without administering it, 404 for
-// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
+// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has. The
+// answer says how many postings a workflow lock, a closed period or a creator's access kept out, and
+// why (status "partial").
 //
 // POST /api/forms/{id}/sync
 func (UnimplementedHandler) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (r SyncFormMappingsRes, _ error) {

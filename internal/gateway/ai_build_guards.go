@@ -326,9 +326,25 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	if err != nil {
 		return ""
 	}
+	// The maps the session's executed imports loaded sheets with are the
+	// sheets' maps (check_sheet): kept every turn, so a sheet imported
+	// before maps were kept has one too. A map the AI gave stays.
+	if revID != "" {
+		if modelID, err := h.modelOfRevision(ctx, revID); err == nil {
+			for _, p := range props {
+				if p.Status == "executed" || p.Status == "partial" {
+					for _, lm := range aiassistant.LoadMapsOf(p.Steps) {
+						_ = aiassistant.SaveSheetMap(ctx, h.db.For(ctx), modelID, lm.File, lm.Sheet, lm.Map)
+					}
+				}
+			}
+		}
+	}
+	// Plans since the last check that can change values: a plan of only
+	// dashboards, roles or workflows leaves every value as it was.
 	var fresh []aiassistant.Proposal
 	for _, p := range props {
-		if (p.Status == "executed" || p.Status == "partial") && p.ExecutedAt != nil && p.ExecutedAt.After(lastCheck) {
+		if (p.Status == "executed" || p.Status == "partial") && p.ExecutedAt != nil && p.ExecutedAt.After(lastCheck) && p.ChangesValues() {
 			fresh = append(fresh, p)
 		}
 	}
@@ -344,6 +360,12 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	if len(fresh) == 0 && !handover {
 		return ""
 	}
+	// No revision to compare in (a model with no active revision, asked
+	// without one): every row came back "invalid input syntax for type
+	// uuid" (2026-11-13, an attached plan's first turn).
+	if revID == "" {
+		return ""
+	}
 	all := append(append([]aiassistant.ChatMessage{}, earlier...), history...)
 	status("checking values against the source")
 	head := stageCheckHead
@@ -356,17 +378,48 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 
 	specs := sessionCompareRows(all)
 	before := sheetComparisons(all)
+	modelID, mErr := h.modelOfRevision(ctx, revID)
+	// Sheets with a map are checked cell by cell (check_sheet): the map an
+	// executed import loaded a sheet with is saved as the sheet's map, so
+	// the map that loads a sheet is the map that checks it (2026-11-14).
+	var sheetChecks []*aiassistant.SheetCheck
+	if mErr == nil {
+		var files []string
+		for _, d := range docs {
+			if d.Importable {
+				files = append(files, d.Filename)
+			}
+		}
+		sheetChecks = exec.CheckSavedSheets(ctx, files)
+	}
+	mappedSheet := map[string]bool{}
+	for _, c := range sheetChecks {
+		mappedSheet[strings.ToLower(c.File)+"\x00"+strings.ToLower(c.Sheet)] = true
+	}
 	// The workbook map's rows of every sheet the confirmed plans' metrics
 	// were mapped on: rows compared in earlier sessions or drafts, and rows
 	// on the same sheet the plans may have broken.
-	if modelID, mErr := h.modelOfRevision(ctx, revID); mErr == nil {
+	if mErr == nil {
 		if mapRows, lErr := aiassistant.LoadWorkbookMap(ctx, h.db.For(ctx), modelID, revID, nil); lErr == nil {
 			specs = append(specs, mapSpecsForPlans(mapRows, planMetricNames(fresh), specs, before)...)
 		}
 	}
+	// A sheet checked cell by cell is not compared row by row as well.
+	kept := specs[:0]
+	for _, s := range specs {
+		if !mappedSheet[strings.ToLower(s.File)+"\x00"+strings.ToLower(s.Sheet)] {
+			kept = append(kept, s)
+		}
+	}
+	specs = kept
 	compared := map[string]bool{}
 	for _, s := range specs {
 		compared[strings.ToLower(s.Metric)] = true
+	}
+	for _, c := range sheetChecks {
+		for _, m := range c.Metrics() {
+			compared[strings.ToLower(m)] = true
+		}
 	}
 	uncompared := h.uncomparedMetrics(ctx, revID, fresh, compared)
 	if len(specs) > maxStageCheckRows {
@@ -417,14 +470,58 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 			differNow = append(differNow, line)
 		}
 	}
-	if total == 0 && len(uncompared) == 0 && len(notCompared) == 0 {
+	if total == 0 && len(uncompared) == 0 && len(notCompared) == 0 && len(sheetChecks) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	b.WriteString(head)
+	mappingProblems, valueProblems := 0, 0
+	if len(sheetChecks) > 0 {
+		// A block that matches as at its last check is named, not shown
+		// again; a block of text fields has nothing to compare.
+		cellsOK, cellsAll := 0, 0
+		var shown []string
+		quiet := map[string]int{}
+		var quietOrder []string
+		for _, c := range sheetChecks {
+			if c.TextOnly {
+				continue
+			}
+			cellsOK += c.Matched
+			cellsAll += c.Compared
+			mappingProblems += len(c.MappingProblems)
+			valueProblems += len(c.ValueProblems)
+			if c.Unchanged(revID) {
+				if quiet[c.Sheet] == 0 {
+					quietOrder = append(quietOrder, c.Sheet)
+				}
+				quiet[c.Sheet]++
+				continue
+			}
+			shown = append(shown, c.Line())
+		}
+		if cellsAll == cellsOK {
+			fmt.Fprintf(&b, " Checked cell by cell against the sheets' maps in this draft: %d cell(s) — all match.", cellsAll)
+		} else {
+			fmt.Fprintf(&b, " Checked cell by cell against the sheets' maps in this draft: %d cell(s) — %d match, %d differ.", cellsAll, cellsOK, cellsAll-cellsOK)
+		}
+		if len(quietOrder) > 0 {
+			names := make([]string, len(quietOrder))
+			for i, s := range quietOrder {
+				names[i] = s
+				if quiet[s] > 1 {
+					names[i] = fmt.Sprintf("%s (%d blocks)", s, quiet[s])
+				}
+			}
+			b.WriteString("\nMatching as at the last check: " + strings.Join(names, ", ") + ".")
+		}
+		for _, l := range shown {
+			b.WriteString("\n" + l)
+		}
+	}
 	if total > 0 {
-		fmt.Fprintf(&b, " Compared again: %d row(s) compared with the source in this draft — %d match every period, %d differ.", total, matched, total-matched)
+		fmt.Fprintf(&b, "\nCompared again row by row (sheets without a map): %d row(s) — %d match every period, %d differ.", total, matched, total-matched)
 	}
 	list := func(title string, lines []string, limit int) {
 		if len(lines) == 0 {
@@ -451,11 +548,14 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 		if len(shown) > 40 {
 			shown = append(append([]string{}, shown[:40]...), fmt.Sprintf("and %d more", len(uncompared)-40))
 		}
-		fmt.Fprintf(&b, "\nMade or changed by the confirmed plan and never compared with the source (%d): %s — compare each with its row "+
-			"(compare_with_sheet, \"rows\": a whole sheet in one call).", len(uncompared), strings.Join(shown, ", "))
+		fmt.Fprintf(&b, "\nMade or changed by the confirmed plan and never compared with the source (%d): %s — check their sheets with "+
+			"check_sheet (one call per sheet; give map when the sheet has none).", len(uncompared), strings.Join(shown, ", "))
 	}
-	if len(broke)+len(differNow)+len(notCompared)+len(uncompared) > 0 {
-		b.WriteString("\nFix what differs before going on — in the formula, or the input row it reads; never move an input until a row matches — " +
+	if mappingProblems > 0 {
+		b.WriteString("\nA mapping problem is fixed in the map (check_sheet with map), never by changing the model's data.")
+	}
+	if len(broke)+len(differNow)+len(notCompared)+len(uncompared)+valueProblems > 0 {
+		b.WriteString("\nFix what differs before going on — in the formula, or the input it reads; never move an input until its cells match — " +
 			"unless the developer's message asks for something else.")
 	}
 	if cur := plan.Current(); cur >= 0 && !handover {

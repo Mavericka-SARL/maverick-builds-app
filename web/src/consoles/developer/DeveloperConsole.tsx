@@ -236,8 +236,13 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
     render: (active) => {
       const cur = localTab(active) as Tab;
       if (cur === "workflows" || cur === "ai") {
+        // The AI Developer fills the window below the context bar and scrolls
+        // its chat inside: the page grew with the conversation, so the chat
+        // never scrolled to a new message and the message box went below
+        // the fold (owner, 2026-11-13).
+        const aiHeight = cur === "ai" ? { flex: "0 0 auto", height: "calc(100vh - var(--context-bar-height) - 1px)", minHeight: 0 } : {};
         return (
-          <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ flex: 1, overflow: "hidden", ...aiHeight }}>
             {liveConfirmElement}
             <Suspense fallback={<LoadingState />}>
               {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} onSelectRevision={handleSelectRevision} />}

@@ -21,6 +21,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -253,11 +254,9 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 	// A session is its draft (owner, 2026-11-13): a new session starts a
 	// fresh draft from the developer's working revision on its first
 	// confirmed proposal, and goes on as one thread with no session cap.
-	// Continuing earlier work is continuing its session.
-	// A plan whose session's draft became the working revision goes on here.
-	if _, err := store.CarryTaskPlan(ctx, sess.ID, modelID, a.UserID, sess.DraftRevisionID); err != nil {
-		log.Printf("AI session %s: carry the task plan: %v", sess.ID, err)
-	}
+	// Continuing earlier work is continuing its session. It starts with no
+	// plan: the developer may attach one from another session
+	// (attach-plan), never must.
 	jsonOK(w, sess)
 }
 
@@ -334,13 +333,19 @@ func (h *handler) aiGetSession(w http.ResponseWriter, r *http.Request) {
 	// What the session's calls were billed for (migration 160).
 	usage, _ := store.Usage(ctx, sessionID)
 	plan, _ := store.TaskPlan(ctx, sessionID)
-	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": withCost(usage, sess.LLMModel), "task_plan": plan})
+	earlier, _ := store.EarlierPlans(ctx, sessionID)
+	jsonOK(w, map[string]any{"session": sess, "messages": msgs, "documents": docs, "usage": withCost(usage, sess.LLMModel), "task_plan": plan,
+		"earlier_plans": earlierOrEmpty(earlier), "memory": h.memoryStatus(ctx, store, sessionID)})
 }
 
 // ── POST /api/ai/sessions/{id}/messages ─────────────────────────────────────
 
 type aiMessageReq struct {
 	Content string `json:"content"`
+	// Continue: the console goes on by itself after the developer confirmed
+	// a plan (owner, 2026-11-13: the AI gives the next step, it does not wait
+	// for a command); the server writes the message (continuationMessage).
+	Continue bool `json:"continue"`
 }
 
 // toolCallSignature canonicalizes one LLM turn's tool calls (names + raw
@@ -380,7 +385,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req aiMessageReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Content) == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (strings.TrimSpace(req.Content) == "" && !req.Continue) {
 		jsonErr(w, fmt.Errorf("content is required"), http.StatusBadRequest)
 		return
 	}
@@ -392,10 +397,9 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("session not found"), http.StatusNotFound)
 		return
 	}
-	if sess.PromotedAt != nil {
-		jsonCodeErr(w, http.StatusConflict, "SESSION_PROMOTED", sessionPromotedError)
-		return
-	}
+	// A session whose draft became the working revision goes on (owner,
+	// 2026-11-13: the developer is never pushed to a new session): its next
+	// confirmed plan starts a fresh draft from the working revision.
 
 	// Rate limits (SOW Phase 4): checked up front so an already-exhausted
 	// caller fails before we save their message or spend a provider round-trip.
@@ -431,7 +435,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// what its calls were billed for, input, cached and output together.
 	if limit := sessionTokenLimit(); limit > 0 {
 		if u, uErr := store.Usage(ctx, sessionID); uErr == nil && u.Total() >= limit {
-			jsonErr(w, fmt.Errorf("this session has used %d tokens, its budget of %d: start a new session to go on", u.Total(), limit), http.StatusTooManyRequests)
+			jsonErr(w, fmt.Errorf("this session has used %d tokens, its budget of %d (AI_SESSION_TOKEN_LIMIT): an administrator can raise it", u.Total(), limit), http.StatusTooManyRequests)
 			return
 		}
 	}
@@ -487,6 +491,17 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		).Scan(&revID)
 	}
 
+	// A turn that goes on after a confirmed plan says what ran and asks for
+	// the next step (ai_continue.go).
+	if req.Continue {
+		msg, cErr := h.continuationMessage(ctx, store, sessionID)
+		if cErr != nil {
+			jsonErr(w, cErr, http.StatusConflict)
+			return
+		}
+		req.Content = msg
+	}
+
 	// 1. Save the user's message.
 	_, err = store.SaveMessage(ctx, sessionID, "user", req.Content, nil, "", "")
 	if err != nil {
@@ -515,6 +530,18 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// The message read as a direct order, a delegated goal or a question,
 	// with the playbooks of its tasks and the session's plan (ai_task.go).
 	taskPlan, _ := store.TaskPlan(ctx, sessionID)
+	// A plan waiting for approval is approved by a reply that says so as
+	// well as by the button (aiApprovePlan): the turn then starts building.
+	approvedNow := false
+	// A plan that waited before this turn: a direct order of the developer's
+	// may run meanwhile; a plan made in this turn waits whatever the mode.
+	pendingBefore := taskPlan.AwaitsApproval()
+	if !req.Continue && taskPlan.AwaitsApproval() && aiassistant.ApprovesPlan(req.Content) {
+		taskPlan.Approve()
+		if err := store.SetTaskPlan(ctx, sessionID, taskPlan); err == nil {
+			approvedNow = true
+		}
+	}
 	// A turn building one sheet of a target model gets only what that needs
 	// (aiassistant/prompt_trim.go): every call re-sent ~110k tokens on
 	// 2026-11-12, 120k characters of them instructions for workflows,
@@ -527,19 +554,18 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	if sheetTurn {
 		systemPrompt = aiassistant.TrimPromptForSheet(systemPrompt)
 	}
-	if docs, dErr := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID); dErr == nil {
-		if taskPlan != nil && taskPlan.Target != nil {
-			// The target model holds what the workbook says; the AI reads a
-			// sheet when it needs one (read_attached_sheet, plan_sheet).
-			systemPrompt += buildDocumentIndex(docs, h.sessionWorkbooks(ctx, sessionID))
-		} else {
-			systemPrompt += buildDocumentContext(docs)
-		}
-	}
+	// Every turn, sheet turns too (owner, 2026-11-13).
+	systemPrompt += aiassistant.MultidimensionalRule
+	// The attached files go into the prompt once the memory is ready
+	// (after the stream starts): their analysis, not their text.
+	sessionDocs, _ := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID)
+	reread := rereadFiles(req.Content, sessionDocs)
 	// Carried context made right (ai_plan_carry.go): the developer's answer
 	// to the AI's question is kept as a decision, and a carried plan's open
 	// stages are checked against the model once.
-	taskPlan = recordDecision(ctx, store, sessionID, taskPlan, history, req.Content)
+	if !req.Continue {
+		taskPlan = recordDecision(ctx, store, sessionID, taskPlan, history, req.Content)
+	}
 	h.checkCarriedPlan(ctx, store, llmProvider, llmModel, sessionID, revID, taskPlan)
 	// State proven from the model: a sheet's stage whose rows the workbook
 	// map shows matching is done, whatever any call said (ai_task.go).
@@ -548,7 +574,13 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// minutes, calls, tokens, tool calls and corrections per stage).
 	defer h.measureTurn(ctx, store, sessionID, taskPlan, req.Content)()
 	systemPrompt += h.targetProgress(ctx, modelID, revID, taskPlan)
-	reqMode := classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
+	var reqMode aiassistant.RequestMode
+	if req.Continue || approvedNow {
+		// Going on with the work under way: no reading of the message needed.
+		reqMode = aiassistant.RequestMode{Mode: aiassistant.ModeDelegated, Tasks: aiassistant.ClassifyByRules(req.Content, taskPlan).Tasks}
+	} else {
+		reqMode = classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
+	}
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
 	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
 	// The workbook map: which row became which metric, what differs and what
@@ -557,7 +589,8 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	systemPrompt += sessionLengthNote(sessionCalls, maxLLMCallsPerSession)
 
 	// 4. Tool executors.
-	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
+	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(
+		h.memoryReads(h.aiReadHooks(r, sessionID, modelID, a.UserID), store, sessionID, reread))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
 	planHooks := taskHooks{
 		Proof:    func(st aiassistant.TaskStage) string { return h.stageProofFor(ctx, sessionID, modelID, revID, st) },
@@ -597,19 +630,42 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	// The session's memory (ai_memory.go): a new attachment is gone through
+	// once and its analysis kept; a full memory is compacted and the
+	// developer told; the memory goes into every call of the turn.
+	memStatus := func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }
+	analysed, again := h.analyseAttachments(ctx, store, llmProvider, llmModel, sessionID, sessionDocs, reread, memStatus)
+	if len(analysed) > 0 {
+		_, _ = store.SaveMessage(context.WithoutCancel(ctx), sessionID, "assistant", fmt.Sprintf(
+			"📎 I went through %s and kept the analysis in my memory of this session: from now on I work from it, and read the file again only if you ask me to.",
+			strings.Join(analysed, ", ")), nil, "", "")
+	}
+	if len(again) > 0 {
+		_, _ = store.SaveMessage(context.WithoutCancel(ctx), sessionID, "assistant", fmt.Sprintf(
+			"📎 As you asked, I read %s again and replaced its analysis in my memory.", strings.Join(again, ", ")), nil, "", "")
+	}
+	if full := h.memoryStatus(ctx, store, sessionID); full.Percent >= aiassistant.CompactAtPercent {
+		memStatus(fmt.Sprintf("memory %d%% full — compacting it", full.Percent))
+		if note, cErr := h.compactMemory(ctx, store, llmProvider, llmModel, sessionID, taskPlan, false); cErr != nil {
+			log.Printf("AI memory: session=%s compact: %v", sessionID, cErr)
+			memStatus("the memory could not be compacted (" + cErr.Error() + ") — going on")
+		} else if note != "" {
+			_, _ = store.SaveMessage(context.WithoutCancel(ctx), sessionID, "assistant", note, nil, "", "")
+		}
+		history, _ = store.ListMessages(ctx, sessionID)
+	}
+	mem, _ := store.Memory(ctx, sessionID)
+	earlierPlans, _ := store.EarlierPlans(ctx, sessionID)
+	systemPrompt += documentsSection(sessionDocs, mem, taskPlan, h.sessionWorkbooks(ctx, sessionID), reread)
+	systemPrompt += mem.Render(earlierPlans)
+	sendSSE("memory", map[string]any{"memory": h.memoryStatus(ctx, store, sessionID)})
+
 	// Loop to handle read tool calls. propose_actions (write gateway) breaks
 	// the loop and sends a "proposal" event to the frontend.
 	// Tool exchanges older than the last confirmed plan are settled: the
-	// plan, its decisions and the workbook map carry what they found.
-	var settled time.Time
-	if props, pErr := aiassistant.NewProposalStore(h.db.For(ctx)).ListProposals(ctx, sessionID); pErr == nil {
-		for _, p := range props {
-			if p.ExecutedAt != nil && p.ExecutedAt.After(settled) {
-				settled = *p.ExecutedAt
-			}
-		}
-	}
-	provMessages := aiassistant.MessagesToProviderHistory(aiassistant.CompactHistory(aiassistant.SettleHistory(history, settled)))
+	// plan, its decisions and the workbook map carry what they found; the
+	// conversation the memory's summary holds is not sent again.
+	provMessages := aiassistant.MessagesToProviderHistory(h.sentHistory(ctx, sessionID, history, mem))
 	var finalReply string
 
 	// Repeat-call breaker: gpt-4o-mini has been observed calling the SAME
@@ -829,6 +885,12 @@ turn:
 				provMessages = append(provMessages, providers.Message{Role: "user", Content: emptyReplyNudge})
 				continue
 			}
+			// A plan waiting for the developer's approval ends the turn on
+			// its presentation: no nudge to propose.
+			if p, _ := store.TaskPlan(ctx, sessionID); p.AwaitsApproval() {
+				finalReply = llmResp.Message.Content
+				break
+			}
 			// How to split the work into proposals is the server's to
 			// answer, once and for the whole build: "as many as it needs"
 			// (2026-11-12: "A) two proposals or B) three or more?" ended
@@ -999,6 +1061,12 @@ turn:
 				}
 				continue turn
 			}
+			// Nothing is built for a plan the developer has not approved; a
+			// direct order of theirs is theirs to have meanwhile.
+			if p, _ := store.TaskPlan(ctx, sessionID); p.AwaitsApproval() && (reqMode.Mode != aiassistant.ModeDirect || !pendingBefore || approvedNow) {
+				answerCalls(llmResp.Message, aiassistant.PlanAwaitsApprovalResult)
+				continue turn
+			}
 			// A sheet_plan step is the server's plan of a sheet (ai_sheet_plan.go).
 			if expanded, xErr := h.expandSheetPlans(ctx, sessionID, revID, args.Steps); xErr != nil {
 				answerCalls(llmResp.Message, "Proposal NOT shown to the developer: "+xErr.Error())
@@ -1064,6 +1132,19 @@ turn:
 				if probs, failed := typedFileProblems(args.Steps, req.Content, h.aiTypedFiles(ctx, sessionID)); len(probs) > 0 {
 					check.problems = append(check.problems, probs...)
 					if check.failed == nil {
+						check.failed = map[int]bool{}
+					}
+					for _, i := range failed {
+						check.failed[i] = true
+					}
+				}
+				// Think multidimensionally (dimensional_names.go): a metric
+				// named for a version or a period goes back; metrics that
+				// differ only by a dimension's members are asked about once.
+				if probs, warns, failed := h.flatMetricProblems(ctx, revID, args.Steps, req.Content); len(probs)+len(warns) > 0 {
+					check.problems = append(check.problems, probs...)
+					check.warnings = append(check.warnings, warns...)
+					if len(failed) > 0 && check.failed == nil {
 						check.failed = map[int]bool{}
 					}
 					for _, i := range failed {
@@ -1298,7 +1379,8 @@ turn:
 				allMsgs = []aiassistant.ChatMessage{}
 			}
 			usage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
-			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings, "usage": withCost(usage, llmModel)})
+			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings, "usage": withCost(usage, llmModel),
+				"memory": h.memoryStatus(context.WithoutCancel(ctx), store, sessionID)})
 			return
 		}
 	}
@@ -1325,6 +1407,11 @@ turn:
 		"session":   sess,
 		"usage":     withCost(doneUsage, llmModel),
 		"task_plan": func() *aiassistant.TaskPlan { p, _ := store.TaskPlan(ctx, sessionID); return p }(),
+		"earlier_plans": func() []aiassistant.EarlierPlan {
+			e, _ := store.EarlierPlans(ctx, sessionID)
+			return earlierOrEmpty(e)
+		}(),
+		"memory": h.memoryStatus(context.WithoutCancel(ctx), store, sessionID),
 	})
 }
 
@@ -1722,6 +1809,16 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Name) != "" && strings.TrimSpace(body.Name) != draftName {
 		if draftName, err = h.renameRevision(ctx, draftRevID, body.Name, nil); err != nil {
+			// A session goes on after its draft is promoted, so the name the
+			// console offers (the session's title) is taken from the second
+			// promotion on (2026-11-13): the answer suggests the next free one.
+			if errors.Is(err, modeledit.ErrRevisionNameTaken) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error(), "code": "REVISION_NAME_TAKEN",
+					"suggested_name": h.nextFreeRevisionName(ctx, modelID, body.Name)})
+				return
+			}
 			jsonErr(w, err, renameRevisionStatus(err))
 			return
 		}
@@ -1745,8 +1842,9 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.DraftRevisionID = ""
-	// The session is finished: its plans would go on being checked against
-	// the base it started from, not the promoted revision.
+	// The session goes on: with no draft, its turns read the console's
+	// working revision — the promoted one, which the console switches to —
+	// and its next confirmed plan copies it into a fresh draft.
 	promotedAt, err := h.aiChatStore(ctx).MarkPromoted(ctx, sessionID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -1755,9 +1853,9 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	sess.PromotedAt = &promotedAt
 
 	chatStore := h.aiChatStore(ctx)
-	// The developer's other sessions continued the same draft: they are
-	// finished too, or their next proposal would write into the revision
-	// the developer now builds by hand.
+	// The developer's other sessions continued the same draft: they lose it
+	// too, or their next proposal would write into the revision the
+	// developer now builds by hand; they go on with a fresh draft.
 	others, err := chatStore.FinishDraftSessions(ctx, draftRevID, a.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -2192,6 +2290,11 @@ func (h *handler) aiDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("session not found"), http.StatusNotFound)
 		return
 	}
+	// What the memory learned from the file goes with it.
+	_, _ = h.aiChatStore(ctx).UpdateMemory(ctx, sessionID, func(m *aiassistant.SessionMemory) error {
+		m.ForgetDocument(docID)
+		return nil
+	})
 	if err := aiassistant.NewDocumentStore(h.db.For(ctx)).DeleteDocument(ctx, sessionID, docID); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -2625,6 +2728,18 @@ func (h *handler) aiSessionDetail(w http.ResponseWriter, r *http.Request) {
 		h.aiPromoteDraft(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/memory") || strings.HasSuffix(path, "/memory/compact") {
+		h.aiSessionMemory(w, r)
+		return
+	}
+	if strings.HasSuffix(path, "/attach-plan") && r.Method == http.MethodPost {
+		h.aiAttachPlan(w, r)
+		return
+	}
+	if strings.HasSuffix(path, "/plan/approve") && r.Method == http.MethodPost {
+		h.aiApprovePlan(w, r)
+		return
+	}
 	if strings.HasSuffix(path, "/discard-draft") {
 		h.aiDiscardDraft(w, r)
 		return
@@ -2738,7 +2853,13 @@ func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
 			return h.plans.CheckMembers(ctx, h.db.For(ctx), cid, dimensionID, adding)
 		},
 		PostFormIntegration: func(ctx context.Context, integrationID string) (int, error) {
-			return h.backfillFormMapping(ctx, integrationID, userID)
+			n, skipped, reasons, err := h.backfillFormMapping(ctx, integrationID, userID)
+			if err == nil && skipped > 0 {
+				// The AI Developer reports what it posted; a lock that kept
+				// postings out is an error it must tell the developer about.
+				return n, fmt.Errorf("%d posting(s) were kept out: %s", skipped, reasons[0].Reason)
+			}
+			return n, err
 		},
 		// As the developer console's table save: in the background.
 		RepostTable: func(ctx context.Context, formID string) error {

@@ -232,7 +232,14 @@ export function postsMember(form: FormDef, field: FormField): boolean {
 
 /** A table's label for one of its records: "Accounts" → "Account", "Categories" → "Category". */
 export function singular(label: string): string {
-  return label.endsWith("ies") ? label.slice(0, -3) + "y" : label.endsWith("s") ? label.slice(0, -1) : label;
+  // A qualifier in parentheses stays: "Acquisitions (IFRS 3)" → "Acquisition (IFRS 3)".
+  const paren = label.match(/^(.*?)(\s*\(.*\))$/);
+  if (paren && paren[1]) return singular(paren[1]) + paren[2];
+  // -ches, -shes, -sses, -xes, -zes drop "es": "IC matches" read "New IC matche" (2026-11-13).
+  if (/(ch|sh|ss|x|z)es$/i.test(label)) return label.slice(0, -2);
+  if (label.endsWith("ies")) return label.slice(0, -3) + "y";
+  if (label.endsWith("s") && !/(ss|us|is)$/i.test(label)) return label.slice(0, -1);
+  return label;
 }
 
 /**

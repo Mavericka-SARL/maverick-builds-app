@@ -301,9 +301,16 @@ func SyncKeptMembers(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (add
 		if err := keepRoot(ctx, db, form); err != nil {
 			return err
 		}
+		// The label as crudapp.FormDef.MemberLabel gives it: the label
+		// field, else the code — code first ("IC03 · …") when the table
+		// says so ($5). Labels used to ignore that setting here, so a table
+		// switched to it kept its old labels until each record was saved.
 		const recs = `
 			SELECT r.data->>$2::text AS code,
-			       COALESCE(NULLIF(btrim(r.data->>$3::text), ''), r.data->>$2::text) AS label,
+			       CASE WHEN $5::bool AND NULLIF(btrim(r.data->>$3::text), '') IS NOT NULL
+			                 AND btrim(r.data->>$3::text) <> r.data->>$2::text
+			            THEN (r.data->>$2::text) || ' · ' || btrim(r.data->>$3::text)
+			            ELSE COALESCE(NULLIF(btrim(r.data->>$3::text), ''), r.data->>$2::text) END AS label,
 			       r.created_at, r.id
 			FROM runtime.form_record r
 			WHERE r.form_id = $1::uuid AND COALESCE(r.data->>$2::text, '') <> ''`
@@ -311,7 +318,7 @@ func SyncKeptMembers(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (add
 			UPDATE model.dimension_member m SET label = x.label
 			FROM (`+recs+`) x
 			WHERE m.dimension_id = $4::uuid AND m.code = x.code AND m.label IS DISTINCT FROM x.label`,
-			form.ID, codeField, labelField, form.KeepsDimensionID); err != nil {
+			form.ID, codeField, labelField, form.KeepsDimensionID, form.MemberLabelWithCode); err != nil {
 			return err
 		}
 		tag, err := db.Exec(ctx, `
@@ -321,7 +328,7 @@ func SyncKeptMembers(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (add
 			         + row_number() OVER (ORDER BY x.created_at, x.id)
 			FROM (`+recs+`) x
 			WHERE NOT EXISTS (SELECT 1 FROM model.dimension_member m WHERE m.dimension_id = $4::uuid AND m.code = x.code)`,
-			form.ID, codeField, labelField, form.KeepsDimensionID)
+			form.ID, codeField, labelField, form.KeepsDimensionID, form.MemberLabelWithCode)
 		if err != nil {
 			return err
 		}
@@ -424,6 +431,9 @@ type TableSettings struct {
 	// MemberRootLabel: the label of a total member the records' members sit
 	// under ("" for none).
 	MemberRootLabel *string `json:"member_root_label"`
+	// MemberLabelWithCode: each member's label starts with its record's
+	// code ("IC03 · Intragroup loan principal").
+	MemberLabelWithCode *bool `json:"member_label_with_code"`
 	// EditAccess: "creator" or "everyone".
 	EditAccess *string `json:"edit_access"`
 	// CreateRoles: the roles whose people may add records; empty, anyone
@@ -472,6 +482,24 @@ func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef,
 			return 0, err
 		}
 		form.CreateRoles = roles
+	}
+	if s.MemberLabelWithCode != nil && *s.MemberLabelWithCode != form.MemberLabelWithCode {
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET member_label_with_code = $2 WHERE id = $1::uuid`, form.ID, *s.MemberLabelWithCode); err != nil {
+			return 0, err
+		}
+		form.MemberLabelWithCode = *s.MemberLabelWithCode
+		// The members a table keeps already take their new labels.
+		if form.KeepsDimension() && s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				return 0, err
+			}
+			defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+			if _, err := SyncKeptMembers(ctx, tx, form); err != nil {
+				return 0, err
+			}
+			return 0, tx.Commit(ctx)
+		}
 	}
 	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil {
 		return 0, nil

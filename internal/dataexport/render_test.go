@@ -281,3 +281,92 @@ func TestDateMetricExportsDates(t *testing.T) {
 		t.Errorf("date export:\n%s", got)
 	}
 }
+
+// With include_totals a parent the filter names is a column of its own,
+// holding the total the grid served for it — the consolidated column of a
+// group P&L — and members come in the filter's order (2026-11-13).
+func TestPivotIncludesTotalsAsServed(t *testing.T) {
+	got, _ := render(t, Spec{Layout: "pivot", PivotDimension: "geography", Metrics: []string{"margin_pct"}, IncludeTotals: true,
+		Filters: map[string][]string{"geography": {"CA", "AMER"}, "period": {"Q1"}}})
+	if want := "period,CA,AMER\nQ1,0.25,0.3\n"; got != want {
+		t.Errorf("pivot with totals:\n%s\nwant (AMER its served 0.3):\n%s", got, want)
+	}
+	// Unfiltered rows come depth first, each parent before its members.
+	_, tbl := render(t, Spec{Layout: "wide", Metrics: []string{"margin_pct"}, IncludeTotals: true,
+		Filters: map[string][]string{"period": {"Q1"}}})
+	var order []string
+	for _, r := range tbl.Rows {
+		order = append(order, r[0].Text)
+	}
+	if strings.Join(order, ",") != "AMER,CA" {
+		t.Errorf("rows with totals %v; want AMER before CA", order)
+	}
+}
+
+// A pack writes one workbook, a sheet per table, a repeated name numbered.
+func TestWritePackSheets(t *testing.T) {
+	_, a := render(t, Spec{Format: "xlsx", SheetName: "P&L", Metrics: []string{"revenue"}})
+	_, b := render(t, Spec{Format: "xlsx", SheetName: "P&L", Metrics: []string{"revenue"}})
+	var buf bytes.Buffer
+	if err := WritePack(&buf, []*Table{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := excelize.OpenReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.GetSheetList(), "|"); got != "P&L|P&L (2)" {
+		t.Errorf("sheets %q; want P&L|P&L (2)", got)
+	}
+}
+
+// A parent's total the grid did not serve — a summed metric's, which the
+// console adds up itself — is read from the engine at that point; a served
+// one stands. The Group P&L pack's Consolidated column was empty
+// (2026-11-13).
+func TestTotalsTheGridDoesNotServeAreReadFromTheEngine(t *testing.T) {
+	snap := fixtureSnapshot()
+	var asked []map[string]string
+	snap.TotalsAt = func(points []map[string]string) ([]map[string]float64, error) {
+		asked = append(asked, points...)
+		out := make([]map[string]float64, len(points))
+		for i, p := range points {
+			// The engine's answer: revenue added up, margin a ratio of sums.
+			if p[geoID] == "AMER" && p[periodID] == "Q1" {
+				out[i] = map[string]float64{revenueID: 150.125, marginID: 0.31}
+			}
+		}
+		return out, nil
+	}
+	tbl, err := Render(Spec{Layout: "pivot", PivotDimension: "geography", Metrics: []string{"revenue", "margin_pct"}, IncludeTotals: true,
+		Filters: map[string][]string{"geography": {"CA", "AMER"}, "period": {"Q1"}}}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, tbl); err != nil {
+		t.Fatal(err)
+	}
+	if want := "period,metric,CA,AMER\nQ1,revenue,100,150.125\nQ1,margin_pct,0.25,0.3\n"; buf.String() != want {
+		t.Errorf("totals:\n%s\nwant (AMER revenue from the engine, AMER margin as served):\n%s", buf.String(), want)
+	}
+	if len(asked) != 1 || asked[0][geoID] != "AMER" || asked[0][periodID] != "Q1" {
+		t.Errorf("asked the engine for %v; want only AMER at Q1", asked)
+	}
+
+	// Too many parents to read one by one: said, with what to do.
+	snap.TotalsAt = func(points []map[string]string) ([]map[string]float64, error) { return nil, nil }
+	big := fixtureGrid()
+	for i := 0; i < MaxTotalPoints+1; i++ {
+		big.Dimensions[1].Members = append(big.Dimensions[1].Members, Member{Code: "P" + strings.Repeat("x", i%3) + string(rune('A'+i%26)) + itoa(i), ParentCode: "FY26"})
+	}
+	snap.Grid = big
+	if _, err := Render(Spec{Layout: "wide", Metrics: []string{"revenue"}, IncludeTotals: true}, snap); err == nil || !strings.Contains(err.Error(), "selector bar") {
+		t.Errorf("an export asking for more than %d totals: %v; want it refused, saying how to narrow it", MaxTotalPoints, err)
+	}
+}
+
+func itoa(i int) string {
+	b, _ := json.Marshal(i)
+	return string(b)
+}

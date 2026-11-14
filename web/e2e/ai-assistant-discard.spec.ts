@@ -67,7 +67,7 @@ async function openAiAssistantSession(page: Page) {
   await page.getByRole("button", { name: /Session/ }).first().click();
 }
 
-test("Discard draft calls the real discard-draft endpoint and the banner disappears", async ({ page }) => {
+test("Discard draft calls the real discard-draft endpoint and the draft line disappears", async ({ page }) => {
   await mockApi(page);
   await mockCommonAiRoutes(page);
   const discardCalls: string[] = [];
@@ -85,11 +85,12 @@ test("Discard draft calls the real discard-draft endpoint and the banner disappe
 
   await openAiAssistantSession(page);
 
-  // Draft banner visible before discard.
-  await expect(page.getByText("AI draft", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("button", { name: "Discard" })).toBeVisible();
+  // The draft's actions sit on the session's line (the banner they had stayed
+  // on screen for the whole session, owner 2026-11-13).
+  await expect(page.getByText(/writes go to your AI draft/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "discard", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Discard" }).click();
+  await page.getByRole("button", { name: "discard", exact: true }).click();
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Discard draft" }).click();
@@ -97,8 +98,8 @@ test("Discard draft calls the real discard-draft endpoint and the banner disappe
   await expect.poll(() => discardCalls.length).toBeGreaterThan(0);
   expect(discardCalls[0]).toBe("POST");
 
-  // Banner gone — driven by the server response, not local guesswork.
-  await expect(page.getByText("AI draft", { exact: true })).not.toBeVisible();
+  // The draft line gone — driven by the server response, not local guesswork.
+  await expect(page.getByText(/writes go to your AI draft/)).not.toBeVisible();
   await expect(page.getByText("Discarded the draft")).toBeVisible();
 });
 
@@ -141,10 +142,10 @@ test("Use as working revision switches the console to the draft without activati
   });
 
   await openAiAssistantSession(page);
-  await expect(page.getByText("AI draft", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "Use as working revision" }).click();
+  await expect(page.getByText(/writes go to your AI draft/)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "use as working revision", exact: true }).click();
   await page.getByRole("textbox", { name: "Name of the revision" }).fill("Production FP&A");
-  await page.getByRole("button", { name: "Use as working revision" }).click();
+  await page.getByRole("button", { name: "Use as working revision", exact: true }).click();
 
   expect(promoteNames).toEqual(["Production FP&A"]);
   await expect(page.getByText("Production FP&A").first()).toBeVisible();

@@ -538,7 +538,7 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, labelWidth, hideLegend, hideBadges, footer }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, hideEmptyRows, labelWidth, hideLegend, hideBadges, footer }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Amounts in thousands or millions (widget_props.number_scale "k"/"m"); "auto" is a tile's, a grid keeps every digit. */
   numberScale?: NumberScale;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
@@ -549,6 +549,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   hideSearch?: boolean;
   /** No Total row under flat rows (widget_props.hide_total_row): prices, rates and dates have nothing to add up. */
   hideTotalRow?: boolean;
+  /** Rows whose every shown cell is blank or zero, at the selected context, are left out
+      (widget_props.hide_empty_rows): a table's records of other periods (2026-11-13). */
+  hideEmptyRows?: boolean;
   /** The row-label column's width in pixels (widget_props.label_width), instead of a narrow default that wraps labels. */
   labelWidth?: number;
   /** No legend and hints under the grid (widget_props.hide_legend): a read-only statement needs neither. */
@@ -995,7 +998,34 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     return picked.length > 0 ? { ...d, members: picked } : d;
   };
   const findQuery = find.trim().toLowerCase();
-  const rowDims  = inZone(pivotRows).map(onAxis).map(d => searchAxis(d, findQuery) ?? d);
+  // Members of a row dimension holding a value — a number other than 0 or a
+  // text — in a shown metric at the selected context; their parents stay too.
+  const withData = (d: DimInfo): DimInfo => {
+    if (!hideEmptyRows) return d;
+    const at = dims.findIndex(x => x.id === d.id);
+    if (at < 0) return d;
+    const shown = new Set(visibleMetrics.map(m => m.id));
+    const pins = inZone(pivotContext).map(c => ({ at: dims.findIndex(x => x.id === c.id), code: filterSel[c.id] ?? defaultLeafCode(c) ?? "" }))
+      .filter(p => p.at >= 0 && p.code && p.code !== SELECTION_CODE);
+    const keep = new Set<string>();
+    const consider = (key: string, has: boolean) => {
+      if (!has) return;
+      const parts = key.split(":");
+      if (parts.length !== dims.length + 1 || !shown.has(parts[0])) return;
+      if (pins.some(p => parts[p.at + 1] !== p.code)) return;
+      keep.add(parts[at + 1]);
+    };
+    for (const [key, v] of Object.entries(g.cells ?? {})) consider(key, typeof v === "number" && v !== 0);
+    for (const [key, t] of Object.entries(g.texts ?? {})) consider(key, !!t && t.trim() !== "");
+    const byCode = new Map(d.members.map(m => [m.code, m]));
+    for (const code of [...keep]) {
+      let p = byCode.get(code)?.parent_code;
+      for (let guard = 0; p && guard < 50; guard++) { keep.add(p); p = byCode.get(p)?.parent_code; }
+    }
+    const members = d.members.filter(m => keep.has(m.code));
+    return members.length > 0 ? { ...d, members } : d;
+  };
+  const rowDims  = inZone(pivotRows).map(onAxis).map(withData).map(d => searchAxis(d, findQuery) ?? d);
   const colDims  = inZone(pivotCols).map(onAxis).map(d => searchAxis(d, findQuery) ?? d);
   const ctxDims  = inZone(pivotContext);
   // When metrics are in the context zone, only show the one selected metric in the grid
@@ -1038,6 +1068,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
   const rowCombos = crossProduct(rowDims);   // [[]] when empty → one "All" row
   const colCombos = crossProduct(colDims);   // full crossProduct for formula evaluation
+  // A grid with no dimension on its columns heads its one column with what
+  // its context selects ("Sep 2026"), not "Value" (2026-11-13).
+  const ctxHeader = ctxDims.map(d => {
+    const label = (code: string) => selectorMembers(d.id).find(m => m.code === code)?.label ?? code;
+    const many = multiOf(d.id);
+    if (many) return many.map(label).join(", ");
+    const code = filterSel[d.id] ?? defaultLeafCode(d) ?? "";
+    return code ? label(code) : "";
+  }).filter(Boolean).join(" · ") || "Value";
+  // A wide matrix (a year of months) fits its box before it scrolls.
+  const colMin = colCombos.length > 8 ? 74 : 90;
 
   // Build full DimMember[] in dims order for a (rowCombo, colCombo) pair
   function fullCombo(rc: DimMember[], cc: DimMember[]): DimMember[] {
@@ -1960,7 +2001,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                         <th key={`${cell.member.code}-${cell.isTotal ? "total" : "self"}-${ci}`}
                           {...(cell.isTotal ? {} : pickProps(colDims[0]?.id, colDims[0]?.name, cell.member.code, cell.member.label))}
                           colSpan={cell.colSpan} rowSpan={cell.rowSpan}
-                          style={{ ...th, textAlign: "center", minWidth: 90 * cell.colSpan,
+                          style={{ ...th, textAlign: "center", minWidth: colMin * cell.colSpan,
                             borderLeft: "1px solid var(--color-grid-col-header-border)",
                             color: cell.isTotal ? "var(--color-text-quiet)" : (cell.colSpan > 1 ? "var(--color-grid-col-header-text)" : "var(--color-text-strong)"),
                             fontWeight: cell.isTotal ? 700 : (cell.colSpan > 1 ? 600 : 500),
@@ -1979,11 +2020,11 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     </th>
                     {colDims.length > 0
                       ? colCombos.map(cc => (
-                          <th key={comboKey(cc)} {...pickComboProps(cc, colDims)} style={{ ...th, textAlign: "right", minWidth: 90, borderLeft: "1px solid var(--color-grid-col-header-border-soft)", color: "var(--color-grid-col-header-text)" }}>
+                          <th key={comboKey(cc)} {...pickComboProps(cc, colDims)} style={{ ...th, textAlign: "right", minWidth: colMin, borderLeft: "1px solid var(--color-grid-col-header-border-soft)", color: "var(--color-grid-col-header-text)" }}>
                             {cc.map(m => m.label).join(" / ")}
                           </th>
                         ))
-                      : <th style={{ ...th, textAlign: "right", minWidth: 90 }}>Value</th>
+                      : <th style={{ ...th, textAlign: "right", minWidth: 90 }}>{ctxHeader}</th>
                     }
                   </tr>
                 )}

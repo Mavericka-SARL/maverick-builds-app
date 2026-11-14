@@ -331,6 +331,12 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
                 Its approver may start it
               </label>
             </Field>
+            <Field label="Who may reopen it">
+              <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                Reopening takes back an approved run and unlocks what it locked (a reason is asked, everyone involved is told). None ticked: the application's business admins and developers. Tick the approving role (the CFO for a close) so whoever prepared it cannot undo the approval alone.
+              </p>
+              <RolePicker applicationId={applicationId} value={workflow.reopen_roles ?? []} onChange={roles => onChange({ reopen_roles: roles })} />
+            </Field>
             <Field label="Starts on">
               <TriggerEventSelect
                 applicationId={applicationId}

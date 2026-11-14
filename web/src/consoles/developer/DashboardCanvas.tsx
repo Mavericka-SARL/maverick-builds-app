@@ -1426,6 +1426,17 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       <p style={{ fontSize: 11, color: "var(--color-text-quiet)", margin: "2px 0 0" }}>{hint}</p>
                     </div>
                   ))}
+                  <div style={{ marginBottom: 6 }}>
+                    <Checkbox
+                      checked={!!wp.hide_empty_rows}
+                      onChange={e => {
+                        const wid = selectedWidget!.id;
+                        setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, hide_empty_rows: e.target.checked ? true : undefined } } }));
+                      }}
+                      label="Hide rows that are blank or zero"
+                    />
+                    <p style={{ fontSize: 11, color: "var(--color-text-quiet)", margin: "2px 0 0" }}>At the selected period and members: a table's records of other periods, accounts with nothing booked.</p>
+                  </div>
                   <Field label="Label column width (px)" description="Empty: as wide as the labels need, at least 160–180 px.">
                     <NumberInput
                       value={wp.label_width ?? ""}

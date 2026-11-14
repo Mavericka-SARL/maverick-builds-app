@@ -887,6 +887,8 @@ export interface WidgetProps {
   hide_search?: boolean;
   /** Grid widgets: no Total row under flat rows (prices, rates and dates add up to nothing). */
   hide_total_row?: boolean;
+  /** Rows whose every shown cell is blank or zero at the selected context are left out. */
+  hide_empty_rows?: boolean;
   /** Grid widgets: the row-label column's width in pixels (120–480). */
   label_width?: number;
   /** Grid widgets: no legend and hints under the grid. */
@@ -1392,6 +1394,8 @@ export interface FormDef {
   member_label_field?: string;
   /** The label of a total member (code ALL) the records' members sit under. */
   member_root_label?: string;
+  /** Members named code first ("IC03 · Intragroup loan principal"). */
+  member_label_with_code?: boolean;
   /** Who may change and delete its records: their creator and administrators (default), or everyone who sees them. */
   edit_access?: EditAccess;
   /** Who may add records, by role name; none: anyone who opens the application. */
@@ -1477,6 +1481,8 @@ export interface TableSettings {
   keeps_dimension_id?: string;
   member_label_field?: string;
   member_root_label?: string;
+  /** Members named code first ("IC03 · Intragroup loan principal"). */
+  member_label_with_code?: boolean;
   edit_access?: EditAccess;
   /** The roles whose people may add records; [] for anyone who opens the application. */
   create_roles?: string[];
@@ -1666,8 +1672,11 @@ export interface IntegrationDef {
     sheet?: string;
     // A table's loader: the field whose values each file replaces — the
     // table's records holding one the file holds are deleted as its records
-    // are added (a month's file loaded again replaces that month).
-    replace_by?: string;
+    // are added (a month's file loaded again replaces that month). Several
+    // fields — a list, or a comma-joined string — replace that combination.
+    replace_by?: string | string[];
+    // Values a run asks for at each upload, stamped as fixed-value columns.
+    parameters?: { column: string; label?: string; type?: "date" | "text"; required?: boolean }[];
   } & Partial<ExportSpec>;
 }
 
@@ -1754,7 +1763,17 @@ export interface ExportSpec {
   include_empty_rows?: boolean;
   sheet_name?: string;
   file_name?: string;
+  // Parent members too, with their totals; a filter's parent is then its
+  // total, not its leaves.
+  include_totals?: boolean;
+  // A dashboard download narrows to the members its selector bar shows.
+  follow_selector?: boolean;
+  // Excel only: more grids of the revision, one sheet each (a pack).
+  sheets?: ExportPackSheet[];
 }
+
+/** One more sheet of an Excel pack: a grid by name, with its own layout. */
+export type ExportPackSheet = { grid: string } & Omit<ExportSpec, "sheets" | "format" | "follow_selector">;
 
 export interface ExportPreview {
   header: string[];
@@ -1918,6 +1937,9 @@ export interface WorkflowDef {
   /** Who may start it by hand (Start button, inbox, automation button): role
       names as a step's assignee_roles; empty, anyone. */
   start_roles?: string[];
+  /** Who may reopen an approved run (role names, as start_roles); empty,
+      the application's business admins and developers. */
+  reopen_roles?: string[];
   created_at: string;
   updated_at: string;
   published_at?: string;
@@ -2125,8 +2147,8 @@ export interface AISession {
   // Auto-generated from the first request; renameable. Empty = unnamed.
   title?: string;
   created_at: string;
-  // Set once its draft was promoted: the session is finished (a new one
-  // works on the promoted revision).
+  // When its draft was last taken as the working revision; the session goes
+  // on, its next confirmed plan in a fresh draft.
   promoted_at?: string;
   /** The developer's cap on this session's provider calls; absent = the deployment's. */
   call_budget?: number;
@@ -2273,8 +2295,20 @@ export interface WorkflowStatusStep {
 export interface WorkflowRunStatus {
   workflow: string;
   found: boolean;
-  instance: { status: string; started_at: string; completed_at?: string | null } | null;
+  instance: { status: string; started_at: string; completed_at?: string | null; changed_since_approval?: number } | null;
   steps: WorkflowStatusStep[];
+}
+
+/** An approved run whose approved figures changed since its approval
+ *  (GET /api/workflow/approval-changes): an input outside the lock moved them. */
+export interface ApprovalChangeRun {
+  instance_id: string;
+  workflow: string;
+  scope: string;
+  approved_at: string;
+  changed: number;
+  examples: { metric_id: string; metric: string; members: Record<string, string>; approved?: number; now?: number;
+    approved_text?: string; now_text?: string }[];
 }
 
 /** A metric's row style (metric.row_style): "total" draws its row as a total; "" as any row. */
@@ -2334,6 +2368,13 @@ export interface AITaskStage {
 /** The agreed target design of a build from a workbook (the parts the console shows). */
 export interface AITargetModel {
   summary: string;
+  /** The architecture (owner, 2026-11-13): dimensions → grids → dashboards. */
+  dimensions?: { name: string; members?: string }[];
+  sheets?: { sheet: string; role: string; grid?: string; dimensions?: string[]; metrics?: string[]; owner?: string }[];
+  /** A dashboard: a name alone in targets saved before dashboards named their grids. */
+  pages?: (string | { name: string; audience?: string; grids?: string[]; guide?: boolean })[];
+  roles?: string[];
+  workflows?: string[];
   decisions?: { question: string; options?: string[]; choice?: string; sheets?: string[] }[];
   requirements?: { area: string; behaviour: string; status?: string }[];
   checks?: { name: string; how: string; status?: string; evidence?: string }[];
@@ -2345,6 +2386,48 @@ export interface AITaskPlan {
   /** What the developer decided in answer to the AI, kept for every later turn and session. */
   decisions?: string[];
   target?: AITargetModel;
+  /** The plan waits for the developer's approval before anything is built. */
+  pending_approval?: boolean;
+  approved_at?: string;
+}
+
+/** A plan of the session no longer under way: one plan per request. */
+export interface AIEarlierPlan {
+  plan: AITaskPlan;
+  state: "finished" | "set_aside";
+  at: string;
+}
+
+/** The AI Developer's memory of a session: what it learned, and how full it is. */
+export interface AIMemoryStatus {
+  capacity_tokens: number;
+  used_tokens: number;
+  percent: number;
+  conversation_tokens: number;
+  attachment_tokens: number;
+  notes_tokens: number;
+  summary_tokens: number;
+  attachments: { file: string; by: "server" | "ai"; at: string; tokens: number }[];
+  reads: number;
+  notes: string[];
+  summary?: string;
+  compactions: number;
+  compacted_at?: string;
+  compact_at_percent: number;
+}
+
+/** A plan of one of the developer's sessions, offered to attach to another. */
+export interface AIPlanRef {
+  session_id: string;
+  session_title: string;
+  session_created_at: string;
+  index: number;
+  goal: string;
+  stages: number;
+  done: number;
+  state: "current" | "finished" | "set_aside";
+  updated_at: string;
+  attachments: string[];
 }
 
 /** The workbook map: which metric each compared workbook row became. */
@@ -2354,8 +2437,10 @@ export interface AIWorkbookMap {
 }
 
 export interface AISendMessageEvent {
-  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error" | "task_plan";
+  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error" | "task_plan" | "memory";
   task_plan?: AITaskPlan | null; // task_plan | done: the session's plan
+  earlier_plans?: AIEarlierPlan[]; // done: the session's plans no longer under way
+  memory?: AIMemoryStatus; // memory | proposal | done: how full the session's memory is
   content?: string; // delta
   tool?: string; // tool_status | progress
   chars?: number; // progress: how much of the tool call is written
@@ -2590,6 +2675,19 @@ async function streamSSE(
   }
 }
 
+/**
+ * What a Sync (POST /api/forms/{id}/sync) or a mapping's Post records answers:
+ * "partial" when a workflow lock, a closed period or the creators' access kept
+ * postings out, with why (an "ok" used to hide a released period's lock).
+ */
+export interface SyncResult {
+  status: "ok" | "partial";
+  mappings?: number;
+  records_processed: number;
+  postings_skipped?: number;
+  skipped_reasons?: { reason: string; postings: number }[];
+}
+
 export const api = {
   getApps: () => apiFetch<AppInfo[]>("/api/apps"),
 
@@ -2655,6 +2753,7 @@ export const api = {
   listWorkflowDefinitions: () => apiFetch<WorkflowDefPublic[]>("/api/workflow/definitions"),
   // Where the latest run of a published workflow stands (the workflow-status widget).
   workflowStatus: (name: string) => apiFetch<WorkflowRunStatus>(`/api/workflow/status?name=${encodeURIComponent(name)}`),
+  approvalChanges: () => apiFetch<{ runs: ApprovalChangeRun[] }>(`/api/workflow/approval-changes`),
 
   /**
    * `tenantId` is the task's own tenant (Task.tenant_id): an inbox spans every
@@ -2895,7 +2994,7 @@ export const api = {
   deleteFormMapping: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/form-integrations/${id}`, { method: "DELETE" }),
   backfillFormMapping: (id: string) =>
-    apiFetch<{ status: string; records_processed: number }>(`/api/developer/form-integrations/${id}/backfill`, { method: "POST" }),
+    apiFetch<SyncResult>(`/api/developer/form-integrations/${id}/backfill`, { method: "POST" }),
   previewFormMapping: (id: string) =>
     apiFetch<FormRecordPosting[]>(`/api/developer/form-integrations/${id}/preview`),
 
@@ -2926,7 +3025,10 @@ export const api = {
   previewExport: (body: { target_id: string; name?: string; config: ExportSpec; rows?: number }) =>
     apiFetch<ExportPreview>("/api/developer/integrations/export-preview", { method: "POST", body: JSON.stringify(body) }),
   // The file is built for the caller, from their own view of the grid.
-  downloadIntegrationExport: (id: string) => apiFetchBlob(`/api/integrations/${encodeURIComponent(id)}/export`),
+  /** bar: the dashboard's selector bar (dimension id → member code); an
+   *  export that follows the selector is narrowed to it. */
+  downloadIntegrationExport: (id: string, bar?: Record<string, string>) =>
+    apiFetchBlob(`/api/integrations/${encodeURIComponent(id)}/export${bar && Object.keys(bar).length ? `?bar=${encodeURIComponent(JSON.stringify(bar))}` : ""}`),
   aiListConversions: (sessionId: string) => apiFetch<AIConversion[]>(`/api/ai/sessions/${sessionId}/conversions`),
   aiDownloadConversion: (sessionId: string, id: string, format: "csv" | "xlsx") =>
     apiFetchBlob(`/api/ai/sessions/${sessionId}/conversions/${encodeURIComponent(id)}?format=${format}`),
@@ -2953,7 +3055,7 @@ export const api = {
   // columns). key: the run's Idempotency-Key (useImportKey) — sent again
   // under it, a run into a grid or a table is answered from the first and
   // loads nothing.
-  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }, rowLines?: number[], about?: ImportAbout, mapped?: boolean, key?: string) =>
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string; parameters?: Record<string, string> }, rowLines?: number[], about?: ImportAbout, mapped?: boolean, key?: string) =>
     apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[]; replayed?: boolean }>(`/api/integrations/${id}/run`, {
       method: "POST",
       body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}), ...(mapped ? { mapped: true } : {}) }),
@@ -2981,8 +3083,11 @@ export const api = {
     apiFetch<FormRecord>(`/api/forms/${formId}/records`, { method: "POST", body: JSON.stringify({ data, revision_id: revisionId, status }) }),
   updateRecord: (recordId: string, change: FormRecordChange) =>
     apiFetch<{ status: string }>(`/api/records/${recordId}`, { method: "PUT", body: JSON.stringify({ data: change.data, status: change.status }) }),
+  /** Copies of records with a date field moved (POST /api/forms/{id}/records/copy). */
+  copyRecords: (formId: string, recordIds: string[], field: string, value: string) =>
+    apiFetch<{ status: string; copied: number }>(`/api/forms/${formId}/records/copy`, { method: "POST", body: JSON.stringify({ record_ids: recordIds, field, value }) }),
   syncForm: (formId: string) =>
-    apiFetch<{ status: string; mappings: number; records_processed: number }>(`/api/forms/${formId}/sync`, { method: "POST" }),
+    apiFetch<SyncResult>(`/api/forms/${formId}/sync`, { method: "POST" }),
   deleteRecord: (recordId: string) =>
     apiFetch<{ status: string; deleted?: number; cleared?: number }>(`/api/records/${recordId}`, { method: "DELETE" }),
   /** One record, as the caller may see it (404 when they may not). */
@@ -3383,7 +3488,7 @@ export const api = {
     apiFetch<WorkflowDef>(`/api/developer/workflows?application_id=${encodeURIComponent(applicationId)}${revisionId ? `&revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
       method: "POST", body: JSON.stringify(body),
     }),
-  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean; approver_may_start?: boolean; start_roles?: string[] }) =>
+  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean; approver_may_start?: boolean; start_roles?: string[]; reopen_roles?: string[] }) =>
     apiFetch<WorkflowDef>(`/api/developer/workflows/${id}`, {
       method: "PATCH", body: JSON.stringify(body),
     }),
@@ -3450,7 +3555,21 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   aiGetSession: (id: string) =>
-    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[]; usage?: AISessionUsage; task_plan?: AITaskPlan | null }>(`/api/ai/sessions/${id}`),
+    apiFetch<{ session: AISession; messages: AIMessage[]; documents: AIDocument[]; usage?: AISessionUsage; task_plan?: AITaskPlan | null;
+      earlier_plans?: AIEarlierPlan[]; memory?: AIMemoryStatus }>(`/api/ai/sessions/${id}`),
+  /** Compacts the session's memory now (the earlier conversation becomes a summary). */
+  aiCompactMemory: (id: string) =>
+    apiFetch<{ memory: AIMemoryStatus; messages: AIMessage[]; note: string }>(`/api/ai/sessions/${id}/memory/compact`, { method: "POST" }),
+  /** The plans of the developer's other sessions in the model, to attach one. */
+  aiListPlans: (excludeSessionId?: string) =>
+    apiFetch<AIPlanRef[]>(`/api/ai/plans${excludeSessionId ? `?exclude=${encodeURIComponent(excludeSessionId)}` : ""}`),
+  /** Approves the session's plan, which waits for it; the console then goes on (stage 1). */
+  aiApprovePlan: (id: string) =>
+    apiFetch<{ task_plan: AITaskPlan }>(`/api/ai/sessions/${id}/plan/approve`, { method: "POST" }),
+  /** Attaches a plan of another session to this one (optional, never automatic). */
+  aiAttachPlan: (id: string, from: { session_id: string; index: number; attachments: boolean }) =>
+    apiFetch<{ task_plan: AITaskPlan; earlier_plans: AIEarlierPlan[]; messages: AIMessage[]; documents: AIDocument[]; memory: AIMemoryStatus }>(
+      `/api/ai/sessions/${id}/attach-plan`, { method: "POST", body: JSON.stringify(from) }),
   aiUploadDocument: async (sessionId: string, file: File): Promise<AIDocument> => {
     // multipart — bypass apiFetch so the browser sets the Content-Type boundary
     const appId = localStorage.getItem("selected_app_id") ?? "";
@@ -3488,8 +3607,10 @@ export const api = {
   // apps resolve to the newest model otherwise) — pass the console's working
   // revision so the session touches what the console shows.
   // signal stops the turn: the server sees the request close and saves "Stopped".
-  aiSendMessage: (sessionId: string, content: string, onEvent: (event: AISendMessageEvent) => void, revisionId?: string, signal?: AbortSignal) =>
-    streamSSE(`/api/ai/sessions/${sessionId}/messages${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { content }, onEvent, signal),
+  /** goOn: the turn goes on by itself after a confirmed plan ran; the server writes its message. */
+  aiSendMessage: (sessionId: string, content: string, onEvent: (event: AISendMessageEvent) => void, revisionId?: string, signal?: AbortSignal, goOn = false) =>
+    streamSSE(`/api/ai/sessions/${sessionId}/messages${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
+      goOn ? { content, continue: true } : { content }, onEvent, signal),
   /** secrets: what the developer typed into the card for sign-in connection
    *  steps, by 1-based step — sent with the confirmation only, never stored. */
   aiConfirmProposal: (sessionId: string, proposalId: string, revisionId?: string, secrets?: Record<number, Record<string, string>>) =>

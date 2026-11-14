@@ -3239,7 +3239,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			),
 			new_forms AS (
 				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles)
+					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
 				SELECT f.model_id, f.name, f.label,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -3251,7 +3251,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					), '[]'::jsonb),
 					$2::uuid, f.own_records_only,
 					f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-					f.member_label_field, f.member_root_label, f.create_roles
+					f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code
 				FROM model.form_def f
 				WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 				RETURNING id AS new_id, name
@@ -3492,7 +3492,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				INSERT INTO workflow.workflow_def
 				  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
 				   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
-			   single_active_instance, approver_may_start, start_roles)
+			   single_active_instance, approver_may_start, start_roles, reopen_roles)
 				SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 					-- subject_config binds the workflow to a form ({"form_id"}) or a
 					-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -3517,7 +3517,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 						FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 					), '[]'::jsonb),
 					$2::uuid,
-					wd.single_active_instance, wd.approver_may_start, wd.start_roles
+					wd.single_active_instance, wd.approver_may_start, wd.start_roles, wd.reopen_roles
 				FROM workflow.workflow_def wd
 				WHERE wd.application_id = (SELECT application_id FROM app)
 				  AND wd.revision_id = $3::uuid
@@ -3828,6 +3828,9 @@ type updateWorkflowDefParams struct {
 	// StartRoles: who may start it by hand (role names, as steps'
 	// assignee_roles); nil leaves it unchanged, [] lets anyone.
 	StartRoles *[]string `json:"start_roles"`
+	// ReopenRoles: who may reopen an approved run (role names); nil leaves
+	// it unchanged, [] leaves it to the application's administrators.
+	ReopenRoles *[]string `json:"reopen_roles"`
 }
 
 // updateWorkflowDef fetches the current row first for two reasons: (1) to
@@ -3909,6 +3912,12 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 		}
 		def.StartRoles = workflow.CleanStartRoles(*p.StartRoles)
 	}
+	if p.ReopenRoles != nil {
+		if err := ws.SetWorkflowDefReopenRoles(ctx, p.WorkflowDefID, *p.ReopenRoles); err != nil {
+			return "", "", fmt.Errorf("set reopen_roles: %w", err)
+		}
+		def.ReopenRoles = workflow.CleanStartRoles(*p.ReopenRoles)
+	}
 	var stepCount int
 	if arr, uErr := unmarshalArrayLen(def.Steps); uErr == nil {
 		stepCount = arr
@@ -3947,7 +3956,9 @@ type tableSettingParams struct {
 	KeepsDimension   *string `json:"keeps_dimension"`
 	MemberLabelField *string `json:"member_label_field"`
 	MemberRootLabel  *string `json:"member_root_label"`
-	EditAccess       *string `json:"edit_access"`
+	// MemberLabelWithCode: members labelled code first ("IC03 · …").
+	MemberLabelWithCode *bool   `json:"member_label_with_code"`
+	EditAccess          *string `json:"edit_access"`
 	// CreateRoles: the roles whose people may add records; [] for anyone.
 	CreateRoles *[]string `json:"create_roles"`
 }
@@ -3955,7 +3966,8 @@ type tableSettingParams struct {
 // applyTableSettings resolves p's dimension in revID and saves the
 // settings on form; it describes what it set for the tool's answer.
 func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.FormDef, revID string, p tableSettingParams) (string, error) {
-	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess, CreateRoles: p.CreateRoles}
+	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess, CreateRoles: p.CreateRoles,
+		MemberLabelWithCode: p.MemberLabelWithCode}
 	if p.KeepsDimension != nil {
 		ref := strings.TrimSpace(*p.KeepsDimension)
 		id := ""

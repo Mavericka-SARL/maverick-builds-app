@@ -23,14 +23,13 @@ import (
 // "shall I propose it?" after three refused plans, and a promoted session
 // went on checking plans against its empty base revision).
 
-// promotedMessage is the session's last message once its draft is promoted.
+// promotedMessage is the session's message once its draft is promoted. The
+// session goes on (owner, 2026-11-13: the developer is never pushed to a new
+// session): its next confirmed plan starts a fresh draft from the working
+// revision.
 const promotedMessage = "The draft is now your working revision. It is not live: make it the active revision with " +
-	"Set active in Developer › Developer Models when it is ready. This session is finished: start a new session to keep building; " +
-	"it works on your working revision."
-
-// sessionPromotedError refuses a message in a promoted session.
-const sessionPromotedError = "this session's draft became your working revision, so the session is finished — " +
-	"start a new session to keep building; it works on your working revision"
+	"Set active in Developer › Developer Models when it is ready. Keep going here: my next confirmed plan starts a fresh draft " +
+	"from your working revision, with the same plan and memory."
 
 func jsonCodeErr(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -198,7 +197,7 @@ var permissionAsk = regexp.MustCompile(`(?i)(\b(now|first)\s*,?\s+or\s+(continue
 
 // permissionNudge answers such a question for the developer: the request
 // is the leave.
-const permissionNudge = "(Sent by the server, not the developer.) Do not ask the developer's leave to go on — their request is the leave, and checks you can run (compare_with_sheet, list_*) need none. " +
+const permissionNudge = "(Sent by the server, not the developer.) Do not ask the developer's leave to go on — their request is the leave, and checks you can run (check_sheet, list_*) need none. " +
 	"Go on with the request now: call propose_actions with the plan; if it is too large for one proposal, propose the first part now and say what comes next. " +
 	"Ask only where the request or the source leaves a choice that changes the model, and then lay the options out."
 

@@ -51,7 +51,7 @@ test("several files at once, dropped files, and sent files leave the composer", 
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "AI Developer" }).click();
   await page.getByRole("button", { name: /Session/ }).first().click();
-  await expect(page.getByText("This session's AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/writes go to your AI draft/)).toBeVisible({ timeout: 10_000 });
 
   // The picker takes two files in one go.
   const csv = (name: string) => ({ name, mimeType: "text/csv", buffer: Buffer.from("code,label\nA,a\n") });
@@ -98,7 +98,7 @@ test("a pasted table is attached, can come back as text, and prose stays prose",
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "AI Developer" }).click();
   await page.getByRole("button", { name: /Session/ }).first().click();
-  await expect(page.getByText("This session's AI draft")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/writes go to your AI draft/)).toBeVisible({ timeout: 10_000 });
 
   const box = page.getByLabel("Message");
   const paste = (text: string) => box.evaluate((el, t) => {

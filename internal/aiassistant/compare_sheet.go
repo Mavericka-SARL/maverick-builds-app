@@ -14,6 +14,9 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/rollup"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
 // compare_with_sheet (2026-11-07): the assistant said "complete" when a
@@ -84,6 +87,8 @@ func (e *ToolExecutor) compareWithSheet(ctx context.Context, raw json.RawMessage
 	if strings.TrimSpace(p.Sheet) == "" {
 		where = fmt.Sprintf("file %q", name)
 	}
+	// The sheet once, to find the header row each row's periods are under.
+	grid, _ := importpkg.ReadGrid(name, data, strings.TrimSpace(p.Sheet), ',')
 	var b strings.Builder
 	matchedRows := 0
 	for i, r := range rows {
@@ -96,7 +101,7 @@ func (e *ToolExecutor) compareWithSheet(ctx context.Context, raw json.RawMessage
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		line, ok, err := e.compareOne(ctx, name, data, p.Sheet, where, r, p.Tolerance, len(rows) == 1)
+		line, ok, err := e.compareOne(ctx, name, data, grid, p.Sheet, where, r, p.Tolerance, len(rows) == 1)
 		if err != nil {
 			fmt.Fprintf(&b, "%s against %s row %d: not compared — %v", r.Metric, where, r.Row, err)
 			continue
@@ -118,7 +123,7 @@ const maxCompareRows = 80
 // compareOne compares row r of the sheet with its metric: the line it
 // reports, and whether every period matched. full lists up to 24 differing
 // periods; otherwise 3, so a whole sheet stays short.
-func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte, sheet, where string, r compareRow, tolerance float64, full bool) (string, bool, error) {
+func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte, grid [][]string, sheet, where string, r compareRow, tolerance float64, full bool) (string, bool, error) {
 	col, err := excelize.ColumnNameToNumber(strings.ToUpper(strings.TrimSpace(r.FirstColumn)))
 	if err != nil {
 		return "", false, fmt.Errorf("first_column %q is not a column letter", r.FirstColumn)
@@ -172,7 +177,7 @@ func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte,
 			}
 		}
 		if code == "" {
-			return "", false, fmt.Errorf("members needs a code for %s (a dimension of %s)", dimNames[id], m.Name)
+			return "", false, fmt.Errorf("members needs a code for %s (a dimension of %s) — a total row is checked with check_sheet, where a blank key cell reads the model's total", dimNames[id], m.Name)
 		}
 		combo[id] = code
 	}
@@ -190,6 +195,11 @@ func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte,
 		}
 	}
 	sort.Slice(periods, func(i, j int) bool { return periods[i].idx < periods[j].idx })
+	// The header above the row names each column's period: a sheet starting
+	// in 2027 is read from 2027, and the row ends at the first column whose
+	// header is no period (an FY total, a Δ) — pairing columns with periods
+	// by position read an FY column as the next January (2026-11-14).
+	byHeader, headerEnd := headerPeriods(grid, r.Row, col-1, dims[timeID])
 
 	values, err := store.LoadCalcValueMap(ctx, e.modelID, e.revID, m.ID)
 	if m.IsInput {
@@ -208,8 +218,17 @@ func (e *ToolExecutor) compareOne(ctx context.Context, name string, data []byte,
 	}
 	var diffs []string
 	compared, matched := 0, 0
+	if byHeader != nil {
+		periods = periods[:0]
+		for ci := col - 1; ci < headerEnd; ci++ {
+			periods = append(periods, period{byHeader[ci], ci})
+		}
+	}
 	for i, per := range periods {
 		ci := col - 1 + i
+		if byHeader != nil {
+			ci = per.idx
+		}
 		if ci >= len(cells) || strings.TrimSpace(cells[ci]) == "" {
 			continue
 		}
@@ -288,7 +307,9 @@ func sheetRow(filename string, data []byte, sheet string, row int) ([]string, er
 		return nil, fmt.Errorf("row is 1-based")
 	}
 	if strings.HasSuffix(strings.ToLower(filename), ".csv") {
-		recs, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+		cr := csv.NewReader(bytes.NewReader(data))
+		cr.FieldsPerRecord = -1 // a title line above the header has fewer fields
+		recs, err := cr.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("csv parse failed: %w", err)
 		}
@@ -311,4 +332,58 @@ func sheetRow(filename string, data []byte, sheet string, row int) ([]string, er
 		}
 	}
 	return nil, fmt.Errorf("no sheet named %q", sheet)
+}
+
+// headerPeriods finds the header row above row whose cells from column
+// first on name periods of the time dimension (a date in the period, or its
+// code), each later than the one before — at least three, or two months
+// running. It
+// returns each column's period and the column the periods end at; nil when
+// no such header is found (the periods are then taken in order).
+func headerPeriods(grid [][]string, row, first int, td *rollup.Dimension) (map[int]string, int) {
+	if td == nil || first < 0 {
+		return nil, 0
+	}
+	periodOf := func(v string) (string, int, bool) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return "", 0, false
+		}
+		for _, m := range td.Members {
+			if m.IsLeafPeriod() && strings.EqualFold(m.Code, v) {
+				return m.Code, m.TimeIndex, true
+			}
+		}
+		day, ok := timedim.DayOf(v)
+		if !ok {
+			return "", 0, false
+		}
+		for _, m := range td.Members {
+			if m.IsLeafPeriod() && !m.PeriodStart.IsZero() && !day.Before(m.PeriodStart) && !day.After(m.PeriodEnd) {
+				return m.Code, m.TimeIndex, true
+			}
+		}
+		return "", 0, false
+	}
+	for h := row - 1; h >= 1 && h >= row-40; h-- {
+		if h > len(grid) {
+			continue
+		}
+		cells := grid[h-1]
+		out := map[int]string{}
+		last, consecutive := -1, true
+		end := first
+		for c := first; c < len(cells); c++ {
+			code, idx, ok := periodOf(cells[c])
+			if !ok || idx <= last {
+				break
+			}
+			consecutive = consecutive && (last < 0 || idx == last+1)
+			out[c], last, end = code, idx, c+1
+		}
+		if len(out) >= 3 || (len(out) == 2 && consecutive) {
+			return out, end
+		}
+	}
+	return nil, 0
 }

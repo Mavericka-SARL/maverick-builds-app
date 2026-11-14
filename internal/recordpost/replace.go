@@ -55,6 +55,33 @@ func ReplaceField(form *crudapp.FormDef, name string) (*crudapp.FormField, error
 	return nil, fmt.Errorf("replace_by: %s has no field %q", form.Label, name)
 }
 
+// ReplaceFields are the fields spec names — one name, or several separated
+// by commas ("entity, period"): a load replaces the records holding the
+// combination of their values each of its rows holds. By one field only, an
+// entity team reloading its trial balance for a month either wiped the other
+// entities' (by period) or the entity's other months (by entity) (2026-11-13).
+func ReplaceFields(form *crudapp.FormDef, spec string) (replaceSet, error) {
+	var out replaceSet
+	seen := map[string]bool{}
+	for _, name := range strings.Split(spec, ",") {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		f, err := ReplaceField(form, name)
+		if err != nil {
+			return nil, err
+		}
+		if !seen[f.Name] {
+			seen[f.Name] = true
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+// replaceSet is the fields a load replaces by, in order.
+type replaceSet []*crudapp.FormField
+
 // replaceKey is the value a record holding v in field f is replaced by: a
 // date's month (a file of July's postings replaces July, whatever days it
 // holds), any other field's value as stored.
@@ -69,28 +96,78 @@ func replaceKey(f *crudapp.FormField, v any) string {
 	return s
 }
 
-// replaceCondition is the SQL that picks the records of a field holding one
-// of the keys ($2): a date by its month.
-func replaceCondition(f *crudapp.FormField) string {
-	if f.Type == "date" {
-		return `left(data->>$3, 7) = ANY($2::text[])`
+// key is data's combination of the set's values ("" when one is empty).
+func (rs replaceSet) key(data map[string]any) string {
+	parts := make([]string, len(rs))
+	for i, f := range rs {
+		k := replaceKey(f, data[f.Name])
+		if k == "" {
+			return ""
+		}
+		parts[i] = k
 	}
-	return `data->>$3 = ANY($2::text[])`
+	return strings.Join(parts, "\x1f")
+}
+
+// firstEmpty is the first field of the set data leaves empty.
+func (rs replaceSet) firstEmpty(data map[string]any) *crudapp.FormField {
+	for _, f := range rs {
+		if replaceKey(f, data[f.Name]) == "" {
+			return f
+		}
+	}
+	return nil
+}
+
+// labels are the set's fields as a sentence names them.
+func (rs replaceSet) labels() string {
+	names := make([]string, len(rs))
+	for i, f := range rs {
+		names[i] = firstNonEmpty(f.Label, f.Name)
+	}
+	return strings.Join(names, " and ")
+}
+
+// describe is a record's combination as a message names it.
+func (rs replaceSet) describe(data map[string]any) string {
+	parts := make([]string, len(rs))
+	for i, f := range rs {
+		parts[i] = firstNonEmpty(f.Label, f.Name) + " " + replaceKey(f, data[f.Name])
+	}
+	return strings.Join(parts, ", ")
+}
+
+// condition is the SQL that picks the records holding one of the keys ($2),
+// the field names following from $3: a date by its month.
+func (rs replaceSet) condition() (string, []any) {
+	exprs := make([]string, len(rs))
+	args := make([]any, len(rs))
+	for i, f := range rs {
+		n := i + 3
+		if f.Type == "date" {
+			exprs[i] = fmt.Sprintf("left(data->>$%d, 7)", n)
+		} else {
+			exprs[i] = fmt.Sprintf("(data->>$%d)", n)
+		}
+		args[i] = f.Name
+	}
+	return strings.Join(exprs, " || chr(31) || ") + " = ANY($2::text[])", args
 }
 
 type rowQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// recordsToReplace reads the records of form whose field f holds one of
+// recordsToReplace reads the records of form whose fields rs hold one of
 // keys — locked for the transaction q is, when lock.
-func recordsToReplace(ctx context.Context, q rowQuerier, form *crudapp.FormDef, f *crudapp.FormField, keys []string, lock bool) ([]*crudapp.FormRecord, error) {
+func recordsToReplace(ctx context.Context, q rowQuerier, form *crudapp.FormDef, rs replaceSet, keys []string, lock bool) ([]*crudapp.FormRecord, error) {
+	cond, fieldArgs := rs.condition()
 	sql := `SELECT id::text, data, COALESCE(status::text,''), created_by::text, updated_at
-		FROM runtime.form_record WHERE form_id = $1::uuid AND ` + replaceCondition(f)
+		FROM runtime.form_record WHERE form_id = $1::uuid AND ` + cond
 	if lock {
 		sql += ` FOR UPDATE`
 	}
-	rows, err := q.Query(ctx, sql, form.ID, keys, f.Name)
+	rows, err := q.Query(ctx, sql, append([]any{form.ID, keys}, fieldArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read the records the load replaces: %w", err)
 	}
@@ -112,9 +189,9 @@ func recordsToReplace(ctx context.Context, q rowQuerier, form *crudapp.FormDef, 
 // each must be one req's creator may delete (req.DeleteRefusal), and what it
 // posted must come out of cells they may write — a closed month's records
 // stay, whoever loads its file again.
-func (ps *Poster) replaceRefusal(ctx context.Context, req ImportRequest, tp *tablePosting, f *crudapp.FormField, recs []*crudapp.FormRecord) (string, error) {
+func (ps *Poster) replaceRefusal(ctx context.Context, req ImportRequest, tp *tablePosting, rs replaceSet, recs []*crudapp.FormRecord) (string, error) {
 	for _, rec := range recs {
-		what := fmt.Sprintf("a record of %s %s", firstNonEmpty(f.Label, f.Name), replaceKey(f, rec.Data[f.Name]))
+		what := "a record of " + rs.describe(rec.Data)
 		if req.DeleteRefusal != nil {
 			if msg := req.DeleteRefusal(rec); msg != "" {
 				return fmt.Sprintf("the load would replace %s: %s; nothing was loaded", what, msg), nil

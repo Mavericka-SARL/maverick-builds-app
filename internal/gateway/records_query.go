@@ -104,6 +104,10 @@ func (h *handler) recordsQuery(w http.ResponseWriter, r *http.Request, formID st
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	if err := h.prefetchParents(ctx, &scope, res.Records); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 	for _, rec := range res.Records {
 		scope.permit(rec)
 	}

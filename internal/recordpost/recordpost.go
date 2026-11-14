@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -923,6 +924,12 @@ type datedMember struct {
 // only when a value is a date: a coordinate that is already a member code
 // (2026-11) costs nothing.
 func (ps *Poster) periodResolver(ctx context.Context) periodOf {
+	return periodResolverOn(ctx, ps.db(ctx))
+}
+
+// periodResolverOn is periodResolver reading through db: a pool, or the
+// transaction an AI Developer proposal is checked in.
+func periodResolverOn(ctx context.Context, db writeguard.ReadDB) periodOf {
 	periods := map[string][]datedMember{}
 	loaded := map[string]bool{}
 	return func(dimID, value string) (string, bool) {
@@ -935,7 +942,7 @@ func (ps *Poster) periodResolver(ctx context.Context) periodOf {
 		}
 		if !loaded[dimID] {
 			loaded[dimID] = true
-			rows, err := ps.db(ctx).Query(ctx, `
+			rows, err := db.Query(ctx, `
 				SELECT code, period_start, period_end FROM model.dimension_member
 				WHERE dimension_id = $1::uuid AND period_start IS NOT NULL
 				ORDER BY period_end - period_start, time_index`, dimID)
@@ -1081,6 +1088,19 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 		var after *plannedPosting
 		if to != nil {
 			after = m.planned(hasStatus, to.Status, to.Data, true, tp.period)
+			// A change that takes the record's value out of the cell it
+			// posts in now — another period, another member, or a status
+			// it does not post in — leaves that cell, which a workflow may
+			// lock (locked.go). Only the new cell was checked: a record
+			// moved from a released September to October withdrew its
+			// value from September (2026-11-13).
+			if before != nil {
+				if now := m.planned(hasStatus, to.Status, to.Data, false, tp.period); now == nil || !maps.Equal(now.members, before.members) {
+					if code, msg, err := ps.leavingRefusal(ctx, tp, i, before); err != nil || code != 0 {
+						return code, msg, err
+					}
+				}
+			}
 		}
 		if samePosting(before, after) {
 			continue
@@ -1619,8 +1639,9 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 
 // Backfill posts every record of mappingID's table through the table's
 // live mappings: what a new mapping needs for the records already there.
-// It returns how many records it went through.
-func (ps *Poster) Backfill(ctx context.Context, mappingID, userID string) (int, error) {
+// It returns how many records it went through, and the postings a guard
+// kept out by why (a released period's lock among them).
+func (ps *Poster) Backfill(ctx context.Context, mappingID, userID string) (int, map[string]int, error) {
 	var formID string
 	var ownModel bool
 	if err := ps.db(ctx).QueryRow(ctx, `
@@ -1628,12 +1649,36 @@ func (ps *Poster) Backfill(ctx context.Context, mappingID, userID string) (int, 
 		       EXISTS (SELECT 1 FROM model.form_def fd WHERE fd.id = m.form_id AND fd.model_id = m.model_id)
 		FROM model.form_metric_mapping m WHERE m.id=$1::uuid`, mappingID,
 	).Scan(&formID, &ownModel); err != nil {
-		return 0, fmt.Errorf("mapping not found: %w", err)
+		return 0, nil, fmt.Errorf("mapping not found: %w", err)
 	}
 	if !ownModel {
-		return 0, nil // a mapping naming another model's table posts nothing
+		return 0, nil, nil // a mapping naming another model's table posts nothing
 	}
 	return ps.repost(ctx, formID, userID)
+}
+
+// lockRepost holds a table's re-posts to one at a time, across gateways,
+// until the returned release. A re-post reads the table's postings when it
+// starts; a posting changed twice in quick succession re-applies twice in
+// the background, and the first re-post's records could land after the
+// second withdrew them — a record a new row filter left out came back
+// (2026-11-14, TestValuesPostedIntoALockedPeriodStay under load). Held
+// here, whichever runs second reads the postings as they are now. The key
+// space (two ints) is not the one-int key RecomputeFactInput takes per
+// mapping, so the two never wait on each other.
+func (ps *Poster) lockRepost(ctx context.Context, formID string) (func(), error) {
+	conn, err := ps.db(ctx).Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("repost lock: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('table repost'), hashtext($1))`, formID); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("repost lock: %w", err)
+	}
+	return func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext('table repost'), hashtext($1))`, formID)
+		conn.Release()
+	}, nil
 }
 
 // repost posts every record of formID through its live mappings again,
@@ -1641,26 +1686,31 @@ func (ps *Poster) Backfill(ctx context.Context, mappingID, userID string) (int, 
 // used to post on its own — its totals rebuilt and a recalculation after
 // every one, and a sync went through the table once per mapping. It
 // returns how many records it went through.
-func (ps *Poster) repost(ctx context.Context, formID, userID string) (int, error) {
+func (ps *Poster) repost(ctx context.Context, formID, userID string) (int, map[string]int, error) {
+	release, err := ps.lockRepost(ctx, formID)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer release()
 	// Resolve a valid entered_by user — prefer the passed userID, fall back to first user in DB.
 	if userID == "" {
 		_ = ps.db(ctx).QueryRow(ctx, `SELECT id::text FROM identity.user LIMIT 1`).Scan(&userID)
 	}
 	form, err := crudapp.NewStore(ps.db(ctx)).GetForm(ctx, formID)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	tp, err := ps.newTablePosting(ctx, form)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	records, err := ps.recordsToPost(ctx, formID)
 	if err != nil || len(records) == 0 {
-		return 0, err
+		return 0, nil, err
 	}
 	defer ps.pending(ctx, formID)()
 	ps.totals(ctx, tp, ps.post(ctx, tp, records, userID), userID)
-	return len(records), nil
+	return len(records), tp.skipped, nil
 }
 
 // DispatchRecordCreated fires, in the background, the form_submit automation
@@ -1766,22 +1816,55 @@ func (ps *Poster) FormMemberProblem(ctx context.Context, field crudapp.FormField
 // gained or lost its status field needs, since which records count
 // changed. It returns how many mappings and record postings it went
 // through.
-func (ps *Poster) RepostTable(ctx context.Context, formID, userID string) (mappings, processed int) {
+func (ps *Poster) RepostTable(ctx context.Context, formID, userID string) RepostResult {
 	ms, err := ps.liveFormMappings(ctx, formID)
 	if err != nil {
 		ps.Log.Warn().Err(err).Str("form_id", formID).Msg("repost table: read mappings")
-		return 0, 0
+		return RepostResult{}
 	}
 	if len(ms) == 0 {
-		return 0, 0
+		return RepostResult{}
 	}
-	n, err := ps.repost(ctx, formID, userID)
+	n, skipped, err := ps.repost(ctx, formID, userID)
 	if err != nil {
 		ps.Log.Warn().Err(err).Str("form_id", formID).Msg("repost table failed")
-		return len(ms), 0
+		return RepostResult{Mappings: len(ms)}
 	}
-	return len(ms), n * len(ms)
+	res := RepostResult{Mappings: len(ms), Processed: n * len(ms)}
+	res.Skipped, res.SkippedReasons = SkippedList(skipped)
+	return res
 }
+
+// SkippedList is skipped (why → postings) as a total and a list, the most
+// frequent reason first.
+func SkippedList(skipped map[string]int) (int, []SkippedReason) {
+	total, out := 0, []SkippedReason{}
+	for reason, k := range skipped {
+		total += k
+		out = append(out, SkippedReason{Reason: reason, Postings: k})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Postings > out[j].Postings || out[i].Postings == out[j].Postings && out[i].Reason < out[j].Reason
+	})
+	return total, out
+}
+
+// RepostResult is what re-posting a table did: the live mappings, the
+// postings made (records × mappings), and those a guard kept out — a
+// workflow lock, a closed period, the creator's access — by why. A Sync
+// answered "ok" while a released period's lock kept every one of its
+// postings out (2026-11-13).
+type RepostResult struct {
+	Mappings, Processed, Skipped int
+	SkippedReasons               []SkippedReason
+}
+
+// SkippedReason is one reason postings were kept out, and how many.
+type SkippedReason struct {
+	Reason   string `json:"reason"`
+	Postings int    `json:"postings"`
+}
+
 func firstNonEmpty(vs ...string) string {
 	for _, v := range vs {
 		if v != "" {

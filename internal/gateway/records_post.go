@@ -7,6 +7,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -57,12 +58,30 @@ func (h *handler) recomputeFactInput(ctx context.Context, mappingID, revisionID,
 	h.records().RecomputeFactInput(ctx, mappingID, revisionID, userID)
 }
 
-func (h *handler) backfillFormMapping(ctx context.Context, mappingID, userID string) (int, error) {
-	return h.records().Backfill(ctx, mappingID, userID)
+// backfillFormMapping posts the records already in mappingID's table
+// (recordpost.Backfill): how many it went through and the postings a guard
+// kept out, by why.
+func (h *handler) backfillFormMapping(ctx context.Context, mappingID, userID string) (int, int, []recordpost.SkippedReason, error) {
+	n, skipped, err := h.records().Backfill(ctx, mappingID, userID)
+	total, reasons := recordpost.SkippedList(skipped)
+	return n, total, reasons, err
 }
 
-func (h *handler) repostTable(ctx context.Context, formID, userID string) (mappings, processed int) {
+func (h *handler) repostTable(ctx context.Context, formID, userID string) recordpost.RepostResult {
 	return h.records().RepostTable(ctx, formID, userID)
+}
+
+// postingReport is what a Sync or a backfill answers: "ok", or "partial"
+// with the postings a lock, a closed period or the creators' access kept
+// out and why — an "ok" used to hide a released period's lock (2026-11-13).
+func postingReport(body map[string]any, skipped int, reasons []recordpost.SkippedReason) map[string]any {
+	body["status"] = "ok"
+	body["postings_skipped"] = skipped
+	body["skipped_reasons"] = reasons
+	if skipped > 0 {
+		body["status"] = "partial"
+	}
+	return body
 }
 
 func (h *handler) dispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
@@ -99,7 +118,22 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			}
 		}
 	}
-	return h.records().Import(ctx, recordpost.ImportRequest{
+	// Rows under an approved or rejected record: refused for anyone but an
+	// administrator, whose load sends those records back to draft.
+	var underDecided []map[string]any
+	var parentErr error
+	res, err := h.records().Import(ctx, recordpost.ImportRequest{
+		RecordRefusal: func(data map[string]any) string {
+			msg, p, err := h.parentRefusal(ctx, &scope, data)
+			if err != nil {
+				parentErr = err
+				return "the record it belongs to could not be read"
+			}
+			if p != nil && msg == "" {
+				underDecided = append(underDecided, data)
+			}
+			return strings.TrimPrefix(msg, "forbidden: ")
+		},
 		Form: form, CreatorID: act.UserID, Header: header, Rows: rawRows,
 		NewStatus: scope.newRecordStatus(),
 		StatusRefusal: func(status string) string {
@@ -120,6 +154,13 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			return ""
 		},
 	})
+	if err == nil && parentErr != nil {
+		err = parentErr
+	}
+	if err == nil && !dryRun && len(underDecided) > 0 {
+		h.reopenParents(ctx, &scope, act, underDecided...)
+	}
+	return res, err
 }
 
 // jsonImportErr answers an import that failed as a whole: a load whose
@@ -143,8 +184,27 @@ func (h *handler) checkReplaceBy(ctx context.Context, tableID, name string) erro
 	if err != nil {
 		return fmt.Errorf("replace_by: the loader's table: %w", err)
 	}
-	_, err = recordpost.ReplaceField(form, name)
+	_, err = recordpost.ReplaceFields(form, name)
 	return err
+}
+
+// replaceBySpec is a loader's replace_by as configured: one field name, or
+// several — "entity, period" or ["entity", "period"] — held as names
+// separated by commas (recordpost.ReplaceFields).
+type replaceBySpec string
+
+func (r *replaceBySpec) UnmarshalJSON(b []byte) error {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		*r = replaceBySpec(one)
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return fmt.Errorf("replace_by is a field name or a list of them")
+	}
+	*r = replaceBySpec(strings.Join(many, ","))
+	return nil
 }
 
 // replacedNote is what a run that replaced records says of them.

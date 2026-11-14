@@ -54,11 +54,13 @@ const maxRunBodyBytes = 24 << 20
 // nor (the caller's part) the saved column map applies again: applied twice,
 // the map read the model's names as source columns and dropped a renamed
 // one (2026-10-19). Only csv can be mapped; a workbook is the person's file.
-func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string) (header []string, rows []importpkg.RawRow, fileName string, mapped bool, stats importpkg.ShapeStats, err error) {
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape, savedSheet string, params []runParameter) (header []string, rows []importpkg.RawRow, fileName string, mapped bool, stats importpkg.ShapeStats, err error) {
 	var body struct {
-		CSV        string `json:"csv"`
-		XLSXBase64 string `json:"xlsx_base64"`
-		Sheet      string `json:"sheet"`
+		// Parameters: the values the run asks for (runParameter), by column.
+		Parameters map[string]string `json:"parameters"`
+		CSV        string            `json:"csv"`
+		XLSXBase64 string            `json:"xlsx_base64"`
+		Sheet      string            `json:"sheet"`
 		// RowLines is the line in the person's file of each data row of
 		// csv, when csv was written out of it (the Import Wizard's):
 		// every answer about a row names that line (importpkg.RenumberRows).
@@ -68,6 +70,9 @@ func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Res
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBodyBytes)).Decode(&body); err != nil {
 		return nil, nil, "", false, stats, fmt.Errorf("a run needs the file: \"csv\" text or \"xlsx_base64\" (%v)", err)
+	}
+	if reshape, err = withRunParameters(reshape, params, body.Parameters); err != nil {
+		return nil, nil, "", false, stats, err
 	}
 	switch {
 	case body.XLSXBase64 != "":
@@ -319,4 +324,14 @@ func withSkippedNote(ctx context.Context, st importpkg.ShapeStats) context.Conte
 func skippedNote(ctx context.Context) string {
 	note, _ := ctx.Value(skippedNoteKey{}).(string)
 	return note
+}
+
+// runParameter is a value a loader asks for at each run (its config's
+// "parameters"); see importpkg.RunParameter.
+type runParameter = importpkg.RunParameter
+
+// withRunParameters is reshape with the run's values of params added as
+// fixed values; see importpkg.WithParameters.
+func withRunParameters(reshape *importpkg.Reshape, params []runParameter, values map[string]string) (*importpkg.Reshape, error) {
+	return importpkg.WithParameters(reshape, params, values)
 }

@@ -4,6 +4,7 @@ import { api, type AppInfo, type DemoContext, type DashboardDef, type DashboardF
 import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Select, Tabs, SectionHeader, InlineAlert, InConsoleLinkContext } from "../../ui";
 import { flattenFolders, UNFILED_LABEL } from "../developer/folderTree";
 import { DashboardWidgetGrid } from "./DashboardWidgets";
+import { ApprovalChangesBanner } from "./ApprovalChangesBanner";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { useSelectModel } from "./modelSelection";
 import { clearPendingDashboard, findModel, parseDashboardLink, peekPendingDashboard, sameName, setPendingDashboard } from "./dashboardLinks";
@@ -206,6 +207,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
 
       {detail && (
         <div>
+          <ApprovalChangesBanner modelId={ctx.model_id} />
           {(detail.widgets ?? []).length === 0 ? (
             <p style={{ color: "var(--color-disabled)" }}>This dashboard has no widgets yet.</p>
           ) : (

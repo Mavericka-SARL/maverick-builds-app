@@ -60,7 +60,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "get_workflow",
-			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, approver_may_start, start_roles (who may start it by hand), the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
+			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, approver_may_start, start_roles (who may start it by hand), reopen_roles (who may reopen an approved run), the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"workflow_def_id":{"type":"string","description":"The workflow's id from list_workflows, or its exact name"}},"required":["workflow_def_id"]}`),
 		},
 		{
@@ -132,24 +132,29 @@ const (
 	UpdateTaskPlanTool    = "update_task_plan"
 	SetTargetModelTool    = "set_target_model"
 	UpdateTargetModelTool = "update_target_model"
+	// RememberTool keeps a fact, or an attachment's analysis, in the
+	// session's memory (memory.go).
+	RememberTool = "remember"
 )
 
 var taskPlanTools = []providers.ToolDef{
 	{
 		Name: SetTargetModelTool,
-		Description: "Records the TO-BE model of a build from a workbook -- the design you build towards, before plan_task: the dimensions and their members, and for EVERY sheet " +
+		Description: "Records the TO-BE model -- its architecture, which the developer sees as a scheme (dimensions → grids with their dimensions and metrics → dashboards) and approves with the plan. " +
+			"Call it before plan_task for every build of a model or a module, from a workbook or from a description (with no workbook, one entry under sheets per area of the model, its name as sheet). " +
+			"It is the design you build towards: the dimensions and their members, and for EVERY sheet " +
 			"(in build order) its role, the grid it becomes, that grid's dimensions, the rows it covers and its metric names (snake_case, one per workbook row " +
 			"or one per row group when a dimension replaces repeated rows), its owner and how it is verified, plus the dashboards, roles and workflows. " +
 			"Agree it once, before building: the conventions every row follows (units, signs, percentages, opening balances, scenarios, monthly against annual), " +
 			"the substantive choices the workbook leaves open as decisions (each with its options and the sheets it holds back until the developer chooses), " +
 			"the business requirements the platform adds (scenarios, requests, access, approval, an approved revision, role dashboards) and the verification checks " +
 			"beyond the saved workbook (another scenario, a switch off, a delay, actual zero against missing, a rejected approval, a restricted user). " +
-			"Read the whole workbook first (analyse_workbook). It is shown in every later turn and session; call it again to change the design (the whole target each time), " +
+			"Read the whole workbook first (analyse_workbook). It is shown in every later turn (and travels with the plan when the developer attaches it to another session); call it again to change the design (the whole target each time), " +
 			"or update_target_model for decisions, requirements, checks and row notes. No confirmation needed: it changes nothing in the model.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"summary":{"type":"string","description":"the model to build, in two or three sentences"},
 			"dimensions":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"members":{"type":"string","description":"its members, or where they come from"}},"required":["name","members"]},
-				"description":"only where a dimension has meaning (a function for payroll, a site for capacity, a channel for sales)"},
+				"description":"think multidimensionally: a Version dimension (Actual, Budget, Forecast) when the model holds more than one version, the time dimension, and each breakdown that has meaning (a function for payroll, a site for capacity, a channel for sales) — never a metric per version, period or member"},
 			"conventions":{"type":"object","description":"agreed once, for every row: how the workbook does it and what the model does",
 				"properties":{"units":{"type":"string"},"signs":{"type":"string"},"percentages":{"type":"string","description":"the model stores percent units (5 = 5%); how the workbook stores them"},
 				"opening_balances":{"type":"string"},"scenarios":{"type":"string","description":"how scenarios are held, and which one the saved workbook shows"},
@@ -163,12 +168,15 @@ var taskPlanTools = []providers.ToolDef{
 				"rows":{"type":"string","description":"the sheet rows it covers, e.g. 6-77"},
 				"metrics":{"type":"array","items":{"type":"string"}},
 				"owner":{"type":"string","description":"the business role that owns its inputs or reads its results"},
-				"verification":{"type":"string","description":"how it is shown right: compare_with_sheet of its rows, a check below"},
+				"verification":{"type":"string","description":"how it is shown right: check_sheet of its sheet, a check below"},
 				"row_notes":{"type":"array","items":{"type":"object","properties":{"row":{"type":"integer"},"meaning":{"type":"string"},
 					"status":{"type":"string","enum":["","changed"]},"reason":{"type":"string"}},"required":["row"]},
 					"description":"rows whose business meaning needs saying, and rows the model changes on purpose (status changed, with the reason)"},
 				"notes":{"type":"string"}},"required":["sheet","role"]}},
-			"pages":{"type":"array","items":{"type":"string"}},
+			"pages":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"audience":{"type":"string","description":"the role or people who read it"},
+				"grids":{"type":"array","items":{"type":"string"},"description":"the grids it shows, by their names under sheets"},
+				"guide":{"type":"boolean","description":"true for a page of text only (a guide, instructions): it shows no grid"}},"required":["name","grids"]},
+				"description":"the dashboards: each with who reads it and the grids it shows — the links of the architecture scheme the developer approves"},
 			"roles":{"type":"array","items":{"type":"string"}},
 			"workflows":{"type":"array","items":{"type":"string"}},
 			"decisions":{"type":"array","items":{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},
@@ -186,6 +194,8 @@ var taskPlanTools = []providers.ToolDef{
 			"moves a requirement on (built, verified) or adds one, records a verification check (passed, failed or not_possible, with its evidence) or adds one, " +
 			"and gives rows their business meaning or marks a row changed on purpose (with the reason). Items are matched by question, area, name or sheet and row. No confirmation needed.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"pages":{"type":"array","description":"dashboards to add, or to replace by name: each with the grids it shows","items":{"type":"object","properties":{"name":{"type":"string"},"audience":{"type":"string"},
+				"grids":{"type":"array","items":{"type":"string"}},"guide":{"type":"boolean"}},"required":["name","grids"]}},
 			"decisions":{"type":"array","items":{"type":"object","properties":{"question":{"type":"string"},"choice":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"sheets":{"type":"array","items":{"type":"string"}}},"required":["question"]}},
 			"requirements":{"type":"array","items":{"type":"object","properties":{"area":{"type":"string"},"behaviour":{"type":"string"},"status":{"type":"string","enum":["open","built","verified"]}},"required":["area"]}},
 			"checks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"how":{"type":"string"},"status":{"type":"string","enum":["open","passed","failed","not_possible"]},"evidence":{"type":"string"}},"required":["name"]}},
@@ -197,17 +207,23 @@ var taskPlanTools = []providers.ToolDef{
 		Description: "Plans a goal the developer delegated (build a model from this workbook, add the dashboards people need, make the numbers match) before building it: " +
 			"stages in build order, each one coherent module (a few dependent sheets built and proven together, e.g. Hiring Plan, Headcount and payroll; a few dashboards by audience), " +
 			"each naming the items it delivers and how you will check it. " +
-			"A plan already under way is kept and the new stages follow it (one stage is enough), or with replace: true they re-cut its open stages (done stages stay); the developer sees it. " +
+			"ONE PLAN PER REQUEST: while the plan of this request is under way, work it — never plan the same request again. " +
+			"replace: true re-cuts its open stages when the developer asks to change the plan (done stages stay). " +
+			"new_request: true when the developer's message is a different request: the open plan is set aside (kept in this session) and this one starts. " +
+			"resume_plan: n takes up earlier plan n of this session again (your memory lists them) when the developer asks. " +
+			"Unsure whether a message is a new request or part of the plan under way: ask the developer. " +
 			"Not for a direct order or a goal one proposal does.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"goal":{"type":"string","description":"the goal, in the developer's words"},
-			"replace":{"type":"boolean","description":"true: these stages replace the open stages of the plan under way (re-cut it); done stages and decisions stay"},
+			"replace":{"type":"boolean","description":"true: these stages replace the open stages of the plan under way (re-cut it, because the developer asked); done stages and decisions stay"},
+			"new_request":{"type":"boolean","description":"true: the developer made a different request; the plan under way is set aside in this session and this plan starts"},
+			"resume_plan":{"type":"integer","description":"take up earlier plan n of this session again (1-based, as your memory lists them); goal and stages are not needed"},
 			"stages":{"type":"array","items":{"type":"object","properties":{
 				"title":{"type":"string"},
 				"items":{"type":"array","items":{"type":"string"},"description":"what the stage delivers, named: metrics, grids, dashboards, postings, rows"},
-				"check":{"type":"string","description":"how you will check it once confirmed: compare_with_sheet of which rows, describe_dashboard of which dashboard"}},
+				"check":{"type":"string","description":"how you will check it once confirmed: check_sheet of which sheets, describe_dashboard of which dashboard"}},
 				"required":["title","items"]}}},
-			"required":["goal","stages"]}`),
+			"required":[]}`),
 	},
 	{
 		Name: UpdateTaskPlanTool,
@@ -225,6 +241,17 @@ var taskPlanTools = []providers.ToolDef{
 				"differences":{"type":"string","description":"what still differs and why, or none"},
 				"next":{"type":"string","description":"the next bounded stage"}},"required":["built","differences","next"]},
 			"decision":{"type":"string","description":"a convention the developer decided, in one sentence"}},
+			"required":[]}`),
+	},
+	{
+		Name: RememberTool,
+		Description: "Keeps something in your memory of this session, shown to you in every later turn: a fact you will need again (what you found, a figure, " +
+			"where something is, what the developer prefers), or — with attachment — your analysis of an attached file, replacing the one kept. " +
+			"Your memory already holds every attachment's analysis and every part of an attachment you read: do not copy those. No confirmation needed.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"note":{"type":"string","description":"the fact, in one or two sentences"},
+			"attachment":{"type":"string","description":"with analysis: the attached file it is about"},
+			"analysis":{"type":"string","description":"with attachment: your analysis of the file — what it is, its parts, what each holds, the figures, rules and formulas the work needs"}},
 			"required":[]}`),
 	},
 }
@@ -398,6 +425,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.planSheet(ctx, args)
 	case "compare_with_sheet":
 		return e.compareWithSheet(ctx, args)
+	case "check_sheet":
+		return e.checkSheetTool(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
 	case "get_integration":

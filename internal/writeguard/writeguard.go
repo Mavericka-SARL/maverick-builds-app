@@ -478,7 +478,7 @@ func memberRefusal(ctx context.Context, pool *pgxpool.Pool, memberID, access str
 // "Metric" vars locks only those metrics (unknown written metrics = locked,
 // as elsewhere). Until 2026-10-16 such a round locked nothing: a business
 // user changed a Base assumption during the HR model's management review.
-func RevisionLockReason(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID string, metricIDs []string) (locked bool, reason string, err error) {
+func RevisionLockReason(ctx context.Context, pool ReadDB, modelID, revisionID string, metricIDs []string) (locked bool, reason string, err error) {
 	if revisionID == "" {
 		return false, "", nil
 	}

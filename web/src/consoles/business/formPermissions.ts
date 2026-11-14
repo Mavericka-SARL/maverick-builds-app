@@ -28,7 +28,21 @@ export function createStatusFor(form: FormDef | null | undefined, picked: string
   return picked && statuses.includes(picked) ? picked : statuses[0];
 }
 
-export type SyncMessage = { tone: "success" | "danger"; text: string };
+export type SyncMessage = { tone: "success" | "warning" | "danger"; text: string };
+
+/**
+ * What a finished sync tells the user: how much was posted, and what a lock,
+ * a closed period or the creators' access kept out, with the first reason.
+ */
+export function syncResultMessage(data: { mappings?: number; records_processed: number; postings_skipped?: number;
+  skipped_reasons?: { reason: string; postings: number }[] }): SyncMessage {
+  if (!data.mappings) return { tone: "success", text: "No active integrations are set up for this table." };
+  const done = `Synced — ${data.records_processed} record(s) across ${data.mappings} integration(s).`;
+  const skipped = data.postings_skipped ?? 0;
+  if (!skipped) return { tone: "success", text: done };
+  const why = data.skipped_reasons?.[0]?.reason;
+  return { tone: "warning", text: `${done} ${skipped} posting(s) were not made${why ? `: ${why}` : ""}.` };
+}
 
 /** What a failed sync tells the user; a 403 is the server's administrator rule. */
 export function syncFailure(err: Error): SyncMessage {

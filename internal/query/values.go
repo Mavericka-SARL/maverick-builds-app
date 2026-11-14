@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
 // MetricValuesAt reads metrics, by name (ignoring case, as formulas name
@@ -36,28 +37,65 @@ func (r *ChartResolver) MetricValuesAt(ctx context.Context, modelID, revisionID 
 		if !ok {
 			continue
 		}
-		var v float64
-		var has bool
-		if d.IsInput {
-			v, has, err = resolveInput(ctx, dims, d, point, cc.fetchInput)
-		} else {
-			v, has, err = r.evalCalcMetricVisited(ctx, d.ID, point, dims, cc, map[string]bool{})
-		}
-		switch {
-		case err != nil:
-			out[name] = formula.ErrorVal(&formula.FormulaError{Code: formula.ErrValue.Code, Message: fmt.Sprintf("%s cannot be read here: %v", d.Name, err)})
-		case !has:
-			out[name] = formula.BlankVal()
-		default:
-			out[name] = formula.NumberVal(v)
-			if codec, isPicklist := cc.meta.Picklist(d.Name); isPicklist {
-				if code, known := codec.Code(v); known {
-					out[name] = formula.StringVal(code)
-				} else if v == 0 {
-					out[name] = formula.BlankVal()
-				}
-			}
-		}
+		out[name] = r.valueAt(ctx, d, point, dims, cc)
 	}
 	return out, nil
+}
+
+// MetricValuesAtPoints reads one metric, by name, at many points of a
+// revision with the rules of MetricValuesAt — a dimension a point leaves
+// out is read at its total, a parent member or an aggregate period (FY,
+// a quarter) at the engine's own total there — loading the revision once.
+// The AI Developer's sheet check compares every cell of a sheet block with
+// it, a whole sheet in one read. A name that is no metric is an error.
+func (r *ChartResolver) MetricValuesAtPoints(ctx context.Context, modelID, revisionID, name string, points []map[string]string) ([]formula.Value, error) {
+	cc, err := r.loadChartCalc(ctx, modelID, revisionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	dims, err := r.loadAllDimensions(ctx, modelID, revisionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	var d *fullMetricDef
+	for _, def := range cc.defs {
+		if strings.EqualFold(def.Name, strings.TrimSpace(name)) {
+			d = def
+		}
+	}
+	if d == nil {
+		return nil, fmt.Errorf("no metric named %q in this revision", name)
+	}
+	out := make([]formula.Value, len(points))
+	for i, p := range points {
+		out[i] = r.valueAt(ctx, d, p, dims, cc)
+	}
+	return out, nil
+}
+
+// valueAt is one metric at one point: a number, blank when nothing is
+// recorded or computed there, #VALUE! when it cannot be computed.
+func (r *ChartResolver) valueAt(ctx context.Context, d *fullMetricDef, point map[string]string, dims map[string]*rollup.Dimension, cc *chartCalc) formula.Value {
+	var v float64
+	var has bool
+	var err error
+	if d.IsInput {
+		v, has, err = resolveInput(ctx, dims, d, point, cc.fetchInput)
+	} else {
+		v, has, err = r.evalCalcMetricVisited(ctx, d.ID, point, dims, cc, map[string]bool{})
+	}
+	switch {
+	case err != nil:
+		return formula.ErrorVal(&formula.FormulaError{Code: formula.ErrValue.Code, Message: fmt.Sprintf("%s cannot be read here: %v", d.Name, err)})
+	case !has:
+		return formula.BlankVal()
+	}
+	if codec, isPicklist := cc.meta.Picklist(d.Name); isPicklist {
+		if code, known := codec.Code(v); known {
+			return formula.StringVal(code)
+		} else if v == 0 {
+			return formula.BlankVal()
+		}
+	}
+	return formula.NumberVal(v)
 }

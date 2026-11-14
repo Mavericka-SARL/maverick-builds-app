@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/formula"
@@ -947,11 +948,55 @@ func (h *handler) loadScopedReads(
 		if !readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames) && !sr.readsAcrossScope(m, byName, metricDims) {
 			continue
 		}
-		rows, err := store.LoadCalcValueMap(ctx, modelID, revisionID, m.ID)
+		rows, err := calcValueMapOnce(ctx, store, modelID, revisionID, m.ID)
 		if err != nil {
 			return nil, err
 		}
 		sr.Served[m.ID] = &servedMetric{Rows: rows}
 	}
 	return sr, nil
+}
+
+// calcValueMemo is the stored values of served metrics that a batch of
+// scoped reads in one request shares (withCalcValueMemo): an export with
+// totals reads the engine's total at each parent row and column it shows
+// (gridTotalsAt), and every one of those reads loaded each served metric's
+// whole runtime.calc_result again — the same rows each time, about 60% of
+// each read (2026-11-14). The rows are only looked up (sm.Rows[...]), never
+// changed, so the reads running at once share one map.
+type calcValueMemo struct {
+	mu   sync.Mutex
+	maps map[[3]string]*calcValueEntry
+}
+
+type calcValueEntry struct {
+	once sync.Once
+	rows map[string]float64
+	err  error
+}
+
+type calcValueMemoKey struct{}
+
+// withCalcValueMemo gives the reads made with ctx one calcValueMemo.
+func withCalcValueMemo(ctx context.Context) context.Context {
+	return context.WithValue(ctx, calcValueMemoKey{}, &calcValueMemo{maps: map[[3]string]*calcValueEntry{}})
+}
+
+// calcValueMapOnce is store.LoadCalcValueMap, read once per ctx's
+// calcValueMemo when it has one.
+func calcValueMapOnce(ctx context.Context, store *calculation.Store, modelID, revisionID, metricID string) (map[string]float64, error) {
+	memo, _ := ctx.Value(calcValueMemoKey{}).(*calcValueMemo)
+	if memo == nil {
+		return store.LoadCalcValueMap(ctx, modelID, revisionID, metricID)
+	}
+	key := [3]string{modelID, revisionID, metricID}
+	memo.mu.Lock()
+	e := memo.maps[key]
+	if e == nil {
+		e = &calcValueEntry{}
+		memo.maps[key] = e
+	}
+	memo.mu.Unlock()
+	e.once.Do(func() { e.rows, e.err = store.LoadCalcValueMap(ctx, modelID, revisionID, metricID) })
+	return e.rows, e.err
 }

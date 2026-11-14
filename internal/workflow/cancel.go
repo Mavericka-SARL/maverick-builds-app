@@ -23,6 +23,9 @@ var ErrInstanceNotReopenable = errors.New("only a finished, approved workflow ru
 // CancelledTemplate is the notification a cancelled run sends.
 const CancelledTemplate = "workflow_instance_cancelled"
 
+// ReopenedTemplate is the in-app notification of a reopened run.
+const ReopenedTemplate = "workflow_instance_reopened"
+
 // CancelResult is what CancelInstance did.
 type CancelResult struct {
 	ApplicationID string
@@ -148,7 +151,13 @@ func (s *Store) ReopenInstance(ctx context.Context, instanceID, userID, reason s
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE workflow.workflow_instance SET status = 'cancelled' WHERE id = $1::uuid`, instanceID); err != nil {
+	// Still cancelled for what reads the status (its scope is released, as
+	// before), and marked reopened: history and the status widget say
+	// "reopened" (2026-11-13: a reopen read as a cancel).
+	if _, err := tx.Exec(ctx, `
+		UPDATE workflow.workflow_instance
+		SET status = 'cancelled', reopened_at = now(), reopened_by = NULLIF($2, '')::uuid, reopen_reason = NULLIF($3, '')
+		WHERE id = $1::uuid`, instanceID, userID, strings.TrimSpace(reason)); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE workflow.execution SET status = 'cancelled' WHERE instance_id = $1::uuid`, instanceID); err != nil {
@@ -164,7 +173,7 @@ func (s *Store) ReopenInstance(ctx context.Context, instanceID, userID, reason s
 		recipients[startedBy] = true
 	}
 	message := fmt.Sprintf("%q was reopened by %s: %s. What it approved can be changed again.", res.WorkflowName, s.actorName(ctx, userID), strings.TrimSpace(reason))
-	res.Notified = s.notifyRun(ctx, instanceID, userID, recipients, "Reopened: "+res.WorkflowName, message, res.WorkflowName, reason)
+	res.Notified = s.notifyRunWith(ctx, ReopenedTemplate, instanceID, userID, recipients, "Reopened: "+res.WorkflowName, message, res.WorkflowName, reason)
 	return res, nil
 }
 
@@ -229,6 +238,11 @@ func (s *Store) actorName(ctx context.Context, userID string) string {
 // notifyRun tells recipients what became of a run, the person who acted left
 // out, and answers how many were told.
 func (s *Store) notifyRun(ctx context.Context, instanceID, userID string, recipients map[string]bool, subject, message, workflowName, reason string) int {
+	return s.notifyRunWith(ctx, CancelledTemplate, instanceID, userID, recipients, subject, message, workflowName, reason)
+}
+
+// notifyRunWith is notifyRun with the notification's template.
+func (s *Store) notifyRunWith(ctx context.Context, template, instanceID, userID string, recipients map[string]bool, subject, message, workflowName, reason string) int {
 	delete(recipients, userID)
 	vars := map[string]string{
 		"subject":       subject,
@@ -239,7 +253,7 @@ func (s *Store) notifyRun(ctx context.Context, instanceID, userID string, recipi
 	notified := 0
 	notifStore := notification.NewStoreOn(s.db)
 	for id := range recipients {
-		if _, err := notifStore.Notify(ctx, id, CancelledTemplate, vars, "workflow_instance", instanceID); err != nil {
+		if _, err := notifStore.Notify(ctx, id, template, vars, "workflow_instance", instanceID); err != nil {
 			if !errors.Is(err, notification.ErrRecipientDisabled) {
 				s.log.Warn().Err(err).Str("user", id).Str("instance", instanceID).Msg("run notification failed")
 			}

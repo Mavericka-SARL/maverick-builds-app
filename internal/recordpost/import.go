@@ -35,6 +35,11 @@ type ImportRequest struct {
 	// (a row's status column, in a table with a status field); "" when they
 	// may.
 	StatusRefusal func(status string) string
+	// RecordRefusal, when set, says why a row's record may not be created
+	// as the creator ("" when it may): a row naming a record its table
+	// belongs to that is approved or rejected, for someone who is not an
+	// administrator.
+	RecordRefusal func(data map[string]any) string
 	// AppID and RevisionID are where the automation rules a new record
 	// fires are looked for.
 	AppID, RevisionID string
@@ -96,9 +101,9 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResult, err error) {
 	form := req.Form
 	var errs []RowError
-	var replaceBy *crudapp.FormField
-	if req.ReplaceBy != "" {
-		if replaceBy, err = ReplaceField(form, req.ReplaceBy); err != nil {
+	var replaceBy replaceSet
+	if strings.TrimSpace(req.ReplaceBy) != "" {
+		if replaceBy, err = ReplaceFields(form, req.ReplaceBy); err != nil {
 			return res, err
 		}
 	}
@@ -200,6 +205,12 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				status = statusRaw
 			}
 		}
+		if req.RecordRefusal != nil && rowValid {
+			if msg := req.RecordRefusal(data); msg != "" {
+				errs = append(errs, RowError{Row: row.RowNumber, Message: msg})
+				rowValid = false
+			}
+		}
 		if cf := form.TypedCodeField(); cf != nil && rowValid {
 			if code, _ := data[cf.Name].(string); code != "" {
 				if first, dup := codeRows[code]; dup {
@@ -212,9 +223,10 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			}
 		}
 		if replaceBy != nil && rowValid {
-			if key := replaceKey(replaceBy, data[replaceBy.Name]); key == "" {
-				errs = append(errs, RowError{Row: row.RowNumber, Column: firstNonEmpty(headerOf[replaceBy.Name], replaceBy.Name),
-					Message: fmt.Sprintf("this load replaces the records of each %s it holds, so every row needs one", firstNonEmpty(replaceBy.Label, replaceBy.Name))})
+			if key := replaceBy.key(data); key == "" {
+				empty := replaceBy.firstEmpty(data)
+				errs = append(errs, RowError{Row: row.RowNumber, Column: firstNonEmpty(headerOf[empty.Name], empty.Name),
+					Message: fmt.Sprintf("this load replaces the records of each %s it holds, so every row needs one", replaceBy.labels())})
 				rowValid = false
 			} else {
 				replaceKeys[key] = true

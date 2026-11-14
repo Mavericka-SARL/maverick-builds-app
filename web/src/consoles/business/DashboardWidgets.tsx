@@ -10,6 +10,8 @@ import { useImportKey } from "../../api/useImportKey";
 import { ContextSelectors } from "../dashboard/ContextSelectors";
 import { DashboardContextSyncContext, DashboardSlotContext, useFollowsBar, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText, Txt } from "../../ui";
+import { RunParametersDialog } from "../RunParametersDialog";
+import { runParametersOf } from "../runParameters";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, FIT_HEIGHT_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/lazyChart";
@@ -300,7 +302,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} hideEmptyRows={widget.widget_props?.hide_empty_rows} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -614,17 +616,28 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
   // An export downloads a file built from this user's own view of the grid.
   const isExport = type === "file_export";
 
+  // Values the loader asks for at each run ("Period end"): asked before the
+  // file is chosen, sent with it, stamped on every row by the server.
+  const params = runParametersOf(integration?.config);
+  const [askParams, setAskParams] = useState(false);
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+
   const importKey = useImportKey();
   const run = useMutation({
     mutationFn: (file?: { csv?: string; xlsx_base64?: string }) =>
-      api.runIntegration(integrationId, file, undefined, undefined, undefined, importKey.keyFor(JSON.stringify([integrationId, file ?? null]))),
+      api.runIntegration(integrationId, file && params.length ? { ...file, parameters: paramValues } : file, undefined, undefined, undefined,
+        importKey.keyFor(JSON.stringify([integrationId, file ?? null, params.length ? paramValues : null]))),
     onSuccess: (data) => { importKey.done(); setResult(data as typeof result); },
     // A refused file lists its rows in the error's body: nothing went in.
     onError: (err) => setResult({ message: (err as Error).message, errors: (err as ApiError).body?.errors as ImportRowError[] | undefined }),
   });
+  // The dashboard's selector bar: an export that follows it downloads the
+  // members it shows (the period being looked at).
+  const barSync = React.useContext(DashboardContextSyncContext);
   const download = useMutation({
     mutationFn: async () => {
-      const { blob, filename } = await api.downloadIntegrationExport(integrationId);
+      const bar = Object.fromEntries((barSync?.barDims ?? []).filter(id => barSync?.values[id]).map(id => [id, barSync!.values[id]]));
+      const { blob, filename } = await api.downloadIntegrationExport(integrationId, bar);
       downloadBlob(blob, filename);
     },
     onError: (err) => setResult({ message: (err as Error).message }),
@@ -666,6 +679,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
         onClick={() => {
           setResult(null);
           if (isSheets) run.mutate(undefined);
+          else if (params.length > 0) setAskParams(true);
           else fileRef.current?.click();
         }}
         disabled={run.isPending}
@@ -673,6 +687,8 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
         {run.isSuccess && <CheckIcon size={15} aria-hidden="true" />}
         <Txt>{run.isPending ? (isSheets ? "Syncing…" : "Importing…") : run.isSuccess ? "Done" : label}</Txt>
       </CommandButton>
+      <RunParametersDialog open={askParams} title={label} params={params} values={paramValues} onChange={setParamValues}
+        onCancel={() => setAskParams(false)} onChoose={() => { setAskParams(false); fileRef.current?.click(); }} />
       {result && !run.isPending && (
         <div style={{ fontSize: 12, color: result.message ? "var(--color-danger)" : "var(--color-live)" }}>
           {result.message

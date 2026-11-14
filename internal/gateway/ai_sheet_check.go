@@ -53,7 +53,24 @@ func (h *handler) sheetDoneNudge(ctx context.Context, store *aiassistant.ChatSto
 	if err != nil {
 		return ""
 	}
-	return sheetDoneProblems(named, sheetComparisons(msgs))
+	// A sheet with a map is judged by its cell-by-cell checks (check_sheet).
+	var mapped []string
+	if sess, err := store.GetSession(ctx, sessionID); err == nil && sess.ModelID != "" {
+		revID := sess.DraftRevisionID
+		verdicts := aiassistant.SheetMapVerdicts(ctx, h.db.For(ctx), sess.ModelID, revID)
+		rest := named[:0:0]
+		for _, s := range named {
+			v, has := verdicts[strings.ToLower(s)]
+			switch {
+			case !has:
+				rest = append(rest, s)
+			case v != "":
+				mapped = append(mapped, s+": "+v)
+			}
+		}
+		named = rest
+	}
+	return sheetDoneProblems(named, sheetComparisons(msgs), mapped)
 }
 
 // rowResult is one row's last comparison: periods matching of compared.
@@ -90,8 +107,8 @@ func sheetComparisons(msgs []aiassistant.ChatMessage) map[string]map[int]rowResu
 
 // sheetDoneProblems is the nudge for sheets named done whose comparisons in
 // last do not show them matching, or "".
-func sheetDoneProblems(named []string, last map[string]map[int]rowResult) string {
-	var problems []string
+func sheetDoneProblems(named []string, last map[string]map[int]rowResult, mapped []string) string {
+	problems := append([]string(nil), mapped...)
 	for _, s := range named {
 		rows := last[strings.ToLower(s)]
 		if len(rows) == 0 {
@@ -118,8 +135,8 @@ func sheetDoneProblems(named []string, last map[string]map[int]rowResult) string
 	}
 	return "(Sent by the server, not the developer.) Your reply calls work done that the comparisons do not show done:\n- " +
 		strings.Join(problems, "\n- ") +
-		"\nCheck each sheet you name by value with compare_with_sheet (\"rows\": every line of the sheet in one call), fix the rows " +
-		"that differ, and say how many rows match. If some rows are not done, say which plainly instead of calling the sheet complete."
+		"\nCheck each sheet you name cell by cell with check_sheet (one call per sheet), fix what differs — a mapping problem in the map, " +
+		"a value problem in the formula or the input — and say how many cells match. If some are not done, say which plainly instead of calling the sheet complete."
 }
 
 // attachedSheetNames are the worksheet names of the session's attached

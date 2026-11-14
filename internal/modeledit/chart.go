@@ -271,7 +271,8 @@ var (
 		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
 		"kpi_compare": true, "kpi_good": true, "number_scale": true,
-		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true}
+		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true,
+		"hide_empty_rows": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
 		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
 		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true, "y_axis_from_zero": true,

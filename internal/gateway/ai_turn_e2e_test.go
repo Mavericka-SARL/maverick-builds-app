@@ -32,6 +32,9 @@ type aiTurnEnv struct {
 	proposals *aiassistant.ProposalStore
 	session   string
 	send      func(content string) (int, string)
+	// post and get call the gateway as the session's developer.
+	post func(path string, body []byte) (int, string)
+	get  func(path string) (int, string)
 	// confirm confirms a proposal of the session as the console does.
 	confirm func(proposalID string) (int, string)
 }
@@ -88,7 +91,22 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 		_, _ = out.ReadFrom(resp.Body)
 		return resp.StatusCode, out.String()
 	}
+	get := func(path string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+path, nil)
+		req.Header.Set("X-Dev-User", devSub)
+		req.Header.Set("X-App-Id", appID)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		out := new(bytes.Buffer)
+		_, _ = out.ReadFrom(resp.Body)
+		return resp.StatusCode, out.String()
+	}
 	return aiTurnEnv{chat: chat, docs: aiassistant.NewDocumentStore(pool), proposals: aiassistant.NewProposalStore(pool), session: sess.ID,
+		post: post, get: get,
 		confirm: func(proposalID string) (int, string) {
 			return post("/api/ai/sessions/"+sess.ID+"/proposals/"+proposalID+"/confirm", []byte(`{}`))
 		}, send: func(content string) (int, string) {
@@ -291,14 +309,16 @@ func TestSendMessage_NudgedToProposeAfterASendBack(t *testing.T) {
 	}
 }
 
-func TestSendMessage_PromotedSessionIsFinished(t *testing.T) {
+// A session whose draft became the working revision goes on (owner,
+// 2026-11-13: the developer is never pushed to start a new session).
+func TestSendMessage_PromotedSessionGoesOn(t *testing.T) {
 	env := newAITurnEnv(t, &scriptedProvider{resp: providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "hi"}}})
 	if _, err := env.chat.MarkPromoted(context.Background(), env.session); err != nil {
 		t.Fatal(err)
 	}
 	status, body := env.send("update a metric")
-	if status != http.StatusConflict || !strings.Contains(body, "SESSION_PROMOTED") || !strings.Contains(body, "start a new session") {
-		t.Errorf("a message in a promoted session: %d %s, want 409 SESSION_PROMOTED saying to start a new session", status, body)
+	if status != http.StatusOK || !strings.Contains(body, "event: done") || strings.Contains(body, "new session") {
+		t.Errorf("a message in a promoted session: %d %s, want the turn to run", status, body)
 	}
 }
 

@@ -553,7 +553,7 @@ func (h *handler) aiPreviewExport(r *http.Request, gridID, name string, spec dat
 	if problems := dataexport.Validate(spec, g); len(problems) > 0 {
 		return "The spec has problems — fix all of them:\n- " + strings.Join(problems, "\n- "), nil
 	}
-	t, err := h.renderExport(r, gridID, gridRev, spec)
+	t, err := h.renderExport(ctx, r, gridID, gridRev, spec)
 	if err != nil {
 		return "", err
 	}

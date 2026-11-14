@@ -102,6 +102,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
         single_active_instance: d.single_active_instance,
         approver_may_start: d.approver_may_start,
         start_roles: d.start_roles,
+        reopen_roles: d.reopen_roles,
       }),
     onMutate: () => setSaveState("saving"),
     onSuccess: (saved) => {

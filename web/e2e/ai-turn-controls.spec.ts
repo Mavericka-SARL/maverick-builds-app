@@ -4,7 +4,8 @@
  * them, and a promoted session went on checking plans against its old base):
  * a running turn shows its time and a Stop button that closes the request; a
  * proposal carries the plan check's warnings; and a session whose draft was
- * promoted is finished — the input is closed and a new session offered.
+ * promoted goes on — the developer is never pushed to a new session (owner,
+ * 2026-11-13): the input stays open and the list marks the session.
  *
  * Self-contained: CI runs without a gateway.
  */
@@ -38,13 +39,12 @@ async function openSession(page: Page) {
   await page.getByRole("button", { name: /Session/ }).first().click();
 }
 
-test("a promoted session is finished: input closed, a new session offered", async ({ page }) => {
+test("a promoted session goes on: input open, the session marked as the working revision", async ({ page }) => {
   await mockApi(page);
   await mockAi(page, { promoted: true });
   await openSession(page);
-  await expect(page.getByText("This session's draft is now your working revision")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByLabel("Message")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "New session" }).last()).toBeVisible();
+  await expect(page.getByText("working revision ✓")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel("Message")).toBeEnabled();
 });
 
 test("a running turn shows its time and stops on Stop", async ({ page }) => {
@@ -110,7 +110,10 @@ test("a reopened session shows a proposal's warnings in Activity", async ({ page
     steps: [{ tool: "create_metric", description: "Create target", params: { name: "target" } }], warnings: [warning],
   }] });
   await openSession(page);
+  // The pending proposal comes back in the chat too (it was lost on reload,
+  // 2026-11-13): the warning shows there and in Activity.
   await page.getByRole("button", { name: "Activity" }).click();
-  await expect(page.getByText("The plan check warned:")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(/without dividing by 100/)).toBeVisible();
+  const activity = page.getByRole("note").filter({ hasText: "The plan check warned:" });
+  await expect(activity).toBeVisible({ timeout: 10_000 });
+  await expect(activity.getByText(/without dividing by 100/)).toBeVisible();
 });

@@ -1228,7 +1228,7 @@ func emptyInputWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, s
 		more = fmt.Sprintf(" and %d more", len(empty)-len(shown))
 	}
 	return []string{fmt.Sprintf("this plan builds pages, but %d input metric(s) hold no value and nothing loads them (%s%s): every calculation reading them reads 0. "+
-		"Load them from the attached sheet (import_file_data) or a saved loader, and check a row with compare_with_sheet",
+		"Load them from the attached sheet (import_file_data) or a saved loader, and check the sheet with check_sheet",
 		len(empty), strings.Join(shown, ", "), more)}
 }
 

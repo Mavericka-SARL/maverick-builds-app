@@ -15,9 +15,11 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -66,6 +68,55 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 	rec := httptest.NewRecorder()
 	h.grid(rec, req)
 	return gridResponseSnapshot(rec.Code, rec.Body.Bytes())
+}
+
+// gridTotalsAt reads, for an include_totals export, the grid's totals at
+// each point — a scope pinning every grid dimension, some to a parent — as
+// the caller's grid works them out (/api/grid totals_only under that
+// scope: the engine's own sums, ratios and time summaries, and nothing
+// that depends on what is hidden from them). A few are read at a time.
+func (h *handler) gridTotalsAt(ctx context.Context, r *http.Request, gridID, revisionID string) func([]map[string]string) ([]map[string]float64, error) {
+	return func(points []map[string]string) ([]map[string]float64, error) {
+		out := make([]map[string]float64, len(points))
+		// The reads share the stored values of served metrics, read once
+		// for the export (calcValueMemo).
+		g, gctx := errgroup.WithContext(withCalcValueMemo(ctx))
+		g.SetLimit(6)
+		for i, pt := range points {
+			g.Go(func() error {
+				scope, _ := json.Marshal(pt)
+				q := url.Values{"grid_def_id": {gridID}, "totals_only": {"1"}, "scope": {string(scope)}}
+				if revisionID != "" {
+					q.Set("revision_id", revisionID)
+				}
+				req := r.Clone(gctx)
+				req.Method = http.MethodGet
+				req.URL = &url.URL{Path: "/api/grid", RawQuery: q.Encode()}
+				req.RequestURI = ""
+				req.Body = http.NoBody
+				req.ContentLength = 0
+				rec := httptest.NewRecorder()
+				h.grid(rec, req)
+				if rec.Code != http.StatusOK {
+					_, err := gridResponseSnapshot(rec.Code, rec.Body.Bytes())
+					return err
+				}
+				var resp struct {
+					Totals   map[string]float64 `json:"totals"`
+					Withheld []string           `json:"withheld"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					return fmt.Errorf("read grid totals: %w", err)
+				}
+				for _, id := range resp.Withheld {
+					delete(resp.Totals, id)
+				}
+				out[i] = resp.Totals
+				return nil
+			})
+		}
+		return out, g.Wait()
+	}
 }
 
 // gridResponseSnapshot turns an /api/grid answer into a dataexport.Snapshot
@@ -120,10 +171,13 @@ func gridResponseSnapshot(code int, body []byte) (dataexport.Snapshot, error) {
 }
 
 // renderExport renders a spec against the requester's view of a grid.
-func (h *handler) renderExport(r *http.Request, gridID, revisionID string, spec dataexport.Spec) (*dataexport.Table, error) {
+func (h *handler) renderExport(ctx context.Context, r *http.Request, gridID, revisionID string, spec dataexport.Spec) (*dataexport.Table, error) {
 	snap, err := h.gridSnapshot(r, gridID, revisionID)
 	if err != nil {
 		return nil, err
+	}
+	if spec.IncludeTotals {
+		snap.TotalsAt = h.gridTotalsAt(ctx, r, gridID, revisionID)
 	}
 	t, err := dataexport.Render(spec, snap)
 	if err != nil {
@@ -340,7 +394,7 @@ func (h *handler) exportPreview(w http.ResponseWriter, r *http.Request) {
 		writeSpecProblems(w, problems)
 		return
 	}
-	t, err := h.renderExport(r, body.TargetID, gridRev, body.Config)
+	t, err := h.renderExport(ctx, r, body.TargetID, gridRev, body.Config)
 	if err != nil {
 		jsonErr(w, err, errStatus(err, http.StatusInternalServerError))
 		return
@@ -425,13 +479,48 @@ func (h *handler) integrationExport(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("export %q: this revision's values are being recalculated — download it again in a moment", name), http.StatusConflict)
 		return
 	}
-	t, err := h.renderExport(r, gridID, revisionID, spec)
+	// A download from a dashboard sends its selector bar (?bar={dimension
+	// id: member code}); an export that follows it is narrowed to those
+	// members (the period being looked at) on each grid that has them.
+	var bar map[string]string
+	if raw := r.URL.Query().Get("bar"); raw != "" && spec.FollowSelector {
+		_ = json.Unmarshal([]byte(raw), &bar)
+	}
+	t, err := h.renderExport(ctx, r, gridID, revisionID, h.followBar(ctx, spec, gridID, bar))
 	if err != nil {
 		jsonErr(w, err, errStatus(err, http.StatusInternalServerError))
 		return
 	}
+	tables := []*dataexport.Table{t}
+	// A pack: each more sheet is another grid of the export's revision, by
+	// name, read as the downloader sees it.
+	for _, sh := range spec.Sheets {
+		var sheetGrid string
+		if err := h.db.QueryRow(ctx, `SELECT id::text FROM model.grid_def WHERE revision_id = NULLIF($1,'')::uuid AND lower(name) = lower($2)`,
+			revisionID, strings.TrimSpace(sh.Grid)).Scan(&sheetGrid); err != nil {
+			jsonErr(w, fmt.Errorf("export %q: its sheet %q names no grid of this revision", name, sh.Grid), http.StatusBadRequest)
+			return
+		}
+		ss := sh.Spec
+		ss.Format = dataexport.FormatXLSX
+		if ss.SheetName == "" {
+			ss.SheetName = sh.Grid
+		}
+		ss.FollowSelector = spec.FollowSelector
+		st, err := h.renderExport(ctx, r, sheetGrid, revisionID, h.followBar(ctx, ss, sheetGrid, bar))
+		if err != nil {
+			jsonErr(w, err, errStatus(err, http.StatusInternalServerError))
+			return
+		}
+		tables = append(tables, st)
+	}
 	var buf bytes.Buffer
-	if err := dataexport.Write(&buf, t); err != nil {
+	if len(tables) > 1 {
+		if err := dataexport.WritePack(&buf, tables); err != nil {
+			jsonErr(w, fmt.Errorf("write export: %w", err), http.StatusInternalServerError)
+			return
+		}
+	} else if err := dataexport.Write(&buf, t); err != nil {
 		jsonErr(w, fmt.Errorf("write export: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -446,4 +535,40 @@ func (h *handler) integrationExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", dataexport.FileName(spec, name)))
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	_, _ = w.Write(buf.Bytes())
+}
+
+// followBar is spec narrowed to the members of a dashboard's selector bar
+// (dimension id → member code) for the dimensions gridID has, when the
+// export follows the selector: each becomes a filter of that one member.
+func (h *handler) followBar(ctx context.Context, spec dataexport.Spec, gridID string, bar map[string]string) dataexport.Spec {
+	if !spec.FollowSelector || len(bar) == 0 {
+		return spec
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT d.id::text, d.name FROM model.grid_dimension gd
+		JOIN model.dimension_def d ON d.id = gd.dimension_id WHERE gd.grid_id = $1::uuid`, gridID)
+	if err != nil {
+		return spec
+	}
+	defer rows.Close()
+	filters := map[string][]string{}
+	for k, v := range spec.Filters {
+		filters[k] = v
+	}
+	for rows.Next() {
+		var id, dimName string
+		if rows.Scan(&id, &dimName) != nil {
+			continue
+		}
+		if code := strings.TrimSpace(bar[id]); code != "" {
+			for k := range filters {
+				if strings.EqualFold(k, dimName) {
+					delete(filters, k)
+				}
+			}
+			filters[dimName] = []string{code}
+		}
+	}
+	spec.Filters = filters
+	return spec
 }

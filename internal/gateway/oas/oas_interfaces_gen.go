@@ -29,8 +29,16 @@ type AdminSwitchModelLinkRes interface {
 	adminSwitchModelLinkRes()
 }
 
+type ApproveAiPlanRes interface {
+	approveAiPlanRes()
+}
+
 type ArrangeDashboardRes interface {
 	arrangeDashboardRes()
+}
+
+type AttachAiPlanRes interface {
+	attachAiPlanRes()
 }
 
 type CancelIntegrationRunRes interface {
@@ -61,6 +69,10 @@ type ClearTenantAIKeyRes interface {
 	clearTenantAIKeyRes()
 }
 
+type CompactAiSessionMemoryRes interface {
+	compactAiSessionMemoryRes()
+}
+
 type CompleteTaskRes interface {
 	completeTaskRes()
 }
@@ -71,6 +83,10 @@ type ConfirmAiProposalRes interface {
 
 type CopyBAValuesRes interface {
 	copyBAValuesRes()
+}
+
+type CopyFormRecordsRes interface {
+	copyFormRecordsRes()
 }
 
 type CreateAPITokenRes interface {
@@ -313,6 +329,10 @@ type GetAdminBrandingRes interface {
 	getAdminBrandingRes()
 }
 
+type GetAiSessionMemoryRes interface {
+	getAiSessionMemoryRes()
+}
+
 type GetAiSessionRes interface {
 	getAiSessionRes()
 }
@@ -411,6 +431,10 @@ type GetUsageRes interface {
 
 type GetWorkflowDefinitionRes interface {
 	getWorkflowDefinitionRes()
+}
+
+type GetWorkflowInstanceRes interface {
+	getWorkflowInstanceRes()
 }
 
 type GetWorkflowRes interface {

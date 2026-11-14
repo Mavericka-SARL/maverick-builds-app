@@ -299,6 +299,10 @@ func (h *handler) recordRelated(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		if err := h.prefetchParents(ctx, &rs, res.Records); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 		for _, rr := range res.Records {
 			rs.permit(rr)
 		}

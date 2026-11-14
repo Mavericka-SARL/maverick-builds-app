@@ -2162,6 +2162,424 @@ func (s *AiLLMSettingsReasoningEffort) UnmarshalText(data []byte) error {
 	}
 }
 
+// How full the session's memory is and what it holds: each attachment's analysis (made once, when it
+// arrived), the parts of attachments read, the AI's notes and the summary of the earlier
+// conversation. At compact_at_percent the memory is compacted at the start of a turn and the
+// developer told.
+// Ref: #/components/schemas/AiMemoryStatus
+type AiMemoryStatus struct {
+	// AI_MEMORY_TOKENS, else 120000.
+	CapacityTokens OptInt `json:"capacity_tokens"`
+	UsedTokens     OptInt `json:"used_tokens"`
+	Percent        OptInt `json:"percent"`
+	// The conversation since the last compaction, as it is sent.
+	ConversationTokens OptInt                          `json:"conversation_tokens"`
+	AttachmentTokens   OptInt                          `json:"attachment_tokens"`
+	NotesTokens        OptInt                          `json:"notes_tokens"`
+	SummaryTokens      OptInt                          `json:"summary_tokens"`
+	Attachments        []AiMemoryStatusAttachmentsItem `json:"attachments"`
+	// Parts of attachments read and kept.
+	Reads            OptInt      `json:"reads"`
+	Notes            []string    `json:"notes"`
+	Summary          OptString   `json:"summary"`
+	Compactions      OptInt      `json:"compactions"`
+	CompactedAt      OptDateTime `json:"compacted_at"`
+	CompactAtPercent OptInt      `json:"compact_at_percent"`
+}
+
+// GetCapacityTokens returns the value of CapacityTokens.
+func (s *AiMemoryStatus) GetCapacityTokens() OptInt {
+	return s.CapacityTokens
+}
+
+// GetUsedTokens returns the value of UsedTokens.
+func (s *AiMemoryStatus) GetUsedTokens() OptInt {
+	return s.UsedTokens
+}
+
+// GetPercent returns the value of Percent.
+func (s *AiMemoryStatus) GetPercent() OptInt {
+	return s.Percent
+}
+
+// GetConversationTokens returns the value of ConversationTokens.
+func (s *AiMemoryStatus) GetConversationTokens() OptInt {
+	return s.ConversationTokens
+}
+
+// GetAttachmentTokens returns the value of AttachmentTokens.
+func (s *AiMemoryStatus) GetAttachmentTokens() OptInt {
+	return s.AttachmentTokens
+}
+
+// GetNotesTokens returns the value of NotesTokens.
+func (s *AiMemoryStatus) GetNotesTokens() OptInt {
+	return s.NotesTokens
+}
+
+// GetSummaryTokens returns the value of SummaryTokens.
+func (s *AiMemoryStatus) GetSummaryTokens() OptInt {
+	return s.SummaryTokens
+}
+
+// GetAttachments returns the value of Attachments.
+func (s *AiMemoryStatus) GetAttachments() []AiMemoryStatusAttachmentsItem {
+	return s.Attachments
+}
+
+// GetReads returns the value of Reads.
+func (s *AiMemoryStatus) GetReads() OptInt {
+	return s.Reads
+}
+
+// GetNotes returns the value of Notes.
+func (s *AiMemoryStatus) GetNotes() []string {
+	return s.Notes
+}
+
+// GetSummary returns the value of Summary.
+func (s *AiMemoryStatus) GetSummary() OptString {
+	return s.Summary
+}
+
+// GetCompactions returns the value of Compactions.
+func (s *AiMemoryStatus) GetCompactions() OptInt {
+	return s.Compactions
+}
+
+// GetCompactedAt returns the value of CompactedAt.
+func (s *AiMemoryStatus) GetCompactedAt() OptDateTime {
+	return s.CompactedAt
+}
+
+// GetCompactAtPercent returns the value of CompactAtPercent.
+func (s *AiMemoryStatus) GetCompactAtPercent() OptInt {
+	return s.CompactAtPercent
+}
+
+// SetCapacityTokens sets the value of CapacityTokens.
+func (s *AiMemoryStatus) SetCapacityTokens(val OptInt) {
+	s.CapacityTokens = val
+}
+
+// SetUsedTokens sets the value of UsedTokens.
+func (s *AiMemoryStatus) SetUsedTokens(val OptInt) {
+	s.UsedTokens = val
+}
+
+// SetPercent sets the value of Percent.
+func (s *AiMemoryStatus) SetPercent(val OptInt) {
+	s.Percent = val
+}
+
+// SetConversationTokens sets the value of ConversationTokens.
+func (s *AiMemoryStatus) SetConversationTokens(val OptInt) {
+	s.ConversationTokens = val
+}
+
+// SetAttachmentTokens sets the value of AttachmentTokens.
+func (s *AiMemoryStatus) SetAttachmentTokens(val OptInt) {
+	s.AttachmentTokens = val
+}
+
+// SetNotesTokens sets the value of NotesTokens.
+func (s *AiMemoryStatus) SetNotesTokens(val OptInt) {
+	s.NotesTokens = val
+}
+
+// SetSummaryTokens sets the value of SummaryTokens.
+func (s *AiMemoryStatus) SetSummaryTokens(val OptInt) {
+	s.SummaryTokens = val
+}
+
+// SetAttachments sets the value of Attachments.
+func (s *AiMemoryStatus) SetAttachments(val []AiMemoryStatusAttachmentsItem) {
+	s.Attachments = val
+}
+
+// SetReads sets the value of Reads.
+func (s *AiMemoryStatus) SetReads(val OptInt) {
+	s.Reads = val
+}
+
+// SetNotes sets the value of Notes.
+func (s *AiMemoryStatus) SetNotes(val []string) {
+	s.Notes = val
+}
+
+// SetSummary sets the value of Summary.
+func (s *AiMemoryStatus) SetSummary(val OptString) {
+	s.Summary = val
+}
+
+// SetCompactions sets the value of Compactions.
+func (s *AiMemoryStatus) SetCompactions(val OptInt) {
+	s.Compactions = val
+}
+
+// SetCompactedAt sets the value of CompactedAt.
+func (s *AiMemoryStatus) SetCompactedAt(val OptDateTime) {
+	s.CompactedAt = val
+}
+
+// SetCompactAtPercent sets the value of CompactAtPercent.
+func (s *AiMemoryStatus) SetCompactAtPercent(val OptInt) {
+	s.CompactAtPercent = val
+}
+
+func (*AiMemoryStatus) getAiSessionMemoryRes() {}
+
+type AiMemoryStatusAttachmentsItem struct {
+	File   OptString                          `json:"file"`
+	By     OptAiMemoryStatusAttachmentsItemBy `json:"by"`
+	At     OptDateTime                        `json:"at"`
+	Tokens OptInt                             `json:"tokens"`
+}
+
+// GetFile returns the value of File.
+func (s *AiMemoryStatusAttachmentsItem) GetFile() OptString {
+	return s.File
+}
+
+// GetBy returns the value of By.
+func (s *AiMemoryStatusAttachmentsItem) GetBy() OptAiMemoryStatusAttachmentsItemBy {
+	return s.By
+}
+
+// GetAt returns the value of At.
+func (s *AiMemoryStatusAttachmentsItem) GetAt() OptDateTime {
+	return s.At
+}
+
+// GetTokens returns the value of Tokens.
+func (s *AiMemoryStatusAttachmentsItem) GetTokens() OptInt {
+	return s.Tokens
+}
+
+// SetFile sets the value of File.
+func (s *AiMemoryStatusAttachmentsItem) SetFile(val OptString) {
+	s.File = val
+}
+
+// SetBy sets the value of By.
+func (s *AiMemoryStatusAttachmentsItem) SetBy(val OptAiMemoryStatusAttachmentsItemBy) {
+	s.By = val
+}
+
+// SetAt sets the value of At.
+func (s *AiMemoryStatusAttachmentsItem) SetAt(val OptDateTime) {
+	s.At = val
+}
+
+// SetTokens sets the value of Tokens.
+func (s *AiMemoryStatusAttachmentsItem) SetTokens(val OptInt) {
+	s.Tokens = val
+}
+
+type AiMemoryStatusAttachmentsItemBy string
+
+const (
+	AiMemoryStatusAttachmentsItemByServer AiMemoryStatusAttachmentsItemBy = "server"
+	AiMemoryStatusAttachmentsItemByAi     AiMemoryStatusAttachmentsItemBy = "ai"
+)
+
+// AllValues returns all AiMemoryStatusAttachmentsItemBy values.
+func (AiMemoryStatusAttachmentsItemBy) AllValues() []AiMemoryStatusAttachmentsItemBy {
+	return []AiMemoryStatusAttachmentsItemBy{
+		AiMemoryStatusAttachmentsItemByServer,
+		AiMemoryStatusAttachmentsItemByAi,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiMemoryStatusAttachmentsItemBy) MarshalText() ([]byte, error) {
+	switch s {
+	case AiMemoryStatusAttachmentsItemByServer:
+		return []byte(s), nil
+	case AiMemoryStatusAttachmentsItemByAi:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiMemoryStatusAttachmentsItemBy) UnmarshalText(data []byte) error {
+	switch AiMemoryStatusAttachmentsItemBy(data) {
+	case AiMemoryStatusAttachmentsItemByServer:
+		*s = AiMemoryStatusAttachmentsItemByServer
+		return nil
+	case AiMemoryStatusAttachmentsItemByAi:
+		*s = AiMemoryStatusAttachmentsItemByAi
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/AiPlanRef
+type AiPlanRef struct {
+	SessionID        OptUUID     `json:"session_id"`
+	SessionTitle     OptString   `json:"session_title"`
+	SessionCreatedAt OptDateTime `json:"session_created_at"`
+	// -1 the session's current plan, else its earlier plan at this index.
+	Index       OptInt            `json:"index"`
+	Goal        OptString         `json:"goal"`
+	Stages      OptInt            `json:"stages"`
+	Done        OptInt            `json:"done"`
+	State       OptAiPlanRefState `json:"state"`
+	UpdatedAt   OptDateTime       `json:"updated_at"`
+	Attachments []string          `json:"attachments"`
+}
+
+// GetSessionID returns the value of SessionID.
+func (s *AiPlanRef) GetSessionID() OptUUID {
+	return s.SessionID
+}
+
+// GetSessionTitle returns the value of SessionTitle.
+func (s *AiPlanRef) GetSessionTitle() OptString {
+	return s.SessionTitle
+}
+
+// GetSessionCreatedAt returns the value of SessionCreatedAt.
+func (s *AiPlanRef) GetSessionCreatedAt() OptDateTime {
+	return s.SessionCreatedAt
+}
+
+// GetIndex returns the value of Index.
+func (s *AiPlanRef) GetIndex() OptInt {
+	return s.Index
+}
+
+// GetGoal returns the value of Goal.
+func (s *AiPlanRef) GetGoal() OptString {
+	return s.Goal
+}
+
+// GetStages returns the value of Stages.
+func (s *AiPlanRef) GetStages() OptInt {
+	return s.Stages
+}
+
+// GetDone returns the value of Done.
+func (s *AiPlanRef) GetDone() OptInt {
+	return s.Done
+}
+
+// GetState returns the value of State.
+func (s *AiPlanRef) GetState() OptAiPlanRefState {
+	return s.State
+}
+
+// GetUpdatedAt returns the value of UpdatedAt.
+func (s *AiPlanRef) GetUpdatedAt() OptDateTime {
+	return s.UpdatedAt
+}
+
+// GetAttachments returns the value of Attachments.
+func (s *AiPlanRef) GetAttachments() []string {
+	return s.Attachments
+}
+
+// SetSessionID sets the value of SessionID.
+func (s *AiPlanRef) SetSessionID(val OptUUID) {
+	s.SessionID = val
+}
+
+// SetSessionTitle sets the value of SessionTitle.
+func (s *AiPlanRef) SetSessionTitle(val OptString) {
+	s.SessionTitle = val
+}
+
+// SetSessionCreatedAt sets the value of SessionCreatedAt.
+func (s *AiPlanRef) SetSessionCreatedAt(val OptDateTime) {
+	s.SessionCreatedAt = val
+}
+
+// SetIndex sets the value of Index.
+func (s *AiPlanRef) SetIndex(val OptInt) {
+	s.Index = val
+}
+
+// SetGoal sets the value of Goal.
+func (s *AiPlanRef) SetGoal(val OptString) {
+	s.Goal = val
+}
+
+// SetStages sets the value of Stages.
+func (s *AiPlanRef) SetStages(val OptInt) {
+	s.Stages = val
+}
+
+// SetDone sets the value of Done.
+func (s *AiPlanRef) SetDone(val OptInt) {
+	s.Done = val
+}
+
+// SetState sets the value of State.
+func (s *AiPlanRef) SetState(val OptAiPlanRefState) {
+	s.State = val
+}
+
+// SetUpdatedAt sets the value of UpdatedAt.
+func (s *AiPlanRef) SetUpdatedAt(val OptDateTime) {
+	s.UpdatedAt = val
+}
+
+// SetAttachments sets the value of Attachments.
+func (s *AiPlanRef) SetAttachments(val []string) {
+	s.Attachments = val
+}
+
+type AiPlanRefState string
+
+const (
+	AiPlanRefStateCurrent  AiPlanRefState = "current"
+	AiPlanRefStateFinished AiPlanRefState = "finished"
+	AiPlanRefStateSetAside AiPlanRefState = "set_aside"
+)
+
+// AllValues returns all AiPlanRefState values.
+func (AiPlanRefState) AllValues() []AiPlanRefState {
+	return []AiPlanRefState{
+		AiPlanRefStateCurrent,
+		AiPlanRefStateFinished,
+		AiPlanRefStateSetAside,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiPlanRefState) MarshalText() ([]byte, error) {
+	switch s {
+	case AiPlanRefStateCurrent:
+		return []byte(s), nil
+	case AiPlanRefStateFinished:
+		return []byte(s), nil
+	case AiPlanRefStateSetAside:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiPlanRefState) UnmarshalText(data []byte) error {
+	switch AiPlanRefState(data) {
+	case AiPlanRefStateCurrent:
+		*s = AiPlanRefStateCurrent
+		return nil
+	case AiPlanRefStateFinished:
+		*s = AiPlanRefStateFinished
+		return nil
+	case AiPlanRefStateSetAside:
+		*s = AiPlanRefStateSetAside
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Ref: #/components/schemas/AiProposal
 type AiProposal struct {
 	ID         uuid.UUID        `json:"id"`
@@ -2730,8 +3148,8 @@ type AiSession struct {
 	// confirmed proposal; every later proposal of the session writes there.
 	DraftRevisionID OptUUID   `json:"draft_revision_id"`
 	CreatedAt       time.Time `json:"created_at"`
-	// Set once its draft was promoted: the session is finished and refuses messages (409
-	// SESSION_PROMOTED).
+	// When its draft was last taken as the working revision; the session goes on, its next confirmed
+	// proposal in a fresh draft.
 	PromotedAt OptDateTime `json:"promoted_at"`
 	// The developer's cap on the session's provider calls; absent = the deployment's per-session cap.
 	CallBudget OptInt `json:"call_budget"`
@@ -3060,6 +3478,33 @@ func (s *AiToolCallArguments) init() AiToolCallArguments {
 	return m
 }
 
+type ApproveAiPlanOK struct {
+	TaskPlan OptApproveAiPlanOKTaskPlan `json:"task_plan"`
+}
+
+// GetTaskPlan returns the value of TaskPlan.
+func (s *ApproveAiPlanOK) GetTaskPlan() OptApproveAiPlanOKTaskPlan {
+	return s.TaskPlan
+}
+
+// SetTaskPlan sets the value of TaskPlan.
+func (s *ApproveAiPlanOK) SetTaskPlan(val OptApproveAiPlanOKTaskPlan) {
+	s.TaskPlan = val
+}
+
+func (*ApproveAiPlanOK) approveAiPlanRes() {}
+
+type ApproveAiPlanOKTaskPlan map[string]jx.Raw
+
+func (s *ApproveAiPlanOKTaskPlan) init() ApproveAiPlanOKTaskPlan {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
 type ArrangeDashboardBadRequest Error
 
 func (*ArrangeDashboardBadRequest) arrangeDashboardRes() {}
@@ -3118,6 +3563,133 @@ func (s *ArrangeDashboardReq) SetRows(val [][]uuid.UUID) {
 // SetWeights sets the value of Weights.
 func (s *ArrangeDashboardReq) SetWeights(val [][]float64) {
 	s.Weights = val
+}
+
+type AttachAiPlanBadRequest Error
+
+func (*AttachAiPlanBadRequest) attachAiPlanRes() {}
+
+type AttachAiPlanNotFound Error
+
+func (*AttachAiPlanNotFound) attachAiPlanRes() {}
+
+type AttachAiPlanOK struct {
+	TaskPlan     OptAttachAiPlanOKTaskPlan        `json:"task_plan"`
+	EarlierPlans []AttachAiPlanOKEarlierPlansItem `json:"earlier_plans"`
+	Messages     []AiChatMessage                  `json:"messages"`
+	Documents    []AiDocument                     `json:"documents"`
+	Memory       OptAiMemoryStatus                `json:"memory"`
+}
+
+// GetTaskPlan returns the value of TaskPlan.
+func (s *AttachAiPlanOK) GetTaskPlan() OptAttachAiPlanOKTaskPlan {
+	return s.TaskPlan
+}
+
+// GetEarlierPlans returns the value of EarlierPlans.
+func (s *AttachAiPlanOK) GetEarlierPlans() []AttachAiPlanOKEarlierPlansItem {
+	return s.EarlierPlans
+}
+
+// GetMessages returns the value of Messages.
+func (s *AttachAiPlanOK) GetMessages() []AiChatMessage {
+	return s.Messages
+}
+
+// GetDocuments returns the value of Documents.
+func (s *AttachAiPlanOK) GetDocuments() []AiDocument {
+	return s.Documents
+}
+
+// GetMemory returns the value of Memory.
+func (s *AttachAiPlanOK) GetMemory() OptAiMemoryStatus {
+	return s.Memory
+}
+
+// SetTaskPlan sets the value of TaskPlan.
+func (s *AttachAiPlanOK) SetTaskPlan(val OptAttachAiPlanOKTaskPlan) {
+	s.TaskPlan = val
+}
+
+// SetEarlierPlans sets the value of EarlierPlans.
+func (s *AttachAiPlanOK) SetEarlierPlans(val []AttachAiPlanOKEarlierPlansItem) {
+	s.EarlierPlans = val
+}
+
+// SetMessages sets the value of Messages.
+func (s *AttachAiPlanOK) SetMessages(val []AiChatMessage) {
+	s.Messages = val
+}
+
+// SetDocuments sets the value of Documents.
+func (s *AttachAiPlanOK) SetDocuments(val []AiDocument) {
+	s.Documents = val
+}
+
+// SetMemory sets the value of Memory.
+func (s *AttachAiPlanOK) SetMemory(val OptAiMemoryStatus) {
+	s.Memory = val
+}
+
+func (*AttachAiPlanOK) attachAiPlanRes() {}
+
+type AttachAiPlanOKEarlierPlansItem map[string]jx.Raw
+
+func (s *AttachAiPlanOKEarlierPlansItem) init() AttachAiPlanOKEarlierPlansItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type AttachAiPlanOKTaskPlan map[string]jx.Raw
+
+func (s *AttachAiPlanOKTaskPlan) init() AttachAiPlanOKTaskPlan {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type AttachAiPlanReq struct {
+	SessionID uuid.UUID `json:"session_id"`
+	// -1 or absent: that session's current plan; else its earlier plan at this index.
+	Index       OptInt  `json:"index"`
+	Attachments OptBool `json:"attachments"`
+}
+
+// GetSessionID returns the value of SessionID.
+func (s *AttachAiPlanReq) GetSessionID() uuid.UUID {
+	return s.SessionID
+}
+
+// GetIndex returns the value of Index.
+func (s *AttachAiPlanReq) GetIndex() OptInt {
+	return s.Index
+}
+
+// GetAttachments returns the value of Attachments.
+func (s *AttachAiPlanReq) GetAttachments() OptBool {
+	return s.Attachments
+}
+
+// SetSessionID sets the value of SessionID.
+func (s *AttachAiPlanReq) SetSessionID(val uuid.UUID) {
+	s.SessionID = val
+}
+
+// SetIndex sets the value of Index.
+func (s *AttachAiPlanReq) SetIndex(val OptInt) {
+	s.Index = val
+}
+
+// SetAttachments sets the value of Attachments.
+func (s *AttachAiPlanReq) SetAttachments(val OptBool) {
+	s.Attachments = val
 }
 
 // The shape actually returned by GET /api/admin/audit (auditEventItem in internal/gateway/handler.
@@ -4435,31 +5007,6 @@ func (s *BAUser) SetEmail(val string) {
 // SetRole sets the value of Role.
 func (s *BAUser) SetRole(val string) {
 	s.Role = val
-}
-
-type BackfillFormMappingOK struct {
-	Status           OptString `json:"status"`
-	RecordsProcessed OptInt    `json:"records_processed"`
-}
-
-// GetStatus returns the value of Status.
-func (s *BackfillFormMappingOK) GetStatus() OptString {
-	return s.Status
-}
-
-// GetRecordsProcessed returns the value of RecordsProcessed.
-func (s *BackfillFormMappingOK) GetRecordsProcessed() OptInt {
-	return s.RecordsProcessed
-}
-
-// SetStatus sets the value of Status.
-func (s *BackfillFormMappingOK) SetStatus(val OptString) {
-	s.Status = val
-}
-
-// SetRecordsProcessed sets the value of RecordsProcessed.
-func (s *BackfillFormMappingOK) SetRecordsProcessed(val OptInt) {
-	s.RecordsProcessed = val
 }
 
 type BearerAuth struct {
@@ -5783,6 +6330,44 @@ func (s *ColumnMapping) SetTargetField(val OptString) {
 	s.TargetField = val
 }
 
+type CompactAiSessionMemoryOK struct {
+	Memory   OptAiMemoryStatus `json:"memory"`
+	Messages []AiChatMessage   `json:"messages"`
+	Note     OptString         `json:"note"`
+}
+
+// GetMemory returns the value of Memory.
+func (s *CompactAiSessionMemoryOK) GetMemory() OptAiMemoryStatus {
+	return s.Memory
+}
+
+// GetMessages returns the value of Messages.
+func (s *CompactAiSessionMemoryOK) GetMessages() []AiChatMessage {
+	return s.Messages
+}
+
+// GetNote returns the value of Note.
+func (s *CompactAiSessionMemoryOK) GetNote() OptString {
+	return s.Note
+}
+
+// SetMemory sets the value of Memory.
+func (s *CompactAiSessionMemoryOK) SetMemory(val OptAiMemoryStatus) {
+	s.Memory = val
+}
+
+// SetMessages sets the value of Messages.
+func (s *CompactAiSessionMemoryOK) SetMessages(val []AiChatMessage) {
+	s.Messages = val
+}
+
+// SetNote sets the value of Note.
+func (s *CompactAiSessionMemoryOK) SetNote(val OptString) {
+	s.Note = val
+}
+
+func (*CompactAiSessionMemoryOK) compactAiSessionMemoryRes() {}
+
 type CompleteTaskBadRequest Error
 
 func (*CompleteTaskBadRequest) completeTaskRes() {}
@@ -6127,6 +6712,96 @@ func (s *CopyBAValuesUnprocessableEntity) init() CopyBAValuesUnprocessableEntity
 }
 
 func (*CopyBAValuesUnprocessableEntity) copyBAValuesRes() {}
+
+type CopyFormRecordsBadRequest Error
+
+func (*CopyFormRecordsBadRequest) copyFormRecordsRes() {}
+
+type CopyFormRecordsForbidden Error
+
+func (*CopyFormRecordsForbidden) copyFormRecordsRes() {}
+
+type CopyFormRecordsNotFound Error
+
+func (*CopyFormRecordsNotFound) copyFormRecordsRes() {}
+
+type CopyFormRecordsOK struct {
+	Status OptString `json:"status"`
+	Copied OptInt    `json:"copied"`
+}
+
+// GetStatus returns the value of Status.
+func (s *CopyFormRecordsOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetCopied returns the value of Copied.
+func (s *CopyFormRecordsOK) GetCopied() OptInt {
+	return s.Copied
+}
+
+// SetStatus sets the value of Status.
+func (s *CopyFormRecordsOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetCopied sets the value of Copied.
+func (s *CopyFormRecordsOK) SetCopied(val OptInt) {
+	s.Copied = val
+}
+
+func (*CopyFormRecordsOK) copyFormRecordsRes() {}
+
+type CopyFormRecordsReq struct {
+	RecordIds []uuid.UUID `json:"record_ids"`
+	// A date field of the table.
+	Field string `json:"field"`
+	// The copies' date.
+	Value string `json:"value"`
+}
+
+// GetRecordIds returns the value of RecordIds.
+func (s *CopyFormRecordsReq) GetRecordIds() []uuid.UUID {
+	return s.RecordIds
+}
+
+// GetField returns the value of Field.
+func (s *CopyFormRecordsReq) GetField() string {
+	return s.Field
+}
+
+// GetValue returns the value of Value.
+func (s *CopyFormRecordsReq) GetValue() string {
+	return s.Value
+}
+
+// SetRecordIds sets the value of RecordIds.
+func (s *CopyFormRecordsReq) SetRecordIds(val []uuid.UUID) {
+	s.RecordIds = val
+}
+
+// SetField sets the value of Field.
+func (s *CopyFormRecordsReq) SetField(val string) {
+	s.Field = val
+}
+
+// SetValue sets the value of Value.
+func (s *CopyFormRecordsReq) SetValue(val string) {
+	s.Value = val
+}
+
+type CopyFormRecordsUnprocessableEntity map[string]jx.Raw
+
+func (s *CopyFormRecordsUnprocessableEntity) init() CopyFormRecordsUnprocessableEntity {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+func (*CopyFormRecordsUnprocessableEntity) copyFormRecordsRes() {}
 
 // CreateAPITokenBadRequest is response for CreateAPIToken operation.
 type CreateAPITokenBadRequest struct{}
@@ -7453,6 +8128,9 @@ type CreateFormRequest struct {
 	// The label of a total member (code ALL) the records' members sit under; "" for none, omitted keeps
 	// it.
 	MemberRootLabel OptString `json:"member_root_label"`
+	// Name each member code first (IC03 · Intragroup loan principal), so records with the same text
+	// tell apart; omitted keeps it.
+	MemberLabelWithCode OptBool `json:"member_label_with_code"`
 	// Omitted keeps the setting.
 	EditAccess OptCreateFormRequestEditAccess `json:"edit_access"`
 }
@@ -7490,6 +8168,11 @@ func (s *CreateFormRequest) GetMemberLabelField() OptString {
 // GetMemberRootLabel returns the value of MemberRootLabel.
 func (s *CreateFormRequest) GetMemberRootLabel() OptString {
 	return s.MemberRootLabel
+}
+
+// GetMemberLabelWithCode returns the value of MemberLabelWithCode.
+func (s *CreateFormRequest) GetMemberLabelWithCode() OptBool {
+	return s.MemberLabelWithCode
 }
 
 // GetEditAccess returns the value of EditAccess.
@@ -7530,6 +8213,11 @@ func (s *CreateFormRequest) SetMemberLabelField(val OptString) {
 // SetMemberRootLabel sets the value of MemberRootLabel.
 func (s *CreateFormRequest) SetMemberRootLabel(val OptString) {
 	s.MemberRootLabel = val
+}
+
+// SetMemberLabelWithCode sets the value of MemberLabelWithCode.
+func (s *CreateFormRequest) SetMemberLabelWithCode(val OptBool) {
+	s.MemberLabelWithCode = val
 }
 
 // SetEditAccess sets the value of EditAccess.
@@ -10871,6 +11559,8 @@ func (s *Error) SetError(val string) {
 
 func (*Error) addGridDimensionRes()            {}
 func (*Error) addGridMetricRes()               {}
+func (*Error) approveAiPlanRes()               {}
+func (*Error) compactAiSessionMemoryRes()      {}
 func (*Error) createAdminApplicationRes()      {}
 func (*Error) createAdminModelRes()            {}
 func (*Error) createAdminRevisionRes()         {}
@@ -10890,6 +11580,7 @@ func (*Error) deleteWorkflowRes()              {}
 func (*Error) disconnectIntegrationOAuthRes()  {}
 func (*Error) duplicateIntegrationRes()        {}
 func (*Error) generateDimensionPeriodsRes()    {}
+func (*Error) getAiSessionMemoryRes()          {}
 func (*Error) getAiSessionRes()                {}
 func (*Error) getAiWorkbookMapRes()            {}
 func (*Error) getBusinessDashboardRes()        {}
@@ -10901,6 +11592,7 @@ func (*Error) getRecordDeletePlanRes()         {}
 func (*Error) getRecordHistoryRes()            {}
 func (*Error) getRelatedRecordsRes()           {}
 func (*Error) getWorkflowDefinitionRes()       {}
+func (*Error) getWorkflowInstanceRes()         {}
 func (*Error) getWorkflowRes()                 {}
 func (*Error) getWorkflowStatusRes()           {}
 func (*Error) grantAdminUserAppAccessRes()     {}
@@ -11244,6 +11936,15 @@ type ExportSpec struct {
 	IncludeEmptyRows OptBool                       `json:"include_empty_rows"`
 	SheetName        OptString                     `json:"sheet_name"`
 	FileName         OptString                     `json:"file_name"`
+	// Parent members are exported too, with the totals the grid serves for them (a Consolidated column,
+	// a year); a filter's members are then taken as named, in its order, not expanded to their leaves.
+	IncludeTotals OptBool `json:"include_totals"`
+	// A download from a dashboard narrows the export to the members its selector bar shows (GET
+	// …/export?bar=), one filter per bar dimension the grid has.
+	FollowSelector OptBool `json:"follow_selector"`
+	// More grids in the same xlsx workbook (a reporting pack), a sheet each: {grid: <grid name>, …its
+	// own export settings}.
+	Sheets []ExportSpecSheetsItem `json:"sheets"`
 }
 
 // GetFormat returns the value of Format.
@@ -11326,6 +12027,21 @@ func (s *ExportSpec) GetFileName() OptString {
 	return s.FileName
 }
 
+// GetIncludeTotals returns the value of IncludeTotals.
+func (s *ExportSpec) GetIncludeTotals() OptBool {
+	return s.IncludeTotals
+}
+
+// GetFollowSelector returns the value of FollowSelector.
+func (s *ExportSpec) GetFollowSelector() OptBool {
+	return s.FollowSelector
+}
+
+// GetSheets returns the value of Sheets.
+func (s *ExportSpec) GetSheets() []ExportSpecSheetsItem {
+	return s.Sheets
+}
+
 // SetFormat sets the value of Format.
 func (s *ExportSpec) SetFormat(val OptExportSpecFormat) {
 	s.Format = val
@@ -11404,6 +12120,21 @@ func (s *ExportSpec) SetSheetName(val OptString) {
 // SetFileName sets the value of FileName.
 func (s *ExportSpec) SetFileName(val OptString) {
 	s.FileName = val
+}
+
+// SetIncludeTotals sets the value of IncludeTotals.
+func (s *ExportSpec) SetIncludeTotals(val OptBool) {
+	s.IncludeTotals = val
+}
+
+// SetFollowSelector sets the value of FollowSelector.
+func (s *ExportSpec) SetFollowSelector(val OptBool) {
+	s.FollowSelector = val
+}
+
+// SetSheets sets the value of Sheets.
+func (s *ExportSpec) SetSheets(val []ExportSpecSheetsItem) {
+	s.Sheets = val
 }
 
 // Default header -> header in the file.
@@ -11709,6 +12440,43 @@ func (s *ExportSpecMetricDisplay) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
+}
+
+type ExportSpecSheetsItem struct {
+	// A grid of the export's revision.
+	Grid            string `json:"grid"`
+	AdditionalProps ExportSpecSheetsItemAdditional
+}
+
+// GetGrid returns the value of Grid.
+func (s *ExportSpecSheetsItem) GetGrid() string {
+	return s.Grid
+}
+
+// GetAdditionalProps returns the value of AdditionalProps.
+func (s *ExportSpecSheetsItem) GetAdditionalProps() ExportSpecSheetsItemAdditional {
+	return s.AdditionalProps
+}
+
+// SetGrid sets the value of Grid.
+func (s *ExportSpecSheetsItem) SetGrid(val string) {
+	s.Grid = val
+}
+
+// SetAdditionalProps sets the value of AdditionalProps.
+func (s *ExportSpecSheetsItem) SetAdditionalProps(val ExportSpecSheetsItemAdditional) {
+	s.AdditionalProps = val
+}
+
+type ExportSpecSheetsItemAdditional map[string]jx.Raw
+
+func (s *ExportSpecSheetsItemAdditional) init() ExportSpecSheetsItemAdditional {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
 }
 
 type ExtractFormulaRefsOK struct {
@@ -12064,6 +12832,8 @@ type FormDef struct {
 	MemberLabelField OptString `json:"member_label_field"`
 	// The label of the total member (code ALL) the records' members sit under, when there is one.
 	MemberRootLabel OptString `json:"member_root_label"`
+	// Each member is named code first (IC03 · Intragroup loan principal).
+	MemberLabelWithCode OptBool `json:"member_label_with_code"`
 	// Who may change and delete the table's records: their creator and the application's administrators
 	// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
 	// records naming it theirs to see only.
@@ -12114,6 +12884,11 @@ func (s *FormDef) GetMemberLabelField() OptString {
 // GetMemberRootLabel returns the value of MemberRootLabel.
 func (s *FormDef) GetMemberRootLabel() OptString {
 	return s.MemberRootLabel
+}
+
+// GetMemberLabelWithCode returns the value of MemberLabelWithCode.
+func (s *FormDef) GetMemberLabelWithCode() OptBool {
+	return s.MemberLabelWithCode
 }
 
 // GetEditAccess returns the value of EditAccess.
@@ -12169,6 +12944,11 @@ func (s *FormDef) SetMemberLabelField(val OptString) {
 // SetMemberRootLabel sets the value of MemberRootLabel.
 func (s *FormDef) SetMemberRootLabel(val OptString) {
 	s.MemberRootLabel = val
+}
+
+// SetMemberLabelWithCode sets the value of MemberLabelWithCode.
+func (s *FormDef) SetMemberLabelWithCode(val OptBool) {
+	s.MemberLabelWithCode = val
 }
 
 // SetEditAccess sets the value of EditAccess.
@@ -13272,6 +14052,10 @@ type GetAiSessionOK struct {
 	Usage OptGetAiSessionOKUsage `json:"usage"`
 	// The plan of a goal the developer delegated (plan_task); null for a session without one.
 	TaskPlan OptNilGetAiSessionOKTaskPlan `json:"task_plan"`
+	// The session's plans no longer under way — one plan per request, so a new request sets the open
+	// one aside or follows a finished one.
+	EarlierPlans []GetAiSessionOKEarlierPlansItem `json:"earlier_plans"`
+	Memory       OptAiMemoryStatus                `json:"memory"`
 }
 
 // GetSession returns the value of Session.
@@ -13299,6 +14083,16 @@ func (s *GetAiSessionOK) GetTaskPlan() OptNilGetAiSessionOKTaskPlan {
 	return s.TaskPlan
 }
 
+// GetEarlierPlans returns the value of EarlierPlans.
+func (s *GetAiSessionOK) GetEarlierPlans() []GetAiSessionOKEarlierPlansItem {
+	return s.EarlierPlans
+}
+
+// GetMemory returns the value of Memory.
+func (s *GetAiSessionOK) GetMemory() OptAiMemoryStatus {
+	return s.Memory
+}
+
 // SetSession sets the value of Session.
 func (s *GetAiSessionOK) SetSession(val OptAiSession) {
 	s.Session = val
@@ -13324,7 +14118,105 @@ func (s *GetAiSessionOK) SetTaskPlan(val OptNilGetAiSessionOKTaskPlan) {
 	s.TaskPlan = val
 }
 
+// SetEarlierPlans sets the value of EarlierPlans.
+func (s *GetAiSessionOK) SetEarlierPlans(val []GetAiSessionOKEarlierPlansItem) {
+	s.EarlierPlans = val
+}
+
+// SetMemory sets the value of Memory.
+func (s *GetAiSessionOK) SetMemory(val OptAiMemoryStatus) {
+	s.Memory = val
+}
+
 func (*GetAiSessionOK) getAiSessionRes() {}
+
+type GetAiSessionOKEarlierPlansItem struct {
+	Plan  OptGetAiSessionOKEarlierPlansItemPlan  `json:"plan"`
+	State OptGetAiSessionOKEarlierPlansItemState `json:"state"`
+	At    OptDateTime                            `json:"at"`
+}
+
+// GetPlan returns the value of Plan.
+func (s *GetAiSessionOKEarlierPlansItem) GetPlan() OptGetAiSessionOKEarlierPlansItemPlan {
+	return s.Plan
+}
+
+// GetState returns the value of State.
+func (s *GetAiSessionOKEarlierPlansItem) GetState() OptGetAiSessionOKEarlierPlansItemState {
+	return s.State
+}
+
+// GetAt returns the value of At.
+func (s *GetAiSessionOKEarlierPlansItem) GetAt() OptDateTime {
+	return s.At
+}
+
+// SetPlan sets the value of Plan.
+func (s *GetAiSessionOKEarlierPlansItem) SetPlan(val OptGetAiSessionOKEarlierPlansItemPlan) {
+	s.Plan = val
+}
+
+// SetState sets the value of State.
+func (s *GetAiSessionOKEarlierPlansItem) SetState(val OptGetAiSessionOKEarlierPlansItemState) {
+	s.State = val
+}
+
+// SetAt sets the value of At.
+func (s *GetAiSessionOKEarlierPlansItem) SetAt(val OptDateTime) {
+	s.At = val
+}
+
+type GetAiSessionOKEarlierPlansItemPlan map[string]jx.Raw
+
+func (s *GetAiSessionOKEarlierPlansItemPlan) init() GetAiSessionOKEarlierPlansItemPlan {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type GetAiSessionOKEarlierPlansItemState string
+
+const (
+	GetAiSessionOKEarlierPlansItemStateFinished GetAiSessionOKEarlierPlansItemState = "finished"
+	GetAiSessionOKEarlierPlansItemStateSetAside GetAiSessionOKEarlierPlansItemState = "set_aside"
+)
+
+// AllValues returns all GetAiSessionOKEarlierPlansItemState values.
+func (GetAiSessionOKEarlierPlansItemState) AllValues() []GetAiSessionOKEarlierPlansItemState {
+	return []GetAiSessionOKEarlierPlansItemState{
+		GetAiSessionOKEarlierPlansItemStateFinished,
+		GetAiSessionOKEarlierPlansItemStateSetAside,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetAiSessionOKEarlierPlansItemState) MarshalText() ([]byte, error) {
+	switch s {
+	case GetAiSessionOKEarlierPlansItemStateFinished:
+		return []byte(s), nil
+	case GetAiSessionOKEarlierPlansItemStateSetAside:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetAiSessionOKEarlierPlansItemState) UnmarshalText(data []byte) error {
+	switch GetAiSessionOKEarlierPlansItemState(data) {
+	case GetAiSessionOKEarlierPlansItemStateFinished:
+		*s = GetAiSessionOKEarlierPlansItemStateFinished
+		return nil
+	case GetAiSessionOKEarlierPlansItemStateSetAside:
+		*s = GetAiSessionOKEarlierPlansItemStateSetAside
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // The plan of a goal the developer delegated (plan_task); null for a session without one.
 type GetAiSessionOKTaskPlan struct {
@@ -13781,6 +14673,181 @@ func (s *GetAiWorkbookMapOKSheetsItem) SetNotMappedLabels(val OptGetAiWorkbookMa
 type GetAiWorkbookMapOKSheetsItemNotMappedLabels map[string]string
 
 func (s *GetAiWorkbookMapOKSheetsItemNotMappedLabels) init() GetAiWorkbookMapOKSheetsItemNotMappedLabels {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetApprovalChangesOK struct {
+	Runs []GetApprovalChangesOKRunsItem `json:"runs"`
+}
+
+// GetRuns returns the value of Runs.
+func (s *GetApprovalChangesOK) GetRuns() []GetApprovalChangesOKRunsItem {
+	return s.Runs
+}
+
+// SetRuns sets the value of Runs.
+func (s *GetApprovalChangesOK) SetRuns(val []GetApprovalChangesOKRunsItem) {
+	s.Runs = val
+}
+
+type GetApprovalChangesOKRunsItem struct {
+	InstanceID uuid.UUID `json:"instance_id"`
+	Workflow   string    `json:"workflow"`
+	// The run's members, e.g. Period: Sep 2026.
+	Scope      string                                     `json:"scope"`
+	ApprovedAt time.Time                                  `json:"approved_at"`
+	Changed    int                                        `json:"changed"`
+	Examples   []GetApprovalChangesOKRunsItemExamplesItem `json:"examples"`
+}
+
+// GetInstanceID returns the value of InstanceID.
+func (s *GetApprovalChangesOKRunsItem) GetInstanceID() uuid.UUID {
+	return s.InstanceID
+}
+
+// GetWorkflow returns the value of Workflow.
+func (s *GetApprovalChangesOKRunsItem) GetWorkflow() string {
+	return s.Workflow
+}
+
+// GetScope returns the value of Scope.
+func (s *GetApprovalChangesOKRunsItem) GetScope() string {
+	return s.Scope
+}
+
+// GetApprovedAt returns the value of ApprovedAt.
+func (s *GetApprovalChangesOKRunsItem) GetApprovedAt() time.Time {
+	return s.ApprovedAt
+}
+
+// GetChanged returns the value of Changed.
+func (s *GetApprovalChangesOKRunsItem) GetChanged() int {
+	return s.Changed
+}
+
+// GetExamples returns the value of Examples.
+func (s *GetApprovalChangesOKRunsItem) GetExamples() []GetApprovalChangesOKRunsItemExamplesItem {
+	return s.Examples
+}
+
+// SetInstanceID sets the value of InstanceID.
+func (s *GetApprovalChangesOKRunsItem) SetInstanceID(val uuid.UUID) {
+	s.InstanceID = val
+}
+
+// SetWorkflow sets the value of Workflow.
+func (s *GetApprovalChangesOKRunsItem) SetWorkflow(val string) {
+	s.Workflow = val
+}
+
+// SetScope sets the value of Scope.
+func (s *GetApprovalChangesOKRunsItem) SetScope(val string) {
+	s.Scope = val
+}
+
+// SetApprovedAt sets the value of ApprovedAt.
+func (s *GetApprovalChangesOKRunsItem) SetApprovedAt(val time.Time) {
+	s.ApprovedAt = val
+}
+
+// SetChanged sets the value of Changed.
+func (s *GetApprovalChangesOKRunsItem) SetChanged(val int) {
+	s.Changed = val
+}
+
+// SetExamples sets the value of Examples.
+func (s *GetApprovalChangesOKRunsItem) SetExamples(val []GetApprovalChangesOKRunsItemExamplesItem) {
+	s.Examples = val
+}
+
+type GetApprovalChangesOKRunsItemExamplesItem struct {
+	MetricID     uuid.UUID                                       `json:"metric_id"`
+	Metric       string                                          `json:"metric"`
+	Members      GetApprovalChangesOKRunsItemExamplesItemMembers `json:"members"`
+	Approved     OptFloat64                                      `json:"approved"`
+	Now          OptFloat64                                      `json:"now"`
+	ApprovedText OptString                                       `json:"approved_text"`
+	NowText      OptString                                       `json:"now_text"`
+}
+
+// GetMetricID returns the value of MetricID.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetMetricID() uuid.UUID {
+	return s.MetricID
+}
+
+// GetMetric returns the value of Metric.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetMetric() string {
+	return s.Metric
+}
+
+// GetMembers returns the value of Members.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetMembers() GetApprovalChangesOKRunsItemExamplesItemMembers {
+	return s.Members
+}
+
+// GetApproved returns the value of Approved.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetApproved() OptFloat64 {
+	return s.Approved
+}
+
+// GetNow returns the value of Now.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetNow() OptFloat64 {
+	return s.Now
+}
+
+// GetApprovedText returns the value of ApprovedText.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetApprovedText() OptString {
+	return s.ApprovedText
+}
+
+// GetNowText returns the value of NowText.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) GetNowText() OptString {
+	return s.NowText
+}
+
+// SetMetricID sets the value of MetricID.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetMetricID(val uuid.UUID) {
+	s.MetricID = val
+}
+
+// SetMetric sets the value of Metric.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetMetric(val string) {
+	s.Metric = val
+}
+
+// SetMembers sets the value of Members.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetMembers(val GetApprovalChangesOKRunsItemExamplesItemMembers) {
+	s.Members = val
+}
+
+// SetApproved sets the value of Approved.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetApproved(val OptFloat64) {
+	s.Approved = val
+}
+
+// SetNow sets the value of Now.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetNow(val OptFloat64) {
+	s.Now = val
+}
+
+// SetApprovedText sets the value of ApprovedText.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetApprovedText(val OptString) {
+	s.ApprovedText = val
+}
+
+// SetNowText sets the value of NowText.
+func (s *GetApprovalChangesOKRunsItemExamplesItem) SetNowText(val OptString) {
+	s.NowText = val
+}
+
+type GetApprovalChangesOKRunsItemExamplesItemMembers map[string]string
+
+func (s *GetApprovalChangesOKRunsItemExamplesItemMembers) init() GetApprovalChangesOKRunsItemExamplesItemMembers {
 	m := *s
 	if m == nil {
 		m = map[string]string{}
@@ -14932,6 +15999,203 @@ func (s *GetWorkflowDefinitionOKStepsItemType) UnmarshalText(data []byte) error 
 	}
 }
 
+type GetWorkflowInstanceOK struct {
+	ID            uuid.UUID `json:"id"`
+	Workflow      string    `json:"workflow"`
+	ApplicationID uuid.UUID `json:"application_id"`
+	// Running, completed, cancelled, failed or reopened.
+	Status      string                          `json:"status"`
+	Context     OptGetWorkflowInstanceOKContext `json:"context"`
+	StartedAt   string                          `json:"started_at"`
+	CompletedAt OptString                       `json:"completed_at"`
+	ReopenedAt  OptString                       `json:"reopened_at"`
+	// The name of who reopened it.
+	ReopenedBy   OptString                        `json:"reopened_by"`
+	ReopenReason OptString                        `json:"reopen_reason"`
+	Steps        []GetWorkflowInstanceOKStepsItem `json:"steps"`
+}
+
+// GetID returns the value of ID.
+func (s *GetWorkflowInstanceOK) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetWorkflow returns the value of Workflow.
+func (s *GetWorkflowInstanceOK) GetWorkflow() string {
+	return s.Workflow
+}
+
+// GetApplicationID returns the value of ApplicationID.
+func (s *GetWorkflowInstanceOK) GetApplicationID() uuid.UUID {
+	return s.ApplicationID
+}
+
+// GetStatus returns the value of Status.
+func (s *GetWorkflowInstanceOK) GetStatus() string {
+	return s.Status
+}
+
+// GetContext returns the value of Context.
+func (s *GetWorkflowInstanceOK) GetContext() OptGetWorkflowInstanceOKContext {
+	return s.Context
+}
+
+// GetStartedAt returns the value of StartedAt.
+func (s *GetWorkflowInstanceOK) GetStartedAt() string {
+	return s.StartedAt
+}
+
+// GetCompletedAt returns the value of CompletedAt.
+func (s *GetWorkflowInstanceOK) GetCompletedAt() OptString {
+	return s.CompletedAt
+}
+
+// GetReopenedAt returns the value of ReopenedAt.
+func (s *GetWorkflowInstanceOK) GetReopenedAt() OptString {
+	return s.ReopenedAt
+}
+
+// GetReopenedBy returns the value of ReopenedBy.
+func (s *GetWorkflowInstanceOK) GetReopenedBy() OptString {
+	return s.ReopenedBy
+}
+
+// GetReopenReason returns the value of ReopenReason.
+func (s *GetWorkflowInstanceOK) GetReopenReason() OptString {
+	return s.ReopenReason
+}
+
+// GetSteps returns the value of Steps.
+func (s *GetWorkflowInstanceOK) GetSteps() []GetWorkflowInstanceOKStepsItem {
+	return s.Steps
+}
+
+// SetID sets the value of ID.
+func (s *GetWorkflowInstanceOK) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetWorkflow sets the value of Workflow.
+func (s *GetWorkflowInstanceOK) SetWorkflow(val string) {
+	s.Workflow = val
+}
+
+// SetApplicationID sets the value of ApplicationID.
+func (s *GetWorkflowInstanceOK) SetApplicationID(val uuid.UUID) {
+	s.ApplicationID = val
+}
+
+// SetStatus sets the value of Status.
+func (s *GetWorkflowInstanceOK) SetStatus(val string) {
+	s.Status = val
+}
+
+// SetContext sets the value of Context.
+func (s *GetWorkflowInstanceOK) SetContext(val OptGetWorkflowInstanceOKContext) {
+	s.Context = val
+}
+
+// SetStartedAt sets the value of StartedAt.
+func (s *GetWorkflowInstanceOK) SetStartedAt(val string) {
+	s.StartedAt = val
+}
+
+// SetCompletedAt sets the value of CompletedAt.
+func (s *GetWorkflowInstanceOK) SetCompletedAt(val OptString) {
+	s.CompletedAt = val
+}
+
+// SetReopenedAt sets the value of ReopenedAt.
+func (s *GetWorkflowInstanceOK) SetReopenedAt(val OptString) {
+	s.ReopenedAt = val
+}
+
+// SetReopenedBy sets the value of ReopenedBy.
+func (s *GetWorkflowInstanceOK) SetReopenedBy(val OptString) {
+	s.ReopenedBy = val
+}
+
+// SetReopenReason sets the value of ReopenReason.
+func (s *GetWorkflowInstanceOK) SetReopenReason(val OptString) {
+	s.ReopenReason = val
+}
+
+// SetSteps sets the value of Steps.
+func (s *GetWorkflowInstanceOK) SetSteps(val []GetWorkflowInstanceOKStepsItem) {
+	s.Steps = val
+}
+
+func (*GetWorkflowInstanceOK) getWorkflowInstanceRes() {}
+
+type GetWorkflowInstanceOKContext map[string]jx.Raw
+
+func (s *GetWorkflowInstanceOKContext) init() GetWorkflowInstanceOKContext {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type GetWorkflowInstanceOKStepsItem struct {
+	StepID      string    `json:"step_id"`
+	Status      string    `json:"status"`
+	Decision    OptString `json:"decision"`
+	Comment     OptString `json:"comment"`
+	CompletedAt OptString `json:"completed_at"`
+}
+
+// GetStepID returns the value of StepID.
+func (s *GetWorkflowInstanceOKStepsItem) GetStepID() string {
+	return s.StepID
+}
+
+// GetStatus returns the value of Status.
+func (s *GetWorkflowInstanceOKStepsItem) GetStatus() string {
+	return s.Status
+}
+
+// GetDecision returns the value of Decision.
+func (s *GetWorkflowInstanceOKStepsItem) GetDecision() OptString {
+	return s.Decision
+}
+
+// GetComment returns the value of Comment.
+func (s *GetWorkflowInstanceOKStepsItem) GetComment() OptString {
+	return s.Comment
+}
+
+// GetCompletedAt returns the value of CompletedAt.
+func (s *GetWorkflowInstanceOKStepsItem) GetCompletedAt() OptString {
+	return s.CompletedAt
+}
+
+// SetStepID sets the value of StepID.
+func (s *GetWorkflowInstanceOKStepsItem) SetStepID(val string) {
+	s.StepID = val
+}
+
+// SetStatus sets the value of Status.
+func (s *GetWorkflowInstanceOKStepsItem) SetStatus(val string) {
+	s.Status = val
+}
+
+// SetDecision sets the value of Decision.
+func (s *GetWorkflowInstanceOKStepsItem) SetDecision(val OptString) {
+	s.Decision = val
+}
+
+// SetComment sets the value of Comment.
+func (s *GetWorkflowInstanceOKStepsItem) SetComment(val OptString) {
+	s.Comment = val
+}
+
+// SetCompletedAt sets the value of CompletedAt.
+func (s *GetWorkflowInstanceOKStepsItem) SetCompletedAt(val OptString) {
+	s.CompletedAt = val
+}
+
 type GetWorkflowStatusOK struct {
 	Workflow string                            `json:"workflow"`
 	Found    bool                              `json:"found"`
@@ -14985,6 +16249,9 @@ type GetWorkflowStatusOKInstance struct {
 	Status      OptString      `json:"status"`
 	StartedAt   OptDateTime    `json:"started_at"`
 	CompletedAt OptNilDateTime `json:"completed_at"`
+	// How many approved figures of an approved run moved since its approval (an input outside the lock
+	// changed); absent when none.
+	ChangedSinceApproval OptInt `json:"changed_since_approval"`
 }
 
 // GetStatus returns the value of Status.
@@ -15002,6 +16269,11 @@ func (s *GetWorkflowStatusOKInstance) GetCompletedAt() OptNilDateTime {
 	return s.CompletedAt
 }
 
+// GetChangedSinceApproval returns the value of ChangedSinceApproval.
+func (s *GetWorkflowStatusOKInstance) GetChangedSinceApproval() OptInt {
+	return s.ChangedSinceApproval
+}
+
 // SetStatus sets the value of Status.
 func (s *GetWorkflowStatusOKInstance) SetStatus(val OptString) {
 	s.Status = val
@@ -15015,6 +16287,11 @@ func (s *GetWorkflowStatusOKInstance) SetStartedAt(val OptDateTime) {
 // SetCompletedAt sets the value of CompletedAt.
 func (s *GetWorkflowStatusOKInstance) SetCompletedAt(val OptNilDateTime) {
 	s.CompletedAt = val
+}
+
+// SetChangedSinceApproval sets the value of ChangedSinceApproval.
+func (s *GetWorkflowStatusOKInstance) SetChangedSinceApproval(val OptInt) {
+	s.ChangedSinceApproval = val
 }
 
 type GetWorkflowStatusOKStepsItem struct {
@@ -18372,6 +19649,13 @@ type IntegrationRunRequest struct {
 	// reshape and column_map are not applied to it again. Only with csv; a workbook sent with it is
 	// refused (400). Omitted or false, the saved reshape and column_map apply.
 	Mapped OptBool `json:"mapped"`
+	// The values the integration's config asks for at each run (config.parameters: [{column, label, type
+	// date|text, required}]), by column: each is added to every row as that column, as reshape constants
+	// are ("Period end": "2026-10-31" for a trial balance file that names no period). A required one
+	// missing, or a date that is not YYYY-MM-DD, is refused (400). A table loader's config.replace_by
+	// may name several fields (a list, or names separated by commas): the load replaces the records
+	// holding the combination of their values each row holds — one entity's month, not every entity's.
+	Parameters OptIntegrationRunRequestParameters `json:"parameters"`
 }
 
 // GetCsv returns the value of Csv.
@@ -18404,6 +19688,11 @@ func (s *IntegrationRunRequest) GetMapped() OptBool {
 	return s.Mapped
 }
 
+// GetParameters returns the value of Parameters.
+func (s *IntegrationRunRequest) GetParameters() OptIntegrationRunRequestParameters {
+	return s.Parameters
+}
+
 // SetCsv sets the value of Csv.
 func (s *IntegrationRunRequest) SetCsv(val OptString) {
 	s.Csv = val
@@ -18432,6 +19721,28 @@ func (s *IntegrationRunRequest) SetSheet(val OptString) {
 // SetMapped sets the value of Mapped.
 func (s *IntegrationRunRequest) SetMapped(val OptBool) {
 	s.Mapped = val
+}
+
+// SetParameters sets the value of Parameters.
+func (s *IntegrationRunRequest) SetParameters(val OptIntegrationRunRequestParameters) {
+	s.Parameters = val
+}
+
+// The values the integration's config asks for at each run (config.parameters: [{column, label, type
+// date|text, required}]), by column: each is added to every row as that column, as reshape constants
+// are ("Period end": "2026-10-31" for a trial balance file that names no period). A required one
+// missing, or a date that is not YYYY-MM-DD, is refused (400). A table loader's config.replace_by
+// may name several fields (a list, or names separated by commas): the load replaces the records
+// holding the combination of their values each row holds — one entity's month, not every entity's.
+type IntegrationRunRequestParameters map[string]string
+
+func (s *IntegrationRunRequestParameters) init() IntegrationRunRequestParameters {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
 }
 
 type IssueAdminUserTemporaryPasswordBadGateway Error
@@ -20157,6 +21468,8 @@ type ListedForm struct {
 	MemberLabelField OptString `json:"member_label_field"`
 	// The label of the total member (code ALL) the records' members sit under, when there is one.
 	MemberRootLabel OptString `json:"member_root_label"`
+	// Each member is named code first (IC03 · Intragroup loan principal).
+	MemberLabelWithCode OptBool `json:"member_label_with_code"`
 	// Who may change and delete the table's records: their creator and the application's administrators
 	// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
 	// records naming it theirs to see only.
@@ -20214,6 +21527,11 @@ func (s *ListedForm) GetMemberLabelField() OptString {
 // GetMemberRootLabel returns the value of MemberRootLabel.
 func (s *ListedForm) GetMemberRootLabel() OptString {
 	return s.MemberRootLabel
+}
+
+// GetMemberLabelWithCode returns the value of MemberLabelWithCode.
+func (s *ListedForm) GetMemberLabelWithCode() OptBool {
+	return s.MemberLabelWithCode
 }
 
 // GetEditAccess returns the value of EditAccess.
@@ -20284,6 +21602,11 @@ func (s *ListedForm) SetMemberLabelField(val OptString) {
 // SetMemberRootLabel sets the value of MemberRootLabel.
 func (s *ListedForm) SetMemberRootLabel(val OptString) {
 	s.MemberRootLabel = val
+}
+
+// SetMemberLabelWithCode sets the value of MemberLabelWithCode.
+func (s *ListedForm) SetMemberLabelWithCode(val OptBool) {
+	s.MemberLabelWithCode = val
 }
 
 // SetEditAccess sets the value of EditAccess.
@@ -22480,6 +23803,144 @@ func (o OptAiLLMSettingsReasoningEffort) Or(d AiLLMSettingsReasoningEffort) AiLL
 	return d
 }
 
+// NewOptAiMemoryStatus returns new OptAiMemoryStatus with value set to v.
+func NewOptAiMemoryStatus(v AiMemoryStatus) OptAiMemoryStatus {
+	return OptAiMemoryStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiMemoryStatus is optional AiMemoryStatus.
+type OptAiMemoryStatus struct {
+	Value AiMemoryStatus
+	Set   bool
+}
+
+// IsSet returns true if OptAiMemoryStatus was set.
+func (o OptAiMemoryStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiMemoryStatus) Reset() {
+	var v AiMemoryStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiMemoryStatus) SetTo(v AiMemoryStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiMemoryStatus) Get() (v AiMemoryStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiMemoryStatus) Or(d AiMemoryStatus) AiMemoryStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAiMemoryStatusAttachmentsItemBy returns new OptAiMemoryStatusAttachmentsItemBy with value set to v.
+func NewOptAiMemoryStatusAttachmentsItemBy(v AiMemoryStatusAttachmentsItemBy) OptAiMemoryStatusAttachmentsItemBy {
+	return OptAiMemoryStatusAttachmentsItemBy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiMemoryStatusAttachmentsItemBy is optional AiMemoryStatusAttachmentsItemBy.
+type OptAiMemoryStatusAttachmentsItemBy struct {
+	Value AiMemoryStatusAttachmentsItemBy
+	Set   bool
+}
+
+// IsSet returns true if OptAiMemoryStatusAttachmentsItemBy was set.
+func (o OptAiMemoryStatusAttachmentsItemBy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiMemoryStatusAttachmentsItemBy) Reset() {
+	var v AiMemoryStatusAttachmentsItemBy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiMemoryStatusAttachmentsItemBy) SetTo(v AiMemoryStatusAttachmentsItemBy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiMemoryStatusAttachmentsItemBy) Get() (v AiMemoryStatusAttachmentsItemBy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiMemoryStatusAttachmentsItemBy) Or(d AiMemoryStatusAttachmentsItemBy) AiMemoryStatusAttachmentsItemBy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAiPlanRefState returns new OptAiPlanRefState with value set to v.
+func NewOptAiPlanRefState(v AiPlanRefState) OptAiPlanRefState {
+	return OptAiPlanRefState{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiPlanRefState is optional AiPlanRefState.
+type OptAiPlanRefState struct {
+	Value AiPlanRefState
+	Set   bool
+}
+
+// IsSet returns true if OptAiPlanRefState was set.
+func (o OptAiPlanRefState) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiPlanRefState) Reset() {
+	var v AiPlanRefState
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiPlanRefState) SetTo(v AiPlanRefState) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiPlanRefState) Get() (v AiPlanRefState, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiPlanRefState) Or(d AiPlanRefState) AiPlanRefState {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiProposal returns new OptAiProposal with value set to v.
 func NewOptAiProposal(v AiProposal) OptAiProposal {
 	return OptAiProposal{
@@ -22750,6 +24211,98 @@ func (o OptAiTestSettingsRequestReasoningEffort) Get() (v AiTestSettingsRequestR
 
 // Or returns value if set, or given parameter if does not.
 func (o OptAiTestSettingsRequestReasoningEffort) Or(d AiTestSettingsRequestReasoningEffort) AiTestSettingsRequestReasoningEffort {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptApproveAiPlanOKTaskPlan returns new OptApproveAiPlanOKTaskPlan with value set to v.
+func NewOptApproveAiPlanOKTaskPlan(v ApproveAiPlanOKTaskPlan) OptApproveAiPlanOKTaskPlan {
+	return OptApproveAiPlanOKTaskPlan{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptApproveAiPlanOKTaskPlan is optional ApproveAiPlanOKTaskPlan.
+type OptApproveAiPlanOKTaskPlan struct {
+	Value ApproveAiPlanOKTaskPlan
+	Set   bool
+}
+
+// IsSet returns true if OptApproveAiPlanOKTaskPlan was set.
+func (o OptApproveAiPlanOKTaskPlan) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptApproveAiPlanOKTaskPlan) Reset() {
+	var v ApproveAiPlanOKTaskPlan
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptApproveAiPlanOKTaskPlan) SetTo(v ApproveAiPlanOKTaskPlan) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptApproveAiPlanOKTaskPlan) Get() (v ApproveAiPlanOKTaskPlan, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptApproveAiPlanOKTaskPlan) Or(d ApproveAiPlanOKTaskPlan) ApproveAiPlanOKTaskPlan {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAttachAiPlanOKTaskPlan returns new OptAttachAiPlanOKTaskPlan with value set to v.
+func NewOptAttachAiPlanOKTaskPlan(v AttachAiPlanOKTaskPlan) OptAttachAiPlanOKTaskPlan {
+	return OptAttachAiPlanOKTaskPlan{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAttachAiPlanOKTaskPlan is optional AttachAiPlanOKTaskPlan.
+type OptAttachAiPlanOKTaskPlan struct {
+	Value AttachAiPlanOKTaskPlan
+	Set   bool
+}
+
+// IsSet returns true if OptAttachAiPlanOKTaskPlan was set.
+func (o OptAttachAiPlanOKTaskPlan) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAttachAiPlanOKTaskPlan) Reset() {
+	var v AttachAiPlanOKTaskPlan
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAttachAiPlanOKTaskPlan) SetTo(v AttachAiPlanOKTaskPlan) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAttachAiPlanOKTaskPlan) Get() (v AttachAiPlanOKTaskPlan, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAttachAiPlanOKTaskPlan) Or(d AttachAiPlanOKTaskPlan) AttachAiPlanOKTaskPlan {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -25148,6 +26701,98 @@ func (o OptFormRecord) Or(d FormRecord) FormRecord {
 	return d
 }
 
+// NewOptGetAiSessionOKEarlierPlansItemPlan returns new OptGetAiSessionOKEarlierPlansItemPlan with value set to v.
+func NewOptGetAiSessionOKEarlierPlansItemPlan(v GetAiSessionOKEarlierPlansItemPlan) OptGetAiSessionOKEarlierPlansItemPlan {
+	return OptGetAiSessionOKEarlierPlansItemPlan{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiSessionOKEarlierPlansItemPlan is optional GetAiSessionOKEarlierPlansItemPlan.
+type OptGetAiSessionOKEarlierPlansItemPlan struct {
+	Value GetAiSessionOKEarlierPlansItemPlan
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiSessionOKEarlierPlansItemPlan was set.
+func (o OptGetAiSessionOKEarlierPlansItemPlan) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiSessionOKEarlierPlansItemPlan) Reset() {
+	var v GetAiSessionOKEarlierPlansItemPlan
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiSessionOKEarlierPlansItemPlan) SetTo(v GetAiSessionOKEarlierPlansItemPlan) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiSessionOKEarlierPlansItemPlan) Get() (v GetAiSessionOKEarlierPlansItemPlan, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiSessionOKEarlierPlansItemPlan) Or(d GetAiSessionOKEarlierPlansItemPlan) GetAiSessionOKEarlierPlansItemPlan {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetAiSessionOKEarlierPlansItemState returns new OptGetAiSessionOKEarlierPlansItemState with value set to v.
+func NewOptGetAiSessionOKEarlierPlansItemState(v GetAiSessionOKEarlierPlansItemState) OptGetAiSessionOKEarlierPlansItemState {
+	return OptGetAiSessionOKEarlierPlansItemState{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetAiSessionOKEarlierPlansItemState is optional GetAiSessionOKEarlierPlansItemState.
+type OptGetAiSessionOKEarlierPlansItemState struct {
+	Value GetAiSessionOKEarlierPlansItemState
+	Set   bool
+}
+
+// IsSet returns true if OptGetAiSessionOKEarlierPlansItemState was set.
+func (o OptGetAiSessionOKEarlierPlansItemState) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetAiSessionOKEarlierPlansItemState) Reset() {
+	var v GetAiSessionOKEarlierPlansItemState
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetAiSessionOKEarlierPlansItemState) SetTo(v GetAiSessionOKEarlierPlansItemState) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetAiSessionOKEarlierPlansItemState) Get() (v GetAiSessionOKEarlierPlansItemState, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetAiSessionOKEarlierPlansItemState) Or(d GetAiSessionOKEarlierPlansItemState) GetAiSessionOKEarlierPlansItemState {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGetAiSessionOKTaskPlanStagesItemStatus returns new OptGetAiSessionOKTaskPlanStagesItemStatus with value set to v.
 func NewOptGetAiSessionOKTaskPlanStagesItemStatus(v GetAiSessionOKTaskPlanStagesItemStatus) OptGetAiSessionOKTaskPlanStagesItemStatus {
 	return OptGetAiSessionOKTaskPlanStagesItemStatus{
@@ -25648,6 +27293,52 @@ func (o OptGetWorkflowDefinitionOKStepsItemType) Get() (v GetWorkflowDefinitionO
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGetWorkflowDefinitionOKStepsItemType) Or(d GetWorkflowDefinitionOKStepsItemType) GetWorkflowDefinitionOKStepsItemType {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetWorkflowInstanceOKContext returns new OptGetWorkflowInstanceOKContext with value set to v.
+func NewOptGetWorkflowInstanceOKContext(v GetWorkflowInstanceOKContext) OptGetWorkflowInstanceOKContext {
+	return OptGetWorkflowInstanceOKContext{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetWorkflowInstanceOKContext is optional GetWorkflowInstanceOKContext.
+type OptGetWorkflowInstanceOKContext struct {
+	Value GetWorkflowInstanceOKContext
+	Set   bool
+}
+
+// IsSet returns true if OptGetWorkflowInstanceOKContext was set.
+func (o OptGetWorkflowInstanceOKContext) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetWorkflowInstanceOKContext) Reset() {
+	var v GetWorkflowInstanceOKContext
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetWorkflowInstanceOKContext) SetTo(v GetWorkflowInstanceOKContext) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetWorkflowInstanceOKContext) Get() (v GetWorkflowInstanceOKContext, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetWorkflowInstanceOKContext) Or(d GetWorkflowInstanceOKContext) GetWorkflowInstanceOKContext {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -26292,6 +27983,52 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptIntegrationRunRequestParameters returns new OptIntegrationRunRequestParameters with value set to v.
+func NewOptIntegrationRunRequestParameters(v IntegrationRunRequestParameters) OptIntegrationRunRequestParameters {
+	return OptIntegrationRunRequestParameters{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptIntegrationRunRequestParameters is optional IntegrationRunRequestParameters.
+type OptIntegrationRunRequestParameters struct {
+	Value IntegrationRunRequestParameters
+	Set   bool
+}
+
+// IsSet returns true if OptIntegrationRunRequestParameters was set.
+func (o OptIntegrationRunRequestParameters) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptIntegrationRunRequestParameters) Reset() {
+	var v IntegrationRunRequestParameters
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptIntegrationRunRequestParameters) SetTo(v IntegrationRunRequestParameters) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptIntegrationRunRequestParameters) Get() (v IntegrationRunRequestParameters, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptIntegrationRunRequestParameters) Or(d IntegrationRunRequestParameters) IntegrationRunRequestParameters {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -30223,6 +31960,137 @@ func (s *PlanStateLimitState) UnmarshalText(data []byte) error {
 	}
 }
 
+// What re-posting a table's records did. status is "ok", or "partial" when postings were kept out by
+// a workflow lock (an approved or pending period), a closed period or a record creator's access;
+// their records keep the postings they had.
+// Ref: #/components/schemas/PostingReport
+type PostingReport struct {
+	Status PostingReportStatus `json:"status"`
+	// Live mappings of the table (Sync only).
+	Mappings         OptInt                            `json:"mappings"`
+	RecordsProcessed int                               `json:"records_processed"`
+	PostingsSkipped  OptInt                            `json:"postings_skipped"`
+	SkippedReasons   []PostingReportSkippedReasonsItem `json:"skipped_reasons"`
+}
+
+// GetStatus returns the value of Status.
+func (s *PostingReport) GetStatus() PostingReportStatus {
+	return s.Status
+}
+
+// GetMappings returns the value of Mappings.
+func (s *PostingReport) GetMappings() OptInt {
+	return s.Mappings
+}
+
+// GetRecordsProcessed returns the value of RecordsProcessed.
+func (s *PostingReport) GetRecordsProcessed() int {
+	return s.RecordsProcessed
+}
+
+// GetPostingsSkipped returns the value of PostingsSkipped.
+func (s *PostingReport) GetPostingsSkipped() OptInt {
+	return s.PostingsSkipped
+}
+
+// GetSkippedReasons returns the value of SkippedReasons.
+func (s *PostingReport) GetSkippedReasons() []PostingReportSkippedReasonsItem {
+	return s.SkippedReasons
+}
+
+// SetStatus sets the value of Status.
+func (s *PostingReport) SetStatus(val PostingReportStatus) {
+	s.Status = val
+}
+
+// SetMappings sets the value of Mappings.
+func (s *PostingReport) SetMappings(val OptInt) {
+	s.Mappings = val
+}
+
+// SetRecordsProcessed sets the value of RecordsProcessed.
+func (s *PostingReport) SetRecordsProcessed(val int) {
+	s.RecordsProcessed = val
+}
+
+// SetPostingsSkipped sets the value of PostingsSkipped.
+func (s *PostingReport) SetPostingsSkipped(val OptInt) {
+	s.PostingsSkipped = val
+}
+
+// SetSkippedReasons sets the value of SkippedReasons.
+func (s *PostingReport) SetSkippedReasons(val []PostingReportSkippedReasonsItem) {
+	s.SkippedReasons = val
+}
+
+func (*PostingReport) syncFormMappingsRes() {}
+
+type PostingReportSkippedReasonsItem struct {
+	Reason   string `json:"reason"`
+	Postings int    `json:"postings"`
+}
+
+// GetReason returns the value of Reason.
+func (s *PostingReportSkippedReasonsItem) GetReason() string {
+	return s.Reason
+}
+
+// GetPostings returns the value of Postings.
+func (s *PostingReportSkippedReasonsItem) GetPostings() int {
+	return s.Postings
+}
+
+// SetReason sets the value of Reason.
+func (s *PostingReportSkippedReasonsItem) SetReason(val string) {
+	s.Reason = val
+}
+
+// SetPostings sets the value of Postings.
+func (s *PostingReportSkippedReasonsItem) SetPostings(val int) {
+	s.Postings = val
+}
+
+type PostingReportStatus string
+
+const (
+	PostingReportStatusOk      PostingReportStatus = "ok"
+	PostingReportStatusPartial PostingReportStatus = "partial"
+)
+
+// AllValues returns all PostingReportStatus values.
+func (PostingReportStatus) AllValues() []PostingReportStatus {
+	return []PostingReportStatus{
+		PostingReportStatusOk,
+		PostingReportStatusPartial,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s PostingReportStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case PostingReportStatusOk:
+		return []byte(s), nil
+	case PostingReportStatusPartial:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *PostingReportStatus) UnmarshalText(data []byte) error {
+	switch PostingReportStatus(data) {
+	case PostingReportStatusOk:
+		*s = PostingReportStatusOk
+		return nil
+	case PostingReportStatusPartial:
+		*s = PostingReportStatusPartial
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Ref: #/components/schemas/Preferences
 type Preferences struct {
 	Theme OptPreferencesTheme `json:"theme"`
@@ -32491,20 +34359,20 @@ func (*ReopenWorkflowInstanceOK) reopenWorkflowInstanceRes() {}
 type ReopenWorkflowInstanceOKStatus string
 
 const (
-	ReopenWorkflowInstanceOKStatusCancelled ReopenWorkflowInstanceOKStatus = "cancelled"
+	ReopenWorkflowInstanceOKStatusReopened ReopenWorkflowInstanceOKStatus = "reopened"
 )
 
 // AllValues returns all ReopenWorkflowInstanceOKStatus values.
 func (ReopenWorkflowInstanceOKStatus) AllValues() []ReopenWorkflowInstanceOKStatus {
 	return []ReopenWorkflowInstanceOKStatus{
-		ReopenWorkflowInstanceOKStatusCancelled,
+		ReopenWorkflowInstanceOKStatusReopened,
 	}
 }
 
 // MarshalText implements encoding.TextMarshaler.
 func (s ReopenWorkflowInstanceOKStatus) MarshalText() ([]byte, error) {
 	switch s {
-	case ReopenWorkflowInstanceOKStatusCancelled:
+	case ReopenWorkflowInstanceOKStatusReopened:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -32514,8 +34382,8 @@ func (s ReopenWorkflowInstanceOKStatus) MarshalText() ([]byte, error) {
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (s *ReopenWorkflowInstanceOKStatus) UnmarshalText(data []byte) error {
 	switch ReopenWorkflowInstanceOKStatus(data) {
-	case ReopenWorkflowInstanceOKStatusCancelled:
-		*s = ReopenWorkflowInstanceOKStatusCancelled
+	case ReopenWorkflowInstanceOKStatusReopened:
+		*s = ReopenWorkflowInstanceOKStatusReopened
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
@@ -35047,44 +36915,6 @@ func (*SyncFormMappingsForbidden) syncFormMappingsRes() {}
 type SyncFormMappingsNotFound Error
 
 func (*SyncFormMappingsNotFound) syncFormMappingsRes() {}
-
-type SyncFormMappingsOK struct {
-	Status           OptString `json:"status"`
-	Mappings         OptInt    `json:"mappings"`
-	RecordsProcessed OptInt    `json:"records_processed"`
-}
-
-// GetStatus returns the value of Status.
-func (s *SyncFormMappingsOK) GetStatus() OptString {
-	return s.Status
-}
-
-// GetMappings returns the value of Mappings.
-func (s *SyncFormMappingsOK) GetMappings() OptInt {
-	return s.Mappings
-}
-
-// GetRecordsProcessed returns the value of RecordsProcessed.
-func (s *SyncFormMappingsOK) GetRecordsProcessed() OptInt {
-	return s.RecordsProcessed
-}
-
-// SetStatus sets the value of Status.
-func (s *SyncFormMappingsOK) SetStatus(val OptString) {
-	s.Status = val
-}
-
-// SetMappings sets the value of Mappings.
-func (s *SyncFormMappingsOK) SetMappings(val OptInt) {
-	s.Mappings = val
-}
-
-// SetRecordsProcessed sets the value of RecordsProcessed.
-func (s *SyncFormMappingsOK) SetRecordsProcessed(val OptInt) {
-	s.RecordsProcessed = val
-}
-
-func (*SyncFormMappingsOK) syncFormMappingsRes() {}
 
 // Ref: #/components/schemas/Task
 type Task struct {
@@ -38296,6 +40126,9 @@ type UpdateWorkflowRequest struct {
 	ApproverMayStart     OptBool                               `json:"approver_may_start"`
 	// Who may start it by hand (role names); [] lets anyone, absent leaves it unchanged.
 	StartRoles []string `json:"start_roles"`
+	// Who may reopen an approved run (role names); [] leaves it to the application's business admins and
+	// developers, absent leaves it unchanged.
+	ReopenRoles []string `json:"reopen_roles"`
 }
 
 // GetName returns the value of Name.
@@ -38348,6 +40181,11 @@ func (s *UpdateWorkflowRequest) GetStartRoles() []string {
 	return s.StartRoles
 }
 
+// GetReopenRoles returns the value of ReopenRoles.
+func (s *UpdateWorkflowRequest) GetReopenRoles() []string {
+	return s.ReopenRoles
+}
+
 // SetName sets the value of Name.
 func (s *UpdateWorkflowRequest) SetName(val OptString) {
 	s.Name = val
@@ -38396,6 +40234,11 @@ func (s *UpdateWorkflowRequest) SetApproverMayStart(val OptBool) {
 // SetStartRoles sets the value of StartRoles.
 func (s *UpdateWorkflowRequest) SetStartRoles(val []string) {
 	s.StartRoles = val
+}
+
+// SetReopenRoles sets the value of ReopenRoles.
+func (s *UpdateWorkflowRequest) SetReopenRoles(val []string) {
+	s.ReopenRoles = val
 }
 
 type UpdateWorkflowRequestContextSchema map[string]jx.Raw
@@ -38982,7 +40825,10 @@ type WorkflowDefFull struct {
 	// Who may start it by hand (Start button, inbox, automation button): role names, matched as a step's
 	// assignee_roles; empty, anyone who reaches the application. A record or event that starts it is not
 	// asked.
-	StartRoles  []string       `json:"start_roles"`
+	StartRoles []string `json:"start_roles"`
+	// Who may reopen an approved run (role names, matched as start_roles); empty, the application's
+	// business admins and developers.
+	ReopenRoles []string       `json:"reopen_roles"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	PublishedAt OptNilDateTime `json:"published_at"`
@@ -39052,6 +40898,11 @@ func (s *WorkflowDefFull) GetApproverMayStart() OptBool {
 // GetStartRoles returns the value of StartRoles.
 func (s *WorkflowDefFull) GetStartRoles() []string {
 	return s.StartRoles
+}
+
+// GetReopenRoles returns the value of ReopenRoles.
+func (s *WorkflowDefFull) GetReopenRoles() []string {
+	return s.ReopenRoles
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -39137,6 +40988,11 @@ func (s *WorkflowDefFull) SetApproverMayStart(val OptBool) {
 // SetStartRoles sets the value of StartRoles.
 func (s *WorkflowDefFull) SetStartRoles(val []string) {
 	s.StartRoles = val
+}
+
+// SetReopenRoles sets the value of ReopenRoles.
+func (s *WorkflowDefFull) SetReopenRoles(val []string) {
+	s.ReopenRoles = val
 }
 
 // SetCreatedAt sets the value of CreatedAt.

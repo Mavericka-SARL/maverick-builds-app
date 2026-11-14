@@ -438,7 +438,8 @@ func TestEachSessionIsItsOwnDraft(t *testing.T) {
 		t.Fatalf("a session asked with new_draft starts in %s", s3.DraftRevisionID)
 	}
 
-	// Promoting a session's draft finishes that session, and no other.
+	// Promoting a session's draft releases its draft, and no other session's;
+	// the session goes on (owner, 2026-11-13: never pushed to a new session).
 	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/promote-draft", f.devSub, nil); status != http.StatusOK {
 		t.Fatalf("promote: %d %s", status, body)
 	}
@@ -450,7 +451,27 @@ func TestEachSessionIsItsOwnDraft(t *testing.T) {
 	if !finished(s1.ID) || finished(s2.ID) {
 		t.Fatalf("finished after promoting: s1 %v, s2 %v — want s1 alone", finished(s1.ID), finished(s2.ID))
 	}
-	if status, _ := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/messages", f.devSub, map[string]string{"content": "more"}); status != http.StatusConflict {
-		t.Fatalf("a message to a session whose draft was promoted: %d, want 409", status)
+	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/messages", f.devSub, map[string]string{"content": "more"}); status == http.StatusConflict {
+		t.Fatalf("a message to a session whose draft was promoted was refused: %d %s — the session goes on", status, body)
+	}
+	if d := confirm(s1.ID, dim("Fourth")).DraftRevisionID; d == "" || d == d1 {
+		t.Fatalf("s1's next plan after promotion went to draft %q, want a fresh one (its promoted draft was %s)", d, d1)
+	}
+	// Promoted again under the name it had: the answer suggests the next
+	// free one (the console offers the session's title each time).
+	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/promote-draft", f.devSub, map[string]string{"name": "Planning"}); status != http.StatusOK {
+		t.Fatalf("promote as Planning: %d %s", status, body)
+	}
+	confirm(s1.ID, dim("Fifth"))
+	status, body := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/promote-draft", f.devSub, map[string]string{"name": "Planning"})
+	var taken struct {
+		Code          string `json:"code"`
+		SuggestedName string `json:"suggested_name"`
+	}
+	if status != http.StatusConflict || json.Unmarshal(body, &taken) != nil || taken.Code != "REVISION_NAME_TAKEN" || taken.SuggestedName != "Planning 2" {
+		t.Fatalf("a taken name: %d %s — want 409 suggesting \"Planning 2\"", status, body)
+	}
+	if status, body := f.do(t, "POST", "/api/ai/sessions/"+s1.ID+"/promote-draft", f.devSub, map[string]string{"name": taken.SuggestedName}); status != http.StatusOK {
+		t.Fatalf("promote as the suggested name: %d %s", status, body)
 	}
 }

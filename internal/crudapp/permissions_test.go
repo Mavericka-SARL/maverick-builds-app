@@ -32,6 +32,10 @@ func TestRecordPermissionsRule(t *testing.T) {
 			crudapp.RecordPermissions{Edit: true, Delete: true, SetStatus: []string{"draft", "submitted", "rejected"}}},
 		{"admin who created an approved record", crudapp.RecordAccess{Statuses: true, Reach: true, Admin: true, Creator: true}, "approved",
 			crudapp.RecordPermissions{Edit: true, Delete: true, SetStatus: []string{"draft", "submitted", "rejected"}}},
+		// A record belonging to an approved or rejected record follows it.
+		{"creator of a line of an approved journal", crudapp.RecordAccess{Reach: true, Creator: true, ParentDecided: true}, "", none},
+		{"admin of a line of an approved journal", crudapp.RecordAccess{Reach: true, Admin: true, ParentDecided: true}, "",
+			crudapp.RecordPermissions{Edit: true, Delete: true, SetStatus: []string{}}},
 	}
 	for _, c := range cases {
 		if got := c.access.Permissions(c.status); !reflect.DeepEqual(got, c.want) {

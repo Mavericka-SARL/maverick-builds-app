@@ -57,6 +57,11 @@ type RecordAccess struct {
 	// no administrator, holds none of (migration 161): its records are the
 	// dimension's members, theirs to read only.
 	NotEditor bool
+	// ParentDecided: the record belongs to a record (a belonging field
+	// names it) that is approved or rejected. Like that record, it is the
+	// administrators' to change; an administrator's change sends the parent
+	// back to draft (owner decision 2026-11-13).
+	ParentDecided bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -81,6 +86,8 @@ type RecordPermissions struct {
 //     no status, is a draft or is submitted, and may move it only between
 //     draft and submitted: never to a decided status, and not once it is
 //     decided.
+//   - A record belonging to an approved or rejected record (ParentDecided)
+//     is, like that record, the administrators' to change.
 //   - In a table everyone edits (Everyone), everyone who sees the record
 //     may do what its creator may — unless it names a member read-only for
 //     them (ReadOnly), creator included: then they read it only.
@@ -99,6 +106,7 @@ func (a RecordAccess) Permissions(status string) RecordPermissions {
 			p.SetStatus = otherStatuses(RecordStatuses, status)
 		}
 	case a.NotEditor:
+	case a.ParentDecided:
 	case a.Everyone && a.ReadOnly:
 	case (a.Creator || a.Everyone) && (status == "" || slices.Contains(creatorStatuses, status)):
 		p.Edit, p.Delete = true, true

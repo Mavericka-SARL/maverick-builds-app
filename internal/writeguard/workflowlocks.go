@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // A workflow instance locks the crossing of its "Dimension member" fields,
@@ -117,7 +115,7 @@ const ReopenableSQL = `COALESCE(wi.status::text = 'completed' AND ws.decision = 
 
 // loadWorkflowLocks reads the workflow instances of modelID's application,
 // newest first, as locks.
-func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) ([]workflowLock, error) {
+func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]workflowLock, error) {
 	var appID string
 	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID); err != nil {
 		return nil, err
@@ -263,7 +261,7 @@ func loadWorkflowLocks(ctx context.Context, pool *pgxpool.Pool, modelID string) 
 }
 
 // dimensionLineages is the lineage of each of dimIDs that still exists.
-func dimensionLineages(ctx context.Context, pool *pgxpool.Pool, dimIDs []string) (map[string]string, error) {
+func dimensionLineages(ctx context.Context, pool ReadDB, dimIDs []string) (map[string]string, error) {
 	out := map[string]string{}
 	rows, err := pool.Query(ctx, `SELECT id::text, lineage_id::text FROM model.dimension_def WHERE id::text = ANY($1)`, dimIDs)
 	if err != nil {
@@ -281,7 +279,7 @@ func dimensionLineages(ctx context.Context, pool *pgxpool.Pool, dimIDs []string)
 }
 
 // metricLineages is the lineage of each of metricIDs.
-func metricLineages(ctx context.Context, pool *pgxpool.Pool, metricIDs []string) (map[string]string, error) {
+func metricLineages(ctx context.Context, pool ReadDB, metricIDs []string) (map[string]string, error) {
 	out := map[string]string{}
 	if len(metricIDs) == 0 {
 		return out, nil
@@ -303,7 +301,7 @@ func metricLineages(ctx context.Context, pool *pgxpool.Pool, metricIDs []string)
 
 // lockReason says what l locks, by the members' labels: "Europe · Budget
 // is locked: …", and the metric when l is scoped to metrics.
-func lockReason(ctx context.Context, pool *pgxpool.Pool, l workflowLock, metric string) string {
+func lockReason(ctx context.Context, pool ReadDB, l workflowLock, metric string) string {
 	parts := make([]string, 0, len(l.bindings)+1)
 	for _, b := range l.bindings {
 		label := b.code
@@ -341,7 +339,7 @@ type LockMetric struct{ ID, Name string }
 // (WorkflowLockReasonForMetrics): for each metric, the newest instance of
 // each member scope that covers it decides, and only locked ones are
 // returned.
-func WorkflowLockScopes(ctx context.Context, pool *pgxpool.Pool, modelID string, metrics []LockMetric) ([]LockScope, error) {
+func WorkflowLockScopes(ctx context.Context, pool ReadDB, modelID string, metrics []LockMetric) ([]LockScope, error) {
 	locks, err := loadWorkflowLocks(ctx, pool, modelID)
 	if err != nil || len(locks) == 0 {
 		return nil, err
@@ -410,7 +408,7 @@ func WorkflowLockScopes(ctx context.Context, pool *pgxpool.Pool, modelID string,
 // inRevision re-keys covered (dimension ID → codes) onto the dimensions of
 // revisionID with the same lineage; a dimension with no copy there keeps its
 // id.
-func inRevision(ctx context.Context, pool *pgxpool.Pool, covered map[string][]string, revisionID string) (map[string][]string, error) {
+func inRevision(ctx context.Context, pool ReadDB, covered map[string][]string, revisionID string) (map[string][]string, error) {
 	ids := make([]string, 0, len(covered))
 	for id := range covered {
 		ids = append(ids, id)
@@ -446,7 +444,7 @@ func inRevision(ctx context.Context, pool *pgxpool.Pool, covered map[string][]st
 
 // memberSubtree is b's member and every member under it (parent_member_id,
 // across dimensions), as dimension ID → codes.
-func memberSubtree(ctx context.Context, pool *pgxpool.Pool, b lockBinding) (map[string][]string, error) {
+func memberSubtree(ctx context.Context, pool ReadDB, b lockBinding) (map[string][]string, error) {
 	rows, err := pool.Query(ctx, `
 		WITH RECURSIVE sub AS (
 		    SELECT id, dimension_id, code FROM model.dimension_member WHERE dimension_id = $1::uuid AND code = $2

@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	workflowv1 "github.com/mavericks-engine/mavericks/gen/go/workflow/v1"
+	"github.com/mavericks-engine/mavericks/internal/approvalsnap"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
@@ -1300,6 +1301,14 @@ func (s *Store) closeInstanceIfIdle(ctx context.Context, instanceID, finalStatus
 	// The records the run was about take its decision, once.
 	if tag.RowsAffected() == 1 && finalStatus == "completed" {
 		s.driveRecords(ctx, instanceID, runFinished, "")
+		// An approved run that locks a scope keeps what it approved, so a
+		// later change through an input outside the lock shows as "changed
+		// since approval" (approvalsnap, owner decision 2026-11-13).
+		if n, err := approvalsnap.Take(ctx, s.db, instanceID); err != nil {
+			s.log.Warn().Err(err).Str("instance", instanceID).Msg("keeping the approved figures failed")
+		} else if n > 0 {
+			s.log.Info().Int64("values", n).Str("instance", instanceID).Msg("approved figures kept")
+		}
 	}
 	execStatus := "completed"
 	if finalStatus != "completed" {
@@ -1740,6 +1749,11 @@ type WorkflowDefFull struct {
 	// who decides it (internal/workflow/assignee); empty, anyone who reaches
 	// the application (migration 154).
 	StartRoles []string `json:"start_roles"`
+	// ReopenRoles names who may reopen an approved run of it, as
+	// StartRoles names who starts it; empty, the application's business
+	// admins and developers, as before (migration 182, owner decision
+	// 2026-11-13).
+	ReopenRoles []string `json:"reopen_roles"`
 }
 
 // ListWorkflowDefs lists a revision's workflow defs plus revision-global
@@ -1777,12 +1791,12 @@ func (s *Store) GetWorkflowDefFull(ctx context.Context, defID string) (*Workflow
 	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, COALESCE(description,''),
 		       trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		       created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		       created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 		FROM workflow.workflow_def WHERE id = $1::uuid
 	`, defID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found", defID)
@@ -1810,11 +1824,11 @@ func (s *Store) CreateWorkflowDefFull(ctx context.Context, appID, revisionID, na
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6::uuid, $6::uuid)
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, appID, revisionID, name, description, triggerEvent, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if err != nil {
 		return nil, nameTaken(err)
@@ -1838,11 +1852,11 @@ func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, descript
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, defID, name, description, triggerEvent, subjectType, nullableJSON(subjectConfig), nullableJSON(steps), nullableJSON(contextSchema), userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
@@ -1883,6 +1897,52 @@ func (s *Store) SetWorkflowDefStartRoles(ctx context.Context, defID string, role
 		return fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
 	}
 	return nil
+}
+
+// SetWorkflowDefReopenRoles sets who may reopen an approved run of the
+// definition (WorkflowDefFull.ReopenRoles), cleaned as start roles are;
+// none leaves it to the application's administrators. Archived
+// definitions refuse.
+func (s *Store) SetWorkflowDefReopenRoles(ctx context.Context, defID string, roles []string) error {
+	b, _ := json.Marshal(CleanStartRoles(roles))
+	tag, err := s.db.Exec(ctx, `
+		UPDATE workflow.workflow_def SET reopen_roles = $2::jsonb, updated_at = now()
+		WHERE id = $1::uuid AND status <> 'archived'`, defID, string(b))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
+	}
+	return nil
+}
+
+// ReopenRoles are the roles instanceID's definition names as those who may
+// reopen it; none when it names none (its administrators may).
+func (s *Store) ReopenRoles(ctx context.Context, instanceID string) ([]string, error) {
+	var roles []string
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(wd.reopen_roles, '[]'::jsonb) FROM workflow.workflow_instance wi
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id WHERE wi.id = $1::uuid`, instanceID).Scan(&roles)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return roles, err
+}
+
+// HoldsReopenRole reports whether userID holds one of the roles instanceID's
+// definition names as those who may reopen it, matched as a step's
+// assignee_roles are (assignee.SQL).
+func (s *Store) HoldsReopenRole(ctx context.Context, instanceID, userID string) (bool, error) {
+	var ok bool
+	err := s.db.QueryRow(ctx, `
+		SELECT `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$2::uuid")+`
+		FROM workflow.workflow_instance wi
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id WHERE wi.id = $1::uuid`, instanceID, userID).Scan(&ok)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return ok, err
 }
 
 // CleanStartRoles trims role names and drops empty ones and repeats.
@@ -1954,11 +2014,11 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status IN ('draft', 'invalid')
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not in publishable state", defID)
@@ -1981,11 +2041,11 @@ func (s *Store) ArchiveWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or already archived", defID)
@@ -2004,11 +2064,11 @@ func (s *Store) RestoreWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status = 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not archived", defID)
@@ -2042,17 +2102,17 @@ func (s *Store) DuplicateWorkflowDef(ctx context.Context, defID, newName, userID
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def
 		    (application_id, revision_id, name, description, trigger_event, subject_type, subject_config, steps, context_schema, created_by, updated_by,
-		     single_active_instance, approver_may_start, start_roles)
+		     single_active_instance, approver_may_start, start_roles, reopen_roles)
 		SELECT application_id, revision_id, $2, description, trigger_event, subject_type, subject_config, steps, context_schema, $3::uuid, $3::uuid,
-		       single_active_instance, approver_may_start, start_roles
+		       single_active_instance, approver_may_start, start_roles, reopen_roles
 		FROM workflow.workflow_def WHERE id = $1::uuid
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start, start_roles, reopen_roles
 	`, defID, newName, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart, &w.StartRoles, &w.ReopenRoles,
 	)
 	if err != nil {
 		return nil, nameTaken(err)
@@ -2438,6 +2498,25 @@ type startContextVarDef struct {
 	DimensionID string `json:"dimension_id"`
 }
 
+// periodHolding is the code of dimensionID's shortest period holding the
+// date v ("YYYY-MM-DD"); ok is false when v is not a date, is already a
+// member code, or no period holds it.
+func (s *Store) periodHolding(ctx context.Context, dimensionID, v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	d, err := time.Parse("2006-01-02", v)
+	if err != nil {
+		return "", false
+	}
+	var code string
+	err = s.db.QueryRow(ctx, `
+		SELECT code FROM model.dimension_member
+		WHERE dimension_id = $1::uuid AND period_start IS NOT NULL AND period_end IS NOT NULL
+		  AND period_start <= $2::date AND period_end >= $2::date
+		  AND NOT EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.dimension_id = $1::uuid AND c.code = $3)
+		ORDER BY period_end - period_start, period_start LIMIT 1`, dimensionID, d.Format("2006-01-02"), v).Scan(&code)
+	return code, err == nil
+}
+
 // resolveRACIResponsible returns the single dimension-member code a user is
 // "responsible" for per security.raci_rule (pattern "CC_SALES.*" -> "CC_SALES"),
 // scoped to one application. ok=false means the caller has no such grant.
@@ -2648,6 +2727,16 @@ func (s *Store) ResolveStartContext(ctx context.Context, defID, userID string, c
 				continue
 			}
 			result[cv.Key] = code
+		}
+		// A run a record starts carries the record's fields (enrichFormPayload):
+		// a dimension field gives its member code as it stands, and a date
+		// given for a time dimension is the shortest period holding it. A
+		// watch started by an intercompany match then reads that match's
+		// month, not the year's total (2026-11-13).
+		if cv.DimensionID != "" {
+			if code, ok := s.periodHolding(ctx, cv.DimensionID, result[cv.Key]); ok {
+				result[cv.Key] = code
+			}
 		}
 		v, ok := result[cv.Key]
 		if !ok || strings.TrimSpace(v) == "" {

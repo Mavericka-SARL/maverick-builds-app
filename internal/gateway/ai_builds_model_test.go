@@ -695,11 +695,9 @@ func (b *aiBuild) promote() string {
 	if active != b.draft {
 		b.t.Fatalf("active revision %s after promote, want the draft %s", active, b.draft)
 	}
-	// The promoted session is finished; the build goes on in a new one,
-	// which works on the promoted revision.
-	if status, body := b.do("POST", "/api/ai/sessions/"+b.sessID+"/messages", map[string]string{"content": "go on"}); status != http.StatusConflict {
-		b.t.Fatalf("a message in the promoted session: status %d %s, want 409", status, body)
-	}
+	// The promoted session could go on (its next plan in a fresh draft —
+	// TestSendMessage_PromotedSessionGoesOn); this build goes on in a new
+	// session the developer starts, which works on the promoted revision.
 	ctx := context.Background()
 	old, err := aiassistant.NewChatStore(b.pool).GetSession(ctx, b.sessID)
 	if err != nil {

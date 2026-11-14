@@ -18,7 +18,19 @@ type Snapshot struct {
 	Cells map[string]float64
 	// Texts are the text metrics' cells, keyed as Cells.
 	Texts map[string]string
+	// TotalsAt reads the engine's values at points that name a parent
+	// member (dimension ID → member code, every grid dimension pinned):
+	// one map of metric ID → value per point, a metric left out where there
+	// is none or it is withheld from the reader. An include_totals export
+	// reads its parent rows and columns through it, since the grid's cells
+	// hold leaves (and a calculated metric's rollups) only; nil reads only
+	// what Cells holds.
+	TotalsAt func(points []map[string]string) ([]map[string]float64, error)
 }
+
+// MaxTotalPoints bounds the parent combinations an include_totals export
+// reads from the engine, each a read of its own.
+const MaxTotalPoints = 600
 
 // Value is one cell of a rendered table: text (a member code, label or
 // metric name), a number, or empty.
@@ -101,10 +113,31 @@ func (p *plan) memberHeader(m Member) string {
 }
 
 // allowedLeaves is a dimension's leaves that pass the spec's filter, in
-// display order.
+// display order — with include_totals its parents too, in the filter's
+// order when it names them.
 func (p *plan) allowedLeaves(d Dimension) []Member {
 	allowed := p.allowed[d.ID]
 	var out []Member
+	if p.spec.IncludeTotals {
+		if order := p.order[d.ID]; len(order) > 0 {
+			byCode := map[string]Member{}
+			for _, m := range d.Members {
+				byCode[m.Code] = m
+			}
+			for _, c := range order {
+				if m, ok := byCode[strings.TrimSpace(c)]; ok && allowed[m.Code] {
+					out = append(out, m)
+				}
+			}
+			return out
+		}
+		for _, m := range d.treeOrder() {
+			if allowed[m.Code] {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
 	for _, m := range d.leaves() {
 		if allowed[m.Code] {
 			out = append(out, m)
@@ -151,6 +184,105 @@ func splitCodes(rest string, dims []Dimension) ([]string, bool) {
 		return nil, false
 	}
 	return codes, true
+}
+
+// readTotals fills rows with the engine's values at every combination of
+// the export's members that names a parent (a total row or column), where
+// the grid's cells hold none: the totals as the engine works them out —
+// sums, averages, ratios of sums, time summaries — under the reader's
+// access. The Group P&L pack's Aggregated, All adjustments and Consolidated
+// columns are such totals (2026-11-13).
+func (p *plan) readTotals(snap Snapshot, placeable map[string]Metric, rows map[string]*rowData, rowKey func(map[string]string) string) error {
+	isParent := map[string]map[string]bool{}
+	for _, d := range snap.Dimensions {
+		isParent[d.ID] = map[string]bool{}
+		for _, m := range d.Members {
+			if m.ParentCode != "" {
+				isParent[d.ID][m.ParentCode] = true
+			}
+		}
+	}
+	type point struct {
+		codes map[string]string
+		pivot string
+	}
+	var points []point
+	var walk func(i int, codes map[string]string)
+	axes := append([]Dimension{}, p.rowDims...)
+	if p.pivotDim != nil {
+		axes = append(axes, *p.pivotDim)
+	}
+	walk = func(i int, codes map[string]string) {
+		if i == len(axes) {
+			cp := make(map[string]string, len(codes)+len(p.pinned))
+			parent := false
+			for id, c := range p.pinned {
+				cp[id] = c
+				parent = parent || isParent[id][c]
+			}
+			for id, c := range codes {
+				cp[id] = c
+				parent = parent || isParent[id][c]
+			}
+			if parent {
+				pv := ""
+				if p.pivotDim != nil {
+					pv = cp[p.pivotDim.ID]
+				}
+				points = append(points, point{codes: cp, pivot: pv})
+			}
+			return
+		}
+		for _, m := range p.allowedLeaves(axes[i]) {
+			codes[axes[i].ID] = m.Code
+			walk(i+1, codes)
+		}
+		delete(codes, axes[i].ID)
+	}
+	walk(0, map[string]string{})
+	if len(points) == 0 {
+		return nil
+	}
+	if len(points) > MaxTotalPoints {
+		return fmt.Errorf("this export asks for %d totals (combinations naming a parent member), more than %d: filter its dimensions to fewer parents, or let a dashboard download follow its selector bar", len(points), MaxTotalPoints)
+	}
+	asked := make([]map[string]string, len(points))
+	for i, pt := range points {
+		asked[i] = pt.codes
+	}
+	got, err := snap.TotalsAt(asked)
+	if err != nil {
+		return err
+	}
+	for i, pt := range points {
+		if i >= len(got) {
+			break
+		}
+		rowCodes := make(map[string]string, len(p.rowDims))
+		for _, d := range p.rowDims {
+			rowCodes[d.ID] = pt.codes[d.ID]
+		}
+		rk := rowKey(rowCodes)
+		for id, v := range got[i] {
+			m, ok := placeable[id]
+			if !ok || m.Text {
+				continue
+			}
+			col := id
+			if p.pivotDim != nil {
+				col += "\x1f" + pt.pivot
+			}
+			r := rows[rk]
+			if r == nil {
+				r = &rowData{codes: rowCodes, vals: map[string]float64{}, texts: map[string]string{}}
+				rows[rk] = r
+			}
+			if _, served := r.vals[col]; !served {
+				r.vals[col] = v
+			}
+		}
+	}
+	return nil
 }
 
 type rowData struct {
@@ -257,11 +389,21 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		}
 	}
 
+	if s.IncludeTotals && snap.TotalsAt != nil {
+		if err := p.readTotals(snap, placeable, rows, rowKey); err != nil {
+			return nil, err
+		}
+	}
+
 	// Row order: each row dimension's display order, outermost first.
 	order := make([]map[string]int, len(p.rowDims))
 	for i, d := range p.rowDims {
 		order[i] = map[string]int{}
-		for j, m := range d.Members {
+		members := d.Members
+		if s.IncludeTotals {
+			members = d.treeOrder() // a parent's row before its members', as the grid shows them
+		}
+		for j, m := range members {
 			order[i][m.Code] = j
 		}
 	}

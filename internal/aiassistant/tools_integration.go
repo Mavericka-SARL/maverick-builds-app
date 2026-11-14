@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
@@ -167,8 +168,30 @@ func integrationToolDefs() []toolDef {
 		},
 		{
 			Name:        "compare_with_sheet",
-			Description: "Compares one row of an attached sheet with the metric it became, period by period along the metric's time dimension, at the members you name for its other dimensions: how many periods match and every one that differs (sheet value, model value). Use it before saying a row or a sheet is done — a model can look complete and still differ — and after each fix. A percentage metric matches the sheet's fraction.",
+			Description: "Compares ONE row of an attached sheet with the metric it became, period by period (each column's period read from the header above it), at the members you name for its other dimensions — to check a whole sheet use check_sheet: how many periods match and every one that differs (sheet value, model value). Use it before saying a row or a sheet is done — a model can look complete and still differ — and after each fix. A percentage metric matches the sheet's fraction.",
 			Parameters:  compareWithSheetSchema,
+		},
+		{
+			Name: "check_sheet",
+			Description: "Checks a sheet of an attached file against the model CELL BY CELL, on the server, in one call: every number becomes a model coordinate " +
+				"(a metric, one member per dimension, a period at any level) through a map in the import's own terms — reshape (header_row, unpivot of month " +
+				"columns, constants such as {\"version\": \"ACTUAL\"}, skip_rows, value_map) and column_map (column → dimension or metric) — and is compared " +
+				"with the model's own value there: a parent member, a blank key cell or a total period (FY, a quarter) is read at the engine's total, so total " +
+				"rows and FY columns check the model's roll-ups too. The map an executed import loaded a sheet with is saved and used by itself: call it with " +
+				"file and sheet only. Give map (and block) for a sheet loaded another way or calculated in Excel, or for more of a sheet (e.g. block \"FY " +
+				"totals\": its FY column unpivoted with value_map {\"<header>\": \"FY2026\"}); maps are saved and the server checks them again after every " +
+				"plan. The answer separates MAPPING problems (fix the map, never the data) from VALUE problems (a row of input cells → the load; of " +
+				"formula cells → the model's formula), and lists numbers no block reads. Use it instead of compare_with_sheet to check a sheet. Read-only.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"The attached file's name"},
+				"sheet":{"type":"string","description":"Worksheet name; omit for a CSV file"},
+				"block":{"type":"string","description":"The map's name on this sheet (default \"main\"); without map: check only this block"},
+				"map":{"type":"object","description":"The block's map, saved for later checks: the same reshape and column_map an import of the sheet takes","properties":{
+					"reshape":` + reshapeSchema + `,
+					"column_map":{"type":"object","description":"File column (after reshape) → a dimension or metric name; \"metric\" + \"value\" for a long file; \"*\": \"ignore\" drops the rest"}
+				},"required":["column_map"]},
+				"forget":{"type":"boolean","description":"Drop the saved map of block instead of checking"}
+			},"required":["file"]}`,
 		},
 		{
 			Name: "workbook_map",
@@ -285,13 +308,17 @@ func (e *ToolExecutor) listIntegrations(ctx context.Context) (string, error) {
 				ColumnMap  map[string]string  `json:"column_map"`
 				ImportMode string             `json:"import_mode"`
 				SheetURL   string             `json:"sheet_url"`
-				ReplaceBy  string             `json:"replace_by"`
+				ReplaceBy  replaceByParam     `json:"replace_by"`
+				Parameters []loaderParameter  `json:"parameters"`
 			}
 			_ = json.Unmarshal([]byte(cfg), &c)
 			b, _ := json.Marshal(c.ColumnMap)
 			fmt.Fprintf(&sb, "    column_map: %s · import_mode: %s", b, orDefault(c.ImportMode, "default"))
 			if c.ReplaceBy != "" {
 				fmt.Fprintf(&sb, " · replace_by: %s", c.ReplaceBy)
+			}
+			for _, lp := range c.Parameters {
+				fmt.Fprintf(&sb, " · asks at each run: %s (%s)", lp.Column, orDefault(lp.Type, "text"))
 			}
 			if c.SheetURL != "" {
 				fmt.Fprintf(&sb, " · sheet: %s", c.SheetURL)
@@ -565,22 +592,75 @@ type fileIntegrationConfig struct {
 	Reshape    *importpkg.Reshape `json:"reshape,omitempty"`
 	ColumnMap  map[string]string  `json:"column_map,omitempty"`
 	ImportMode string             `json:"import_mode,omitempty"`
-	// ReplaceBy (a table) names the field whose values each file replaces.
-	ReplaceBy string `json:"replace_by,omitempty"`
+	// ReplaceBy (a table) names the fields whose values each file replaces,
+	// comma-joined: its period, or an entity and a period.
+	ReplaceBy replaceByParam `json:"replace_by,omitempty"`
+	// Parameters are the values a run asks for (the gateway's runParameter),
+	// stamped on every row as fixed-value columns: a TB's period end.
+	Parameters []loaderParameter `json:"parameters,omitempty"`
 }
 
-// tableReplaceBy is the name of the field of table tableID a loader may
-// replace by, as name names it.
-func (e *WriteExecutor) tableReplaceBy(ctx context.Context, tableID, name string) (string, error) {
+// replaceByParam is a replace_by as it is given — one field, a comma list,
+// or a list of fields (a table loaded per entity and period) — held
+// comma-joined, as the gateway reads it.
+type replaceByParam string
+
+func (r *replaceByParam) UnmarshalJSON(b []byte) error {
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		*r = replaceByParam(strings.Join(list, ","))
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("replace_by is a field name or a list of them")
+	}
+	*r = replaceByParam(s)
+	return nil
+}
+
+// loaderParameter is a value a file loader asks for at each run.
+type loaderParameter = importpkg.RunParameter
+
+// configReplaceBy is a saved config's replace_by, comma-joined: it may be
+// saved as one name, a comma list or a list.
+func configReplaceBy(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []any:
+		names := make([]string, 0, len(t))
+		for _, n := range t {
+			if s, ok := n.(string); ok {
+				names = append(names, s)
+			}
+		}
+		return strings.Join(names, ",")
+	}
+	return ""
+}
+
+// tableReplaceBy is the fields of table tableID a loader may replace by, as
+// spec (one name or a comma list) names them, comma-joined.
+func (e *WriteExecutor) tableReplaceBy(ctx context.Context, tableID, spec string) (string, error) {
 	form, err := crudapp.NewStoreOn(e.pool).GetForm(ctx, tableID)
 	if err != nil {
 		return "", fmt.Errorf("replace_by: read the table: %w", err)
 	}
-	f, err := recordpost.ReplaceField(form, name)
-	if err != nil {
-		return "", err
+	var names []string
+	for _, name := range strings.Split(spec, ",") {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		f, err := recordpost.ReplaceField(form, name)
+		if err != nil {
+			return "", err
+		}
+		if !slices.Contains(names, f.Name) {
+			names = append(names, f.Name)
+		}
 	}
-	return f.Name, nil
+	return strings.Join(names, ","), nil
 }
 
 // create_file_integration saves a re-runnable Excel/CSV import: the Import
@@ -596,7 +676,8 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		Tags       []string           `json:"tags"`
 		SheetURL   string             `json:"sheet_url"`
 		Sheet      string             `json:"sheet"`
-		ReplaceBy  string             `json:"replace_by"`
+		ReplaceBy  replaceByParam     `json:"replace_by"`
+		Parameters []loaderParameter  `json:"parameters"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -642,11 +723,21 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	}
 	cfg.SheetURL = p.SheetURL
 	cfg.Sheet = p.Sheet
-	if p.ReplaceBy = strings.TrimSpace(p.ReplaceBy); p.ReplaceBy != "" {
+	if rb := strings.TrimSpace(string(p.ReplaceBy)); rb != "" {
 		if p.TargetType != "form" {
 			return "", "", fmt.Errorf("replace_by applies to a table's loader; a grid's import_mode says what a file replaces")
 		}
-		if cfg.ReplaceBy, err = e.tableReplaceBy(ctx, targetID, p.ReplaceBy); err != nil {
+		names, err := e.tableReplaceBy(ctx, targetID, rb)
+		if err != nil {
+			return "", "", err
+		}
+		cfg.ReplaceBy = replaceByParam(names)
+	}
+	if len(p.Parameters) > 0 {
+		if kindOf == "google_sheets" {
+			return "", "", fmt.Errorf("parameters are asked when a file is uploaded; a Google Sheets integration takes no file")
+		}
+		if cfg.Parameters, err = importpkg.CheckParameters(p.Parameters); err != nil {
 			return "", "", err
 		}
 	}
@@ -745,18 +836,19 @@ func (e *WriteExecutor) createExportIntegration(ctx context.Context, raw json.Ra
 // target and config. REST API connectors are edited in their own wizard.
 func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		IntegrationID string            `json:"integration_id"`
-		Name          *string           `json:"name"`
-		Tags          *[]string         `json:"tags"`
-		TargetID      string            `json:"target_id"`
-		Reshape       json.RawMessage   `json:"reshape"`
-		ColumnMap     map[string]string `json:"column_map"`
-		ImportMode    *string           `json:"import_mode"`
-		Spec          json.RawMessage   `json:"spec"`
-		Status        *string           `json:"status"`
-		SheetURL      *string           `json:"sheet_url"`
-		Sheet         *string           `json:"sheet"`
-		ReplaceBy     *string           `json:"replace_by"`
+		IntegrationID string             `json:"integration_id"`
+		Name          *string            `json:"name"`
+		Tags          *[]string          `json:"tags"`
+		TargetID      string             `json:"target_id"`
+		Reshape       json.RawMessage    `json:"reshape"`
+		ColumnMap     map[string]string  `json:"column_map"`
+		ImportMode    *string            `json:"import_mode"`
+		Spec          json.RawMessage    `json:"spec"`
+		Status        *string            `json:"status"`
+		SheetURL      *string            `json:"sheet_url"`
+		Sheet         *string            `json:"sheet"`
+		ReplaceBy     *replaceByParam    `json:"replace_by"`
+		Parameters    *[]loaderParameter `json:"parameters"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -892,7 +984,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 			if row.TargetType != "form" {
 				return "", "", fmt.Errorf("replace_by applies to a table's loader only")
 			}
-			if s := strings.TrimSpace(*p.ReplaceBy); s == "" {
+			if s := strings.TrimSpace(string(*p.ReplaceBy)); s == "" {
 				delete(c, "replace_by")
 			} else {
 				name, err := e.tableReplaceBy(ctx, targetID, s)
@@ -902,10 +994,26 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 				c["replace_by"] = name
 			}
 			changed = append(changed, "replace_by")
-		} else if rb, _ := c["replace_by"].(string); rb != "" && targetID != row.TargetID {
+		} else if rb := configReplaceBy(c["replace_by"]); rb != "" && targetID != row.TargetID {
 			if _, err := e.tableReplaceBy(ctx, targetID, rb); err != nil {
 				return "", "", err
 			}
+		}
+		// parameters: the values each run asks for; [] removes them.
+		if p.Parameters != nil {
+			if row.Type != "csv_import" {
+				return "", "", fmt.Errorf("parameters are asked when a file is uploaded: an Excel/CSV loader's only")
+			}
+			ps, err := importpkg.CheckParameters(*p.Parameters)
+			if err != nil {
+				return "", "", err
+			}
+			if len(ps) == 0 {
+				delete(c, "parameters")
+			} else {
+				c["parameters"] = ps
+			}
+			changed = append(changed, "parameters")
 		}
 		cfg, _ = json.Marshal(c)
 	}
@@ -969,7 +1077,9 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		Reshape       *importpkg.Reshape `json:"reshape"`
 		ColumnMap     map[string]string  `json:"column_map"`
 		ImportMode    string             `json:"import_mode"`
-		ReplaceBy     string             `json:"replace_by"`
+		ReplaceBy     replaceByParam     `json:"replace_by"`
+		// Parameters: a saved loader's values asked at each run, by column.
+		Parameters map[string]string `json:"parameters"`
 		// See FileImportRequest.ValuesArePercentUnits.
 		ValuesArePercentUnits bool `json:"values_are_percent_units"`
 		PercentFractions      bool `json:"percent_fractions"`
@@ -998,7 +1108,10 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		var c fileIntegrationConfig
 		_ = json.Unmarshal(row.Config, &c)
 		req.IntegrationID, req.TargetType, req.TargetID = row.ID, row.TargetType, row.TargetID
-		req.Reshape, req.ColumnMap, req.ImportMode, req.ReplaceBy = c.Reshape, c.ColumnMap, c.ImportMode, c.ReplaceBy
+		req.Reshape, req.ColumnMap, req.ImportMode, req.ReplaceBy = c.Reshape, c.ColumnMap, c.ImportMode, string(c.ReplaceBy)
+		if req.Reshape, err = importpkg.WithParameters(req.Reshape, c.Parameters, p.Parameters); err != nil {
+			return "", "", err
+		}
 		if req.Sheet == "" {
 			req.Sheet = c.Sheet
 		}
@@ -1064,8 +1177,8 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		return "", "", err
 	}
 	req.ImportMode = cfg.ImportMode
-	if p.ReplaceBy = strings.TrimSpace(p.ReplaceBy); p.ReplaceBy != "" {
-		req.ReplaceBy = p.ReplaceBy
+	if rb := strings.TrimSpace(string(p.ReplaceBy)); rb != "" {
+		req.ReplaceBy = rb
 	}
 	if req.ReplaceBy != "" {
 		if req.TargetType != "form" {

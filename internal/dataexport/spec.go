@@ -6,11 +6,14 @@
 // A Spec is the stored config of a "file_export" integration
 // (model.integration_def). It names metrics, dimensions and members by NAME
 // and CODE, never by id, so it survives a revision copy and a model export
-// unchanged. Exports are leaf-level: one row per leaf combination, values
-// exactly as the grid serves them (inputs and calculated metrics alike).
-// Aggregating to a parent level is left to the spreadsheet — a server-side
-// rollup here would be a second implementation of what /api/grid computes,
-// free to disagree with it.
+// unchanged. Exports are leaf-level by default: one row per leaf
+// combination, values exactly as the grid serves them (inputs and calculated
+// metrics alike). With include_totals a parent member is exported too, with
+// the total /api/grid serves for it — never a rollup computed here, which
+// would be a second implementation of what /api/grid computes, free to
+// disagree with it. A statement's main column is often a total (Consolidated,
+// the year): leaf-only, a group P&L pack had no consolidated figures
+// (2026-11-13).
 //
 // The package is pure. Its caller supplies the grid's structure (Grid) to
 // validate a spec and the requesting user's own view of the grid's values
@@ -42,6 +45,24 @@ type Spec struct {
 	IncludeEmptyRows bool                `json:"include_empty_rows,omitempty"`
 	SheetName        string              `json:"sheet_name,omitempty"` // xlsx: default "Data"
 	FileName         string              `json:"file_name,omitempty"`  // without extension; default = the export's name
+	// IncludeTotals exports parent members too, with the totals the grid
+	// serves for them; a filter's members are then taken as named (a parent
+	// is its total, not its leaves), in the filter's order.
+	IncludeTotals bool `json:"include_totals,omitempty"`
+	// FollowSelector lets a download from a dashboard narrow the export to
+	// the members its selector bar shows (the period being looked at): each
+	// bar dimension the grid has becomes a filter of one member.
+	FollowSelector bool `json:"follow_selector,omitempty"`
+	// Sheets adds more grids to an xlsx export, one sheet each: a reporting
+	// pack (P&L, balance sheet, consolidated trial balance) in one workbook.
+	Sheets []PackSheet `json:"sheets,omitempty"`
+}
+
+// PackSheet is one more sheet of a pack: a grid of the export's revision, by
+// name, laid out by its own spec (its format is the pack's).
+type PackSheet struct {
+	Grid string `json:"grid"`
+	Spec
 }
 
 const (
@@ -203,6 +224,61 @@ func (d Dimension) leaves() []Member {
 	return out
 }
 
+// treeOrder is the dimension's members depth first: each parent, then its
+// members in their order.
+func (d Dimension) treeOrder() []Member {
+	children := map[string][]Member{}
+	known := map[string]bool{}
+	for _, m := range d.Members {
+		known[m.Code] = true
+	}
+	var roots []Member
+	for _, m := range d.Members {
+		if m.ParentCode == "" || !known[m.ParentCode] {
+			roots = append(roots, m)
+		} else {
+			children[m.ParentCode] = append(children[m.ParentCode], m)
+		}
+	}
+	out := make([]Member, 0, len(d.Members))
+	seen := map[string]bool{}
+	var walk func(m Member)
+	walk = func(m Member) {
+		if seen[m.Code] {
+			return
+		}
+		seen[m.Code] = true
+		out = append(out, m)
+		for _, c := range children[m.Code] {
+			walk(c)
+		}
+	}
+	for _, r := range roots {
+		walk(r)
+	}
+	return out
+}
+
+// named is the filter codes as members of their own — a parent standing for
+// its total, not its leaves (include_totals); unknown codes apart.
+func (d Dimension) named(codes []string) (map[string]bool, []string) {
+	known := map[string]bool{}
+	for _, m := range d.Members {
+		known[m.Code] = true
+	}
+	out := map[string]bool{}
+	var unknown []string
+	for _, c := range codes {
+		c = strings.TrimSpace(c)
+		if !known[c] {
+			unknown = append(unknown, c)
+			continue
+		}
+		out[c] = true
+	}
+	return out, unknown
+}
+
 // leavesUnder resolves filter codes to the leaf members they stand for: a
 // leaf itself, or every leaf below a parent. Unknown codes are returned
 // separately; for a requesting user they include members hidden from them.
@@ -250,6 +326,9 @@ type plan struct {
 	pivotDim *Dimension
 	metrics  []Metric
 	allowed  map[string]map[string]bool // dimension ID -> allowed leaf codes
+	// order is a filter's codes in the order named (include_totals): the
+	// members' order on the axis.
+	order map[string][]string
 	// pinned dimensions are filtered to exactly one leaf and are not a
 	// column; their code is part of every cell's identity all the same.
 	pinned map[string]string
@@ -258,7 +337,19 @@ type plan struct {
 // Validate checks a spec against a grid's structure and returns every
 // problem found, so a caller can fix them in one pass.
 func Validate(spec Spec, g Grid) []string {
-	_, problems := resolve(spec.Normalized(), g, true)
+	s := spec.Normalized()
+	_, problems := resolve(s, g, true)
+	if len(s.Sheets) > 0 && s.Format != FormatXLSX {
+		problems = append(problems, "sheets make a workbook: format must be xlsx")
+	}
+	for i, sh := range s.Sheets {
+		if strings.TrimSpace(sh.Grid) == "" {
+			problems = append(problems, fmt.Sprintf("sheet %d names no grid", i+2))
+		}
+		if len(sh.Sheets) > 0 {
+			problems = append(problems, fmt.Sprintf("sheet %d (%s) cannot hold sheets of its own", i+2, sh.Grid))
+		}
+	}
 	return problems
 }
 
@@ -324,7 +415,7 @@ func resolve(s Spec, g Grid, strict bool) (*plan, []string) {
 		add("grid %q has no dimensions", g.Name)
 	}
 
-	p := &plan{spec: s, allowed: map[string]map[string]bool{}, pinned: map[string]string{}}
+	p := &plan{spec: s, allowed: map[string]map[string]bool{}, pinned: map[string]string{}, order: map[string][]string{}}
 
 	// Metrics.
 	if len(s.Metrics) == 0 {
@@ -362,7 +453,14 @@ func resolve(s Spec, g Grid, strict bool) (*plan, []string) {
 			add("filter on %q lists no members", d.Name)
 			continue
 		}
-		leaves, unknown := d.leavesUnder(codes)
+		var leaves map[string]bool
+		var unknown []string
+		if s.IncludeTotals {
+			leaves, unknown = d.named(codes)
+			p.order[d.ID] = codes
+		} else {
+			leaves, unknown = d.leavesUnder(codes)
+		}
 		if strict && len(unknown) > 0 {
 			add("filter on %q names member(s) %s that are not in it", d.Name, strings.Join(unknown, ", "))
 		}
@@ -373,7 +471,11 @@ func resolve(s Spec, g Grid, strict bool) (*plan, []string) {
 			continue
 		}
 		all := map[string]bool{}
-		for _, m := range d.leaves() {
+		members := d.leaves()
+		if s.IncludeTotals {
+			members = d.Members
+		}
+		for _, m := range members {
 			all[m.Code] = true
 		}
 		p.allowed[d.ID] = all

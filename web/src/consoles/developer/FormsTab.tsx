@@ -271,7 +271,7 @@ function FormFieldsEditor({
 const ownRecordsHint = "People who do not administer the application see only the records they created; business admins see every record.";
 
 /** A table's settings beyond its fields: who may change its records, and the dimension whose members they are. */
-function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelField, onLabelField, rootLabel, onRootLabel, fields, dims, forms, selfId }: {
+function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelField, onLabelField, rootLabel, onRootLabel, withCode, onWithCode, fields, dims, forms, selfId }: {
   editAccess: EditAccess;
   onEditAccess: (v: EditAccess) => void;
   keeps: string;
@@ -280,6 +280,8 @@ function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelFi
   onLabelField: (v: string) => void;
   rootLabel: string;
   onRootLabel: (v: string) => void;
+  withCode: boolean;
+  onWithCode: (v: boolean) => void;
   fields: FormField[];
   dims: DevDimension[];
   forms: FormDef[];
@@ -322,6 +324,10 @@ function TableSettingsEditor({ editAccess, onEditAccess, keeps, onKeeps, labelFi
           <TextInput value={rootLabel} onChange={e => onRootLabel(e.target.value)} placeholder="All accounts" style={{ width: 220 }} />
         </Field>
       )}
+      {keeps && (
+        <Checkbox checked={withCode} onChange={e => onWithCode(e.target.checked)}
+          label="Name each member with its code too (IC03 · Intragroup loan principal), so records with the same text tell apart" />
+      )}
     </div>
   );
 }
@@ -337,6 +343,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [newKeeps, setNewKeeps] = useState("");
   const [newLabelField, setNewLabelField] = useState("");
   const [newRootLabel, setNewRootLabel] = useState("");
+  const [newWithCode, setNewWithCode] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editLabel, setEditLabel] = useState("");
@@ -348,6 +355,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [editKeeps, setEditKeeps] = useState("");
   const [editLabelField, setEditLabelField] = useState("");
   const [editRootLabel, setEditRootLabel] = useState("");
+  const [editWithCode, setEditWithCode] = useState(false);
   const [savedOk, setSavedOk] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -360,13 +368,13 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
     const seen = new Set<string>();
     return (dimsRaw as DevDimension[]).filter(d => { if (seen.has(d.name)) return false; seen.add(d.name); return true; });
   }, [dimsRaw]);
-  const resetCreate = () => { setNewName(""); setNewLabel(""); setNewFields([blankField()]); setNewOwnOnly(false); setNewEditAccess("creator"); setNewKeeps(""); setNewLabelField(""); setNewRootLabel(""); };
+  const resetCreate = () => { setNewName(""); setNewLabel(""); setNewFields([blankField()]); setNewOwnOnly(false); setNewEditAccess("creator"); setNewKeeps(""); setNewLabelField(""); setNewRootLabel(""); setNewWithCode(false); };
   const createForm = useMutation({
     mutationFn: () => api.createForm({
       name: newName, label: newLabel, fields: newFields, own_records_only: newOwnOnly,
       // Settings left at their defaults are not sent: the request is what it always was.
       ...(newEditAccess !== "creator" ? { edit_access: newEditAccess } : {}),
-      ...(newKeeps ? { keeps_dimension_id: newKeeps, member_label_field: newLabelField, ...(newRootLabel.trim() ? { member_root_label: newRootLabel.trim() } : {}) } : {}),
+      ...(newKeeps ? { keeps_dimension_id: newKeeps, member_label_field: newLabelField, ...(newRootLabel.trim() ? { member_root_label: newRootLabel.trim() } : {}), ...(newWithCode ? { member_label_with_code: true } : {}) } : {}),
     }, revisionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["forms"] });
@@ -407,11 +415,12 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
       out.member_label_field = editKeeps ? editLabelField : "";
       out.member_root_label = editKeeps ? editRootLabel.trim() : "";
     }
+    if (editWithCode !== !!t?.member_label_with_code) out.member_label_with_code = editWithCode;
     return out;
   };
   const startEdit = (f: FormDef) => {
     setEditId(f.id); setEditName(f.name); setEditLabel(f.label); setEditFields([...(f.fields ?? [])]); setEditOwnOnly(!!f.own_records_only);
-    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? "");
+    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? ""); setEditWithCode(!!f.member_label_with_code);
   };
   const editing = (forms as FormDef[]).find(f => f.id === editId);
   // Removing the status field makes every record count; adding one makes new records wait for approval.
@@ -471,7 +480,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
             <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0 24px" }}>{ownRecordsHint}</p>
           </div>
           <TableSettingsEditor editAccess={newEditAccess} onEditAccess={setNewEditAccess} keeps={newKeeps} onKeeps={setNewKeeps}
-            labelField={newLabelField} onLabelField={setNewLabelField} rootLabel={newRootLabel} onRootLabel={setNewRootLabel} fields={newFields} dims={dims} forms={forms as FormDef[]} />
+            labelField={newLabelField} onLabelField={setNewLabelField} rootLabel={newRootLabel} onRootLabel={setNewRootLabel} withCode={newWithCode} onWithCode={setNewWithCode} fields={newFields} dims={dims} forms={forms as FormDef[]} />
           <Button variant="primary"
             disabled={!newName || !newLabel || newFields.some(f => !f.name) || (!!newKeeps && !newLabelField)}
             loading={createForm.isPending}
@@ -515,7 +524,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
                     {demoCtx?.app_id && <RolePicker applicationId={demoCtx.app_id} value={editCreateRoles} onChange={setEditCreateRoles} />}
                   </Field>
                   <TableSettingsEditor editAccess={editEditAccess} onEditAccess={setEditEditAccess} keeps={editKeeps} onKeeps={setEditKeeps}
-                    labelField={editLabelField} onLabelField={setEditLabelField} rootLabel={editRootLabel} onRootLabel={setEditRootLabel} fields={editFields} dims={dims} forms={forms as FormDef[]} selfId={f.id} />
+                    labelField={editLabelField} onLabelField={setEditLabelField} rootLabel={editRootLabel} onRootLabel={setEditRootLabel} withCode={editWithCode} onWithCode={setEditWithCode} fields={editFields} dims={dims} forms={forms as FormDef[]} selfId={f.id} />
                   {statusChange && (
                     <p className="mvx-admin-muted" style={{ fontSize: 12 }}>
                       {editFields.some(ff => ff.type === "status")
