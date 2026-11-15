@@ -270,6 +270,7 @@ var (
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
 		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
+		"record_selects": true, "record_follows": true, "follow_rows": true, "follow_columns": true,
 		"kpi_compare": true, "kpi_good": true, "number_scale": true,
 		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true,
 		"hide_empty_rows": true}

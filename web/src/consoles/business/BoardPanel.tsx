@@ -1,7 +1,7 @@
 import { useDateFormat } from "../dateFormat";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { Filter, Lock, Plus as PlusIcon } from "lucide-react";
+import { Filter, Link2, Lock, Plus as PlusIcon } from "lucide-react";
 import {
   api, type BoardColumn, type BoardSettings, type DevDimension, type FormDef, type FormRecord, type Metric, type RecordFilter, type RecordsQuery,
 } from "../../api/client";
@@ -28,12 +28,16 @@ const NONE = "";
  * counts its records and totals the sum field over all of them, not only the
  * cards shown. A card opens the record.
  */
-export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecordButton = false, title }: {
+export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecordButton = false, title, prefill, followFilters }: {
   form: FormDef;
   revisionId: string;
   settings: BoardSettings;
   fixedFilters?: RecordFilter[];
   newRecordButton?: boolean;
+  /** Values a new card starts with: the dashboard's selection it follows. */
+  prefill?: Record<string, unknown>;
+  /** The dashboard's selection the board follows, applied like fixed filters and shown apart from them. */
+  followFilters?: RecordFilter[];
   title?: string;
 }) {
   const dateFormat = useDateFormat();
@@ -69,7 +73,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
     queryFn: () => api.boardColumns(form.id, settings.column_field, settings.color_property),
     enabled: !!colField,
   });
-  const query: RecordsQuery = listQuery({ search, filters, sort: null, limit: BOARD_LIMIT, fixedFilters });
+  const query: RecordsQuery = listQuery({ search, filters, sort: null, limit: BOARD_LIMIT, fixedFilters: followFilters?.length ? [...(fixedFilters ?? []), ...followFilters] : fixedFilters });
   const { data: page, isLoading, error: listError } = useQuery({
     queryKey: ["records", form.id, "board", query],
     queryFn: () => api.queryRecords(form.id, query),
@@ -156,6 +160,17 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                 <Fragment key={i}>
                   <Txt>{i > 0 && " · "}</Txt>
                   <span aria-label={`Filter set on this widget: ${describeFilter(f, listCols, dims, metrics)}`}>{describeFilter(f, listCols, dims, metrics)}</span>
+                </Fragment>
+              ))}
+            </span>
+          )}
+          {(followFilters ?? []).length > 0 && (
+            <span className="mvx-panel-head__note" title="Follows the record selected on the dashboard">
+              <Link2 size={11} aria-hidden="true" />
+              {(followFilters ?? []).map((f, i) => (
+                <Fragment key={i}>
+                  <Txt>{i > 0 && " · "}</Txt>
+                  <span aria-label={`Follows the dashboard's selection: ${describeFilter(f, listCols, dims, metrics)}`}>{describeFilter(f, listCols, dims, metrics)}</span>
                 </Fragment>
               ))}
             </span>
@@ -267,7 +282,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
       )}
       {creatingIn !== null && (
         <RecordDialog form={form} forms={forms} record={null} revisionId={revisionId}
-          initialData={creatingIn ? { [settings.column_field]: creatingIn } : undefined} onClose={() => setCreatingIn(null)} />
+          initialData={creatingIn || prefill ? { ...prefill, ...(creatingIn ? { [settings.column_field]: creatingIn } : {}) } : undefined} onClose={() => setCreatingIn(null)} />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useContext, useId } from "react";
 import { serialToISO, serialToLocal, isoToSerial, parseDateText } from "../dateSerial";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
@@ -13,7 +13,8 @@ import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
 import { scaleFor, scales, type Scale } from "../numberScale";
 import { invalidateModelData, refreshAfterRecalc } from "../modelDataQueries";
-import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
+import { DashboardContextSyncContext, foreignSelection, useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
+import { selectionScope } from "../selectionScope";
 import { downloadBlob } from "./blobUtils";
 import { parseCellNumber } from "./cellNumber";
 import { cellAt, cellsBetween, copyText, editableIn, parseClipboard, pastedDate, toClipboard } from "./cellClipboard";
@@ -538,7 +539,7 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, hideEmptyRows, labelWidth, hideLegend, hideBadges, footer }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, hideEmptyRows, labelWidth, hideLegend, hideBadges, footer, followRows, followColumns }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Amounts in thousands or millions (widget_props.number_scale "k"/"m"); "auto" is a tile's, a grid keeps every digit. */
   numberScale?: NumberScale;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
@@ -559,7 +560,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   /** No INPUT / CALC tags beside the metric labels (widget_props.hide_badges). */
   hideBadges?: boolean;
   /** A line of text under the grid (widget_props.footer): a source, a unit, a note. */
-  footer?: string }) {
+  footer?: string;
+  /** Rows / columns show only what is under the dashboard's selection (widget_props.follow_rows / follow_columns). */
+  followRows?: boolean;
+  followColumns?: boolean }) {
   const qc = useQueryClient();
   // A grid divides by one unit throughout ("k", "m"); "auto" sizes a tile's
   // single number, and a table keeps its every digit then.
@@ -925,6 +929,21 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // Works on any dashboard, independent of this grid's own sync flag: the
   // click is the user's explicit choice (see ChartWidget for the same rule).
   const pushSync = useSyncSetter(true);
+  // Rows or columns following the dashboard's selection (follow_rows /
+  // follow_columns) show what is under the member another widget selected —
+  // in the same dimension, a parent dimension or a grouping. This grid's own
+  // clicks select for the others, never narrow it: it reads, per dimension,
+  // the newest member someone else selected.
+  const following = !!(followRows || followColumns);
+  const followSync = useContext(DashboardContextSyncContext);
+  const selfId = useId();
+  const foreignSel = useMemo(() => (following && followSync ? foreignSelection(followSync, selfId) : {}), [following, followSync, selfId]);
+  const { data: modelDims } = useQuery({
+    queryKey: ["grid-meta", ctx.revision_id],
+    queryFn: () => api.getGrid(ctx.revision_id, undefined, { metaOnly: true }),
+    staleTime: 30_000,
+    enabled: following && !!followSync,
+  });
   const selPos: SelectorsPosition = selectorsPosition ?? "top";
   const selVertical = selPos === "left" || selPos === "right";
   // The row-label column: widget_props.label_width when set, else a minimum
@@ -933,14 +952,31 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     labelWidth ? { minWidth: labelWidth, width: labelWidth, maxWidth: labelWidth } : { minWidth: dflt };
   const pickProps = (dimId: string | undefined, dimName: string | undefined, code: string, label: string) =>
     pushSync && dimId
-      ? { className: "mvx-header-cell--pickable", title: `Set ${dimName ?? "context"} to ${label} for synced widgets`, onClick: () => pushSync(dimId, code) }
+      ? { className: "mvx-header-cell--pickable", title: `Set ${dimName ?? "context"} to ${label} for synced widgets`, onClick: () => pushSync(dimId, code, selfId) }
       : {};
+  // The Total row's label selects every member of each row dimension for the
+  // synced widgets: the dimension's one top member, or no selection where it
+  // has several (the rows a following grid narrowed come back).
+  const pickAllProps = (axisDims: { id: string; name: string; label?: string }[]) => {
+    if (!pushSync || axisDims.length === 0) return {};
+    const topOf = (dimId: string) => {
+      const members = (grid?.dimensions ?? []).find(d => d.id === dimId)?.members ?? [];
+      const codes = new Set(members.map(m => m.code));
+      const tops = members.filter(m => !m.parent_code || !codes.has(m.parent_code));
+      return tops.length === 1 ? tops[0].code : "";
+    };
+    return {
+      className: "mvx-header-cell--pickable",
+      title: `Show every ${axisDims.map(d => d.label || d.name).join(" and ")} in synced widgets`,
+      onClick: () => axisDims.forEach(d => pushSync(d.id, topOf(d.id), selfId)),
+    };
+  };
   const pickComboProps = (combo: { code: string; label: string }[], axisDims: { id: string; name: string }[]) =>
     pushSync && combo.length > 0
       ? {
           className: "mvx-header-cell--pickable",
           title: `Set ${combo.map((m, i) => `${axisDims[i]?.name ?? "context"} to ${m.label}`).join(", ")} for synced widgets`,
-          onClick: () => combo.forEach((m, i) => { if (axisDims[i]) pushSync(axisDims[i].id, m.code); }),
+          onClick: () => combo.forEach((m, i) => { if (axisDims[i]) pushSync(axisDims[i].id, m.code, selfId); }),
         }
       : {};
 
@@ -1025,8 +1061,20 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const members = d.members.filter(m => keep.has(m.code));
     return members.length > 0 ? { ...d, members } : d;
   };
-  const rowDims  = inZone(pivotRows).map(onAxis).map(withData).map(d => searchAxis(d, findQuery) ?? d);
-  const colDims  = inZone(pivotCols).map(onAxis).map(d => searchAxis(d, findQuery) ?? d);
+  // An axis following the dashboard's selection: only the members under it,
+  // the highest of them on top (a member whose parent is left out heads its part).
+  const scopeDims = (modelDims as GridData | undefined)?.all_dimensions ?? g.all_dimensions ?? g.dimensions ?? [];
+  const followed: { dim: DimInfo; shown: number }[] = [];
+  const narrowed = (on: boolean) => (d: DimInfo): DimInfo => {
+    if (!on || !followSync) return d;
+    const scope = selectionScope(d.id, scopeDims, foreignSel);
+    if (!scope) return d;
+    const members = d.members.filter(m => scope.has(m.code)).map(m => (m.parent_code && scope.has(m.parent_code) ? m : { ...m, parent_code: undefined }));
+    followed.push({ dim: d, shown: members.length });
+    return { ...d, members };
+  };
+  const rowDims  = inZone(pivotRows).map(onAxis).map(narrowed(!!followRows)).map(withData).map(d => searchAxis(d, findQuery) ?? d);
+  const colDims  = inZone(pivotCols).map(onAxis).map(narrowed(!!followColumns)).map(d => searchAxis(d, findQuery) ?? d);
   const ctxDims  = inZone(pivotContext);
   // When metrics are in the context zone, only show the one selected metric in the grid
   const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
@@ -1766,7 +1814,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // A note (a comment, an owner): typed as text; emptied, it clears.
       const isActive = editing[key] !== undefined;
       return (
-        <td className={tone || undefined} style={{ ...td, textAlign: "left", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title={note ? `${note}\n\nRight-click for history` : "Right-click for history"}>
+        <td className={tone || undefined} style={{ ...td, textAlign: "left", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title={note ? `${note}\n\nRight-click for history` : "Right-click for history"}>
           <input
             value={isActive ? editing[key] : note} placeholder="—"
             aria-label={`${m.label ?? m.name} — note`}
@@ -1799,7 +1847,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, text: iso });
       };
       return (
-        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
           <DateInput value={stored} format={dateFormat} className="mvx-cell-input" ariaLabel={`${m.label ?? m.name} — date`}
             {...pasteAttrs("date", stored)} onCommit={writeDate} />
         </td>
@@ -1811,7 +1859,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // list, written at once (the key; "—" clears it).
       const current = val != null && val !== 0 ? String(val) : "";
       return (
-        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+        <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
           <select
             className="mvx-cell-input mvx-cell-select"
             aria-label={`${m.label ?? m.name} — choose a member`}
@@ -1846,7 +1894,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       ? editing[key]
       : (val != null ? fmtMetric(m, val, gridScale) : "");
     return (
-      <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+      <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
         <input
           value={dispVal} placeholder="—"
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
@@ -2267,7 +2315,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 {maintainedRowDim && <AddMemberRow dim={maintainedRowDim} colSpan={1 + effectiveColCombos.length * gridMetrics.length} />}
                 {!hasRowHierarchy && rowCombos.length > 1 && !hideTotalRow && (
                   <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-surface-faint)" }}>
-                    <td style={{ ...td, fontWeight: 700 }}>Total</td>
+                    <td {...pickAllProps(rowDims)} style={{ ...td, fontWeight: 700 }}>Total</td>
                     {colSlots.map(({ cc, m, edge }) => {
                         const bl = edge ? "1px solid var(--color-border)" : undefined;
                         const total = colTotal(m.id, cc);
@@ -2295,6 +2343,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           {/* Only where a label can be clicked: a grid of metrics alone has
               none, and the hint promised a click that did nothing. */}
           {pushSync && rowDims.length + colDims.length > 0 && <span>Click a row or column label to select it in synced widgets</span>}
+          {followed.length > 0 && <span>{followed.some(f => f.shown === 0) ? "Nothing here is under the dashboard's selection" : "Shows what is under the dashboard's selection"}</span>}
           {gridMetrics.some(m => m.is_input) && <span>Shift+click selects cells; ⌘/Ctrl+C and ⌘/Ctrl+V copy and paste them, also from a spreadsheet</span>}
           </>}
           {!toolbarRow && (
@@ -2351,8 +2400,11 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   );
 }
 
-const th: React.CSSProperties = { padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 12, color: "var(--color-text-strong)", whiteSpace: "nowrap" };
-const td: React.CSSProperties = { padding: "8px 12px", color: "var(--color-text)" };
+// Padding as longhands: cells override paddingLeft (a row's indent), and a
+// shorthand beside it makes React warn when a following grid's rows change
+// in place (one cell losing its indent, 2026-11-15).
+const th: React.CSSProperties = { paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, textAlign: "left", fontWeight: 600, fontSize: 12, color: "var(--color-text-strong)", whiteSpace: "nowrap" };
+const td: React.CSSProperties = { paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, color: "var(--color-text)" };
 
 // Probe is a value a highlight rule tests: a number, or text (a pick-list's
 // member code, a note).

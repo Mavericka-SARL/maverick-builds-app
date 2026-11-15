@@ -6,6 +6,7 @@
 import type { DevDimension, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
 import { localToday, statusFieldOf } from "../../api/client";
 import { formatIsoDate, isoToLocal } from "../dateSerial";
+import { selectionScope, type ScopeDim } from "../selectionScope";
 
 /** A sortable, filterable column of the list. */
 export interface ListColumn {
@@ -147,6 +148,39 @@ export function isDueToday(f: FormField, data: Record<string, unknown>, today = 
   if (typeof v !== "string" || v.slice(0, 10) !== today) return false;
   if (f.done_field && (f.done_values ?? ["true"]).includes(String(data[f.done_field]))) return false;
   return true;
+}
+
+/** The code of the member a record is, in a table that keeps a dimension ("" otherwise): its auto-code. */
+export function memberCodeOf(form: FormDef, data: Record<string, unknown>): string {
+  if (!form.keeps_dimension_id) return "";
+  const f = form.fields.find(x => x.type === "autocode") ?? form.fields.find(x => x.code);
+  const v = f ? data[f.name] : undefined;
+  return typeof v === "string" ? v : "";
+}
+
+/**
+ * What a widget following the dashboard's selection (widget_props.record_follows) keeps: for each followed dimension
+ * field, a filter to the members the selection leaves of its dimension (selectionScope: the selected member and those
+ * under it, a parent dimension's or a grouping's selection included); nothing applies, no filter. A leaf of the
+ * field's own dimension selected is also the value a new record starts with. dims: the model's dimensions as the
+ * grids read them (members by code, parent_code crossing into a parent dimension).
+ */
+export function followSelection(form: FormDef, follows: string[] | undefined, selected: Record<string, string> | undefined, dims: ScopeDim[]): { filters: RecordFilter[]; prefill: Record<string, string> } {
+  const filters: RecordFilter[] = [];
+  const prefill: Record<string, string> = {};
+  if (!selected || !follows?.length) return { filters, prefill };
+  for (const name of follows) {
+    const f = form.fields.find(x => x.name === name && x.type === "dimension" && x.dimension_id);
+    if (!f) continue;
+    const scope = selectionScope(f.dimension_id!, dims, selected);
+    if (!scope) continue;
+    const codes = [...scope];
+    filters.push(codes.length === 1 ? { field: name, op: "eq", value: codes[0] } : { field: name, op: "in", values: codes.length > 0 ? codes : [""] });
+    const own = selected[f.dimension_id!];
+    const members = dims.find(d => d.id === f.dimension_id)?.members ?? [];
+    if (own && scope.has(own) && members.some(m => m.code === own) && !members.some(m => m.parent_code === own)) prefill[name] = own;
+  }
+  return { filters, prefill };
 }
 
 /** A new record's starting values: each field's default ("today" for a date is the viewer's day). */

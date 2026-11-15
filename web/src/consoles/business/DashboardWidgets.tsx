@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { serialToLocal } from "../dateSerial";
 import { DateFormatContext, useDateFormat } from "../dateFormat";
 import { scaleFor, scales } from "../numberScale";
@@ -17,6 +17,7 @@ import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/lazyChart";
 import { FormPanel } from "./FormPanel";
 import { BoardPanel } from "./BoardPanel";
+import { followSelection } from "./recordList";
 import { ImportWidget } from "./ImportWidget";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { PlanningGrid } from "./PlanningGrid";
@@ -302,7 +303,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} hideEmptyRows={widget.widget_props?.hide_empty_rows} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} hideEmptyRows={widget.widget_props?.hide_empty_rows} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} followRows={!!widget.widget_props?.follow_rows} followColumns={!!widget.widget_props?.follow_columns} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -337,14 +338,15 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     inner = (
       <div className="mvx-panel mvx-records-box" style={{ padding: 0, overflow: "hidden" }}>
         <FormWidgetPanel formId={widget.ref_id} ctx={ctx} title={widget.show_title && widget.title ? widget.title : undefined} newRecordButton={!!widget.widget_props?.new_record_button}
-          fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort} />
+          fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort}
+          selects={!!widget.widget_props?.record_selects} follows={widget.widget_props?.record_follows} />
       </div>
     );
   } else if (widget.widget_type === "board" && widget.ref_id && widget.widget_props?.board) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
         <BoardWidgetPanel formId={widget.ref_id} ctx={ctx} settings={widget.widget_props.board} title={widget.title ?? undefined}
-          newRecordButton={!!widget.widget_props?.new_record_button} fixedFilters={widget.widget_props?.record_filters} />
+          newRecordButton={!!widget.widget_props?.new_record_button} fixedFilters={widget.widget_props?.record_filters} follows={widget.widget_props?.record_follows} />
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
@@ -819,7 +821,7 @@ function triggerWhen(triggerType: string): string {
 // the list defaulted to the active one (found live, 2026-09-11). Tables reach
 // business users and business admins only this way; see FormPanel. The
 // widget offers "+ New record" only when its developer added the button.
-export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, fixedFilters, columns, fixedSort }: {
+export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, fixedFilters, columns, fixedSort, selects, follows }: {
   formId: string;
   ctx?: DemoContext;
   title?: string;
@@ -827,6 +829,8 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, 
   fixedFilters?: RecordFilter[];
   columns?: string[];
   fixedSort?: { field: string; desc?: boolean };
+  selects?: boolean;
+  follows?: string[];
 }) {
   const { data: formsRaw = [], isLoading } = useQuery({
     queryKey: ["forms", hostCtx?.revision_id ?? ""],
@@ -836,18 +840,50 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, 
   const { data: demoCtx } = useDemo(undefined, { enabled: !hostCtx });
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
+  const follow = useFollowSelection(form, follows, revisionId);
+  const sync = useContext(DashboardContextSyncContext);
+  const kept = form?.keeps_dimension_id;
+  const selection = useMemo(
+    () => (selects && sync && kept ? { code: sync.values[kept], onSelect: (code: string) => sync.setValue(kept, code) } : undefined),
+    [selects, sync, kept],
+  );
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
-  return <FormPanel form={form} revisionId={revisionId} title={title} newRecordButton={newRecordButton} fixedFilters={fixedFilters} columns={columns} fixedSort={fixedSort} />;
+  return <FormPanel form={form} revisionId={revisionId} title={title} newRecordButton={newRecordButton} fixedFilters={fixedFilters} columns={columns} fixedSort={fixedSort}
+    followFilters={follow.follow} prefill={follow.prefill} selection={selection} />;
+}
+
+// useFollowSelection: for each dimension field a records widget or board
+// follows (record_follows), a filter to the dashboard's selected member of
+// that field's dimension, and what a new record starts with. Outside a
+// dashboard, or nothing selected, none.
+function useFollowSelection(form: FormDef | undefined, follows: string[] | undefined, revisionId: string) {
+  const sync = useContext(DashboardContextSyncContext);
+  const following = (follows?.length ?? 0) > 0 && !!sync;
+  // The model's dimensions as the grids and the selector bar read them (shared cache).
+  const { data: meta } = useQuery({
+    queryKey: ["grid-meta", revisionId],
+    queryFn: () => api.getGrid(revisionId, undefined, { metaOnly: true }),
+    staleTime: 30_000,
+    enabled: following,
+  });
+  const values = following ? sync!.values : undefined;
+  return useMemo(() => {
+    const m = meta as GridData | undefined;
+    if (!form || !values || !m) return { follow: undefined, prefill: undefined };
+    const f = followSelection(form, follows, values, m.all_dimensions ?? m.dimensions ?? []);
+    return { follow: f.filters, prefill: f.prefill };
+  }, [form, follows, values, meta]);
 }
 
 // A board widget's body: the table's records as cards in columns (BoardPanel).
-export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButton, fixedFilters, title }: {
+export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButton, fixedFilters, title, follows }: {
   formId: string;
   ctx?: DemoContext;
   settings: BoardSettings;
   newRecordButton?: boolean;
   fixedFilters?: RecordFilter[];
   title?: string;
+  follows?: string[];
 }) {
   const { data: formsRaw = [], isLoading } = useQuery({
     queryKey: ["forms", hostCtx?.revision_id ?? ""],
@@ -857,6 +893,7 @@ export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButt
   const { data: demoCtx } = useDemo(undefined, { enabled: !hostCtx });
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
+  const follow = useFollowSelection(form, follows, revisionId);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
-  return <BoardPanel form={form} revisionId={revisionId} settings={settings} newRecordButton={newRecordButton} fixedFilters={fixedFilters} title={title} />;
+  return <BoardPanel form={form} revisionId={revisionId} settings={settings} newRecordButton={newRecordButton} fixedFilters={fixedFilters} followFilters={follow.follow} title={title} prefill={follow.prefill} />;
 }

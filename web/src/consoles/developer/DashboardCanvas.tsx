@@ -8,7 +8,7 @@ import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartT
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { SelectorBarEditor } from "./SelectorBarEditor";
-import { BoardSettingsEditor, RecordPresetsEditor } from "./RecordWidgetSettings";
+import { BoardSettingsEditor, RecordPresetsEditor, RecordSelectionEditor } from "./RecordWidgetSettings";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText, Txt } from "../../ui";
 
@@ -1350,6 +1350,13 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       const wid = selectedWidget!.id;
                       setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, ...patch } } }));
                     }} />
+                  <div style={{ marginTop: 10 }}>
+                    <RecordSelectionEditor form={table} dims={kpiScopeDims as DevDimension[]} value={wp} canSelect
+                      onChange={patch => {
+                        const wid = selectedWidget!.id;
+                        setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, ...patch } } }));
+                      }} />
+                  </div>
                 </div>
               );
             })()}
@@ -1367,6 +1374,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   <BoardSettingsEditor form={table} dims={kpiScopeDims as DevDimension[]} value={wp.board ?? { column_field: "" }} onChange={board => setWp({ board })} />
                   <Checkbox checked={!!wp.new_record_button} label="Show the + New button" onChange={e => setWp({ new_record_button: e.target.checked || undefined })} />
                   <RecordPresetsEditor form={table} dims={kpiScopeDims as DevDimension[]} metrics={metrics as Metric[]} value={wp} withColumns={false} onChange={setWp} />
+                  <RecordSelectionEditor form={table} dims={kpiScopeDims as DevDimension[]} value={wp} canSelect={false} onChange={setWp} />
                 </div>
               );
             })()}
@@ -1437,6 +1445,21 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     />
                     <p style={{ fontSize: 11, color: "var(--color-text-quiet)", margin: "2px 0 0" }}>At the selected period and members: a table's records of other periods, accounts with nothing booked.</p>
                   </div>
+                  {([["follow_rows", "Rows follow the dashboard's selection"], ["follow_columns", "Columns follow the dashboard's selection"]] as const).map(([key, label]) => (
+                    <div key={key} style={{ marginBottom: 6 }}>
+                      <Checkbox
+                        checked={!!wp[key]}
+                        onChange={e => {
+                          const wid = selectedWidget!.id;
+                          setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, [key]: e.target.checked ? true : undefined } } }));
+                        }}
+                        label={label}
+                      />
+                    </div>
+                  ))}
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", margin: "0 0 6px" }}>Only what is under the member another widget selected:
+                    a department clicked in one grid, its cabinets here — its descendants, a child dimension's members, a grouping's.
+                    Nothing selected: every member.</p>
                   <Field label="Label column width (px)" description="Empty: as wide as the labels need, at least 160–180 px.">
                     <NumberInput
                       value={wp.label_width ?? ""}

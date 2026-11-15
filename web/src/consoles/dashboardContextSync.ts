@@ -4,7 +4,11 @@ import { defaultLeafCode, type LeafCodeMember } from "./dashboardLayout";
 
 export interface DashboardContextSyncValue {
   values: Record<string, string>; // dimension id -> shared member code
-  setValue: (dimId: string, code: string) => void;
+  // Per dimension, each setter's latest choice, newest first (a widget's own
+  // id, "" for the bar and selectors): a grid whose rows follow the selection
+  // reads the newest one not its own, so its own clicks never narrow it.
+  trail: Record<string, { code: string; source: string }[]>;
+  setValue: (dimId: string, code: string, source?: string) => void;
   // Selector dedup: the first synced widget to claim a dimension renders
   // its selector; every other synced widget hides that dimension's selector
   // and just follows the shared value. Claiming is idempotent per widget.
@@ -95,7 +99,7 @@ export function useSelectorOwnership(syncEnabled: boolean): (dimId: string) => b
 // (KPIs, other charts, grid filters). Returns null when the widget is not
 // synced or no provider is mounted, which callers also use as "is
 // click-to-select available here?".
-export function useSyncSetter(syncEnabled: boolean): ((dimId: string, code: string) => void) | null {
+export function useSyncSetter(syncEnabled: boolean): ((dimId: string, code: string, source?: string) => void) | null {
   const sync = useContext(DashboardContextSyncContext);
   return useMemo(() => (syncEnabled && sync ? sync.setValue : null), [syncEnabled, sync]);
 }
@@ -150,4 +154,17 @@ export function useWidgetContextSync<T extends { id: string; members: LeafCodeMe
     },
     [active, sync, setLocal],
   );
+}
+
+// foreignSelection: the dashboard's selection as the widget source sees it —
+// per dimension, the newest member someone else chose (a value the bar opened
+// with counts too).
+export function foreignSelection(sync: DashboardContextSyncValue, source: string): Record<string, string> {
+  const out: Record<string, string> = { ...sync.values };
+  for (const [dimId, trail] of Object.entries(sync.trail)) {
+    const other = trail.find(t => t.source !== source);
+    if (other?.code) out[dimId] = other.code;
+    else delete out[dimId];
+  }
+  return out;
 }

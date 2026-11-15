@@ -156,3 +156,55 @@ export function RecordPresetsEditor({ form, dims, metrics, value, onChange, with
     </div>
   );
 }
+
+/**
+ * How a records widget or board takes part in its dashboard's selection — one member per dimension, which the
+ * selector bar and synced grids share: a records widget over a table that keeps a dimension may select its clicked
+ * record's member (record_selects), and any of them may show only the records whose dimension fields hold the
+ * selected members (record_follows) — a journal clicked above, its lines below.
+ */
+export function RecordSelectionEditor({ form, dims, value, onChange, canSelect }: {
+  form: FormDef;
+  dims: DevDimension[];
+  value: WidgetProps;
+  onChange: (patch: Partial<WidgetProps>) => void;
+  /** A records widget, not a board: a card clicked opens its record. */
+  canSelect: boolean;
+}) {
+  const keeps = !!form.keeps_dimension_id;
+  const keptLabel = dims.find(d => d.id === form.keeps_dimension_id)?.label || dims.find(d => d.id === form.keeps_dimension_id)?.name || "its dimension";
+  const dimFields = form.fields.filter(f => f.type === "dimension" && f.dimension_id);
+  const follows = value.record_follows ?? [];
+  const toggle = (name: string, on: boolean) => {
+    const next = on ? [...follows.filter(n => n !== name), name] : follows.filter(n => n !== name);
+    onChange({ record_follows: next.length > 0 ? next : undefined });
+  };
+  if (!(canSelect && keeps) && dimFields.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="mvx-prop-section">Dashboard selection</div>
+      {canSelect && keeps && (
+        <>
+          <Checkbox checked={!!value.record_selects} label="Clicking a record selects it on the dashboard"
+            onChange={e => onChange({ record_selects: e.target.checked || undefined })} />
+          <p style={hint}>Its {keptLabel} member becomes the dashboard's selection, as on the selector bar: widgets
+            following {keptLabel} show what belongs to it. The eye beside a record opens it.</p>
+        </>
+      )}
+      {dimFields.length > 0 && (
+        <>
+          <p style={{ ...hint, marginTop: canSelect && keeps ? 6 : 0 }}>Show only the records whose field holds the dashboard's selected member:</p>
+          {dimFields.map(f => {
+            const sameDim = follows.some(n => n !== f.name && form.fields.find(x => x.name === n)?.dimension_id === f.dimension_id);
+            return (
+              <Checkbox key={f.name} checked={follows.includes(f.name)} disabled={sameDim && !follows.includes(f.name)}
+                label={f.label || f.name} onChange={e => toggle(f.name, e.target.checked)} />
+            );
+          })}
+          <p style={hint}>Nothing selected: every record. A parent selected: the records under it. + New starts with the
+            selected member.</p>
+        </>
+      )}
+    </div>
+  );
+}

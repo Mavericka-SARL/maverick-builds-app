@@ -9,6 +9,13 @@ package modeledit
 // "record_sort"). A board lays the records out as cards in columns
 // ("board"): the columns are the members of a dimension field — any
 // dimension — or the choices of a select field, in their order.
+//
+// Widgets on one dashboard follow one another through the dashboard's
+// selection, one member per dimension (the selector bar's, a synced grid's):
+// a records widget over a table that keeps a dimension may select its
+// clicked record's member ("record_selects"), and a records widget or board
+// may show only the records whose dimension fields hold the selected members
+// ("record_follows": field names) — a journal clicked above, its lines below.
 
 import (
 	"context"
@@ -62,6 +69,8 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 		Filters []crudapp.Filter `json:"record_filters"`
 		Columns []string         `json:"record_columns"`
 		Sort    *RecordSort      `json:"record_sort"`
+		Selects bool             `json:"record_selects"`
+		Follows []string         `json:"record_follows"`
 	}
 	if err := json.Unmarshal(props, &p); err != nil {
 		return fmt.Errorf("widget_props: %w", err)
@@ -82,6 +91,25 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 	}
 	if p.Sort != nil && !form.HasColumn(p.Sort.Field) {
 		return fmt.Errorf("record_sort names %q, which is not a field of %s", p.Sort.Field, form.Label)
+	}
+	seen := map[string]bool{}
+	for _, name := range p.Follows {
+		f := form.Field(name)
+		if f == nil || f.Type != "dimension" || f.DimensionID == "" {
+			return fmt.Errorf("record_follows names %q, which is not a dimension field of %s (its dimension fields: %s)", name, form.Label, dimensionFieldNames(form))
+		}
+		if seen[f.DimensionID] {
+			return fmt.Errorf("record_follows names two fields of the same dimension (%q): the dashboard selects one member of it", name)
+		}
+		seen[f.DimensionID] = true
+	}
+	if p.Selects {
+		if widgetType != "form" {
+			return fmt.Errorf("record_selects belongs to a records widget, not a board: a card clicked opens its record")
+		}
+		if !form.KeepsDimension() {
+			return fmt.Errorf("record_selects needs a table whose records are a dimension's members (one that keeps a dimension); %s keeps none", form.Label)
+		}
 	}
 	if widgetType == "form" {
 		if p.Board != nil {
@@ -124,6 +152,21 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 		}
 	}
 	return nil
+}
+
+// dimensionFieldNames lists f's dimension fields, for an error naming one
+// that is not.
+func dimensionFieldNames(f *crudapp.FormDef) string {
+	var names []string
+	for _, x := range f.Fields {
+		if x.Type == "dimension" && x.DimensionID != "" {
+			names = append(names, x.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
 }
 
 func fieldNames(f *crudapp.FormDef) string {

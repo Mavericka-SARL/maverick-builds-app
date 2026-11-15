@@ -3059,6 +3059,9 @@ td[data-sel] .mvx-cell-input { background: transparent; }
 .mvx-row-link { cursor: pointer; }
 .mvx-row-link:hover td { background: var(--color-surface-subtle); }
 .mvx-row-link:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: -2px; }
+/* A record selected for its dashboard (record_selects): the widgets following it show what belongs to it. */
+.mvx-row-link.mvx-row--selected td { background: var(--color-brand-50); }
+.mvx-row-link.mvx-row--selected td:first-child { box-shadow: inset 3px 0 0 var(--color-brand-500); }
 
 /* ── A records or board panel: header, toolbar, secondary actions ─────────── */
 .mvx-panel-head {

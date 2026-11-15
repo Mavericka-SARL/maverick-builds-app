@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
-import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, RefreshCw, Copy } from "lucide-react";
+import { X as XIcon, Pencil as PencilIcon, Eye, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, Link2, RefreshCw, Copy } from "lucide-react";
 import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type FormRecord, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
 import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip, Txt } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, syncResultMessage, type SyncMessage } from "./formPermissions";
-import { cellClass, defaultsOf, describeFilter, filterOps, inSentence, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
+import { cellClass, defaultsOf, describeFilter, filterOps, inSentence, listColumns, listQuery, localDate, memberCodeOf, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
 import { RecordStatusBadge } from "./RecordFieldInput";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
@@ -124,9 +124,12 @@ export function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }
  * remove (fixedFilters: overdue tasks), and choose its columns and order.
  * Its header names the widget (title) or the table, says which filters the
  * widget keeps, and holds one primary action — the new record — with the
- * rest (export, import, sync) under "⋯".
+ * rest (export, import, sync) under "⋯". On a dashboard, a widget may select
+ * its records for the other widgets (selection: a row clicked selects its
+ * member, the eye opens it) and start new records with the values of the
+ * dashboard's selection (prefill).
  */
-export function FormPanel({ form, revisionId, title, newRecordButton = false, fixedFilters, columns, fixedSort }: {
+export function FormPanel({ form, revisionId, title, newRecordButton = false, fixedFilters, columns, fixedSort, prefill, selection, followFilters }: {
   form: FormDef;
   revisionId: string;
   title?: string;
@@ -134,6 +137,10 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   fixedFilters?: RecordFilter[];
   columns?: string[];
   fixedSort?: { field: string; desc?: boolean };
+  prefill?: Record<string, unknown>;
+  selection?: { code?: string; onSelect: (code: string) => void };
+  /** The dashboard's selection the widget follows, applied like fixed filters and shown apart from them. */
+  followFilters?: RecordFilter[];
 }) {
   const qc = useQueryClient();
   const dateFormat = useDateFormat();
@@ -178,7 +185,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   const listKey = JSON.stringify([search, filters, sort]);
   const [paging, setPaging] = useState<{ key: string; pages: number }>({ key: listKey, pages: 1 });
   const pages = paging.key === listKey ? paging.pages : 1;
-  const query = listQuery({ search, filters, sort: sort ?? (fixedSort ? { field: fixedSort.field, desc: !!fixedSort.desc } : null), limit: PAGE * pages, fixedFilters });
+  const query = listQuery({ search, filters, sort: sort ?? (fixedSort ? { field: fixedSort.field, desc: !!fixedSort.desc } : null), limit: PAGE * pages, fixedFilters: followFilters?.length ? [...(fixedFilters ?? []), ...followFilters] : fixedFilters });
 
   const { data: dimsRaw = [] } = useQuery({ queryKey: ["dimensions"], queryFn: api.getDimensions });
   // The model's tables: a field naming a member another table keeps offers "+ New" of it.
@@ -335,7 +342,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
     onMutate: () => setImportErrors(null),
   });
 
-  const filtered = search !== "" || filters.length > 0 || (fixedFilters?.length ?? 0) > 0;
+  const filtered = search !== "" || filters.length > 0 || (fixedFilters?.length ?? 0) > 0 || (followFilters?.length ?? 0) > 0;
   const statusChoices = page?.statuses ?? (hasStatus ? ["draft", "submitted", "approved", "rejected"] : []);
 
   // The panel fills its widget's box: the head and filters keep their
@@ -359,6 +366,17 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 ))}
               </span>
             )}
+            {(followFilters ?? []).length > 0 && (
+              <span className="mvx-panel-head__note" title="Follows the record selected on the dashboard">
+                <Link2 size={11} aria-hidden="true" />
+                {(followFilters ?? []).map((f, i) => (
+                  <React.Fragment key={i}>
+                    <Txt>{i > 0 && " · "}</Txt>
+                    <span aria-label={`Follows the dashboard's selection: ${describeFilter(f, allCols, dims, metrics, dateFormat)}`}>{describeFilter(f, allCols, dims, metrics, dateFormat)}</span>
+                  </React.Fragment>
+                ))}
+              </span>
+            )}
           </div>
           <div className="mvx-panel-head__actions">
             {newRecordButton && canCreate && (
@@ -366,7 +384,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 size="sm"
                 variant="primary"
                 leadingIcon={<PlusIcon size={13} />}
-                onClick={() => { setDraft(defaultsOf(form)); setNewStatusPick(null); createRecord.reset(); setShowNewRecord(true); closeEditor(); }}
+                onClick={() => { setDraft({ ...defaultsOf(form), ...prefill }); setNewStatusPick(null); createRecord.reset(); setShowNewRecord(true); closeEditor(); }}
               >
                 {newRecordLabel(form)}
               </Button>
@@ -533,11 +551,17 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 // none of it is offered when it says nothing (an older server).
                 const statuses = recordStatusOptions(rec);
                 const isEditing = editingRecord?.id === rec.id;
+                // A record that is a member selects it for the dashboard; any other opens.
+                const code = selection ? memberCodeOf(form, rec.data) : "";
+                const isSelected = !!code && code === selection?.code;
+                const choose = () => (code ? selection!.onSelect(code) : setOpened(rec));
                 return (
                   <tr key={rec.id} style={isEditing ? { background: "var(--color-brand-50)" } : undefined}
-                    className="mvx-row-link" tabIndex={0} title="Open the record"
-                    onClick={(e) => { if (!(e.target as HTMLElement).closest("button, select, a, input, textarea")) setOpened(rec); }}
-                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) setOpened(rec); }}>
+                    className={isSelected ? "mvx-row-link mvx-row--selected" : "mvx-row-link"} tabIndex={0}
+                    title={code ? "Select the record: the dashboard shows what belongs to it" : "Open the record"}
+                    aria-selected={code ? isSelected : undefined}
+                    onClick={(e) => { if (!(e.target as HTMLElement).closest("button, select, a, input, textarea")) choose(); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) choose(); }}>
                     {cols.map((c) => {
                       if (c.kind === "status") {
                         return (
@@ -565,6 +589,11 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                     })}
                     <td style={{ whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: 2 }}>
+                        {code && (
+                          <IconButton aria-label="Open record" title="Open" size={26} onClick={() => setOpened(rec)}>
+                            <Eye size={13} />
+                          </IconButton>
+                        )}
                         {rec.permissions?.edit && (
                           <IconButton
                             aria-label={isEditing ? "Cancel editing record" : "Edit record"}

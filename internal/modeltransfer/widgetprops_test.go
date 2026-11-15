@@ -172,6 +172,8 @@ var widgetPropRefs = map[string]string{
 	"hide_search": "data", "button_corners": "data", "new_record_button": "data", "hide_empty_rows": "data",
 	// A board's and a records widget's settings name the table's fields.
 	"board": "data", "record_filters": "data", "record_columns": "data", "record_sort": "data",
+	"record_selects": "data", "record_follows": "data", // a flag and field names: no ids
+	"follow_rows": "data", "follow_columns": "data",
 	"kpi_compare": "names a dimension", "kpi_good": "data", "number_scale": "data",
 	"hide_total_row": "data", "label_width": "data", "hide_legend": "data", "hide_badges": "data", "footer": "data",
 

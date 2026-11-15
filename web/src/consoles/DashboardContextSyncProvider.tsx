@@ -8,8 +8,25 @@ import { DashboardContextSyncContext } from "./dashboardContextSync";
 // followBar: told the slot of each widget that follows the bar.
 export function DashboardContextSyncProvider({ children, reserved, initial, followBar }: { children: ReactNode; reserved?: string[]; initial?: Record<string, string>; followBar?: (slot: string) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...initial }));
-  const setValue = useCallback((dimId: string, code: string) => {
-    setValues(prev => (prev[dimId] === code ? prev : { ...prev, [dimId]: code }));
+  const [trail, setTrail] = useState<Record<string, { code: string; source: string }[]>>({});
+  // An empty code clears the dimension's selection (a grid's Total row clicked
+  // where the dimension has no single top member): nothing is selected.
+  const setValue = useCallback((dimId: string, code: string, source?: string) => {
+    setValues(prev => {
+      if (code === "") {
+        if (!(dimId in prev)) return prev;
+        const next = { ...prev };
+        delete next[dimId];
+        return next;
+      }
+      return prev[dimId] === code ? prev : { ...prev, [dimId]: code };
+    });
+    const src = source ?? "";
+    setTrail(prev => {
+      const cur = prev[dimId] ?? [];
+      if (cur[0]?.source === src && cur[0]?.code === code) return prev;
+      return { ...prev, [dimId]: [{ code, source: src }, ...cur.filter(t => t.source !== src)] };
+    });
   }, []);
 
   const reservedKey = (reserved ?? []).join(",");
@@ -34,8 +51,8 @@ export function DashboardContextSyncProvider({ children, reserved, initial, foll
 
   const barDims = useMemo(() => [...reservedSet], [reservedSet]);
   const value = useMemo(
-    () => ({ values, setValue, claimSelector, releaseSelectors, barDims, followBar }),
-    [values, setValue, claimSelector, releaseSelectors, barDims, followBar],
+    () => ({ values, trail, setValue, claimSelector, releaseSelectors, barDims, followBar }),
+    [values, trail, setValue, claimSelector, releaseSelectors, barDims, followBar],
   );
   return <DashboardContextSyncContext.Provider value={value}>{children}</DashboardContextSyncContext.Provider>;
 }

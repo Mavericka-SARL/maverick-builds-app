@@ -897,6 +897,11 @@ export interface WidgetProps {
   hide_badges?: boolean;
   /** Grid widgets: a line of text under the grid (a source, a unit, a note). */
   footer?: string;
+  /** Grid widgets: the rows / columns show only what is under the member the dashboard has selected — the member and
+      its descendants, a child dimension's members under it, a grouping's members — as another widget selected it
+      (a department clicked in one grid, its cabinets in this one). Nothing selected: every member. */
+  follow_rows?: boolean;
+  follow_columns?: boolean;
   /** Records widgets: offer "+ New record" (to people who may create one). Off by default. */
   new_record_button?: boolean;
   /** Records widgets and boards: filters the viewer cannot remove (relative dates count from their day). */
@@ -905,6 +910,12 @@ export interface WidgetProps {
   record_columns?: string[];
   /** Records widgets: the order the records are listed in. */
   record_sort?: { field: string; desc?: boolean };
+  /** Records widgets over a table that keeps a dimension: a record clicked selects its member for the whole
+      dashboard, as the selector bar does; widgets following that dimension follow it. */
+  record_selects?: boolean;
+  /** Records widgets and boards: dimension fields that must hold the dashboard's selected member of their dimension
+      (a journal clicked above, its lines below). Nothing selected: every record. */
+  record_follows?: string[];
   /** Board widgets: the records as cards in columns. */
   board?: BoardSettings;
   /** Widget surface: "white" draws the widget on a card (surface + border),

@@ -756,7 +756,11 @@ the records out as cards in columns: widget_props {"board": {"column_field": <a 
 dimension, its members in order are the columns>, "title_field", "card_fields": [...], "sum_field": <a number field
 totalled per column>, "color_property": <a property of the column dimension holding a CSS colour>, "hide_empty"},
 "record_filters", "new_record_button"}; dragging a card to another column changes that field (a sales pipeline by
-stage, tasks by status, requests by team).
+stage, tasks by status, requests by team). Widgets on a dashboard share its selection, one member per dimension (the
+selector bar's, a synced grid's): a records widget over a table that keeps a dimension selects the member of the
+record clicked with "record_selects": true, and a records widget or board shows only the records whose dimension
+fields hold the selected members with "record_follows": [<dimension field names>] — journals above with
+record_selects, their lines below following "journal"; + New there starts with the selected member.
 
 query_records reads a table's records read-only: a page (filters, search, sort) or totals (group_by, aggregates
 count/count_distinct/sum/avg/min/max). Use it to answer questions about saved records; count with it rather than
@@ -1272,7 +1276,10 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   the row-label column so labels do not wrap; "hide_legend": true and "hide_badges": true leave out the legend under
   it and the INPUT/CALC tags (a read-only statement); "footer": a line of text under it (a source, a unit);
   "hide_empty_rows": true leaves out rows whose every shown cell is blank or zero at the selected period and members
-  (a table's records of other periods, accounts with nothing booked). A chart's other dimensions start at
+  (a table's records of other periods, accounts with nothing booked); "follow_rows" / "follow_columns": true shows on
+  that axis only what is under the member another widget selected on the dashboard (a department's row label clicked
+  in one grid, its cabinets in this one: the member's descendants, a declared child dimension's members, a grouping's
+  members; nothing selected, every member). A chart's other dimensions start at
   "chart": {"context_defaults": {"<dimension>": "<member code>"}}.
   propose_actions({
     "steps": [

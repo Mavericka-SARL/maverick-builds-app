@@ -352,6 +352,25 @@ func TestKeptDimensionsLinkRecords(t *testing.T) {
 		if status, raw := widget("form", tasks, map[string]any{"record_filters": []map[string]any{{"field": "title", "op": "before_today"}}}); status != http.StatusBadRequest {
 			t.Errorf("a relative date filter on a text field: %d %s, want 400", status, raw)
 		}
+		// The dashboard's selection: a deal clicked above, its tasks below; a
+		// board of the account's deals.
+		for _, c := range []struct {
+			what, wt, ref string
+			props         map[string]any
+			want          int
+		}{
+			{"deals selecting their member", "form", deals, map[string]any{"record_selects": true}, http.StatusOK},
+			{"tasks following the selected deal", "form", tasks, map[string]any{"record_follows": []string{"deal"}, "new_record_button": true}, http.StatusOK},
+			{"a board following the selected account", "board", deals, map[string]any{"board": map[string]any{"column_field": "stage"}, "record_follows": []string{"account"}}, http.StatusOK},
+			{"tasks selecting, though they keep no dimension", "form", tasks, map[string]any{"record_selects": true}, http.StatusBadRequest},
+			{"a board selecting", "board", deals, map[string]any{"board": map[string]any{"column_field": "stage"}, "record_selects": true}, http.StatusBadRequest},
+			{"following a text field", "form", tasks, map[string]any{"record_follows": []string{"title"}}, http.StatusBadRequest},
+			{"following a field the table lacks", "form", tasks, map[string]any{"record_follows": []string{"account"}}, http.StatusBadRequest},
+		} {
+			if status, raw := widget(c.wt, c.ref, c.props); status != c.want {
+				t.Errorf("%s: %d %s, want %d", c.what, status, raw, c.want)
+			}
+		}
 		// The columns, for the viewer: a dimension's members in order (a stage
 		// read-only for them marked), a select field's choices.
 		columns := func(persona, formID, field string) []map[string]any {
