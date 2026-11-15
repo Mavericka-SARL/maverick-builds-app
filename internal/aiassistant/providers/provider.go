@@ -42,6 +42,25 @@ type ChatRequest struct {
 	// arguments arrive, with the call's name and its arguments so far: a
 	// long proposal can show progress while it is being written.
 	OnToolArgs func(name string, args []byte)
+	// OnStage, when set, is called by ChatStream as the provider's stream
+	// gets somewhere a developer can be told about before any output: the
+	// request accepted (StageConnected), the model reasoning
+	// (StageReasoning). A reasoning model sends nothing else for minutes,
+	// and without it a working call looked like a frozen one (2026-11-15).
+	OnStage func(stage string)
+}
+
+// The stages ChatStream reports through ChatRequest.OnStage.
+const (
+	StageConnected = "connected"
+	StageReasoning = "reasoning"
+)
+
+// stage calls req.OnStage when it is set.
+func (req ChatRequest) stage(s string) {
+	if req.OnStage != nil {
+		req.OnStage(s)
+	}
 }
 
 // ChatResponse is what the LLM returns.

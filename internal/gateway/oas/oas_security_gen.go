@@ -269,6 +269,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ReorderDimensionMembersOperation:         []string{},
 	ReorderGridMetricsOperation:              []string{},
 	ResendAdminUserInvitationOperation:       []string{},
+	RestoreAiSessionOperation:                []string{},
 	RestoreWorkflowOperation:                 []string{},
 	RevokeAPITokenOperation:                  []string{},
 	RevokeAdminUserAppAccessOperation:        []string{},

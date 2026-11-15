@@ -658,7 +658,11 @@ func (UnimplementedHandler) DeleteAiDocument(ctx context.Context, params DeleteA
 
 // DeleteAiSession implements deleteAiSession operation.
 //
-// Delete a session (and its messages/documents/proposals).
+// Delete a session — hidden from the list and every read, and kept with its messages, plan, memory,
+//
+//	proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then
+//
+// removed for good.
 //
 // DELETE /api/ai/sessions/{id}
 func (UnimplementedHandler) DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (r DeleteAiSessionRes, _ error) {
@@ -1701,7 +1705,8 @@ func (UnimplementedHandler) ListAiProposals(ctx context.Context, params ListAiPr
 
 // ListAiSessions implements listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions in the current model.
+// List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true
+// its deleted sessions that can still be restored.
 //
 // GET /api/ai/sessions
 func (UnimplementedHandler) ListAiSessions(ctx context.Context, params ListAiSessionsParams) (r []AiSession, _ error) {
@@ -2401,6 +2406,16 @@ func (UnimplementedHandler) ResendAdminUserInvitation(ctx context.Context, param
 	return r, ht.ErrNotImplemented
 }
 
+// RestoreAiSession implements restoreAiSession operation.
+//
+// Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a
+// deleted session is kept 30 days.
+//
+// POST /api/ai/sessions/{id}/restore
+func (UnimplementedHandler) RestoreAiSession(ctx context.Context, params RestoreAiSessionParams) (r RestoreAiSessionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // RestoreWorkflow implements restoreWorkflow operation.
 //
 // Restore an archived workflow definition to draft.
@@ -2626,21 +2641,28 @@ func (UnimplementedHandler) ScimServiceProviderConfig(ctx context.Context) (r Sc
 //
 // Response is text/event-stream, not JSON — ogen/generated clients cannot consume this operation
 // and callers should use a raw fetch/ EventSource instead. Named events: "delta" ({content}) for
-// each streamed token; "tool_status" ({tool}) before executing a read tool; "progress" ({tool, chars,
+// each streamed token; "tool_status" ({tool}) before executing a read tool; "status" ({phase, step_s,
 //
-//	steps}) at most once a second while the model writes a tool call (steps: of a proposal so far);
+//	recent, label | call, attempt, stage, quiet_s, idle_limit_s, max_s, context_tokens, note}) at
 //
-// "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model calls a write tool
-// and a proposal is created instead of executing immediately — warnings are the plan check's (a
-// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
-// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
-// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
-// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
-// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
-// if exceeded before any streaming has started — after streaming begins, limit hits are only
-// reported via an "error" event since the HTTP status is already sent).
+// every change of the step the turn is on — phase "ai" a call to the AI provider (stage sending,
+// connected, reasoning or writing; quiet_s since its last output), "server" a step on the server
+// named by label — and every 5 seconds while one runs, so a client that hears nothing for longer
+// knows the stream is gone; "progress" ({tool, chars, steps}) at most once a second while the model
+// writes a tool call (steps: of a proposal so far); "proposal" ({proposal: AiProposal, messages,
+// session, warnings}) when the model calls a write tool and a proposal is created instead of
+// executing immediately — warnings are the plan check's (a Percentage metric multiplied in without
+// / 100, SUMIFS(src, D, D) where a LOOKUP gives the total); "error" ({error}) on any failure (rate
+// limit, provider error, invalid proposal, the turn's time limit AI_TURN_TIMEOUT — 30 minutes by
+// default — or the request closed by Stop, each also saved as the session's last message); "done"
+// ({reply: AiChatMessage, messages, session, task_plan, earlier_plans, memory}) on normal completion;
+//
+//	"memory" ({memory: AiMemoryStatus}) once the turn's memory is ready — a new attachment gone
+//
+// through once, a full memory compacted. A session whose draft was promoted goes on. Rate-limited to
+// 50 LLM calls per session and 200 per user per day (429 if exceeded before any streaming has
+// started — after streaming begins, limit hits are only reported via an "error" event since the
+// HTTP status is already sent).
 //
 // POST /api/ai/sessions/{id}/messages
 func (UnimplementedHandler) SendAiMessage(ctx context.Context, req *AiSendMessageRequest, params SendAiMessageParams) (r SendAiMessageRes, _ error) {

@@ -239,6 +239,7 @@ const (
 	ReorderDimensionMembersOperation         OperationName = "ReorderDimensionMembers"
 	ReorderGridMetricsOperation              OperationName = "ReorderGridMetrics"
 	ResendAdminUserInvitationOperation       OperationName = "ResendAdminUserInvitation"
+	RestoreAiSessionOperation                OperationName = "RestoreAiSession"
 	RestoreWorkflowOperation                 OperationName = "RestoreWorkflow"
 	RevokeAPITokenOperation                  OperationName = "RevokeAPIToken"
 	RevokeAdminUserAppAccessOperation        OperationName = "RevokeAdminUserAppAccess"

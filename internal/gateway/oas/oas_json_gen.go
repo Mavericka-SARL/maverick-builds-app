@@ -7178,6 +7178,12 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.DeletedAt.Set {
+			e.FieldStart("deleted_at")
+			s.DeletedAt.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
 		if s.LlmCalls.Set {
 			e.FieldStart("llm_calls")
 			s.LlmCalls.Encode(e)
@@ -7197,7 +7203,7 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfAiSession = [14]string{
+var jsonFieldsNameOfAiSession = [15]string{
 	0:  "id",
 	1:  "app_id",
 	2:  "model_id",
@@ -7209,9 +7215,10 @@ var jsonFieldsNameOfAiSession = [14]string{
 	8:  "created_at",
 	9:  "promoted_at",
 	10: "call_budget",
-	11: "llm_calls",
-	12: "plan_done",
-	13: "plan_stages",
+	11: "deleted_at",
+	12: "llm_calls",
+	13: "plan_done",
+	14: "plan_stages",
 }
 
 // Decode decodes AiSession from json.
@@ -7346,6 +7353,16 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"call_budget\"")
+			}
+		case "deleted_at":
+			if err := func() error {
+				s.DeletedAt.Reset()
+				if err := s.DeletedAt.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"deleted_at\"")
 			}
 		case "llm_calls":
 			if err := func() error {

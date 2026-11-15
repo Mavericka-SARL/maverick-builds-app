@@ -21006,6 +21006,50 @@ func decodeResendAdminUserInvitationResponse(resp *http.Response) (res ResendAdm
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }
 
+func decodeRestoreAiSessionResponse(resp *http.Response) (res RestoreAiSessionRes, _ error) {
+	switch resp.StatusCode {
+	case 200:
+		// Code 200.
+		ct, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if err != nil {
+			return res, errors.Wrap(err, "parse media type")
+		}
+		switch {
+		case ct == "application/json":
+			buf, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return res, err
+			}
+			d := jx.DecodeBytes(buf)
+
+			var response AiSession
+			if err := func() error {
+				if err := response.Decode(d); err != nil {
+					return err
+				}
+				if err := d.Skip(); err != io.EOF {
+					return errors.New("unexpected trailing data")
+				}
+				return nil
+			}(); err != nil {
+				err = &ogenerrors.DecodeBodyError{
+					ContentType: ct,
+					Body:        buf,
+					Err:         err,
+				}
+				return res, err
+			}
+			return &response, nil
+		default:
+			return res, validate.InvalidContentType(ct)
+		}
+	case 404:
+		// Code 404.
+		return &RestoreAiSessionNotFound{}, nil
+	}
+	return res, validate.UnexpectedStatusCodeWithResponse(resp)
+}
+
 func decodeRestoreWorkflowResponse(resp *http.Response) (res RestoreWorkflowRes, _ error) {
 	switch resp.StatusCode {
 	case 200:

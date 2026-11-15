@@ -279,6 +279,8 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req ChatRequest, o
 			return nil
 		}
 		switch ev.Type {
+		case "response.created", "response.in_progress":
+			req.stage(StageConnected)
 		case "response.output_text.delta":
 			if ev.Delta != "" {
 				onDelta(ev.Delta)
@@ -287,8 +289,13 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req ChatRequest, o
 			var it struct {
 				Type, ID, Name string
 			}
-			if json.Unmarshal(ev.Item, &it) == nil && it.Type == "function_call" {
-				names[it.ID] = it.Name
+			if json.Unmarshal(ev.Item, &it) == nil {
+				switch it.Type {
+				case "function_call":
+					names[it.ID] = it.Name
+				case "reasoning":
+					req.stage(StageReasoning)
+				}
 			}
 		case "response.function_call_arguments.delta":
 			args[ev.ItemID] = append(args[ev.ItemID], ev.Delta...)

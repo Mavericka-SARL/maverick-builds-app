@@ -175,9 +175,14 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest, onD
 			return ChatResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
 		switch ev := event.AsAny().(type) {
+		case anthropic.MessageStartEvent:
+			req.stage(StageConnected)
 		case anthropic.ContentBlockStartEvent:
-			if tu, ok := ev.ContentBlock.AsAny().(anthropic.ToolUseBlock); ok {
-				toolName, toolArgs = tu.Name, toolArgs[:0]
+			switch blk := ev.ContentBlock.AsAny().(type) {
+			case anthropic.ToolUseBlock:
+				toolName, toolArgs = blk.Name, toolArgs[:0]
+			case anthropic.ThinkingBlock:
+				req.stage(StageReasoning)
 			}
 		case anthropic.ContentBlockDeltaEvent:
 			if text := ev.Delta.Text; text != "" {

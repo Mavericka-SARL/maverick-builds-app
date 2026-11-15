@@ -2147,6 +2147,7 @@ export interface AISessionUsage {
 
 export interface AISession {
   id: string;
+  deleted_at?: string; // only in the list of deleted sessions
   app_id: string;
   model_id: string;
   llm_provider: string;
@@ -2447,8 +2448,26 @@ export interface AIWorkbookMap {
   rows: { file: string; sheet: string; row: number; label?: string; metric: string; members?: Record<string, string>; first_column: string; matched: number; compared: number }[];
 }
 
-export interface AISendMessageEvent {
-  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error" | "task_plan" | "memory";
+// The step an AI developer turn is on ("status" event): sent at every change
+// and every 5 seconds while a step runs, so a console that hears nothing for
+// longer knows the stream is gone.
+export interface AITurnStatus {
+  phase: "ai" | "server" | ""; // a call to the AI provider, a step on the server, between steps
+  step_s: number; // how long the step has run when sent
+  recent: { label: string; ms: number }[]; // the steps before it, oldest first
+  label?: string; // server: the step
+  call?: number; // ai: the session's call number, as its usage counts calls
+  attempt?: number; // ai: 2 when the call is asked again
+  note?: string; // ai: why it was asked again
+  stage?: "sending" | "connected" | "reasoning" | "writing"; // ai: how far the provider has got
+  quiet_s?: number; // ai: since the provider's last output (or the call's start)
+  idle_limit_s?: number; // ai: silence after which the call is asked again
+  max_s?: number; // ai: longest a call may run
+  context_tokens?: number; // ai: about how many tokens the call sent
+}
+
+export interface AISendMessageEvent extends Partial<AITurnStatus> {
+  type: "delta" | "tool_status" | "status" | "progress" | "proposal" | "done" | "error" | "task_plan" | "memory";
   task_plan?: AITaskPlan | null; // task_plan | done: the session's plan
   earlier_plans?: AIEarlierPlan[]; // done: the session's plans no longer under way
   memory?: AIMemoryStatus; // memory | proposal | done: how full the session's memory is
@@ -3555,8 +3574,14 @@ export const api = {
     const qs = q.toString();
     return apiFetch<AISession>(`/api/ai/sessions${qs ? `?${qs}` : ""}`, { method: "POST" });
   },
+  /** Deletes a session: it is kept 30 days, and aiRestoreSession brings it back. */
   aiDeleteSession: (id: string) =>
     apiFetch<{ status: string }>(`/api/ai/sessions/${id}`, { method: "DELETE" }),
+  /** The caller's deleted sessions in the model that can still be restored, the last deleted first. */
+  aiListDeletedSessions: (revisionId?: string) =>
+    apiFetch<AISession[]>(`/api/ai/sessions?deleted=true${revisionId ? `&revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+  aiRestoreSession: (id: string) =>
+    apiFetch<AISession>(`/api/ai/sessions/${id}/restore`, { method: "POST" }),
   /** n caps the session's provider calls; null returns it to the deployment's cap. */
   aiSetCallBudget: (id: string, n: number | null) =>
     apiFetch<{ id: string; call_budget: number | null }>(`/api/ai/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ call_budget: n }) }),

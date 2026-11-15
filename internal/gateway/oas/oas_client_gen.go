@@ -492,7 +492,9 @@ type Invoker interface {
 	DeleteAiDocument(ctx context.Context, params DeleteAiDocumentParams) (DeleteAiDocumentRes, error)
 	// DeleteAiSession invokes deleteAiSession operation.
 	//
-	// Delete a session (and its messages/documents/proposals).
+	// Delete a session — hidden from the list and every read, and kept with its messages, plan, memory,
+	//  proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then
+	// removed for good.
 	//
 	// DELETE /api/ai/sessions/{id}
 	DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error)
@@ -1215,7 +1217,8 @@ type Invoker interface {
 	ListAiProposals(ctx context.Context, params ListAiProposalsParams) (ListAiProposalsRes, error)
 	// ListAiSessions invokes listAiSessions operation.
 	//
-	// List the caller's 20 most recent AI assistant sessions in the current model.
+	// List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true
+	// its deleted sessions that can still be restored.
 	//
 	// GET /api/ai/sessions
 	ListAiSessions(ctx context.Context, params ListAiSessionsParams) ([]AiSession, error)
@@ -1705,6 +1708,13 @@ type Invoker interface {
 	//
 	// POST /api/admin/users/{id}/invite
 	ResendAdminUserInvitation(ctx context.Context, params ResendAdminUserInvitationParams) (ResendAdminUserInvitationRes, error)
+	// RestoreAiSession invokes restoreAiSession operation.
+	//
+	// Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a
+	// deleted session is kept 30 days.
+	//
+	// POST /api/ai/sessions/{id}/restore
+	RestoreAiSession(ctx context.Context, params RestoreAiSessionParams) (RestoreAiSessionRes, error)
 	// RestoreWorkflow invokes restoreWorkflow operation.
 	//
 	// Restore an archived workflow definition to draft.
@@ -1861,19 +1871,24 @@ type Invoker interface {
 	//
 	// Response is text/event-stream, not JSON — ogen/generated clients cannot consume this operation
 	// and callers should use a raw fetch/ EventSource instead. Named events: "delta" ({content}) for
-	// each streamed token; "tool_status" ({tool}) before executing a read tool; "progress" ({tool, chars,
-	//  steps}) at most once a second while the model writes a tool call (steps: of a proposal so far);
-	// "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model calls a write tool
-	// and a proposal is created instead of executing immediately — warnings are the plan check's (a
-	// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
-	// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-	// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-	// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
-	// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
-	// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
-	// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
-	// if exceeded before any streaming has started — after streaming begins, limit hits are only
-	// reported via an "error" event since the HTTP status is already sent).
+	// each streamed token; "tool_status" ({tool}) before executing a read tool; "status" ({phase, step_s,
+	//  recent, label | call, attempt, stage, quiet_s, idle_limit_s, max_s, context_tokens, note}) at
+	// every change of the step the turn is on — phase "ai" a call to the AI provider (stage sending,
+	// connected, reasoning or writing; quiet_s since its last output), "server" a step on the server
+	// named by label — and every 5 seconds while one runs, so a client that hears nothing for longer
+	// knows the stream is gone; "progress" ({tool, chars, steps}) at most once a second while the model
+	// writes a tool call (steps: of a proposal so far); "proposal" ({proposal: AiProposal, messages,
+	// session, warnings}) when the model calls a write tool and a proposal is created instead of
+	// executing immediately — warnings are the plan check's (a Percentage metric multiplied in without
+	// / 100, SUMIFS(src, D, D) where a LOOKUP gives the total); "error" ({error}) on any failure (rate
+	// limit, provider error, invalid proposal, the turn's time limit AI_TURN_TIMEOUT — 30 minutes by
+	// default — or the request closed by Stop, each also saved as the session's last message); "done"
+	// ({reply: AiChatMessage, messages, session, task_plan, earlier_plans, memory}) on normal completion;
+	//  "memory" ({memory: AiMemoryStatus}) once the turn's memory is ready — a new attachment gone
+	// through once, a full memory compacted. A session whose draft was promoted goes on. Rate-limited to
+	// 50 LLM calls per session and 200 per user per day (429 if exceeded before any streaming has
+	// started — after streaming begins, limit hits are only reported via an "error" event since the
+	// HTTP status is already sent).
 	//
 	// POST /api/ai/sessions/{id}/messages
 	SendAiMessage(ctx context.Context, request *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error)
@@ -9871,7 +9886,11 @@ func (c *Client) sendDeleteAiDocument(ctx context.Context, params DeleteAiDocume
 
 // DeleteAiSession invokes deleteAiSession operation.
 //
-// Delete a session (and its messages/documents/proposals).
+// Delete a session — hidden from the list and every read, and kept with its messages, plan, memory,
+//
+//	proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then
+//
+// removed for good.
 //
 // DELETE /api/ai/sessions/{id}
 func (c *Client) DeleteAiSession(ctx context.Context, params DeleteAiSessionParams) (DeleteAiSessionRes, error) {
@@ -22998,7 +23017,8 @@ func (c *Client) sendListAiProposals(ctx context.Context, params ListAiProposals
 
 // ListAiSessions invokes listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions in the current model.
+// List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true
+// its deleted sessions that can still be restored.
 //
 // GET /api/ai/sessions
 func (c *Client) ListAiSessions(ctx context.Context, params ListAiSessionsParams) ([]AiSession, error) {
@@ -23060,6 +23080,23 @@ func (c *Client) sendListAiSessions(ctx context.Context, params ListAiSessionsPa
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.RevisionID.Get(); ok {
 				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "deleted" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "deleted",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Deleted.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
 			}
 			return nil
 		}); err != nil {
@@ -31700,6 +31737,133 @@ func (c *Client) sendResendAdminUserInvitation(ctx context.Context, params Resen
 	return result, nil
 }
 
+// RestoreAiSession invokes restoreAiSession operation.
+//
+// Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a
+// deleted session is kept 30 days.
+//
+// POST /api/ai/sessions/{id}/restore
+func (c *Client) RestoreAiSession(ctx context.Context, params RestoreAiSessionParams) (RestoreAiSessionRes, error) {
+	res, err := c.sendRestoreAiSession(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendRestoreAiSession(ctx context.Context, params RestoreAiSessionParams) (res RestoreAiSessionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("restoreAiSession"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/restore"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RestoreAiSessionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/restore"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RestoreAiSessionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRestoreAiSessionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // RestoreWorkflow invokes restoreWorkflow operation.
 //
 // Restore an archived workflow definition to draft.
@@ -34629,21 +34793,28 @@ func (c *Client) sendScimServiceProviderConfig(ctx context.Context) (res ScimSer
 //
 // Response is text/event-stream, not JSON — ogen/generated clients cannot consume this operation
 // and callers should use a raw fetch/ EventSource instead. Named events: "delta" ({content}) for
-// each streamed token; "tool_status" ({tool}) before executing a read tool; "progress" ({tool, chars,
+// each streamed token; "tool_status" ({tool}) before executing a read tool; "status" ({phase, step_s,
 //
-//	steps}) at most once a second while the model writes a tool call (steps: of a proposal so far);
+//	recent, label | call, attempt, stage, quiet_s, idle_limit_s, max_s, context_tokens, note}) at
 //
-// "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model calls a write tool
-// and a proposal is created instead of executing immediately — warnings are the plan check's (a
-// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
-// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
-// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
-// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
-// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
-// if exceeded before any streaming has started — after streaming begins, limit hits are only
-// reported via an "error" event since the HTTP status is already sent).
+// every change of the step the turn is on — phase "ai" a call to the AI provider (stage sending,
+// connected, reasoning or writing; quiet_s since its last output), "server" a step on the server
+// named by label — and every 5 seconds while one runs, so a client that hears nothing for longer
+// knows the stream is gone; "progress" ({tool, chars, steps}) at most once a second while the model
+// writes a tool call (steps: of a proposal so far); "proposal" ({proposal: AiProposal, messages,
+// session, warnings}) when the model calls a write tool and a proposal is created instead of
+// executing immediately — warnings are the plan check's (a Percentage metric multiplied in without
+// / 100, SUMIFS(src, D, D) where a LOOKUP gives the total); "error" ({error}) on any failure (rate
+// limit, provider error, invalid proposal, the turn's time limit AI_TURN_TIMEOUT — 30 minutes by
+// default — or the request closed by Stop, each also saved as the session's last message); "done"
+// ({reply: AiChatMessage, messages, session, task_plan, earlier_plans, memory}) on normal completion;
+//
+//	"memory" ({memory: AiMemoryStatus}) once the turn's memory is ready — a new attachment gone
+//
+// through once, a full memory compacted. A session whose draft was promoted goes on. Rate-limited to
+// 50 LLM calls per session and 200 per user per day (429 if exceeded before any streaming has
+// started — after streaming begins, limit hits are only reported via an "error" event since the
+// HTTP status is already sent).
 //
 // POST /api/ai/sessions/{id}/messages
 func (c *Client) SendAiMessage(ctx context.Context, request *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error) {

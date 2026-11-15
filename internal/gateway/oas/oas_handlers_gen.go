@@ -11671,7 +11671,11 @@ func (s *Server) handleDeleteAiDocumentRequest(args [2]string, argsEscaped bool,
 
 // handleDeleteAiSessionRequest handles deleteAiSession operation.
 //
-// Delete a session (and its messages/documents/proposals).
+// Delete a session — hidden from the list and every read, and kept with its messages, plan, memory,
+//
+//	proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then
+//
+// removed for good.
 //
 // DELETE /api/ai/sessions/{id}
 func (s *Server) handleDeleteAiSessionRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -11807,7 +11811,7 @@ func (s *Server) handleDeleteAiSessionRequest(args [1]string, argsEscaped bool, 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteAiSessionOperation,
-			OperationSummary: "Delete a session (and its messages/documents/proposals)",
+			OperationSummary: "Delete a session — hidden from the list and every read, and kept with its messages, plan, memory, proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then removed for good",
 			OperationID:      "deleteAiSession",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -30707,7 +30711,8 @@ func (s *Server) handleListAiProposalsRequest(args [1]string, argsEscaped bool, 
 
 // handleListAiSessionsRequest handles listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions in the current model.
+// List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true
+// its deleted sessions that can still be restored.
 //
 // GET /api/ai/sessions
 func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -30843,7 +30848,7 @@ func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListAiSessionsOperation,
-			OperationSummary: "List the caller's 20 most recent AI assistant sessions in the current model",
+			OperationSummary: "List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true its deleted sessions that can still be restored",
 			OperationID:      "listAiSessions",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -30852,6 +30857,10 @@ func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w
 					Name: "revision_id",
 					In:   "query",
 				}: params.RevisionID,
+				{
+					Name: "deleted",
+					In:   "query",
+				}: params.Deleted,
 			},
 			Raw: r,
 		}
@@ -43731,6 +43740,194 @@ func (s *Server) handleResendAdminUserInvitationRequest(args [1]string, argsEsca
 	}
 }
 
+// handleRestoreAiSessionRequest handles restoreAiSession operation.
+//
+// Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a
+// deleted session is kept 30 days.
+//
+// POST /api/ai/sessions/{id}/restore
+func (s *Server) handleRestoreAiSessionRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("restoreAiSession"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.HTTPRouteKey.String("/api/ai/sessions/{id}/restore"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), RestoreAiSessionOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: RestoreAiSessionOperation,
+			ID:   "restoreAiSession",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, RestoreAiSessionOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeRestoreAiSessionParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+
+	var response RestoreAiSessionRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    RestoreAiSessionOperation,
+			OperationSummary: "Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a deleted session is kept 30 days",
+			OperationID:      "restoreAiSession",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = RestoreAiSessionParams
+			Response = RestoreAiSessionRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackRestoreAiSessionParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.RestoreAiSession(ctx, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.RestoreAiSession(ctx, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeRestoreAiSessionResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
 // handleRestoreWorkflowRequest handles restoreWorkflow operation.
 //
 // Restore an archived workflow definition to draft.
@@ -48108,21 +48305,28 @@ func (s *Server) handleScimServiceProviderConfigRequest(args [0]string, argsEsca
 //
 // Response is text/event-stream, not JSON — ogen/generated clients cannot consume this operation
 // and callers should use a raw fetch/ EventSource instead. Named events: "delta" ({content}) for
-// each streamed token; "tool_status" ({tool}) before executing a read tool; "progress" ({tool, chars,
+// each streamed token; "tool_status" ({tool}) before executing a read tool; "status" ({phase, step_s,
 //
-//	steps}) at most once a second while the model writes a tool call (steps: of a proposal so far);
+//	recent, label | call, attempt, stage, quiet_s, idle_limit_s, max_s, context_tokens, note}) at
 //
-// "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model calls a write tool
-// and a proposal is created instead of executing immediately — warnings are the plan check's (a
-// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
-// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
-// limit AI_TURN_TIMEOUT — 30 minutes by default — or the request closed by Stop, each also saved
-// as the session's last message); "done" ({reply: AiChatMessage, messages, session, task_plan,
-// earlier_plans, memory}) on normal completion; "memory" ({memory: AiMemoryStatus}) once the turn's
-// memory is ready — a new attachment gone through once, a full memory compacted. A session whose
-// draft was promoted goes on. Rate-limited to 50 LLM calls per session and 200 per user per day (429
-// if exceeded before any streaming has started — after streaming begins, limit hits are only
-// reported via an "error" event since the HTTP status is already sent).
+// every change of the step the turn is on — phase "ai" a call to the AI provider (stage sending,
+// connected, reasoning or writing; quiet_s since its last output), "server" a step on the server
+// named by label — and every 5 seconds while one runs, so a client that hears nothing for longer
+// knows the stream is gone; "progress" ({tool, chars, steps}) at most once a second while the model
+// writes a tool call (steps: of a proposal so far); "proposal" ({proposal: AiProposal, messages,
+// session, warnings}) when the model calls a write tool and a proposal is created instead of
+// executing immediately — warnings are the plan check's (a Percentage metric multiplied in without
+// / 100, SUMIFS(src, D, D) where a LOOKUP gives the total); "error" ({error}) on any failure (rate
+// limit, provider error, invalid proposal, the turn's time limit AI_TURN_TIMEOUT — 30 minutes by
+// default — or the request closed by Stop, each also saved as the session's last message); "done"
+// ({reply: AiChatMessage, messages, session, task_plan, earlier_plans, memory}) on normal completion;
+//
+//	"memory" ({memory: AiMemoryStatus}) once the turn's memory is ready — a new attachment gone
+//
+// through once, a full memory compacted. A session whose draft was promoted goes on. Rate-limited to
+// 50 LLM calls per session and 200 per user per day (429 if exceeded before any streaming has
+// started — after streaming begins, limit hits are only reported via an "error" event since the
+// HTTP status is already sent).
 //
 // POST /api/ai/sessions/{id}/messages
 func (s *Server) handleSendAiMessageRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

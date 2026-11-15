@@ -671,7 +671,7 @@ func (s *ChatStore) CarryTaskPlan(ctx context.Context, sessionID, modelID, userI
 	err := s.pool.QueryRow(ctx, `
 		SELECT id::text, task_plan, COALESCE(draft_revision_id::text, '') = $4 AND $4 <> '', promoted_at IS NOT NULL
 		FROM ai_assistant.session
-		WHERE model_id = $1::uuid AND user_id = $2::uuid AND id <> $3::uuid AND task_plan IS NOT NULL
+		WHERE model_id = $1::uuid AND user_id = $2::uuid AND id <> $3::uuid AND task_plan IS NOT NULL AND deleted_at IS NULL
 		ORDER BY created_at DESC LIMIT 1`, modelID, userID, sessionID, draftID).Scan(&from, &raw, &sameDraft, &promoted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

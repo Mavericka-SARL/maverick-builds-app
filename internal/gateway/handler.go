@@ -538,6 +538,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/ai/sessions/{id}", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/messages", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/promote-draft", "developer", dev(h.aiSessionDetail))
+	register("POST", "/api/ai/sessions/{id}/restore", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/discard-draft", "developer", dev(h.aiSessionDetail))
 	register("GET", "/api/ai/sessions/{id}/proposals", "developer", dev(h.aiSessionDetail))
 	register("GET", "/api/ai/sessions/{id}/memory", "developer", dev(h.aiSessionDetail))

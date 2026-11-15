@@ -241,6 +241,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 		return ChatResponse{}, fmt.Errorf("%s: %w", p.label, err)
 	}
 	defer func() { _ = stream.Close() }()
+	// The stream opens on the response's headers: the request is accepted.
+	// Chat Completions says nothing of a model's reasoning, so the next
+	// thing heard is its output.
+	req.stage(StageConnected)
 
 	var content []byte
 	var usage Usage

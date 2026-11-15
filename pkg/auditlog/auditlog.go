@@ -197,6 +197,7 @@ const (
 	// even when they happen in the same user flow. Neither activates a
 	// revision: that is EventRevisionActivated, the developer's own step.
 	EventAISessionDeleted    EventType = "ai_session.deleted"
+	EventAISessionRestored   EventType = "ai_session.restored"
 	EventAIDocumentUploaded  EventType = "ai_document.uploaded"
 	EventAIDocumentDeleted   EventType = "ai_document.deleted"
 	EventAIProposalConfirmed EventType = "ai_proposal.confirmed"

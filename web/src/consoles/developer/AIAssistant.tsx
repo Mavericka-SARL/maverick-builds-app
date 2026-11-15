@@ -7,7 +7,7 @@ import {
 import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
 import { credentialSteps, credentialsComplete } from "./proposalCredentials";
-import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage, type AITaskPlan, type AITaskStage, type AIEarlierPlan, type AIMemoryStatus } from "../../api/client";
+import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument, type AISessionUsage, type AITaskPlan, type AITaskStage, type AIEarlierPlan, type AIMemoryStatus, type AITurnStatus } from "../../api/client";
 import { AttachPlanPanel, EarlierPlansCard, MemoryGauge, MemoryPanel } from "./AIMemoryPlan";
 import { ArchitectureScheme, PlanReviewCard } from "./AIArchitecture";
 import { useDemo } from "../../api/useDemo";
@@ -776,6 +776,100 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+// formatStep is a finished step's time: tenths of a second under ten
+// seconds, m:ss above.
+function formatStep(ms: number): string {
+  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : formatElapsed(ms);
+}
+
+// statusQuietWarnS: no word from the server for this long, while the server
+// sends its status every 5 s, means the stream is gone.
+const statusQuietWarnS = 20;
+
+// TurnStatusBubble is what a running turn shows: the step it is on and how
+// long that step and the turn have run; for a call to the AI, how far the
+// provider has got, how long it has said nothing and when it is asked again;
+// the steps before; and when the server last said anything. A server too old
+// to send a status gets the one-line label it always had.
+function TurnStatusBubble({ progress, toolStatus, status, heardAt, now, elapsed }: {
+  progress: { tool?: string; chars?: number; steps?: number } | null;
+  toolStatus: string | null;
+  status: { s: AITurnStatus; at: number } | null;
+  heardAt: number;
+  now: number;
+  elapsed: string;
+}) {
+  const kb = (chars?: number) => Math.max(1, Math.round((chars ?? 0) / 1024));
+  const s = status?.s;
+  const since = status ? Math.max(0, (now - status.at) / 1000) : 0;
+  const stepS = s ? s.step_s + since : 0;
+  let head: string;
+  if (progress?.tool === "propose_actions") {
+    head = `Writing the proposal — ${progress.steps ?? 0} step${progress.steps === 1 ? "" : "s"} so far (${kb(progress.chars)} KB)`;
+  } else if (progress?.tool) {
+    head = `Writing ${progress.tool} (${kb(progress.chars)} KB)`;
+  } else if (s?.phase === "ai") {
+    head = `Waiting for the AI — call ${s.call ?? "?"}${(s.attempt ?? 1) > 1 ? ", asked again" : ""}`;
+  } else if (s?.phase === "server" && s.label) {
+    head = /^[a-z_]+$/.test(s.label) ? `Running ${s.label}` : s.label.charAt(0).toUpperCase() + s.label.slice(1);
+  } else {
+    head = toolStatus ? `Calling ${toolStatus}` : "Thinking";
+  }
+
+  const details: string[] = [];
+  if (s?.phase === "ai") {
+    const sent = s.context_tokens ? ` (about ${Math.round(s.context_tokens / 1000)}k tokens)` : "";
+    switch (s.stage) {
+      case "sending":
+        details.push(`Request sent${sent}; the AI provider has not answered yet.`);
+        break;
+      case "connected":
+        details.push(`The AI provider accepted the request${sent}; nothing written yet.`);
+        break;
+      case "reasoning":
+        details.push(`The AI is reasoning${sent}. The provider shows nothing of it until the AI starts writing.`);
+        break;
+      case "writing":
+        details.push("The AI is writing.");
+        break;
+    }
+    const quiet = (s.quiet_s ?? 0) + since;
+    if (s.idle_limit_s && quiet >= 10) {
+      details.push(`Nothing from the AI for ${formatElapsed(quiet * 1000)}; at ${formatElapsed(s.idle_limit_s * 1000)} it is stopped and asked again${(s.attempt ?? 1) > 1 ? " — this is the second time, the last" : ""}.`);
+    }
+    if (s.note) details.push(`Before: ${s.note}.`);
+  }
+  const heardS = heardAt ? Math.max(0, (now - heardAt) / 1000) : 0;
+  const lost = status != null && heardS >= statusQuietWarnS;
+
+  return (
+    <div className="mvx-chat-bubble mvx-chat-bubble--pending" style={{ maxWidth: 680 }}>
+      <div>
+        <span style={lost ? undefined : { animation: "pulse 1s infinite" }}>{head}…</span>
+        {s && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{formatElapsed(stepS * 1000)} this step</span>}
+        {elapsed && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{s ? `· ${elapsed} turn` : elapsed}</span>}
+      </div>
+      {details.map((d) => <div key={d} className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 4 }}>{d}</div>)}
+      {s && s.recent.length > 0 && (
+        <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 4 }}>
+          {`Done before: ${s.recent.map((r) => `${r.label} ${formatStep(r.ms)}`).join(" · ")}`}
+        </div>
+      )}
+      {status && (
+        lost ? (
+          <div style={{ fontSize: 12, marginTop: 6, color: "var(--color-warning)" }}>
+            {`No word from the server for ${formatElapsed(heardS * 1000)}, though it reports every 5 seconds: the connection is probably lost. Reload the page to see where the turn stands.`}
+          </div>
+        ) : (
+          <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {`Live — the server reported ${Math.floor(heardS)}s ago.`}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
 
@@ -1024,6 +1118,11 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [progress, setProgress] = useState<{ tool?: string; chars?: number; steps?: number } | null>(null);
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  // The step the turn is on, as the server last said (at: when it arrived),
+  // and when the server last sent anything: a turn the server stopped
+  // telling about is shown as one, not as a timer ticking on its own.
+  const [turnStatus, setTurnStatus] = useState<{ s: AITurnStatus; at: number } | null>(null);
+  const [heardAt, setHeardAt] = useState(0);
   const [proposalWarnings, setProposalWarnings] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -1070,6 +1169,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
       setPendingProposal(null);
       setStreamingContent("");
       setToolStatus(null);
+      setTurnStatus(null);
     }
   }
 
@@ -1124,6 +1224,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     setPendingProposal(null);
     setStreamingContent("");
     setToolStatus(null);
+    setTurnStatus(null);
     const data = await api.aiGetSession(id);
     setCurrentSession(data.session);
     setUsage(data.usage ?? null);
@@ -1184,6 +1285,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
       setPendingProposal(null);
       setStreamingContent("");
       setToolStatus(null);
+      setTurnStatus(null);
       setError(null);
     },
     onError: (e) => setError((e as Error).message),
@@ -1195,10 +1297,27 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-sessions"] }),
   });
 
+  // A deleted session is kept 30 days: listed under the sessions with a
+  // Restore, which brings it back and opens it.
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { data: deletedSessions = [] } = useQuery<AISession[]>({
+    queryKey: ["ai-sessions-deleted", revisionId ?? ""],
+    queryFn: () => api.aiListDeletedSessions(revisionId),
+  });
+  const restoreSession = useMutation({
+    mutationFn: (id: string) => api.aiRestoreSession(id),
+    onSuccess: (sess) => {
+      qc.invalidateQueries({ queryKey: ["ai-sessions"] });
+      qc.invalidateQueries({ queryKey: ["ai-sessions-deleted"] });
+      loadSession(sess.id);
+    },
+    onError: (e) => setError((e as Error).message),
+  });
   const deleteSession = useMutation({
     mutationFn: (id: string) => api.aiDeleteSession(id),
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
+      qc.invalidateQueries({ queryKey: ["ai-sessions-deleted"] });
       if (sessionId === id) {
         setSessionId(null);
         setCurrentSession(null);
@@ -1207,6 +1326,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
         setPendingProposal(null);
         setStreamingContent("");
         setToolStatus(null);
+        setTurnStatus(null);
       }
     },
   });
@@ -1394,14 +1514,17 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
 
     setStreamingContent("");
     setToolStatus(null);
+    setTurnStatus(null);
     setProgress(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setTurnStartedAt(Date.now());
     setNowTick(Date.now());
+    setHeardAt(Date.now());
 
     try {
       await api.aiSendMessage(sid, content, (event) => {
+        setHeardAt(Date.now());
         switch (event.type) {
           case "delta":
             setStreamingContent(prev => prev + (event.content ?? ""));
@@ -1409,14 +1532,25 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           case "tool_status":
             setToolStatus(event.tool ?? null);
             setProgress(null);
-            setStreamingContent(""); // a fresh LLM turn is starting
+            setStreamingContent(""); // a server step is starting
             break;
+          case "status": {
+            const s = event as AITurnStatus;
+            // A new call or a server step: the last call's writing is over.
+            if (s.phase !== "ai" || s.stage === "sending") {
+              setProgress(null);
+              setStreamingContent("");
+            }
+            setTurnStatus({ s, at: Date.now() });
+            break;
+          }
           case "progress":
             setProgress({ tool: event.tool, chars: event.chars, steps: event.steps });
             break;
           case "proposal":
             setStreamingContent("");
             setToolStatus(null);
+            setTurnStatus(null);
             setProgress(null);
             setMessages(event.messages ?? []);
             setPendingProposal(event.proposal ?? null);
@@ -1437,6 +1571,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
           case "done":
             setStreamingContent("");
             setToolStatus(null);
+            setTurnStatus(null);
             setMessages(event.messages ?? []);
             setPendingProposal(null);
             if (event.session) setCurrentSession(event.session);
@@ -1475,6 +1610,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
       setThinking(false);
       setStreamingContent("");
       setToolStatus(null);
+      setTurnStatus(null);
       inputRef.current?.focus();
     }
   };
@@ -1645,7 +1781,16 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                   danger
                   size={24}
                   style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
-                  onClick={(e) => { e.stopPropagation(); deleteSession.mutate(s.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    confirm({
+                      title: "Delete this session?",
+                      body: `"${s.title || "Session"}" goes from the list with its chat, plan and memory. It is kept for 30 days: restore it from "Deleted sessions" below the list. The model and its revisions are not touched.`,
+                      confirmLabel: "Delete session",
+                      destructive: true,
+                      onConfirm: () => deleteSession.mutate(s.id),
+                    });
+                  }}
                 >
                   <Trash2 size={12} />
                 </IconButton>
@@ -1653,6 +1798,34 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             )}
           </div>
         ))}
+
+        {deletedSessions.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="mvx-admin-muted"
+              style={{ background: "none", border: "none", padding: "2px 4px", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+              aria-expanded={showDeleted}
+              onClick={() => setShowDeleted(v => !v)}
+            >
+              <Trash2 size={11} /> {`Deleted sessions (${deletedSessions.length})`}
+            </button>
+            {showDeleted && deletedSessions.map(s => (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 4px 4px 8px" }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || "Session"}</div>
+                  <div style={{ fontSize: 10, color: "var(--color-text-subtle)" }}>
+                    {`deleted ${s.deleted_at ? new Date(s.deleted_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : ""}`}
+                  </div>
+                </div>
+                <Button size="sm" variant="ghost" disabled={restoreSession.isPending} onClick={() => restoreSession.mutate(s.id)}
+                  title="Bring the session back with its chat, plan and memory">
+                  Restore
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {!settings?.has_key && !settings?.tenant_key && (
           <div className="mvx-context-banner mvx-context-banner--warning" style={{ marginTop: "auto", padding: "8px 10px", fontSize: 11 }}>
@@ -1825,16 +1998,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
 
           {thinking && !streamingContent && (
             <div className="mvx-chat-row">
-              <div className="mvx-chat-bubble mvx-chat-bubble--pending">
-                <span style={{ animation: "pulse 1s infinite" }}>
-                  {progress?.tool === "propose_actions"
-                    ? `Writing the proposal — ${progress.steps ?? 0} step${progress.steps === 1 ? "" : "s"} so far (${Math.max(1, Math.round((progress.chars ?? 0) / 1024))} KB)…`
-                    : progress?.tool
-                      ? `Writing ${progress.tool} (${Math.max(1, Math.round((progress.chars ?? 0) / 1024))} KB)…`
-                      : toolStatus ? `Calling ${toolStatus}…` : "Thinking…"}
-                </span>
-                {elapsed && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{elapsed}</span>}
-              </div>
+              <TurnStatusBubble progress={progress} toolStatus={toolStatus} status={turnStatus}
+                heardAt={heardAt} now={nowTick} elapsed={elapsed} />
             </div>
           )}
 

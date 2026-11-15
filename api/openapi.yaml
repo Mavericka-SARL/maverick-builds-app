@@ -2149,6 +2149,7 @@ components:
         created_at:        { type: string, format: date-time }
         promoted_at:       { type: string, format: date-time, description: "When its draft was last taken as the working revision; the session goes on, its next confirmed proposal in a fresh draft" }
         call_budget:       { type: integer, description: "The developer's cap on the session's provider calls; absent = the deployment's per-session cap" }
+        deleted_at:        { type: string, format: date-time, description: "When the session was deleted; set only in the list of deleted sessions (deleted=true)" }
         llm_calls:         { type: integer, description: "The session's model calls so far" }
         plan_done:         { type: integer, description: "Stages of the session's task plan done or skipped (in the list)" }
         plan_stages:       { type: integer, description: "Stages of the session's task plan (in the list)" }
@@ -9222,12 +9223,16 @@ paths:
     get:
       operationId: listAiSessions
       tags: [AI Assistant]
-      summary: List the caller's 20 most recent AI assistant sessions in the current model
+      summary: List the caller's 20 most recent AI assistant sessions in the current model, or with deleted=true its deleted sessions that can still be restored
       parameters:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
           description: Names the model whose sessions are listed (the revision's model). Without it, the application's selected or default model.
+        - name: deleted
+          in: query
+          schema: { type: boolean }
+          description: true lists the caller's deleted sessions in the model that can still be restored (30 days after deletion), the last deleted first, with deleted_at. Without it, the list leaves deleted sessions out and first removes for good those deleted more than 30 days ago.
       responses:
         "200":
           description: Session list
@@ -9341,7 +9346,7 @@ paths:
     delete:
       operationId: deleteAiSession
       tags: [AI Assistant]
-      summary: Delete a session (and its messages/documents/proposals)
+      summary: Delete a session — hidden from the list and every read, and kept with its messages, plan, memory, proposals and files for 30 days, while POST /api/ai/sessions/{id}/restore brings it back; then removed for good
       parameters:
         - name: id
           in: path
@@ -9365,6 +9370,13 @@ paths:
         cannot consume this operation and callers should use a raw fetch/
         EventSource instead. Named events: "delta" ({content}) for each
         streamed token; "tool_status" ({tool}) before executing a read tool;
+        "status" ({phase, step_s, recent, label | call, attempt, stage,
+        quiet_s, idle_limit_s, max_s, context_tokens, note}) at every change
+        of the step the turn is on — phase "ai" a call to the AI provider
+        (stage sending, connected, reasoning or writing; quiet_s since its
+        last output), "server" a step on the server named by label — and
+        every 5 seconds while one runs, so a client that hears nothing for
+        longer knows the stream is gone;
         "progress" ({tool, chars, steps}) at most once a second while the
         model writes a tool call (steps: of a proposal so far);
         "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model
@@ -9415,6 +9427,24 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/ai/sessions/{id}/restore:
+    post:
+      operationId: restoreAiSession
+      tags: [AI Assistant]
+      summary: Bring back the caller's deleted session, with its messages, plan, memory, proposals and files; a deleted session is kept 30 days
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Session restored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSession" }
+        "404":
+          description: No deleted session of the caller's with this id that can still be restored
   /api/ai/sessions/{id}/promote-draft:
     post:
       operationId: promoteAiDraft

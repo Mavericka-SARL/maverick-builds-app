@@ -34,6 +34,9 @@ func TestOpenAIResponsesFallback(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			ev := func(v string) { _, _ = fmt.Fprintf(w, "event: x\ndata: %s\n\n", v) }
+			ev(`{"type":"response.created","response":{"status":"in_progress"}}`)
+			ev(`{"type":"response.in_progress","response":{"status":"in_progress"}}`)
+			ev(`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}`)
 			ev(`{"type":"response.output_text.delta","delta":"Reading "}`)
 			ev(`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"list_metrics","arguments":""}}`)
 			ev(`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"search\":"}`)
@@ -50,10 +53,18 @@ func TestOpenAIResponsesFallback(t *testing.T) {
 	var text strings.Builder
 	var progress []string
 	req.OnToolArgs = func(name string, args []byte) { progress = append(progress, name+":"+string(args)) }
+	var stages []string
+	req.OnStage = func(s string) { stages = append(stages, s) }
 	resp, err := p.ChatStream(context.Background(), req, func(d string) { text.WriteString(d) })
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Accepted twice (created, in progress), then reasoning: what the
+	// developer is told before the first output.
+	if strings.Join(stages, ",") != "connected,connected,reasoning" {
+		t.Errorf("stages %v", stages)
+	}
+	req.OnStage = nil
 	if text.String() != "Reading " || resp.Message.Content != "Reading " || resp.FinishReason != "tool_calls" {
 		t.Fatalf("text %q / %q, finish %s", text.String(), resp.Message.Content, resp.FinishReason)
 	}

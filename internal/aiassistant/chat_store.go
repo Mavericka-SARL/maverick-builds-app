@@ -42,6 +42,9 @@ type Session struct {
 	// CallBudget caps the session's provider calls (migration 180); nil is
 	// the deployment's per-session cap.
 	CallBudget *int `json:"call_budget,omitempty"`
+	// DeletedAt is when the session was deleted (migration 186): set only in
+	// ListDeletedSessions, as every other read leaves a deleted session out.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	// LLMCalls, PlanDone and PlanStages show the session's work in the list:
 	// its model calls and its task plan's stages done (or skipped) of all.
 	LLMCalls   int `json:"llm_calls"`
@@ -91,7 +94,7 @@ func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([
 		       CASE WHEN jsonb_typeof(task_plan->'stages') = 'array'
 		            THEN (SELECT count(*) FROM jsonb_array_elements(task_plan->'stages') e WHERE e->>'status' IN ('done', 'skipped')) ELSE 0 END
 		FROM ai_assistant.session
-		WHERE model_id=$1::uuid AND user_id=$2::uuid
+		WHERE model_id=$1::uuid AND user_id=$2::uuid AND deleted_at IS NULL
 		ORDER BY created_at DESC LIMIT 20
 	`, modelID, userID)
 	if err != nil {
@@ -118,7 +121,7 @@ func (s *ChatStore) GetSession(ctx context.Context, sessionID string) (Session, 
 	var draftRevID *string
 	err := s.pool.QueryRow(ctx, `
 		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at, call_budget
-		FROM ai_assistant.session WHERE id=$1::uuid
+		FROM ai_assistant.session WHERE id=$1::uuid AND deleted_at IS NULL
 	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt, &sess.CallBudget)
 	if err != nil {
 		return Session{}, fmt.Errorf("session not found: %w", err)
@@ -161,7 +164,7 @@ func (s *ChatStore) EarlierSessions(ctx context.Context, sessionID, carriedFrom 
 			SELECT NULLIF(o.task_plan->>'carried_from', '')::uuid FROM ai_assistant.session o JOIN chain c ON o.id = c.id
 		)
 		SELECT o.id::text FROM ai_assistant.session o JOIN ai_assistant.session s ON s.id = $1::uuid
-		WHERE o.id <> s.id AND o.model_id = s.model_id AND o.user_id = s.user_id AND o.created_at < s.created_at
+		WHERE o.id <> s.id AND o.model_id = s.model_id AND o.user_id = s.user_id AND o.created_at < s.created_at AND o.deleted_at IS NULL
 		  AND ((s.draft_revision_id IS NOT NULL AND o.draft_revision_id = s.draft_revision_id)
 		       OR o.id IN (SELECT id FROM chain WHERE id IS NOT NULL))
 		ORDER BY o.created_at`, sessionID, carriedFrom)
@@ -210,9 +213,18 @@ func (s *ChatStore) SetTitleIfEmpty(ctx context.Context, sessionID, title string
 	return err
 }
 
+// DeletedSessionRetention is how long a deleted session can be restored
+// before PurgeDeletedSessions removes it for good.
+const DeletedSessionRetention = 30 * 24 * time.Hour
+
+// DeleteSession deletes userID's session: it is hidden from the list and
+// every read, and kept, with its messages, plan, memory, proposals and files,
+// for DeletedSessionRetention so RestoreSession can bring it back. It was
+// deleted for good at once, by one click (2026-11-15).
 func (s *ChatStore) DeleteSession(ctx context.Context, sessionID, userID string) error {
 	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM ai_assistant.session WHERE id=$1::uuid AND user_id=$2::uuid
+		UPDATE ai_assistant.session SET deleted_at = now()
+		WHERE id=$1::uuid AND user_id=$2::uuid AND deleted_at IS NULL
 	`, sessionID, userID)
 	if err != nil {
 		return err
@@ -221,6 +233,59 @@ func (s *ChatStore) DeleteSession(ctx context.Context, sessionID, userID string)
 		return fmt.Errorf("session not found")
 	}
 	return nil
+}
+
+// RestoreSession brings back userID's deleted session, while it is kept.
+func (s *ChatStore) RestoreSession(ctx context.Context, sessionID, userID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE ai_assistant.session SET deleted_at = NULL
+		WHERE id=$1::uuid AND user_id=$2::uuid AND deleted_at IS NOT NULL
+		  AND deleted_at > now() - make_interval(secs => $3)
+	`, sessionID, userID, DeletedSessionRetention.Seconds())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("session not found")
+	}
+	return nil
+}
+
+// ListDeletedSessions lists userID's deleted sessions in modelID that can
+// still be restored, the last deleted first.
+func (s *ChatStore) ListDeletedSessions(ctx context.Context, modelID, userID string) ([]Session, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, title, created_at, deleted_at, llm_calls
+		FROM ai_assistant.session
+		WHERE model_id=$1::uuid AND user_id=$2::uuid AND deleted_at IS NOT NULL
+		  AND deleted_at > now() - make_interval(secs => $3)
+		ORDER BY deleted_at DESC LIMIT 50
+	`, modelID, userID, DeletedSessionRetention.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sessions := []Session{}
+	for rows.Next() {
+		sess := Session{ModelID: modelID, UserID: userID}
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.CreatedAt, &sess.DeletedAt, &sess.LLMCalls); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sess)
+	}
+	return sessions, rows.Err()
+}
+
+// PurgeDeletedSessions removes for good userID's sessions deleted longer
+// than DeletedSessionRetention ago; their messages, proposals and files go
+// with them (ON DELETE CASCADE). The session list calls it, so a deployment
+// needs no job of its own.
+func (s *ChatStore) PurgeDeletedSessions(ctx context.Context, userID string) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM ai_assistant.session
+		WHERE user_id=$1::uuid AND deleted_at IS NOT NULL AND deleted_at <= now() - make_interval(secs => $2)
+	`, userID, DeletedSessionRetention.Seconds())
+	return err
 }
 
 // ── Messages ─────────────────────────────────────────────────────────────────

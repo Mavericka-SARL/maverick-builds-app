@@ -3153,6 +3153,8 @@ type AiSession struct {
 	PromotedAt OptDateTime `json:"promoted_at"`
 	// The developer's cap on the session's provider calls; absent = the deployment's per-session cap.
 	CallBudget OptInt `json:"call_budget"`
+	// When the session was deleted; set only in the list of deleted sessions (deleted=true).
+	DeletedAt OptDateTime `json:"deleted_at"`
 	// The session's model calls so far.
 	LlmCalls OptInt `json:"llm_calls"`
 	// Stages of the session's task plan done or skipped (in the list).
@@ -3214,6 +3216,11 @@ func (s *AiSession) GetPromotedAt() OptDateTime {
 // GetCallBudget returns the value of CallBudget.
 func (s *AiSession) GetCallBudget() OptInt {
 	return s.CallBudget
+}
+
+// GetDeletedAt returns the value of DeletedAt.
+func (s *AiSession) GetDeletedAt() OptDateTime {
+	return s.DeletedAt
 }
 
 // GetLlmCalls returns the value of LlmCalls.
@@ -3286,6 +3293,11 @@ func (s *AiSession) SetCallBudget(val OptInt) {
 	s.CallBudget = val
 }
 
+// SetDeletedAt sets the value of DeletedAt.
+func (s *AiSession) SetDeletedAt(val OptDateTime) {
+	s.DeletedAt = val
+}
+
 // SetLlmCalls sets the value of LlmCalls.
 func (s *AiSession) SetLlmCalls(val OptInt) {
 	s.LlmCalls = val
@@ -3300,6 +3312,8 @@ func (s *AiSession) SetPlanDone(val OptInt) {
 func (s *AiSession) SetPlanStages(val OptInt) {
 	s.PlanStages = val
 }
+
+func (*AiSession) restoreAiSessionRes() {}
 
 // Ref: #/components/schemas/AiTestSettingsRequest
 type AiTestSettingsRequest struct {
@@ -34584,6 +34598,11 @@ func (*ResendAdminUserInvitationOK) resendAdminUserInvitationRes() {}
 type ResendAdminUserInvitationServiceUnavailable Error
 
 func (*ResendAdminUserInvitationServiceUnavailable) resendAdminUserInvitationRes() {}
+
+// RestoreAiSessionNotFound is response for RestoreAiSession operation.
+type RestoreAiSessionNotFound struct{}
+
+func (*RestoreAiSessionNotFound) restoreAiSessionRes() {}
 
 // RevokeAPITokenForbidden is response for RevokeAPIToken operation.
 type RevokeAPITokenForbidden struct{}

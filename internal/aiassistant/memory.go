@@ -593,7 +593,7 @@ func (s *ChatStore) ListPlanRefs(ctx context.Context, modelID, userID, exceptSes
 		SELECT s.id::text, s.title, s.created_at, s.task_plan, s.earlier_plans,
 		       COALESCE((SELECT array_agg(d.filename ORDER BY d.created_at) FROM ai_assistant.document d WHERE d.session_id = s.id), '{}')
 		FROM ai_assistant.session s
-		WHERE s.model_id = $1::uuid AND s.user_id = $2::uuid AND s.id <> NULLIF($3, '')::uuid
+		WHERE s.model_id = $1::uuid AND s.user_id = $2::uuid AND s.id <> NULLIF($3, '')::uuid AND s.deleted_at IS NULL
 		  AND (s.task_plan IS NOT NULL OR s.earlier_plans IS NOT NULL)
 		ORDER BY s.created_at DESC LIMIT 50`, modelID, userID, exceptSessionID)
 	if err != nil {

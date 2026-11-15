@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
@@ -279,7 +280,22 @@ func (h *handler) aiListSessions(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve model")
 		return
 	}
-	sessions, err := h.aiChatStore(ctx).ListSessions(ctx, modelID, a.UserID)
+	store := h.aiChatStore(ctx)
+	// ?deleted=true lists the caller's deleted sessions that can still be
+	// restored. The plain list purges those kept long enough first.
+	if r.URL.Query().Get("deleted") == "true" {
+		deleted, err := store.ListDeletedSessions(ctx, modelID, a.UserID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, deleted)
+		return
+	}
+	if err := store.PurgeDeletedSessions(ctx, a.UserID); err != nil {
+		h.log.Warn().Err(err).Msg("ai sessions: purging deleted sessions failed")
+	}
+	sessions, err := store.ListSessions(ctx, modelID, a.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -621,13 +637,36 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	sendSSE := func(event string, payload any) {
+	// The turn's status beat (turnStatus) writes from a goroutine of its
+	// own: every event is written under one lock.
+	var sseMu sync.Mutex
+	writeSSE := func(event string, payload any) {
 		b, mErr := json.Marshal(payload)
 		if mErr != nil {
 			return
 		}
+		sseMu.Lock()
+		defer sseMu.Unlock()
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 		flusher.Flush()
+	}
+	status := newTurnStatus(writeSSE, aiCallIdleLimit(), aiCallMaxDuration())
+	status.beat(statusBeat)
+	defer status.close()
+	// Every "tool_status" — a tool, the plan check, the memory — starts a
+	// server step in the status, which the console shows over the label.
+	// The events that end a turn end its step first: no status follows them.
+	sendSSE := func(event string, payload any) {
+		switch event {
+		case "done", "proposal", "error":
+			status.done()
+		}
+		writeSSE(event, payload)
+		if event == "tool_status" {
+			if p, ok := payload.(map[string]string); ok {
+				status.server(p["tool"])
+			}
+		}
 	}
 
 	// The session's memory (ai_memory.go): a new attachment is gone through
@@ -804,21 +843,34 @@ turn:
 		// aiCallMaxDuration or loses its connection is stopped and asked
 		// once more; the second such end finishes the turn with an error.
 		var llmResp providers.ChatResponse
+		// The status names the call as the session's usage counts it (the
+		// "N calls" beside the session), which the plan check's and the
+		// memory's calls count in too; sessionCalls does not.
+		callNo := sessionCalls
+		if n, cErr := store.CountLLMCallsInSession(ctx, sessionID); cErr == nil {
+			callNo = n + 1
+		}
+		callTokens := estimateTokens(chatReq)
+		retryNote := ""
 		for attempt := 1; ; attempt++ {
 			var stalled bool
 			callStart := time.Now()
+			status.aiCall(callNo, attempt, retryNote, callTokens)
 			stalled, err = watchedAICall(turnCtx, aiCallIdleLimit(), aiCallMaxDuration(), func(callCtx context.Context, touch func()) error {
 				req := chatReq
 				req.OnToolArgs = func(name string, args []byte) {
 					touch()
+					status.output()
 					if chatReq.OnToolArgs != nil {
 						chatReq.OnToolArgs(name, args)
 					}
 				}
+				req.OnStage = status.providerStage
 				var cErr error
 				if sp, streamable := llmProvider.(providers.StreamingProvider); streamable {
 					llmResp, cErr = sp.ChatStream(callCtx, req, func(delta string) {
 						touch()
+						status.output()
 						sendSSE("delta", map[string]string{"content": delta})
 					})
 				} else {
@@ -846,8 +898,11 @@ turn:
 				break
 			}
 			log.Printf("AI call: session=%s %s after %s, asked again", sessionID, why, took)
-			sendSSE("tool_status", map[string]string{"tool": "the AI provider " + why + " — asking again"})
+			retryNote = fmt.Sprintf("the AI provider %s after %s, so it was asked again", why, took)
 		}
+		// Between the answer and the next step the server goes through the
+		// answer: a step of its own, so the status beat goes on.
+		status.server("going through the AI's answer")
 		if err != nil && stopTurn() {
 			return
 		}
@@ -2617,9 +2672,37 @@ func (h *handler) aiDeleteSession(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"status": "deleted"})
 }
 
+// aiRestoreSession brings back the caller's deleted session while it is kept
+// (POST /api/ai/sessions/{id}/restore; aiassistant.DeletedSessionRetention).
+func (h *handler) aiRestoreSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	ctx := r.Context()
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	store := h.aiChatStore(ctx)
+	if err := store.RestoreSession(ctx, sessionID, a.UserID); err != nil {
+		jsonErr(w, err, http.StatusNotFound)
+		return
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAISessionRestored,
+		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+		ResourceType: "ai_session", ResourceID: sessionID,
+	})
+	sess, err := store.GetSession(ctx, sessionID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, sess)
+}
+
 // aiSessionDetail dispatches sub-paths under /api/ai/sessions/{id}/...
 //
 //	DELETE /api/ai/sessions/{id}                      → aiDeleteSession
+//	POST /api/ai/sessions/{id}/restore                → aiRestoreSession
 //	/api/ai/sessions/{id}/messages                    → aiSendMessage
 //	/api/ai/sessions/{id}/promote-draft               → aiPromoteDraft
 //	/api/ai/sessions/{id}/proposals/{pid}/confirm     → aiConfirmProposal
@@ -2718,6 +2801,10 @@ func (h *handler) aiSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch && !strings.Contains(path, "/") {
 		h.aiRenameSession(w, r, path)
+		return
+	}
+	if r.Method == http.MethodPost && strings.HasSuffix(path, "/restore") && strings.Count(path, "/") == 1 {
+		h.aiRestoreSession(w, r, strings.TrimSuffix(path, "/restore"))
 		return
 	}
 	if strings.HasSuffix(path, "/messages") {

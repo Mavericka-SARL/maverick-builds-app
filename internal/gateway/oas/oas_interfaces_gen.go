@@ -705,6 +705,10 @@ type ResendAdminUserInvitationRes interface {
 	resendAdminUserInvitationRes()
 }
 
+type RestoreAiSessionRes interface {
+	restoreAiSessionRes()
+}
+
 type RestoreWorkflowRes interface {
 	restoreWorkflowRes()
 }

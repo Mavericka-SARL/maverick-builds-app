@@ -10046,6 +10046,10 @@ type ListAiSessionsParams struct {
 	// Names the model whose sessions are listed (the revision's model). Without it, the application's
 	// selected or default model.
 	RevisionID OptUUID `json:",omitempty,omitzero"`
+	// True lists the caller's deleted sessions in the model that can still be restored (30 days after
+	// deletion), the last deleted first, with deleted_at. Without it, the list leaves deleted sessions
+	// out and first removes for good those deleted more than 30 days ago.
+	Deleted OptBool `json:",omitempty,omitzero"`
 }
 
 func unpackListAiSessionsParams(packed middleware.Parameters) (params ListAiSessionsParams) {
@@ -10056,6 +10060,15 @@ func unpackListAiSessionsParams(packed middleware.Parameters) (params ListAiSess
 		}
 		if v, ok := packed[key]; ok {
 			params.RevisionID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "deleted",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Deleted = v.(OptBool)
 		}
 	}
 	return params
@@ -10100,6 +10113,47 @@ func decodeListAiSessionsParams(args [0]string, argsEscaped bool, r *http.Reques
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: deleted.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "deleted",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotDeletedVal bool
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToBool(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotDeletedVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Deleted.SetTo(paramsDotDeletedVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "deleted",
 			In:   "query",
 			Err:  err,
 		}
@@ -13572,6 +13626,71 @@ func unpackResendAdminUserInvitationParams(packed middleware.Parameters) (params
 }
 
 func decodeResendAdminUserInvitationParams(args [1]string, argsEscaped bool, r *http.Request) (params ResendAdminUserInvitationParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// RestoreAiSessionParams is parameters of restoreAiSession operation.
+type RestoreAiSessionParams struct {
+	ID uuid.UUID
+}
+
+func unpackRestoreAiSessionParams(packed middleware.Parameters) (params RestoreAiSessionParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeRestoreAiSessionParams(args [1]string, argsEscaped bool, r *http.Request) (params RestoreAiSessionParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

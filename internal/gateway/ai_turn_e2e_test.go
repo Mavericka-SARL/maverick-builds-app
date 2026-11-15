@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +36,10 @@ type aiTurnEnv struct {
 	// post and get call the gateway as the session's developer.
 	post func(path string, body []byte) (int, string)
 	get  func(path string) (int, string)
+	// do calls the gateway as the session's developer with any method; db is
+	// the test database.
+	do func(method, path string, body []byte) (int, string)
+	db *pgxpool.Pool
 	// confirm confirms a proposal of the session as the console does.
 	confirm func(proposalID string) (int, string)
 }
@@ -76,6 +81,21 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 		t.Fatal(err)
 	}
 	_ = chat.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	do := func(method, path string, body []byte) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, method, srv.URL+path, bytes.NewReader(body))
+		req.Header.Set("X-Dev-User", devSub)
+		req.Header.Set("X-App-Id", appID)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		out := new(bytes.Buffer)
+		_, _ = out.ReadFrom(resp.Body)
+		return resp.StatusCode, out.String()
+	}
 	post := func(path string, body []byte) (int, string) {
 		t.Helper()
 		req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+path, bytes.NewReader(body))
@@ -106,7 +126,7 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 		return resp.StatusCode, out.String()
 	}
 	return aiTurnEnv{chat: chat, docs: aiassistant.NewDocumentStore(pool), proposals: aiassistant.NewProposalStore(pool), session: sess.ID,
-		post: post, get: get,
+		post: post, get: get, do: do, db: pool,
 		confirm: func(proposalID string) (int, string) {
 			return post("/api/ai/sessions/"+sess.ID+"/proposals/"+proposalID+"/confirm", []byte(`{}`))
 		}, send: func(content string) (int, string) {
