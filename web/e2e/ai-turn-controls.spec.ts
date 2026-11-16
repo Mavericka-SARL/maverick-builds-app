@@ -117,3 +117,48 @@ test("a reopened session shows a proposal's warnings in Activity", async ({ page
   await expect(activity).toBeVisible({ timeout: 10_000 });
   await expect(activity.getByText(/without dividing by 100/)).toBeVisible();
 });
+
+// A plan waiting for Execute stays in the chat when a later turn ends
+// without a new one (2026-11-16: the card vanished at the next message, and
+// the AI went on asking for an Execute no card offered); it goes when the
+// server no longer holds it waiting.
+test("a plan waiting for Execute survives a later turn that ends without one", async ({ page }) => {
+  await mockApi(page);
+  const proposal = {
+    id: "prop-wait", session_id: SESSION_ID, status: "pending", created_at: "2026-10-05T09:02:00Z",
+    steps: [{ tool: "create_workflow", description: "Create the planning workflow", params: { name: "planning" } }],
+  };
+  let waiting = true;
+  await mockAi(page, { promoted: false });
+  await page.unroute(`**/api/ai/sessions/${SESSION_ID}/proposals`);
+  await page.route(`**/api/ai/sessions/${SESSION_ID}/proposals`, (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify(waiting ? [proposal] : [{ ...proposal, status: "rejected" }]),
+  }));
+  let turn = 0;
+  await page.route(`**/api/ai/sessions/${SESSION_ID}/messages*`, (route) => {
+    turn++;
+    const reply = (text: string) => [{ id: `m${turn}`, session_id: SESSION_ID, role: "assistant", content: text, created_at: "2026-10-05T09:03:00Z" }];
+    const body = turn === 1
+      ? `event: proposal\ndata: ${JSON.stringify({ proposal, messages: reply("Here is the plan."), session: session(false), warnings: [] })}\n\n`
+      : `event: done\ndata: ${JSON.stringify({ messages: reply(`The 3-step proposal still needs Execute (${turn}).`), session: session(false) })}\n\n`;
+    return route.fulfill({ status: 200, contentType: "text/event-stream", body });
+  });
+  await openSession(page);
+  const execute = page.getByRole("button", { name: "Execute" });
+
+  await page.getByLabel("Message").fill("build the workflow");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(execute).toBeVisible({ timeout: 10_000 });
+
+  await page.getByLabel("Message").fill("done");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("The 3-step proposal still needs Execute (2).")).toBeVisible();
+  await expect(execute).toBeVisible();
+
+  // Once the server holds it waiting no more, the next turn's end clears it.
+  waiting = false;
+  await page.getByLabel("Message").fill("never mind");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("The 3-step proposal still needs Execute (3).")).toBeVisible();
+  await expect(execute).toHaveCount(0);
+});

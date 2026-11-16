@@ -676,7 +676,7 @@ and mapping**.
 
 **Converted files.** `prepare_converted_file` records the attachment with its
 reshape and column map (`ai_assistant.conversion`, migration 107); the panel's
-**Converted files** strip downloads it as CSV or Excel
+**Show converted files (n)** link (collapsed beside *Show the session's files*, 2026-11-16) downloads it as CSV or Excel
 (`GET /api/ai/sessions/{id}/conversions/{cid}?format=csv|xlsx`, the session
 owner only). The file is rebuilt from the attachment on every download by the
 code an import uses, so it is exactly what an import would read; a column of
@@ -692,7 +692,7 @@ The spec is validated by the same code as the console's editor, and a download
 (`GET /api/integrations/{id}/export`) is rendered for whoever asks from their
 own `/api/grid` view, so hidden members and metrics never reach the file and
 every value is the one their grid shows. The panel lists the session's exports
-with a **Download** button; developers find them in the Integrations tab, and
+under **Show exports (n)** (collapsed beside the session's files) with a **Download** button; developers find them in the Integrations tab, and
 a dashboard's Integration button downloads one for users.
 
 ## What stays human

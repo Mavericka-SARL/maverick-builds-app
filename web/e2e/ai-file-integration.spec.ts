@@ -129,7 +129,10 @@ test("the AI panel marks an importable spreadsheet and downloads the session's e
   await expect(chip).toHaveAttribute("title", /kept whole/);
   await expect(chip).not.toContainText("⚠");
 
+  // Collapsed beside the session's files until asked for (2026-11-16).
   const strip = page.getByTestId("session-exports");
+  await expect(strip).toHaveCount(0);
+  await page.getByRole("button", { name: "Show exports (1)" }).click();
   await expect(strip).toContainText("Sales to ERP");
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -275,6 +278,8 @@ test("the AI panel downloads a converted file as CSV and as Excel", async ({ pag
   await page.getByRole("button", { name: /Session/ }).first().click();
 
   const strip = page.getByTestId("session-conversions");
+  await expect(strip).toHaveCount(0);
+  await page.getByRole("button", { name: "Show converted files (1)" }).click();
   await expect(strip).toContainText("plan (converted)");
   await expect(strip).toContainText("5 rows");
   for (const [label, file] of [["CSV", "plan_converted.csv"], ["Excel", "plan_converted.xlsx"]] as const) {

@@ -680,19 +680,24 @@ function ProposalPanel({
 // Download button. A confirmed proposal leaves the chat at once (only its
 // summary message stays), so the downloads live here, fed by the session's
 // proposal history: they survive a reload and refresh on every confirm.
+// Collapsed under "Show exports (n)" beside the session's files.
 
-function SessionExports({ sessionId }: { sessionId: string }) {
+type SessionExport = { id: string; name: string };
+
+function useSessionExports(sessionId: string | null): SessionExport[] {
   const { data: proposals = [] } = useQuery<AIProposalWithSummary[]>({
     queryKey: ["ai-proposals", sessionId],
-    queryFn: () => api.aiListProposals(sessionId),
+    queryFn: () => api.aiListProposals(sessionId as string),
+    enabled: !!sessionId,
   });
-  const exports = proposals.flatMap(p => (p.steps ?? [])
+  return proposals.flatMap(p => (p.steps ?? [])
     .filter(s => s.tool === "create_export_integration" && s.status === "success" && s.created_id)
     .map(s => ({ id: s.created_id as string, name: String(s.params?.name ?? s.description) })));
-  if (exports.length === 0) return null;
+}
+
+function SessionExports({ exports }: { exports: SessionExport[] }) {
   return (
     <div data-testid="session-exports" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span className="mvx-admin-muted" style={{ fontSize: 12 }}>Exports from this session:</span>
       {exports.map(e => (
         <span key={e.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: 13 }}>{e.name}</span>
@@ -708,14 +713,9 @@ function SessionExports({ sessionId }: { sessionId: string }) {
 // (prepare_converted_file), each downloadable as CSV or Excel. The server
 // rebuilds the file from the attachment on every download.
 
-function SessionConversions({ sessionId }: { sessionId: string }) {
-  const { data: conversions = [] } = useQuery<AIConversion[]>({
-    queryKey: ["ai-conversions", sessionId],
-    queryFn: () => api.aiListConversions(sessionId),
-  });
+function SessionConversions({ sessionId, conversions }: { sessionId: string; conversions: AIConversion[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (conversions.length === 0) return null;
   const download = async (c: AIConversion, format: "csv" | "xlsx") => {
     setBusy(c.id + format);
     setError(null);
@@ -730,7 +730,6 @@ function SessionConversions({ sessionId }: { sessionId: string }) {
   };
   return (
     <div data-testid="session-conversions" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span className="mvx-admin-muted" style={{ fontSize: 12 }}>Converted files:</span>
       {conversions.map(c => (
         <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={c.columns.join(", ")}>
           <span style={{ fontSize: 13 }}>{c.filename}</span>
@@ -1139,6 +1138,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   const [attachingPlan, setAttachingPlan] = useState(false);
   const [messages, setMessages]     = useState<AIMessage[]>([]);
   const [pendingProposal, setPendingProposal] = useState<AIProposal | null>(null);
+  // The open session, for answers that arrive after a switch of sessions.
+  const openSession = useRef<string | null>(null);
   const [input, setInput]           = useState("");
   // The table just pasted and attached, until the next message: its note
   // offers it back as plain text.
@@ -1170,6 +1171,17 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
   // attached to the next message — reported live, 2026-10-24).
   const [sentDocIds, setSentDocIds] = useState<Set<string>>(() => new Set());
   const [showSessionFiles, setShowSessionFiles] = useState(false);
+  // The session's exports and converted files sit collapsed beside its files
+  // (owner, 2026-11-16: always open, they took the space above the message box).
+  const [showExports, setShowExports] = useState(false);
+  const [showConversions, setShowConversions] = useState(false);
+  const sessionExports = useSessionExports(sessionId);
+  const { data: sessionConversions = [] } = useQuery<AIConversion[]>({
+    queryKey: ["ai-conversions", sessionId],
+    queryFn: () => api.aiListConversions(sessionId as string),
+    enabled: !!sessionId,
+  });
+  useEffect(() => { openSession.current = sessionId; }, [sessionId]);
   const [dragOver, setDragOver]     = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [draftBusy, setDraftBusy]   = useState(false);
@@ -1608,7 +1620,18 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setToolStatus(null);
             setTurnStatus(null);
             setMessages(event.messages ?? []);
-            setPendingProposal(null);
+            // A turn that ends without a new plan leaves the one waiting for
+            // Execute: it is asked for again, as a reload does. Cleared here,
+            // it vanished at the next message, and the AI went on asking for
+            // an Execute no card offered (2026-11-16).
+            void api.aiListProposals(sid).then(list => {
+              if (openSession.current !== sid) return;
+              const waiting = list.find(p => p.status === "pending") ?? null;
+              setPendingProposal(waiting);
+              setProposalWarnings(waiting?.warnings ?? []);
+            }).catch(() => {
+              if (openSession.current === sid) setPendingProposal(null);
+            });
             if (event.session) setCurrentSession(event.session);
             if (event.usage) setUsage(event.usage);
             if (event.task_plan !== undefined) setTaskPlan(event.task_plan ?? null);
@@ -2068,17 +2091,32 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             });
           }}
         >
-          {sessionId && <SessionExports sessionId={sessionId} />}
-          {sessionId && <SessionConversions sessionId={sessionId} />}
-          {/* Files sent earlier stay in the session, out of the way. */}
-          {documents.some(d => sentDocIds.has(d.id)) && (
-            <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 6 }}>
-              <button type="button" className="mvx-link-button" aria-expanded={showSessionFiles} onClick={() => setShowSessionFiles(v => !v)}>
-                {showSessionFiles ? "Hide" : "Show"} the session's files ({documents.filter(d => sentDocIds.has(d.id)).length})
-              </button>
-              <Txt>{" — the assistant can still read and import them."}</Txt>
+          {/* Files sent earlier, the session's exports and its converted
+              files stay in the session, out of the way: one line of links. */}
+          {(documents.some(d => sentDocIds.has(d.id)) || sessionExports.length > 0 || sessionConversions.length > 0) && (
+            <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 6, display: "flex", flexWrap: "wrap", gap: "2px 16px" }}>
+              {documents.some(d => sentDocIds.has(d.id)) && (
+                <span>
+                  <button type="button" className="mvx-link-button" aria-expanded={showSessionFiles} onClick={() => setShowSessionFiles(v => !v)}>
+                    {showSessionFiles ? "Hide" : "Show"} the session's files ({documents.filter(d => sentDocIds.has(d.id)).length})
+                  </button>
+                  <Txt>{" — the assistant can still read and import them."}</Txt>
+                </span>
+              )}
+              {sessionExports.length > 0 && (
+                <button type="button" className="mvx-link-button" aria-expanded={showExports} onClick={() => setShowExports(v => !v)}>
+                  {showExports ? "Hide" : "Show"} exports ({sessionExports.length})
+                </button>
+              )}
+              {sessionConversions.length > 0 && (
+                <button type="button" className="mvx-link-button" aria-expanded={showConversions} onClick={() => setShowConversions(v => !v)}>
+                  {showConversions ? "Hide" : "Show"} converted files ({sessionConversions.length})
+                </button>
+              )}
             </div>
           )}
+          {showExports && sessionExports.length > 0 && <SessionExports exports={sessionExports} />}
+          {showConversions && sessionId && sessionConversions.length > 0 && <SessionConversions sessionId={sessionId} conversions={sessionConversions} />}
           {/* Attached document chips: files for the next message, and the
               session's earlier files when shown. */}
           {(documents.some(d => showSessionFiles || !sentDocIds.has(d.id)) || uploading) && (
