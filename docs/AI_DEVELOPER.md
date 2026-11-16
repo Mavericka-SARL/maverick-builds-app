@@ -383,8 +383,17 @@ workbook, 2026-11-08/09; `internal/gateway/ai_build_guards.go`, `ai_turn.go`):
   workflows, tags or ordering is not followed by one); a block that matches
   as at its last check is named in one line, not shown again with its hints,
   and a block of text fields (an owner, a status) is left out. The
-  note is shown in the chat and given to the model with the developer's
-  message.
+  note in the chat is the developer's: what was checked, what matched, and a
+  last line saying what the AI does next ("Nothing to fix. Next: the AI goes
+  on with stage 5 of 11, …" or "Next: the AI fixes what differs, then …",
+  `checkNextStep`). The model is given the note with the developer's message
+  and, after it, instructions the developer does not see (fix before going
+  on, `check_sheet` for what was never compared, `update_task_plan` once the
+  stage is done). The note used to carry those instructions, so a check that
+  found everything matching ended "once its rows match, mark it done with
+  update_task_plan" (owner, 2026-11-16). The after-plan calculation check
+  (`afterConfirmCheck`: failing calculations, metrics without values, IFERROR
+  fallbacks) is split the same way.
 
 **Thinking multidimensionally** (`aiassistant/dimensional_names.go`, owner
 2026-11-13). Every turn's prompt carries `MultidimensionalRule`: a measure is

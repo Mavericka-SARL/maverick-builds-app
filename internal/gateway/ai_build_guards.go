@@ -184,10 +184,32 @@ func namesMetric(low, name, label string) bool {
 // confirmed plan; handoverHead starts the one a session's first turn gets
 // for the rows its earlier sessions compared. The next check runs only after
 // a plan confirmed since the last of either.
+//
+// The check speaks to two readers (owner, 2026-11-16): the note in the chat
+// is the developer's (what was checked, what matched, what the AI does next),
+// and the instructions for the model go with it to the model only. The note
+// used to carry them, so the developer read "once its rows match, mark it
+// done with update_task_plan" under "all match", with no next step.
 const (
-	stageCheckHead = "(Value check by the server after the plan you confirmed.)"
-	handoverHead   = "(Handover by the server: the rows your earlier sessions in this draft compared with the source, compared again.)"
+	stageCheckHead = "Server check of the values after the plan you confirmed:"
+	handoverHead   = "Server check at the start of this session: the rows earlier sessions in this draft compared with the workbook, compared again:"
 )
+
+// isServerCheck: m is a value check of the server's, in today's wording or
+// the wording saved before 2026-11-16.
+func isServerCheck(content string) bool {
+	for _, h := range []string{stageCheckHead, handoverHead,
+		"(Value check by the server after the plan you confirmed.)",
+		"(Handover by the server: the rows your earlier sessions in this draft compared with the source, compared again.)"} {
+		if strings.HasPrefix(content, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// developerMappingHead is aiassistant.MappingProblemsHead in the chat.
+const developerMappingHead = "Mapping problems — the sheet's map reads it wrongly (the AI fixes the map, never the model's data):"
 
 // maxStageCheckRows bounds how many rows one check compares again.
 const maxStageCheckRows = 240
@@ -297,25 +319,25 @@ func earlierHistory(ctx context.Context, store *aiassistant.ChatStore, sessionID
 // stageValueCheck is the server's value check at the start of a turn, in a
 // session with an attached file: after a plan confirmed since the last check,
 // or on the session's first turn when earlier sessions in its draft compared
-// rows (a handover). It returns the note to show the developer and give the
-// model, or "".
+// rows (a handover). It returns the note shown to the developer (and given
+// to the model), and the instructions given to the model only; "" for none.
 func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatStore, ps *aiassistant.ProposalStore, exec *aiassistant.ToolExecutor,
-	sessionID, revID string, history []aiassistant.ChatMessage, plan *aiassistant.TaskPlan, status func(string)) string {
+	sessionID, revID string, history []aiassistant.ChatMessage, plan *aiassistant.TaskPlan, status func(string)) (note, instructions string) {
 	docs, err := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocuments(ctx, sessionID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	attached := false
 	for _, d := range docs {
 		attached = attached || d.Importable
 	}
 	if !attached {
-		return ""
+		return "", ""
 	}
 	var lastCheck time.Time
 	userTurns := 0
 	for _, m := range history {
-		if m.Role == "assistant" && (strings.HasPrefix(m.Content, stageCheckHead) || strings.HasPrefix(m.Content, handoverHead)) {
+		if m.Role == "assistant" && isServerCheck(m.Content) {
 			lastCheck = m.CreatedAt
 		}
 		if m.Role == "user" {
@@ -324,7 +346,7 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	}
 	props, err := ps.ListProposals(ctx, sessionID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	// The maps the session's executed imports loaded sheets with are the
 	// sheets' maps (check_sheet): kept every turn, so a sheet imported
@@ -358,13 +380,13 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 	}
 	handover := len(fresh) == 0 && userTurns == 1 && len(sessionCompareRows(earlier)) > 0
 	if len(fresh) == 0 && !handover {
-		return ""
+		return "", ""
 	}
 	// No revision to compare in (a model with no active revision, asked
 	// without one): every row came back "invalid input syntax for type
 	// uuid" (2026-11-13, an attached plan's first turn).
 	if revID == "" {
-		return ""
+		return "", ""
 	}
 	all := append(append([]aiassistant.ChatMessage{}, earlier...), history...)
 	status("checking values against the source")
@@ -373,7 +395,8 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 		head = handoverHead
 	}
 	if !h.waitRecalculated(ctx, revID, 2*time.Minute) {
-		return head + " A recalculation is still running, so the values were not checked: compare the rows changed before calling them done."
+		return head + "\nA recalculation was still running, so the values could not be checked this time.\nNext: the AI compares the rows the plan changed before calling them done.",
+			"Compare the rows the plan changed with the source (compare_with_sheet, or check_sheet for a mapped sheet) before calling them done."
 	}
 
 	specs := sessionCompareRows(all)
@@ -471,7 +494,7 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 		}
 	}
 	if total == 0 && len(uncompared) == 0 && len(notCompared) == 0 && len(sheetChecks) == 0 {
-		return ""
+		return "", ""
 	}
 
 	var b strings.Builder
@@ -502,9 +525,9 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 			shown = append(shown, c.Line())
 		}
 		if cellsAll == cellsOK {
-			fmt.Fprintf(&b, " Checked cell by cell against the sheets' maps in this draft: %d cell(s) — all match.", cellsAll)
+			fmt.Fprintf(&b, "\nChecked cell by cell against the workbook, through the sheets' maps in this draft: %d cell(s) — all match.", cellsAll)
 		} else {
-			fmt.Fprintf(&b, " Checked cell by cell against the sheets' maps in this draft: %d cell(s) — %d match, %d differ.", cellsAll, cellsOK, cellsAll-cellsOK)
+			fmt.Fprintf(&b, "\nChecked cell by cell against the workbook, through the sheets' maps in this draft: %d cell(s) — %d match, %d differ.", cellsAll, cellsOK, cellsAll-cellsOK)
 		}
 		if len(quietOrder) > 0 {
 			names := make([]string, len(quietOrder))
@@ -514,10 +537,10 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 					names[i] = fmt.Sprintf("%s (%d blocks)", s, quiet[s])
 				}
 			}
-			b.WriteString("\nMatching as at the last check: " + strings.Join(names, ", ") + ".")
+			b.WriteString("\nUnchanged since the last check, still matching: " + strings.Join(names, ", ") + ".")
 		}
 		for _, l := range shown {
-			b.WriteString("\n" + l)
+			b.WriteString("\n" + strings.ReplaceAll(l, aiassistant.MappingProblemsHead, developerMappingHead))
 		}
 	}
 	if total > 0 {
@@ -548,21 +571,58 @@ func (h *handler) stageValueCheck(ctx context.Context, store *aiassistant.ChatSt
 		if len(shown) > 40 {
 			shown = append(append([]string{}, shown[:40]...), fmt.Sprintf("and %d more", len(uncompared)-40))
 		}
-		fmt.Fprintf(&b, "\nMade or changed by the confirmed plan and never compared with the source (%d): %s — check their sheets with "+
-			"check_sheet (one call per sheet; give map when the sheet has none).", len(uncompared), strings.Join(shown, ", "))
+		fmt.Fprintf(&b, "\nMade or changed by the confirmed plan and not yet compared with the workbook (%d): %s.", len(uncompared), strings.Join(shown, ", "))
+	}
+
+	// What the AI does next, for the developer; how, for the model.
+	var ins []string
+	if len(uncompared) > 0 {
+		ins = append(ins, "Check the sheets of what the plan made or changed and never compared with check_sheet (one call per sheet; give map when the sheet has none).")
 	}
 	if mappingProblems > 0 {
-		b.WriteString("\nA mapping problem is fixed in the map (check_sheet with map), never by changing the model's data.")
+		ins = append(ins, "A mapping problem is fixed in the map (check_sheet with map), never by changing the model's data.")
 	}
-	if len(broke)+len(differNow)+len(notCompared)+len(uncompared)+valueProblems > 0 {
-		b.WriteString("\nFix what differs before going on — in the formula, or the input it reads; never move an input until its cells match — " +
+	fix := len(broke)+len(differNow)+len(notCompared)+valueProblems+mappingProblems > 0
+	if fix || len(uncompared) > 0 {
+		ins = append(ins, "Fix what differs before going on — in the formula, or the input it reads; never move an input until its cells match — "+
 			"unless the developer's message asks for something else.")
 	}
-	if cur := plan.Current(); cur >= 0 && !handover {
-		fmt.Fprintf(&b, "\nStage %d of your task plan (%s) is current: once its rows match, mark it done with update_task_plan and go on to the next stage.",
-			cur+1, plan.Stages[cur].Title)
+	line, more := checkNextStep(plan, handover, fix, len(uncompared) > 0)
+	b.WriteString("\n" + line)
+	ins = append(ins, more...)
+	return b.String(), strings.Join(ins, "\n")
+}
+
+// checkNextStep is the value check's last line for the developer — what the
+// AI does next — and the stage instruction for the model, from whether
+// something must be fixed or compared and the task plan's current stage.
+func checkNextStep(plan *aiassistant.TaskPlan, handover, fix, uncompared bool) (line string, ins []string) {
+	todo := ""
+	switch {
+	case fix && uncompared:
+		todo = "fixes what differs and compares what was not yet compared"
+	case fix:
+		todo = "fixes what differs"
+	case uncompared:
+		todo = "compares what was not yet compared"
 	}
-	return b.String()
+	cur := plan.Current()
+	switch {
+	case handover && todo != "":
+		return fmt.Sprintf("Next: the AI %s, then goes on from where the earlier sessions stopped.", todo), nil
+	case handover:
+		return "Nothing to fix: the AI goes on from where the earlier sessions stopped.", nil
+	case cur >= 0 && todo != "":
+		return fmt.Sprintf("Next: the AI %s, then goes on with stage %d of %d, %s.", todo, cur+1, len(plan.Stages), plan.Stages[cur].Title),
+			[]string{fmt.Sprintf("Stage %d of your task plan (%s) stays current until what differs is fixed and compared.", cur+1, plan.Stages[cur].Title)}
+	case cur >= 0:
+		return fmt.Sprintf("Nothing to fix. Next: the AI goes on with stage %d of %d, %s.", cur+1, len(plan.Stages), plan.Stages[cur].Title),
+			[]string{fmt.Sprintf("Everything compared matches. Stage %d of your task plan (%s) is current: once its items are built and checked, "+
+				"mark it done with update_task_plan and go on to the next stage.", cur+1, plan.Stages[cur].Title)}
+	case todo != "":
+		return fmt.Sprintf("Next: the AI %s.", todo), nil
+	}
+	return "Nothing to fix.", nil
 }
 
 // joinDiffLines is a compare_with_sheet result one line per row: a call of

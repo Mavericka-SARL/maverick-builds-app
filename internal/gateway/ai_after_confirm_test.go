@@ -57,4 +57,9 @@ func TestSendMessage_AfterConfirmNamesIferrorFallbacks(t *testing.T) {
 	if !strings.Contains(found, "IFERROR returns its fallback in every cell") || !strings.Contains(found, "cell(s), every one 0") || !strings.Contains(found, "- trials:") {
 		t.Fatalf("the after-confirm check said: %q", found)
 	}
+	// The developer reads what was found and what comes next; how to fix it
+	// goes to the model only (2026-11-16).
+	if !strings.Contains(found, "Next: the AI fixes these before going on.") || strings.Contains(found, "Evaluate the expression") {
+		t.Errorf("the after-confirm note is not the developer's: %q", found)
+	}
 }

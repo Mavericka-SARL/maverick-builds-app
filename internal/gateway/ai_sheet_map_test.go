@@ -118,6 +118,17 @@ func TestStageCheckReplaysTheLoadMapCellByCell(t *testing.T) {
 			t.Errorf("the server's check lacks %q:\n%s", want, note)
 		}
 	}
+	// The note is the developer's: what matched and what happens next, no
+	// instructions to the model (owner, 2026-11-16: "once its rows match,
+	// mark it done with update_task_plan" under "all match" read as a task
+	// for the developer). The model gets the note and the instructions.
+	assertDeveloperNote(t, note)
+	p.mu.Lock()
+	given := p.lastUser
+	p.mu.Unlock()
+	if !strings.Contains(given, note) {
+		t.Errorf("the model was not given the check:\n%s", given)
+	}
 	if strings.Contains(note, "periods match") {
 		t.Errorf("a sheet with a map was also compared row by row:\n%s", note)
 	}
@@ -165,9 +176,55 @@ func TestStageCheckReplaysTheLoadMapCellByCell(t *testing.T) {
 	// A plan that can change values is checked; a sheet matching as before
 	// is named, not shown again with its hints.
 	run("update_metric")
-	if n := notes(); n != 2 || !strings.Contains(note, "4 cell(s) — all match") || !strings.Contains(note, "Matching as at the last check: Actuals.") ||
+	if n := notes(); n != 2 || !strings.Contains(note, "4 cell(s) — all match") || !strings.Contains(note, "Unchanged since the last check, still matching: Actuals.") ||
 		strings.Contains(note, `column D "FY"`) {
 		t.Errorf("after a value plan (%d notes):\n%s", n, note)
+	}
+}
+
+// assertDeveloperNote: a server check in the chat speaks to the developer —
+// it says what comes next and names no tool or instruction of the model's.
+func assertDeveloperNote(t *testing.T, note string) {
+	t.Helper()
+	if !strings.Contains(note, "Next: the AI") && !strings.Contains(note, "Nothing to fix") {
+		t.Errorf("the check says nothing of what comes next:\n%s", note)
+	}
+	for _, not := range []string{"update_task_plan", "check_sheet", "compare_with_sheet", "your task plan", "mark it done", "Fix what differs before going on"} {
+		if strings.Contains(note, not) {
+			t.Errorf("the developer's note carries the model's instruction %q:\n%s", not, note)
+		}
+	}
+}
+
+// The check's last line says what the AI does next — the developer's next
+// step under "all match" was missing (owner, 2026-11-16) — and the stage
+// instruction goes to the model only.
+func TestCheckNextStep(t *testing.T) {
+	plan := &aiassistant.TaskPlan{Stages: []aiassistant.TaskStage{
+		{Title: "Accounts", Status: aiassistant.StageDone}, {Title: "Release controls", Status: "in_progress"}, {Title: "Reports", Status: "pending"}}}
+	for _, c := range []struct {
+		name                      string
+		plan                      *aiassistant.TaskPlan
+		handover, fix, uncompared bool
+		want, wantIns             string
+	}{
+		{"all match, a stage current", plan, false, false, false, "Nothing to fix. Next: the AI goes on with stage 2 of 3, Release controls.", "mark it done with update_task_plan"},
+		{"differences", plan, false, true, false, "Next: the AI fixes what differs, then goes on with stage 2 of 3, Release controls.", "stays current until"},
+		{"not yet compared", plan, false, false, true, "Next: the AI compares what was not yet compared, then goes on with stage 2 of 3, Release controls.", "stays current until"},
+		{"both", plan, false, true, true, "Next: the AI fixes what differs and compares what was not yet compared, then goes on with stage 2 of 3", "stays current until"},
+		{"handover, all match", plan, true, false, false, "Nothing to fix: the AI goes on from where the earlier sessions stopped.", ""},
+		{"handover, differences", plan, true, true, false, "Next: the AI fixes what differs, then goes on from where the earlier sessions stopped.", ""},
+		{"no plan, all match", nil, false, false, false, "Nothing to fix.", ""},
+		{"no plan, differences", nil, false, true, false, "Next: the AI fixes what differs.", ""},
+	} {
+		line, ins := checkNextStep(c.plan, c.handover, c.fix, c.uncompared)
+		if !strings.HasPrefix(line, c.want) {
+			t.Errorf("%s: %q, want %q", c.name, line, c.want)
+		}
+		assertDeveloperNote(t, line)
+		if got := strings.Join(ins, " "); (c.wantIns == "") != (got == "") || !strings.Contains(got, c.wantIns) {
+			t.Errorf("%s: instructions %q, want %q", c.name, got, c.wantIns)
+		}
 	}
 }
 

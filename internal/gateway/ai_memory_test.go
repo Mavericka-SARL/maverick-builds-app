@@ -19,6 +19,9 @@ type recordingProvider struct {
 	reply    string
 	prompts  []string
 	analyses int
+	// lastUser is the last user message of the latest main call: what the
+	// model was given this turn.
+	lastUser string
 }
 
 func (p *recordingProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
@@ -31,6 +34,12 @@ func (p *recordingProvider) Chat(_ context.Context, req providers.ChatRequest) (
 		return r, nil
 	}
 	p.prompts = append(p.prompts, req.SystemPrompt)
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			p.lastUser = req.Messages[i].Content
+			break
+		}
+	}
 	return providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: p.reply}}, nil
 }
 

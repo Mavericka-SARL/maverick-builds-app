@@ -30,7 +30,7 @@ const afterConfirmHead = "Checked by the server after the confirmed plan was cal
 // afterConfirmCheck returns the note for the plans confirmed since the
 // session's last reply, or "" when they left nothing to report.
 func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.ProposalStore, sessionID, modelID, revID string,
-	history []aiassistant.ChatMessage, status func(string)) string {
+	history []aiassistant.ChatMessage, status func(string)) (note, instructions string) {
 	// Since the developer's previous message: history holds this turn's
 	// message last, and confirming saves a reply of its own after the plan
 	// runs.
@@ -41,12 +41,12 @@ func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.Proposa
 		}
 	}
 	if len(userAt) < 2 {
-		return ""
+		return "", ""
 	}
 	lastReply := userAt[len(userAt)-2]
 	props, err := ps.ListProposals(ctx, sessionID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var refs []string
 	for _, p := range props {
@@ -67,11 +67,11 @@ func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.Proposa
 		}
 	}
 	if len(refs) == 0 {
-		return ""
+		return "", ""
 	}
 	status("checking the confirmed plan's results")
 	if !h.waitRecalculated(ctx, revID, 2*time.Minute) {
-		return ""
+		return "", ""
 	}
 	q := h.db.For(ctx)
 	type touched struct{ id, name, formula string }
@@ -85,7 +85,7 @@ func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.Proposa
 		  AND EXISTS (SELECT 1 FROM model.grid_metric gm WHERE gm.metric_id = m.id)
 		ORDER BY m.name`, modelID, revID, refs)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	for rows.Next() {
 		var t touched
@@ -131,7 +131,7 @@ func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.Proposa
 		erows.Close()
 	}
 	if len(blank)+len(fallback)+len(failed) == 0 {
-		return ""
+		return "", ""
 	}
 	var b strings.Builder
 	b.WriteString(afterConfirmHead)
@@ -141,18 +141,26 @@ func (h *handler) afterConfirmCheck(ctx context.Context, ps *aiassistant.Proposa
 			b.WriteString("\n- " + f)
 		}
 	}
+	// The note is the developer's; how to fix goes to the model only (as
+	// with the value check, ai_build_guards.go).
+	var ins []string
+	if len(failed) > 0 {
+		ins = append(ins, "Fix the failing calculations before going on.")
+	}
 	if len(blank) > 0 {
-		fmt.Fprintf(&b, "\nNo values at all after the recalculation: %s — typically a total read over a dimension that totals by none, a cycle that fails, or a formula reading a metric with no values. "+
-			"Find why before going on; a blank is never a zero.", strings.Join(blank, ", "))
+		fmt.Fprintf(&b, "\nNo values at all after the recalculation: %s — typically a total read over a dimension that totals by none, a cycle that fails, or a formula reading a metric with no values.",
+			strings.Join(blank, ", "))
+		ins = append(ins, "Find why the metrics without values have none before going on; a blank is never a zero.")
 	}
 	if len(fallback) > 0 {
 		b.WriteString("\nIFERROR returns its fallback in every cell — the expression inside most likely fails everywhere (a wrong name or member):")
 		for _, f := range fallback {
 			b.WriteString("\n- " + f)
 		}
-		b.WriteString("\nEvaluate the expression without IFERROR to see its error, and fix it.")
+		ins = append(ins, "Evaluate each IFERROR expression above without IFERROR to see its error, and fix it.")
 	}
-	return b.String()
+	b.WriteString("\nNext: the AI fixes these before going on.")
+	return b.String(), strings.Join(ins, "\n")
 }
 
 // everyCellIsFallback reports whether every value is the numeric fallback of

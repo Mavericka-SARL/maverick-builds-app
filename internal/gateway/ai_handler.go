@@ -835,26 +835,29 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// After a confirmed plan, the turn starts with the server's own value
 	// check of it (ai_build_guards.go): shown to the developer, and given to
 	// the model with the developer's message.
-	if note := h.stageValueCheck(turnCtx, store, proposalStore, readExecutor, sessionID, revID, history, taskPlan,
-		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }); note != "" {
+	// serverNote shows a check's note in the chat and gives the model the
+	// note with its instructions, which the developer does not see.
+	serverNote := func(note, instructions string) {
+		if note == "" {
+			return
+		}
 		_, _ = store.SaveMessage(saveCtx, sessionID, "assistant", note, nil, "", "")
+		text := note
+		if instructions != "" {
+			text += "\n\nFor you, not shown to the developer:\n" + instructions
+		}
 		if n := len(provMessages); n > 0 && provMessages[n-1].Role == "user" {
-			provMessages[n-1].Content += "\n\n" + note
+			provMessages[n-1].Content += "\n\n" + text
 		} else {
-			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
+			provMessages = append(provMessages, providers.Message{Role: "user", Content: text})
 		}
 	}
+	serverNote(h.stageValueCheck(turnCtx, store, proposalStore, readExecutor, sessionID, revID, history, taskPlan,
+		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }))
 	// And with the results of the plans confirmed since the last reply: blank
 	// metrics, failing calculations, IFERROR fallbacks (ai_after_confirm.go).
-	if note := h.afterConfirmCheck(turnCtx, proposalStore, sessionID, modelID, revID, history,
-		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }); note != "" {
-		_, _ = store.SaveMessage(saveCtx, sessionID, "assistant", note, nil, "", "")
-		if n := len(provMessages); n > 0 && provMessages[n-1].Role == "user" {
-			provMessages[n-1].Content += "\n\n" + note
-		} else {
-			provMessages = append(provMessages, providers.Message{Role: "user", Content: note})
-		}
-	}
+	serverNote(h.afterConfirmCheck(turnCtx, proposalStore, sessionID, modelID, revID, history,
+		func(s string) { sendSSE("tool_status", map[string]string{"tool": s}) }))
 	// stageChecked: the turn's coverage check answered for the task plan's
 	// current stage; stageDoes are the stage's open items the plan does,
 	// stageOpen the ones it leaves for later plans of the stage.

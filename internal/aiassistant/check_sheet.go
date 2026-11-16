@@ -1184,6 +1184,10 @@ func formulaReader(filename string, data []byte, sheet string) func(col, row int
 }
 
 // Render is the block's check for the AI and the developer.
+// MappingProblemsHead heads a check's mapping problems for the model; the
+// server's value check in the chat shows the developer its own wording.
+const MappingProblemsHead = "Mapping problems — the map reads the sheet wrongly; fix the map (check_sheet with map), never the model's data:"
+
 func (res *SheetCheck) Render() string {
 	var b strings.Builder
 	where := fmt.Sprintf("%q", res.Sheet)
@@ -1222,7 +1226,7 @@ func (res *SheetCheck) Render() string {
 	if res.Overall != "" {
 		b.WriteString("\n" + res.Overall + ".")
 	}
-	list("Mapping problems — the map reads the sheet wrongly; fix the map (check_sheet with map), never the model's data:", res.MappingProblems, 8)
+	list(MappingProblemsHead, res.MappingProblems, 8)
 	list("Value problems — the model differs from the sheet:", res.ValueProblems, 15)
 	list("Not in this block (not compared):", res.NotMapped, 8)
 	for _, n := range res.Notes {
