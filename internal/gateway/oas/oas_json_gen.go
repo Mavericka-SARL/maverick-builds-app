@@ -5186,13 +5186,83 @@ func (s *AiLLMSettings) encodeFields(e *jx.Encoder) {
 			s.ReasoningEffort.Encode(e)
 		}
 	}
+	{
+		if s.TenantKey.Set {
+			e.FieldStart("tenant_key")
+			s.TenantKey.Encode(e)
+		}
+	}
+	{
+		if s.TenantEnforced.Set {
+			e.FieldStart("tenant_enforced")
+			s.TenantEnforced.Encode(e)
+		}
+	}
+	{
+		if s.TenantProvider.Set {
+			e.FieldStart("tenant_provider")
+			s.TenantProvider.Encode(e)
+		}
+	}
+	{
+		if s.DefaultModels.Set {
+			e.FieldStart("default_models")
+			s.DefaultModels.Encode(e)
+		}
+	}
+	{
+		if s.BuildAdvice.Set {
+			e.FieldStart("build_advice")
+			s.BuildAdvice.Encode(e)
+		}
+	}
+	{
+		if s.DailyCallLimit.Set {
+			e.FieldStart("daily_call_limit")
+			s.DailyCallLimit.Encode(e)
+		}
+	}
+	{
+		if s.TenantDailyCallLimit.Set {
+			e.FieldStart("tenant_daily_call_limit")
+			s.TenantDailyCallLimit.Encode(e)
+		}
+	}
+	{
+		if s.ServerDailyCallLimit.Set {
+			e.FieldStart("server_daily_call_limit")
+			s.ServerDailyCallLimit.Encode(e)
+		}
+	}
+	{
+		if s.DailyLimit.Set {
+			e.FieldStart("daily_limit")
+			s.DailyLimit.Encode(e)
+		}
+	}
+	{
+		if s.DailyLimitBy.Set {
+			e.FieldStart("daily_limit_by")
+			s.DailyLimitBy.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiLLMSettings = [4]string{
-	0: "provider",
-	1: "model",
-	2: "has_key",
-	3: "reasoning_effort",
+var jsonFieldsNameOfAiLLMSettings = [14]string{
+	0:  "provider",
+	1:  "model",
+	2:  "has_key",
+	3:  "reasoning_effort",
+	4:  "tenant_key",
+	5:  "tenant_enforced",
+	6:  "tenant_provider",
+	7:  "default_models",
+	8:  "build_advice",
+	9:  "daily_call_limit",
+	10: "tenant_daily_call_limit",
+	11: "server_daily_call_limit",
+	12: "daily_limit",
+	13: "daily_limit_by",
 }
 
 // Decode decodes AiLLMSettings from json.
@@ -5200,7 +5270,7 @@ func (s *AiLLMSettings) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode AiLLMSettings to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -5250,6 +5320,106 @@ func (s *AiLLMSettings) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"reasoning_effort\"")
 			}
+		case "tenant_key":
+			if err := func() error {
+				s.TenantKey.Reset()
+				if err := s.TenantKey.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tenant_key\"")
+			}
+		case "tenant_enforced":
+			if err := func() error {
+				s.TenantEnforced.Reset()
+				if err := s.TenantEnforced.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tenant_enforced\"")
+			}
+		case "tenant_provider":
+			if err := func() error {
+				s.TenantProvider.Reset()
+				if err := s.TenantProvider.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tenant_provider\"")
+			}
+		case "default_models":
+			if err := func() error {
+				s.DefaultModels.Reset()
+				if err := s.DefaultModels.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"default_models\"")
+			}
+		case "build_advice":
+			if err := func() error {
+				s.BuildAdvice.Reset()
+				if err := s.BuildAdvice.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"build_advice\"")
+			}
+		case "daily_call_limit":
+			if err := func() error {
+				s.DailyCallLimit.Reset()
+				if err := s.DailyCallLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"daily_call_limit\"")
+			}
+		case "tenant_daily_call_limit":
+			if err := func() error {
+				s.TenantDailyCallLimit.Reset()
+				if err := s.TenantDailyCallLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tenant_daily_call_limit\"")
+			}
+		case "server_daily_call_limit":
+			if err := func() error {
+				s.ServerDailyCallLimit.Reset()
+				if err := s.ServerDailyCallLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"server_daily_call_limit\"")
+			}
+		case "daily_limit":
+			if err := func() error {
+				s.DailyLimit.Reset()
+				if err := s.DailyLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"daily_limit\"")
+			}
+		case "daily_limit_by":
+			if err := func() error {
+				s.DailyLimitBy.Reset()
+				if err := s.DailyLimitBy.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"daily_limit_by\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -5259,8 +5429,9 @@ func (s *AiLLMSettings) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
+	for i, mask := range [2]uint8{
 		0b00000111,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -5302,6 +5473,106 @@ func (s *AiLLMSettings) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *AiLLMSettings) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiLLMSettingsDailyLimitBy as json.
+func (s AiLLMSettingsDailyLimitBy) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes AiLLMSettingsDailyLimitBy from json.
+func (s *AiLLMSettingsDailyLimitBy) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AiLLMSettingsDailyLimitBy to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch AiLLMSettingsDailyLimitBy(v) {
+	case AiLLMSettingsDailyLimitByOwn:
+		*s = AiLLMSettingsDailyLimitByOwn
+	case AiLLMSettingsDailyLimitByTenant:
+		*s = AiLLMSettingsDailyLimitByTenant
+	case AiLLMSettingsDailyLimitByServer:
+		*s = AiLLMSettingsDailyLimitByServer
+	case AiLLMSettingsDailyLimitByServerKey:
+		*s = AiLLMSettingsDailyLimitByServerKey
+	default:
+		*s = AiLLMSettingsDailyLimitBy(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AiLLMSettingsDailyLimitBy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AiLLMSettingsDailyLimitBy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s AiLLMSettingsDefaultModels) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s AiLLMSettingsDefaultModels) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes AiLLMSettingsDefaultModels from json.
+func (s *AiLLMSettingsDefaultModels) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AiLLMSettingsDefaultModels to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode AiLLMSettingsDefaultModels")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AiLLMSettingsDefaultModels) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AiLLMSettingsDefaultModels) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -6888,13 +7159,20 @@ func (s *AiSaveSettingsRequest) encodeFields(e *jx.Encoder) {
 			s.ReasoningEffort.Encode(e)
 		}
 	}
+	{
+		if s.DailyCallLimit.Set {
+			e.FieldStart("daily_call_limit")
+			s.DailyCallLimit.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAiSaveSettingsRequest = [4]string{
+var jsonFieldsNameOfAiSaveSettingsRequest = [5]string{
 	0: "provider",
 	1: "model",
 	2: "api_key",
 	3: "reasoning_effort",
+	4: "daily_call_limit",
 }
 
 // Decode decodes AiSaveSettingsRequest from json.
@@ -6945,6 +7223,16 @@ func (s *AiSaveSettingsRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"reasoning_effort\"")
+			}
+		case "daily_call_limit":
+			if err := func() error {
+				s.DailyCallLimit.Reset()
+				if err := s.DailyCallLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"daily_call_limit\"")
 			}
 		default:
 			return d.Skip()
@@ -58270,6 +58558,73 @@ func (s *OptAiConversionReshape) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes AiLLMSettingsDailyLimitBy as json.
+func (o OptAiLLMSettingsDailyLimitBy) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes AiLLMSettingsDailyLimitBy from json.
+func (o *OptAiLLMSettingsDailyLimitBy) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptAiLLMSettingsDailyLimitBy to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptAiLLMSettingsDailyLimitBy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptAiLLMSettingsDailyLimitBy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AiLLMSettingsDefaultModels as json.
+func (o OptAiLLMSettingsDefaultModels) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes AiLLMSettingsDefaultModels from json.
+func (o *OptAiLLMSettingsDefaultModels) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptAiLLMSettingsDefaultModels to nil")
+	}
+	o.Set = true
+	o.Value = make(AiLLMSettingsDefaultModels)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptAiLLMSettingsDefaultModels) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptAiLLMSettingsDefaultModels) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes AiLLMSettingsReasoningEffort as json.
 func (o OptAiLLMSettingsReasoningEffort) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -79373,15 +79728,22 @@ func (s *TenantAISettings) encodeFields(e *jx.Encoder) {
 		e.FieldStart("enforced")
 		e.Bool(s.Enforced)
 	}
+	{
+		if s.DailyCallLimit.Set {
+			e.FieldStart("daily_call_limit")
+			s.DailyCallLimit.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfTenantAISettings = [6]string{
+var jsonFieldsNameOfTenantAISettings = [7]string{
 	0: "scope",
 	1: "provider",
 	2: "model",
 	3: "api_key",
 	4: "has_key",
 	5: "enforced",
+	6: "daily_call_limit",
 }
 
 // Decode decodes TenantAISettings from json.
@@ -79458,6 +79820,16 @@ func (s *TenantAISettings) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"enforced\"")
+			}
+		case "daily_call_limit":
+			if err := func() error {
+				s.DailyCallLimit.Reset()
+				if err := s.DailyCallLimit.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"daily_call_limit\"")
 			}
 		default:
 			return d.Skip()

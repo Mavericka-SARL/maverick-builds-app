@@ -203,11 +203,18 @@ outside disposable local development, together with `INTEGRATION_CRED_KEY`,
 which seals connector credentials and has no plaintext fallback at all
 (see [SELF_HOSTING.md](SELF_HOSTING.md#step-4--create-the-secrets)).
 
-`AI_MAX_CALLS_PER_SESSION` (default 200) and `AI_MAX_CALLS_PER_DAY` (default
-1000, per user, UTC day) cap the AI Developer's LLM calls; every call counts,
-read-tool round trips included. A whole 13-sheet FP&A workbook took 74 to 78
-calls with the gpt-5 models; at the session cap, the developer is told to
-make the session's draft their working revision and continue in a new session.
+`AI_MAX_CALLS_PER_DAY` (default 1000, per user, UTC day) is the default
+limit on the AI Developer's LLM calls; every call counts, read-tool round
+trips included. A developer sets their own daily limit in AI settings, and a
+tenant admin one for every developer of the tenant under AI keys
+(enterprise): the lower of those counts, above the server's default if they
+like, except on the server's own key ([AI_KEYS.md](AI_KEYS.md#daily-call-limits)).
+`AI_MAX_CALLS_PER_SESSION` adds a cap per session, unset by default: a
+session is its draft and goes on as one thread. Both variables are the
+gateway's environment, changed by whoever runs the deployment, and the error
+that reports a limit names who set it. A developer can also set a call
+budget on one session in the AI Developer, and raise or clear it there. A whole 13-sheet FP&A workbook took 74 to 78 calls with the
+gpt-5 models.
 Each session keeps the tokens its calls were billed for, as the provider
 reports them (input, read from and written to the cache, output); the AI
 Developer shows them above the chat, and `GET /api/ai/sessions/{id}` returns

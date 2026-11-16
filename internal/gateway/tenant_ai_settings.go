@@ -49,11 +49,16 @@ func (h *handler) tenantAISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		respond(s, inherited)
 	case http.MethodPut:
-		var body aikeys.Settings
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		// The daily call limit per developer: omitted keeps it, null clears it.
+		var req struct {
+			aikeys.Settings
+			DailyCallLimit optionalLimit `json:"daily_call_limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body: %w", err), http.StatusBadRequest)
 			return
 		}
+		body := req.Settings
 		// The provider catalog lives with buildProvider, so validate against
 		// it here rather than duplicating the list in ee/aikeys.
 		if body.Provider != "" {
@@ -67,16 +72,29 @@ func (h *handler) tenantAISettings(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		limit := "unchanged"
+		if req.DailyCallLimit.set {
+			if err := store.SetDailyCallLimit(ctx, scope.CustomerID, req.DailyCallLimit.n); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			if s, _, err = store.Get(ctx, scope.CustomerID); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			limit = limitWord(req.DailyCallLimit.n)
+		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantAISettingsUpdated,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ResourceType: "tenant_ai_settings", ResourceID: scopeResourceID(scope),
 			Metadata: map[string]string{
-				"scope":           scopeWord(scope),
-				"provider":        s.Provider,
-				"model":           s.Model,
-				"api_key_changed": strconv.FormatBool(strings.TrimSpace(body.APIKey) != ""),
-				"enforced":        boolWord(s.Enforced),
+				"scope":            scopeWord(scope),
+				"provider":         s.Provider,
+				"model":            s.Model,
+				"api_key_changed":  strconv.FormatBool(strings.TrimSpace(body.APIKey) != ""),
+				"enforced":         boolWord(s.Enforced),
+				"daily_call_limit": limit,
 			},
 		})
 		respond(s, false)
@@ -173,17 +191,19 @@ type tenantAIKeyResult struct {
 	APIKey   string
 	Enforced bool
 	OK       bool
+	// Deployment: the key is the deployment's, inherited (the server's money).
+	Deployment bool
 }
 
 func (h *handler) tenantAIKey(ctx context.Context, customerID string) tenantAIKeyResult {
 	if h.lic == nil || !h.lic.Usable(license.FeatureTenantAIKeys) || customerID == "" {
 		return tenantAIKeyResult{}
 	}
-	provider, model, key, enforced, err := aikeys.NewStore(h.db.For(ctx)).Resolve(ctx, customerID)
+	provider, model, key, enforced, deployment, err := aikeys.NewStore(h.db.For(ctx)).ResolveSource(ctx, customerID)
 	if err != nil {
 		return tenantAIKeyResult{Enforced: false}
 	}
-	return tenantAIKeyResult{Provider: provider, Model: model, APIKey: key, Enforced: enforced, OK: true}
+	return tenantAIKeyResult{Provider: provider, Model: model, APIKey: key, Enforced: enforced, OK: true, Deployment: deployment}
 }
 
 func firstNonEmpty(vals ...string) string {

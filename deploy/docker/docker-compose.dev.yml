@@ -23,6 +23,7 @@ services:
       -c wal_level=replica
       -c archive_mode=on
       -c archive_command='wal-g wal-push %p'
+      -c archive_timeout=60s
       -c restore_command='wal-g wal-fetch %f %p'
       -c max_wal_senders=3
       -c wal_keep_size=512MB

@@ -2042,6 +2042,28 @@ type AiLLMSettings struct {
 	// Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the
 	// model's default). Some models refuse tools unless it is none.
 	ReasoningEffort OptAiLLMSettingsReasoningEffort `json:"reasoning_effort"`
+	// The tenant supplies a key (enterprise AI keys).
+	TenantKey OptBool `json:"tenant_key"`
+	// The tenant key is used for every call and personal keys are ignored.
+	TenantEnforced OptBool `json:"tenant_enforced"`
+	// The tenant key's provider, when there is one.
+	TenantProvider OptString `json:"tenant_provider"`
+	// The model each provider runs when the model setting is blank.
+	DefaultModels OptAiLLMSettingsDefaultModels `json:"default_models"`
+	// Why the model or effort plans too shallowly to build a model from a workbook; absent when they suit.
+	BuildAdvice OptString `json:"build_advice"`
+	// The developer's own limit on model calls per UTC day; absent when none is set.
+	DailyCallLimit OptInt `json:"daily_call_limit"`
+	// The tenant admin's limit for every developer of the tenant (AI keys, enterprise); absent when none.
+	TenantDailyCallLimit OptInt `json:"tenant_daily_call_limit"`
+	// The server's default (AI_MAX_CALLS_PER_DAY), for a developer with no limit set; the ceiling on the
+	// server's own key.
+	ServerDailyCallLimit OptInt `json:"server_daily_call_limit"`
+	// The limit that applies now: the lower of the developer's own and the tenant admin's, else the
+	// server's default.
+	DailyLimit OptInt `json:"daily_limit"`
+	// Who set daily_limit; server_key is the server's ceiling on its own key.
+	DailyLimitBy OptAiLLMSettingsDailyLimitBy `json:"daily_limit_by"`
 }
 
 // GetProvider returns the value of Provider.
@@ -2064,6 +2086,56 @@ func (s *AiLLMSettings) GetReasoningEffort() OptAiLLMSettingsReasoningEffort {
 	return s.ReasoningEffort
 }
 
+// GetTenantKey returns the value of TenantKey.
+func (s *AiLLMSettings) GetTenantKey() OptBool {
+	return s.TenantKey
+}
+
+// GetTenantEnforced returns the value of TenantEnforced.
+func (s *AiLLMSettings) GetTenantEnforced() OptBool {
+	return s.TenantEnforced
+}
+
+// GetTenantProvider returns the value of TenantProvider.
+func (s *AiLLMSettings) GetTenantProvider() OptString {
+	return s.TenantProvider
+}
+
+// GetDefaultModels returns the value of DefaultModels.
+func (s *AiLLMSettings) GetDefaultModels() OptAiLLMSettingsDefaultModels {
+	return s.DefaultModels
+}
+
+// GetBuildAdvice returns the value of BuildAdvice.
+func (s *AiLLMSettings) GetBuildAdvice() OptString {
+	return s.BuildAdvice
+}
+
+// GetDailyCallLimit returns the value of DailyCallLimit.
+func (s *AiLLMSettings) GetDailyCallLimit() OptInt {
+	return s.DailyCallLimit
+}
+
+// GetTenantDailyCallLimit returns the value of TenantDailyCallLimit.
+func (s *AiLLMSettings) GetTenantDailyCallLimit() OptInt {
+	return s.TenantDailyCallLimit
+}
+
+// GetServerDailyCallLimit returns the value of ServerDailyCallLimit.
+func (s *AiLLMSettings) GetServerDailyCallLimit() OptInt {
+	return s.ServerDailyCallLimit
+}
+
+// GetDailyLimit returns the value of DailyLimit.
+func (s *AiLLMSettings) GetDailyLimit() OptInt {
+	return s.DailyLimit
+}
+
+// GetDailyLimitBy returns the value of DailyLimitBy.
+func (s *AiLLMSettings) GetDailyLimitBy() OptAiLLMSettingsDailyLimitBy {
+	return s.DailyLimitBy
+}
+
 // SetProvider sets the value of Provider.
 func (s *AiLLMSettings) SetProvider(val string) {
 	s.Provider = val
@@ -2082,6 +2154,124 @@ func (s *AiLLMSettings) SetHasKey(val bool) {
 // SetReasoningEffort sets the value of ReasoningEffort.
 func (s *AiLLMSettings) SetReasoningEffort(val OptAiLLMSettingsReasoningEffort) {
 	s.ReasoningEffort = val
+}
+
+// SetTenantKey sets the value of TenantKey.
+func (s *AiLLMSettings) SetTenantKey(val OptBool) {
+	s.TenantKey = val
+}
+
+// SetTenantEnforced sets the value of TenantEnforced.
+func (s *AiLLMSettings) SetTenantEnforced(val OptBool) {
+	s.TenantEnforced = val
+}
+
+// SetTenantProvider sets the value of TenantProvider.
+func (s *AiLLMSettings) SetTenantProvider(val OptString) {
+	s.TenantProvider = val
+}
+
+// SetDefaultModels sets the value of DefaultModels.
+func (s *AiLLMSettings) SetDefaultModels(val OptAiLLMSettingsDefaultModels) {
+	s.DefaultModels = val
+}
+
+// SetBuildAdvice sets the value of BuildAdvice.
+func (s *AiLLMSettings) SetBuildAdvice(val OptString) {
+	s.BuildAdvice = val
+}
+
+// SetDailyCallLimit sets the value of DailyCallLimit.
+func (s *AiLLMSettings) SetDailyCallLimit(val OptInt) {
+	s.DailyCallLimit = val
+}
+
+// SetTenantDailyCallLimit sets the value of TenantDailyCallLimit.
+func (s *AiLLMSettings) SetTenantDailyCallLimit(val OptInt) {
+	s.TenantDailyCallLimit = val
+}
+
+// SetServerDailyCallLimit sets the value of ServerDailyCallLimit.
+func (s *AiLLMSettings) SetServerDailyCallLimit(val OptInt) {
+	s.ServerDailyCallLimit = val
+}
+
+// SetDailyLimit sets the value of DailyLimit.
+func (s *AiLLMSettings) SetDailyLimit(val OptInt) {
+	s.DailyLimit = val
+}
+
+// SetDailyLimitBy sets the value of DailyLimitBy.
+func (s *AiLLMSettings) SetDailyLimitBy(val OptAiLLMSettingsDailyLimitBy) {
+	s.DailyLimitBy = val
+}
+
+// Who set daily_limit; server_key is the server's ceiling on its own key.
+type AiLLMSettingsDailyLimitBy string
+
+const (
+	AiLLMSettingsDailyLimitByOwn       AiLLMSettingsDailyLimitBy = "own"
+	AiLLMSettingsDailyLimitByTenant    AiLLMSettingsDailyLimitBy = "tenant"
+	AiLLMSettingsDailyLimitByServer    AiLLMSettingsDailyLimitBy = "server"
+	AiLLMSettingsDailyLimitByServerKey AiLLMSettingsDailyLimitBy = "server_key"
+)
+
+// AllValues returns all AiLLMSettingsDailyLimitBy values.
+func (AiLLMSettingsDailyLimitBy) AllValues() []AiLLMSettingsDailyLimitBy {
+	return []AiLLMSettingsDailyLimitBy{
+		AiLLMSettingsDailyLimitByOwn,
+		AiLLMSettingsDailyLimitByTenant,
+		AiLLMSettingsDailyLimitByServer,
+		AiLLMSettingsDailyLimitByServerKey,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AiLLMSettingsDailyLimitBy) MarshalText() ([]byte, error) {
+	switch s {
+	case AiLLMSettingsDailyLimitByOwn:
+		return []byte(s), nil
+	case AiLLMSettingsDailyLimitByTenant:
+		return []byte(s), nil
+	case AiLLMSettingsDailyLimitByServer:
+		return []byte(s), nil
+	case AiLLMSettingsDailyLimitByServerKey:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AiLLMSettingsDailyLimitBy) UnmarshalText(data []byte) error {
+	switch AiLLMSettingsDailyLimitBy(data) {
+	case AiLLMSettingsDailyLimitByOwn:
+		*s = AiLLMSettingsDailyLimitByOwn
+		return nil
+	case AiLLMSettingsDailyLimitByTenant:
+		*s = AiLLMSettingsDailyLimitByTenant
+		return nil
+	case AiLLMSettingsDailyLimitByServer:
+		*s = AiLLMSettingsDailyLimitByServer
+		return nil
+	case AiLLMSettingsDailyLimitByServerKey:
+		*s = AiLLMSettingsDailyLimitByServerKey
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// The model each provider runs when the model setting is blank.
+type AiLLMSettingsDefaultModels map[string]string
+
+func (s *AiLLMSettingsDefaultModels) init() AiLLMSettingsDefaultModels {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
 }
 
 // Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the
@@ -2999,6 +3189,9 @@ type AiSaveSettingsRequest struct {
 	APIKey OptString `json:"api_key"`
 	// Omit to keep the saved one; blank clears it.
 	ReasoningEffort OptAiSaveSettingsRequestReasoningEffort `json:"reasoning_effort"`
+	// The developer's own limit on model calls per UTC day, above the server's default if they like (not
+	// on the server's own key); omit to keep it, null or 0 clears it.
+	DailyCallLimit OptNilInt `json:"daily_call_limit"`
 }
 
 // GetProvider returns the value of Provider.
@@ -3021,6 +3214,11 @@ func (s *AiSaveSettingsRequest) GetReasoningEffort() OptAiSaveSettingsRequestRea
 	return s.ReasoningEffort
 }
 
+// GetDailyCallLimit returns the value of DailyCallLimit.
+func (s *AiSaveSettingsRequest) GetDailyCallLimit() OptNilInt {
+	return s.DailyCallLimit
+}
+
 // SetProvider sets the value of Provider.
 func (s *AiSaveSettingsRequest) SetProvider(val OptString) {
 	s.Provider = val
@@ -3039,6 +3237,11 @@ func (s *AiSaveSettingsRequest) SetAPIKey(val OptString) {
 // SetReasoningEffort sets the value of ReasoningEffort.
 func (s *AiSaveSettingsRequest) SetReasoningEffort(val OptAiSaveSettingsRequestReasoningEffort) {
 	s.ReasoningEffort = val
+}
+
+// SetDailyCallLimit sets the value of DailyCallLimit.
+func (s *AiSaveSettingsRequest) SetDailyCallLimit(val OptNilInt) {
+	s.DailyCallLimit = val
 }
 
 // Omit to keep the saved one; blank clears it.
@@ -23771,6 +23974,98 @@ func (o OptAiConversionReshape) Or(d AiConversionReshape) AiConversionReshape {
 	return d
 }
 
+// NewOptAiLLMSettingsDailyLimitBy returns new OptAiLLMSettingsDailyLimitBy with value set to v.
+func NewOptAiLLMSettingsDailyLimitBy(v AiLLMSettingsDailyLimitBy) OptAiLLMSettingsDailyLimitBy {
+	return OptAiLLMSettingsDailyLimitBy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiLLMSettingsDailyLimitBy is optional AiLLMSettingsDailyLimitBy.
+type OptAiLLMSettingsDailyLimitBy struct {
+	Value AiLLMSettingsDailyLimitBy
+	Set   bool
+}
+
+// IsSet returns true if OptAiLLMSettingsDailyLimitBy was set.
+func (o OptAiLLMSettingsDailyLimitBy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiLLMSettingsDailyLimitBy) Reset() {
+	var v AiLLMSettingsDailyLimitBy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiLLMSettingsDailyLimitBy) SetTo(v AiLLMSettingsDailyLimitBy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiLLMSettingsDailyLimitBy) Get() (v AiLLMSettingsDailyLimitBy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiLLMSettingsDailyLimitBy) Or(d AiLLMSettingsDailyLimitBy) AiLLMSettingsDailyLimitBy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAiLLMSettingsDefaultModels returns new OptAiLLMSettingsDefaultModels with value set to v.
+func NewOptAiLLMSettingsDefaultModels(v AiLLMSettingsDefaultModels) OptAiLLMSettingsDefaultModels {
+	return OptAiLLMSettingsDefaultModels{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiLLMSettingsDefaultModels is optional AiLLMSettingsDefaultModels.
+type OptAiLLMSettingsDefaultModels struct {
+	Value AiLLMSettingsDefaultModels
+	Set   bool
+}
+
+// IsSet returns true if OptAiLLMSettingsDefaultModels was set.
+func (o OptAiLLMSettingsDefaultModels) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiLLMSettingsDefaultModels) Reset() {
+	var v AiLLMSettingsDefaultModels
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiLLMSettingsDefaultModels) SetTo(v AiLLMSettingsDefaultModels) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiLLMSettingsDefaultModels) Get() (v AiLLMSettingsDefaultModels, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiLLMSettingsDefaultModels) Or(d AiLLMSettingsDefaultModels) AiLLMSettingsDefaultModels {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiLLMSettingsReasoningEffort returns new OptAiLLMSettingsReasoningEffort with value set to v.
 func NewOptAiLLMSettingsReasoningEffort(v AiLLMSettingsReasoningEffort) OptAiLLMSettingsReasoningEffort {
 	return OptAiLLMSettingsReasoningEffort{
@@ -37229,6 +37524,10 @@ type TenantAISettings struct {
 	HasKey bool      `json:"has_key"`
 	// Ignore personal keys and use this one for every AI call in the tenant.
 	Enforced bool `json:"enforced"`
+	// Model calls each developer of the tenant may make per UTC day, whichever key they use; a
+	// developer's own lower limit counts instead. May go above the server's default
+	// (AI_MAX_CALLS_PER_DAY), except on the server's own key. Omit to keep it; null or 0 clears it.
+	DailyCallLimit OptNilInt `json:"daily_call_limit"`
 }
 
 // GetScope returns the value of Scope.
@@ -37261,6 +37560,11 @@ func (s *TenantAISettings) GetEnforced() bool {
 	return s.Enforced
 }
 
+// GetDailyCallLimit returns the value of DailyCallLimit.
+func (s *TenantAISettings) GetDailyCallLimit() OptNilInt {
+	return s.DailyCallLimit
+}
+
 // SetScope sets the value of Scope.
 func (s *TenantAISettings) SetScope(val OptSettingsScope) {
 	s.Scope = val
@@ -37289,6 +37593,11 @@ func (s *TenantAISettings) SetHasKey(val bool) {
 // SetEnforced sets the value of Enforced.
 func (s *TenantAISettings) SetEnforced(val bool) {
 	s.Enforced = val
+}
+
+// SetDailyCallLimit sets the value of DailyCallLimit.
+func (s *TenantAISettings) SetDailyCallLimit(val OptNilInt) {
+	s.DailyCallLimit = val
 }
 
 func (*TenantAISettings) clearTenantAIKeyRes()       {}

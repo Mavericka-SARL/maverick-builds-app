@@ -24,6 +24,16 @@
 # config (real base backup + WAL segments, real restore to a timestamp
 # between two marker rows, confirmed the earlier one survived and the
 # later one didn't).
+#
+# The archive trails the live server by up to a minute (archive_timeout):
+# to restore to a moment in that last minute while the server still runs,
+# `SELECT pg_switch_wal()` on it first, or recovery stops "before
+# configured recovery target". To fetch rows without touching the live
+# server, restore into a throwaway pod from this image with
+# `recovery_target_action = 'pause'`, `archive_mode = off` and an empty
+# `archive_command` (it stays read-only and archives nothing), labelled
+# so the postgres Service does not select it, with USER and HOME set
+# (wal-g fails "user: Current requires cgo or $USER set" without them).
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -63,6 +73,15 @@ spec:
             - "archive_mode=on"
             - "-c"
             - "archive_command=wal-g wal-push %p"
+            # Archive the open WAL segment after a minute with writes in it.
+            # At 0 a segment went to the archive only once 16 MB filled,
+            # which a quiet server took hours to do: everything since sat on
+            # this volume alone, and a point-in-time restore to a recent
+            # moment stopped short of it. A segment closed early is
+            # zero-filled, so it is small under lz4 (87 KB, against 6-7 MB
+            # for a full one).
+            - "-c"
+            - "archive_timeout=60s"
             - "-c"
             - "restore_command=wal-g wal-fetch %f %p"
             - "-c"

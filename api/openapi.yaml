@@ -258,6 +258,16 @@ components:
         enforced:
           type: boolean
           description: Ignore personal keys and use this one for every AI call in the tenant.
+        daily_call_limit:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1000000
+          description: >-
+            Model calls each developer of the tenant may make per UTC day,
+            whichever key they use; a developer's own lower limit counts
+            instead. May go above the server's default (AI_MAX_CALLS_PER_DAY),
+            except on the server's own key. Omit to keep it; null or 0 clears it.
 
     ProviderProbeResult:
       type: object
@@ -2290,6 +2300,16 @@ components:
         model:    { type: string }
         has_key:  { type: boolean, description: "True when an API key is stored; the key itself is never returned" }
         reasoning_effort: { type: string, enum: ["", none, minimal, low, medium, high, xhigh], description: "Sent with every OpenAI call when set (blank: the deployment's AI_OPENAI_REASONING_EFFORT, then the model's default). Some models refuse tools unless it is none." }
+        tenant_key: { type: boolean, description: "The tenant supplies a key (enterprise AI keys)" }
+        tenant_enforced: { type: boolean, description: "The tenant key is used for every call and personal keys are ignored" }
+        tenant_provider: { type: string, description: "The tenant key's provider, when there is one" }
+        default_models: { type: object, additionalProperties: { type: string }, description: "The model each provider runs when the model setting is blank" }
+        build_advice: { type: string, description: "Why the model or effort plans too shallowly to build a model from a workbook; absent when they suit" }
+        daily_call_limit: { type: integer, description: "The developer's own limit on model calls per UTC day; absent when none is set" }
+        tenant_daily_call_limit: { type: integer, description: "The tenant admin's limit for every developer of the tenant (AI keys, enterprise); absent when none" }
+        server_daily_call_limit: { type: integer, description: "The server's default (AI_MAX_CALLS_PER_DAY), for a developer with no limit set; the ceiling on the server's own key" }
+        daily_limit: { type: integer, description: "The limit that applies now: the lower of the developer's own and the tenant admin's, else the server's default" }
+        daily_limit_by: { type: string, enum: [own, tenant, server, server_key], description: "Who set daily_limit; server_key is the server's ceiling on its own key" }
 
     AiSaveSettingsRequest:
       type: object
@@ -2298,6 +2318,7 @@ components:
         model:    { type: string, description: "Any model ID the provider offers; empty means the provider's default model" }
         api_key:  { type: string, description: "Omit to keep the existing stored key" }
         reasoning_effort: { type: string, enum: ["", none, minimal, low, medium, high, xhigh], description: "Omit to keep the saved one; blank clears it" }
+        daily_call_limit: { type: integer, nullable: true, minimum: 0, maximum: 1000000, description: "The developer's own limit on model calls per UTC day, above the server's default if they like (not on the server's own key); omit to keep it, null or 0 clears it" }
 
     AiTestSettingsRequest:
       type: object

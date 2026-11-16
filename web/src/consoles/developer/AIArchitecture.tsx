@@ -1,4 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Maximize2, X as XIcon } from "lucide-react";
 import type { AITargetModel, AITaskPlan } from "../../api/client";
 import { Button, Txt } from "../../ui";
 
@@ -43,9 +45,78 @@ function readArchitecture(t: AITargetModel) {
   return { dims, grids: [...grids.values()], pages };
 }
 
-/** The architecture drawn: dimensions → grids → dashboards. */
+type Arch = ReturnType<typeof readArchitecture>;
+
+const sidebarEdge = () => document.querySelector(".mvx-app-shell__sidebar")?.getBoundingClientRect().right ?? 0;
+
+/** The architecture drawn: dimensions → grids → dashboards. A click holds a
+ *  box's links lit (owner, 2026-11-16: following a line took the pointer off
+ *  the box, and its links went dark), and Full screen opens the scheme beside
+ *  the left panel, as a dashboard widget does; the held box stays held. */
 export function ArchitectureScheme({ target }: { target: AITargetModel }) {
   const arch = useMemo(() => readArchitecture(target), [target]);
+  const [held, setHeld] = useState<string | null>(null);
+  const [full, setFull] = useState<{ left: number } | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const close = useRef<HTMLButtonElement>(null);
+  const isFull = full !== null;
+  useEffect(() => {
+    if (!isFull) return;
+    const toolbar = bar.current;
+    close.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(null); };
+    const onResize = () => setFull({ left: sidebarEdge() });
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+      toolbar?.querySelector<HTMLButtonElement>("[data-scheme-expand]")?.focus();
+    };
+  }, [isFull]);
+  // A box the plan no longer has lets go by itself.
+  const ids = useMemo(() => new Set([
+    ...arch.dims.map(d => `dim:${d.key}`), ...arch.grids.map(g => `grid:${g.key}`), ...arch.pages.map(p => `page:${p.key}`),
+  ]), [arch]);
+  const hold = held && ids.has(held) ? held : null;
+
+  if (arch.grids.length === 0 && arch.pages.length === 0) {
+    return <div className="mvx-admin-muted"><Txt>{"No architecture recorded yet."}</Txt></div>;
+  }
+  const hint = hold
+    ? "Its links stay lit: click the box again, or an empty space, to let go."
+    : "Click a box to keep its links lit while you follow them.";
+  return (
+    <>
+      <div ref={bar} style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 6px" }}>
+        <span className="mvx-admin-muted" style={{ flex: 1, fontSize: 11 }}><Txt>{hint}</Txt></span>
+        <Button size="sm" variant="ghost" data-scheme-expand icon={<Maximize2 size={13} />}
+          onClick={() => setFull({ left: sidebarEdge() })}>Full screen</Button>
+      </div>
+      <SchemeBody arch={arch} held={hold} onHold={setHeld} />
+      {full && createPortal(
+        <div className="mvx-dash-full" style={{ left: full.left }} role="dialog" aria-modal aria-label="Architecture">
+          <div className="mvx-dash-full__head">
+            <span className="mvx-dash-full__title"><Txt>{"Architecture"}</Txt></span>
+            <span className="mvx-admin-muted" style={{ fontSize: 12 }}><Txt>{hint}</Txt></span>
+            <button ref={close} type="button" className="mvx-dash-full__close" aria-label="Close full screen" title="Close (Esc)"
+              onClick={() => setFull(null)}>
+              <XIcon size={16} />
+            </button>
+          </div>
+          <div className="mvx-dash-full__body">
+            <SchemeBody arch={arch} held={hold} onHold={setHeld} />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** The three columns and their lines. The pointed-at box lights what it is
+ *  joined to; a held box keeps that lit wherever the pointer goes. */
+function SchemeBody({ arch, held, onHold }: { arch: Arch; held: string | null; onHold: (id: string | null) => void }) {
   const [hover, setHover] = useState<string | null>(null);
   const [allMetrics, setAllMetrics] = useState<Record<string, boolean>>({});
   const box = useRef<HTMLDivElement>(null);
@@ -84,11 +155,12 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
     return () => { cancelAnimationFrame(frame); ro.disconnect(); };
   }, [arch, allMetrics]);
 
-  // What the pointed-at box is joined to.
+  // What the held, else the pointed-at, box is joined to.
+  const focus = held ?? hover;
   const related = useMemo(() => {
-    if (!hover) return null;
-    const set = new Set<string>([hover]);
-    const [kind, key] = [hover.slice(0, hover.indexOf(":")), hover.slice(hover.indexOf(":") + 1)];
+    if (!focus) return null;
+    const set = new Set<string>([focus]);
+    const [kind, key] = [focus.slice(0, focus.indexOf(":")), focus.slice(focus.indexOf(":") + 1)];
     const gridsOf = (g: string) => { set.add(`grid:${g}`); for (const d of arch.grids.find(x => x.key === g)?.dims ?? []) set.add(`dim:${d}`); };
     if (kind === "dim") {
       for (const g of arch.grids) if (g.dims.includes(key)) {
@@ -102,24 +174,29 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
       for (const g of arch.pages.find(x => x.key === key)?.grids ?? []) gridsOf(g);
     }
     return set;
-  }, [hover, arch]);
+  }, [focus, arch]);
 
-  if (arch.grids.length === 0 && arch.pages.length === 0) {
-    return <div className="mvx-admin-muted"><Txt>{"No architecture recorded yet."}</Txt></div>;
-  }
   const faded = (id: string) => (related && !related.has(id) ? 0.35 : 1);
   const reg = (id: string) => (e: HTMLElement | null) => { if (e) els.current.set(id, e); else els.current.delete(id); };
-  const point = (id: string) => ({ onMouseEnter: () => setHover(id), onMouseLeave: () => setHover(null) });
+  const toggle = (id: string) => onHold(held === id ? null : id);
+  const point = (id: string) => ({
+    ref: reg(id), role: "button", tabIndex: 0, "aria-pressed": held === id, "data-scheme-box": id,
+    onMouseEnter: () => setHover(id), onMouseLeave: () => setHover(null),
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); toggle(id); },
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(id); } },
+  });
   const boxStyle = (id: string) => ({
     border: `1px solid ${related?.has(id) ? "var(--color-brand-500)" : "var(--color-border)"}`, borderRadius: 6, background: "var(--color-surface)",
-    padding: "6px 9px", fontSize: 12, opacity: faded(id),
+    padding: "6px 9px", fontSize: 12, opacity: faded(id), cursor: "pointer",
+    boxShadow: held === id ? "0 0 0 1px var(--color-brand-500)" : undefined,
   });
   const head = { fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", margin: "0 0 6px" };
   const gridName = (key: string) => arch.grids.find(g => g.key === key)?.name ?? key;
   const dimName = (key: string) => arch.dims.find(d => d.key === key)?.name ?? key;
 
   return (
-    <div ref={box} style={{ position: "relative", display: "grid", gap: narrow ? 16 : "0 56px",
+    // A click on an empty space lets the held box go.
+    <div ref={box} onClick={() => onHold(null)} style={{ position: "relative", display: "grid", gap: narrow ? 16 : "0 56px",
       gridTemplateColumns: narrow ? "1fr" : "minmax(140px, 1fr) minmax(240px, 1.8fr) minmax(160px, 1fr)" }}>
       {!narrow && (
         <svg aria-hidden width={size.w} height={size.h} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -134,7 +211,7 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
         <p style={head}><Txt>{`Dimensions (${arch.dims.length})`}</Txt></p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {arch.dims.map(d => (
-            <div key={d.key} ref={reg(`dim:${d.key}`)} {...point(`dim:${d.key}`)} style={boxStyle(`dim:${d.key}`)}>
+            <div key={d.key} {...point(`dim:${d.key}`)} style={boxStyle(`dim:${d.key}`)}>
               <strong><Txt>{d.name}</Txt></strong>
               {d.members && <div className="mvx-admin-muted" style={{ fontSize: 11 }}><Txt>{d.members}</Txt></div>}
               {!d.used && <div className="mvx-admin-muted" style={{ fontSize: 11 }}><Txt>{"on no grid yet"}</Txt></div>}
@@ -148,7 +225,7 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
           {arch.grids.map(g => {
             const all = !!allMetrics[g.key];
             return (
-              <div key={g.key} ref={reg(`grid:${g.key}`)} {...point(`grid:${g.key}`)} style={boxStyle(`grid:${g.key}`)}>
+              <div key={g.key} {...point(`grid:${g.key}`)} style={boxStyle(`grid:${g.key}`)}>
                 <div style={{ display: "flex", gap: 8 }}>
                   <strong style={{ flex: 1 }}><Txt>{g.name}</Txt></strong>
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }}><Txt>{g.role}</Txt></span>
@@ -161,7 +238,8 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
                     <Txt>{(all ? g.metrics : g.metrics.slice(0, 6)).join(", ")}</Txt>
                     {g.metrics.length > 6 && (
                       <button type="button" className="mvx-link-button" style={{ marginLeft: 6, fontSize: 11 }}
-                        onClick={() => setAllMetrics(s => ({ ...s, [g.key]: !all }))}>
+                        onClick={e => { e.stopPropagation(); setAllMetrics(s => ({ ...s, [g.key]: !all })); }}
+                        onKeyDown={e => e.stopPropagation()}>
                         <Txt>{all ? "fewer" : `+${g.metrics.length - 6} more`}</Txt>
                       </button>
                     )}
@@ -176,7 +254,7 @@ export function ArchitectureScheme({ target }: { target: AITargetModel }) {
         <p style={head}><Txt>{`Dashboards (${arch.pages.length})`}</Txt></p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {arch.pages.map(p => (
-            <div key={p.key} ref={reg(`page:${p.key}`)} {...point(`page:${p.key}`)} style={boxStyle(`page:${p.key}`)}>
+            <div key={p.key} {...point(`page:${p.key}`)} style={boxStyle(`page:${p.key}`)}>
               <strong><Txt>{p.name}</Txt></strong>
               {p.audience && <span className="mvx-admin-muted" style={{ fontSize: 11 }}><Txt>{` · ${p.audience}`}</Txt></span>}
               <div className="mvx-admin-muted" style={{ fontSize: 11 }}>

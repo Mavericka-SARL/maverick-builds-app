@@ -37,6 +37,10 @@ type Settings struct {
 	APIKey   string `json:"api_key,omitempty"`
 	HasKey   bool   `json:"has_key"`
 	Enforced bool   `json:"enforced"`
+	// DailyCallLimit caps each developer of the tenant at this many model
+	// calls per UTC day, whichever key they use (migration 187); nil is no
+	// limit. Written by SetDailyCallLimit, not Update.
+	DailyCallLimit *int `json:"daily_call_limit,omitempty"`
 }
 
 // Store reads and writes the tenant keys held in one database. Construct it
@@ -62,9 +66,9 @@ func (s *Store) Get(ctx context.Context, customerID string) (Settings, bool, err
 	var out Settings
 	var enc string
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, model, api_key_enc, enforced
+		SELECT provider, model, api_key_enc, enforced, daily_call_limit
 		FROM ai_assistant.tenant_llm_settings WHERE customer_id IS NOT DISTINCT FROM NULLIF($1, '')::uuid
-	`, customerID).Scan(&out.Provider, &out.Model, &enc, &out.Enforced)
+	`, customerID).Scan(&out.Provider, &out.Model, &enc, &out.Enforced, &out.DailyCallLimit)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Settings{Provider: "openai"}, false, nil
@@ -133,6 +137,35 @@ func (s *Store) Update(ctx context.Context, customerID string, in Settings) (Set
 	return out, err
 }
 
+// SetDailyCallLimit sets (n > 0) or clears (nil) one scope's daily call
+// limit per developer, creating the row on first save.
+func (s *Store) SetDailyCallLimit(ctx context.Context, customerID string, n *int) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO ai_assistant.tenant_llm_settings (customer_id, daily_call_limit)
+		VALUES (NULLIF($1, '')::uuid, $2)
+		ON CONFLICT (customer_id) DO UPDATE SET daily_call_limit = EXCLUDED.daily_call_limit, updated_at = now()
+	`, customerID, n)
+	if err != nil {
+		return fmt.Errorf("set tenant daily call limit: %w", err)
+	}
+	return nil
+}
+
+// DailyCallLimit is the tenant's own daily call limit per developer: nil
+// when it has set none (the deployment's row is not inherited: a limit is
+// the tenant's own decision about its spend).
+func (s *Store) DailyCallLimit(ctx context.Context, customerID string) (*int, error) {
+	var n *int
+	err := s.pool.QueryRow(ctx, `
+		SELECT daily_call_limit FROM ai_assistant.tenant_llm_settings
+		WHERE customer_id IS NOT DISTINCT FROM NULLIF($1, '')::uuid
+	`, customerID).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return n, err
+}
+
 // Clear forgets one scope's key (and lifts enforcement) but keeps the row.
 func (s *Store) Clear(ctx context.Context, customerID string) (Settings, error) {
 	_, err := s.pool.Exec(ctx, `
@@ -151,15 +184,23 @@ func (s *Store) Clear(ctx context.Context, customerID string) (Settings, error) 
 // deployment's when the edition includes one. ErrNoTenantKey when neither
 // has a key.
 func (s *Store) Resolve(ctx context.Context, customerID string) (provider, model, apiKey string, enforced bool, err error) {
+	provider, model, apiKey, enforced, _, err = s.ResolveSource(ctx, customerID)
+	return provider, model, apiKey, enforced, err
+}
+
+// ResolveSource is Resolve that also says whether the key is the
+// deployment's (deployment true): the server's money, which keeps the
+// server's daily call limit as a ceiling.
+func (s *Store) ResolveSource(ctx context.Context, customerID string) (provider, model, apiKey string, enforced, deployment bool, err error) {
 	provider, model, apiKey, enforced, err = s.resolveOwn(ctx, customerID)
 	if err == nil || !errors.Is(err, ErrNoTenantKey) || customerID == DeploymentScope || Defaults == nil {
-		return provider, model, apiKey, enforced, err
+		return provider, model, apiKey, enforced, customerID == DeploymentScope && err == nil, err
 	}
 	// No row, or a row without a key, of its own: the deployment's applies.
 	if dp, dm, dk, de, ok := Defaults(ctx); ok && dk != "" {
-		return dp, dm, dk, de, nil
+		return dp, dm, dk, de, true, nil
 	}
-	return provider, model, apiKey, enforced, err
+	return provider, model, apiKey, enforced, false, err
 }
 
 func (s *Store) resolveOwn(ctx context.Context, customerID string) (provider, model, apiKey string, enforced bool, err error) {

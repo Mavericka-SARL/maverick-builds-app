@@ -35,6 +35,11 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   const [apiKey, setApiKey]     = useState("");
   const [saved, setSaved]       = useState(false);
   const [effort, setEffort]     = useState(initialSettings?.reasoning_effort ?? "");
+  // The developer's own daily call limit (owner, 2026-11-16): blank is
+  // none of their own, so the server's default applies.
+  const [limit, setLimit]       = useState(initialSettings?.daily_call_limit ? String(initialSettings.daily_call_limit) : "");
+  const limitN = limit.trim() === "" ? null : Number(limit.trim());
+  const limitBad = limitN !== null && (!Number.isInteger(limitN) || limitN < 1 || limitN > 1_000_000);
   // The models the key reaches: asked for the saved key when the panel opens
   // or the provider changes, and for a typed key on "List models".
   const [typedKeyAsked, setTypedKeyAsked] = useState("");
@@ -53,7 +58,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   };
 
   const save = useMutation({
-    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
+    mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort, daily_call_limit: limitN }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-settings"] });
       setSaved(true);
@@ -156,10 +161,26 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           />
         </Field>
 
+        <Field
+          label="Daily call limit"
+          description={dailyLimitNote(initialSettings)}
+          error={limitBad ? "A whole number from 1 to 1,000,000, or blank." : undefined}
+        >
+          <TextInput
+            value={limit}
+            onChange={e => setLimit(e.target.value)}
+            inputMode="numeric"
+            aria-label="Daily call limit"
+            placeholder={initialSettings?.server_daily_call_limit ? `${initialSettings.server_daily_call_limit} (this server's default)` : "calls a day"}
+            style={{ width: 220 }}
+          />
+        </Field>
+
         <div className="mvx-admin-inline-form">
           <Button
             variant="primary"
             leadingIcon={saved ? <Check size={14} /> : undefined}
+            disabled={limitBad}
             loading={save.isPending}
             loadingLabel="Saving…"
             onClick={() => save.mutate()}
@@ -189,6 +210,20 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
       </div>
     </div>
   );
+}
+
+// dailyLimitNote says what the developer's daily call limit does next to the
+// others: the server's default, the tenant admin's, the server's own key.
+function dailyLimitNote(s?: AISettings): string {
+  const server = s?.server_daily_call_limit;
+  const parts = [`Your model calls per day (UTC). Blank uses this server's default${server ? ` of ${server.toLocaleString()}` : ""}; set more for a long build, or less to cap your spend.`];
+  if (s?.tenant_daily_call_limit) {
+    parts.push(`Your tenant admin's limit is ${s.tenant_daily_call_limit.toLocaleString()} a day for each developer; the lower one counts.`);
+  }
+  if (s?.daily_limit_by === "server_key") {
+    parts.push(`Calls on this server's own AI key stop at ${server?.toLocaleString() ?? "its limit"} a day, whatever you set.`);
+  }
+  return parts.join(" ");
 }
 
 // The files the AI Developer takes as attachments.

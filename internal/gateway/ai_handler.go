@@ -19,11 +19,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mavericks-engine/mavericks/ee/aikeys"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/license"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -94,14 +96,84 @@ const (
 	defaultLLMCallsPerUserPerDay = 1000
 )
 
+// serverLimitOwner names who changes a deployment's AI limits: they are the
+// gateway's environment, so whoever runs the server — not a role in the app
+// (not a tenant admin, not a platform admin).
+const serverLimitOwner = "only whoever runs this server can change it, in the gateway's settings; no role in the app can"
+
 // sessionCapMessage says what to do when a session has used its calls: its
-// call budget is the developer's to raise; a deployment's limit is the
-// administrator's. A session is its draft, so the work goes on here.
+// call budget is the developer's own, raised or cleared in the AI Developer;
+// a deployment's limit is the server operator's. A session is its draft, so
+// the work goes on here.
 func sessionCapMessage(limit int, budget bool) string {
 	if budget {
 		return fmt.Sprintf("this session has used its call budget of %d model calls: raise or clear the budget to go on — the work stays in this session's draft", limit)
 	}
-	return fmt.Sprintf("this session has reached this deployment's limit of %d model calls (AI_MAX_CALLS_PER_SESSION): an administrator can raise it", limit)
+	return fmt.Sprintf("this session has reached this server's limit of %d model calls per session (AI_MAX_CALLS_PER_SESSION): %s — the work stays in this session's draft", limit, serverLimitOwner)
+}
+
+// dailyLimit is the daily call limit that applies to a developer and who
+// set it: "own" (AI Developer settings), "tenant" (a tenant admin, AI keys),
+// "server" (the server's default, AI_MAX_CALLS_PER_DAY) or "server_key"
+// (the same number as the ceiling on the server's own key).
+type dailyLimit struct {
+	n  int
+	by string
+}
+
+// effectiveDailyLimit combines the daily limits (owner, 2026-11-16): the
+// lower of the developer's own and the tenant admin's, either of which may
+// go above the server's default; with neither, the server's default. On the
+// server's own key the server's number stays the ceiling.
+func effectiveDailyLimit(own, tenant *int, server int, serverPays bool) dailyLimit {
+	l, set := dailyLimit{n: server, by: "server"}, false
+	if own != nil && *own > 0 {
+		l, set = dailyLimit{n: *own, by: "own"}, true
+	}
+	if tenant != nil && *tenant > 0 && (!set || *tenant < l.n) {
+		l, set = dailyLimit{n: *tenant, by: "tenant"}, true
+	}
+	if serverPays && (!set || server < l.n) {
+		l = dailyLimit{n: server, by: "server_key"}
+	}
+	return l
+}
+
+// dailyCallLimit is the limit for this developer now: their own (personal
+// settings), their tenant's when the edition has tenant AI keys, the
+// server's, and whether the key the calls use is the server's.
+func (h *handler) dailyCallLimit(r *http.Request, act *actor) dailyLimit {
+	ctx := r.Context()
+	_, server := llmCallCaps()
+	var own, tenant *int
+	pctx := personalCtx(ctx, act)
+	if s, err := h.aiChatStore(pctx).GetSettings(pctx, act.UserID); err == nil {
+		own = s.DailyCallLimit
+	}
+	if cid := h.requestCustomerID(ctx, r, act); cid != "" && h.lic != nil && h.lic.Usable(license.FeatureTenantAIKeys) {
+		tenant, _ = aikeys.NewStore(h.db.For(ctx)).DailyCallLimit(ctx, cid)
+	}
+	serverPays := false
+	if h.testProvider == nil {
+		if c, err := h.chooseAIKey(r, act); err == nil {
+			serverPays = c.serverPays
+		}
+	}
+	return effectiveDailyLimit(own, tenant, server, serverPays)
+}
+
+// dailyCapMessage says a developer has used today's model calls, and names
+// who set the limit and where it is changed.
+func dailyCapMessage(l dailyLimit) string {
+	switch l.by {
+	case "own":
+		return fmt.Sprintf("you've reached your own limit of %d model calls a day, set in AI Developer settings: raise or clear it there to go on, or wait until midnight UTC", l.n)
+	case "tenant":
+		return fmt.Sprintf("you've reached your tenant's limit of %d model calls a day for each developer: a tenant admin changes it under AI keys; it starts again at midnight UTC", l.n)
+	case "server_key":
+		return fmt.Sprintf("you've reached this server's limit of %d model calls a day on the server's own AI key (AI_MAX_CALLS_PER_DAY): %s; it starts again at midnight UTC", l.n, serverLimitOwner)
+	}
+	return fmt.Sprintf("you've reached this server's default limit of %d model calls a day (AI_MAX_CALLS_PER_DAY): set a limit of your own in AI Developer settings to go on, or wait until midnight UTC", l.n)
 }
 
 // sessionLengthNote tells the model, once most of the session's call budget
@@ -172,54 +244,72 @@ func buildProvider(provider, apiKey string) (providers.Provider, error) {
 // A key always brings its own provider with it: the key belongs to that
 // account, so using a tenant key means using the tenant's provider and model.
 func (h *handler) buildProviderForRequest(r *http.Request, act *actor) (providers.Provider, string, string, error) {
-	userID := act.UserID
 	if h.testProvider != nil {
 		return h.testProvider, "test", "test-model", nil
 	}
-	// The person's own settings and key are read where they live
-	// (personalCtx); the tenant's key in the tenant's database.
-	ctx := personalCtx(r.Context(), act)
-	store := h.aiChatStore(ctx)
-	settings, err := store.GetSettings(ctx, userID)
+	c, err := h.chooseAIKey(r, act)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("load llm settings: %w", err)
+		return nil, "", "", err
 	}
-	tenant := h.tenantAIKey(r.Context(), h.requestCustomerID(r.Context(), r, act))
-
-	var provider, model, apiKey string
-	switch {
-	case tenant.OK && tenant.Enforced:
-		provider, model, apiKey = tenant.Provider, tenant.Model, tenant.APIKey
-	default:
-		provider, model = settings.Provider, settings.Model
-		apiKey, _ = store.GetDecryptedAPIKey(ctx, userID)
-		if apiKey == "" && tenant.OK {
-			provider, model, apiKey = tenant.Provider, tenant.Model, tenant.APIKey
-		}
-	}
-	if provider == "" {
-		provider = "openai"
-	}
-	envKey := providerEnvKeys[provider]
-	if apiKey == "" && envKey != "" {
-		apiKey = os.Getenv(envKey)
-	}
-	if apiKey == "" {
-		return nil, "", "", fmt.Errorf("no API key configured for %s — set one in Settings or the %s env var", provider, envKey)
-	}
-
-	p, err := buildProvider(provider, apiKey)
+	p, err := buildProvider(c.provider, c.apiKey)
 	if err != nil {
 		return nil, "", "", err
 	}
 	// The developer's reasoning effort, for their own provider's models.
-	if provider == settings.Provider || (settings.Provider == "" && provider == "openai") {
-		p = withEffort(p, settings.ReasoningEffort)
+	if c.provider == c.settings.Provider || (c.settings.Provider == "" && c.provider == "openai") {
+		p = withEffort(p, c.settings.ReasoningEffort)
 	}
+	model := c.model
 	if model == "" {
-		model = defaultModel(provider)
+		model = defaultModel(c.provider)
 	}
-	return p, provider, model, nil
+	return p, c.provider, model, nil
+}
+
+// aiKeyChoice is the key the AI calls of a request use (buildProviderForRequest's
+// order), with the developer's settings.
+type aiKeyChoice struct {
+	provider, model, apiKey string
+	settings                aiassistant.LLMSettings
+	// serverPays: the key is the server's own (the provider's env var, or the
+	// deployment's tenant key), so the server's daily call limit stays its
+	// ceiling (dailyCallLimit).
+	serverPays bool
+}
+
+func (h *handler) chooseAIKey(r *http.Request, act *actor) (aiKeyChoice, error) {
+	// The person's own settings and key are read where they live
+	// (personalCtx); the tenant's key in the tenant's database.
+	ctx := personalCtx(r.Context(), act)
+	store := h.aiChatStore(ctx)
+	settings, err := store.GetSettings(ctx, act.UserID)
+	if err != nil {
+		return aiKeyChoice{}, fmt.Errorf("load llm settings: %w", err)
+	}
+	tenant := h.tenantAIKey(r.Context(), h.requestCustomerID(r.Context(), r, act))
+
+	c := aiKeyChoice{settings: settings}
+	switch {
+	case tenant.OK && tenant.Enforced:
+		c.provider, c.model, c.apiKey, c.serverPays = tenant.Provider, tenant.Model, tenant.APIKey, tenant.Deployment
+	default:
+		c.provider, c.model = settings.Provider, settings.Model
+		c.apiKey, _ = store.GetDecryptedAPIKey(ctx, act.UserID)
+		if c.apiKey == "" && tenant.OK {
+			c.provider, c.model, c.apiKey, c.serverPays = tenant.Provider, tenant.Model, tenant.APIKey, tenant.Deployment
+		}
+	}
+	if c.provider == "" {
+		c.provider = "openai"
+	}
+	envKey := providerEnvKeys[c.provider]
+	if c.apiKey == "" && envKey != "" {
+		c.apiKey, c.serverPays = os.Getenv(envKey), true
+	}
+	if c.apiKey == "" {
+		return aiKeyChoice{}, fmt.Errorf("no API key configured for %s — set one in Settings or the %s env var", c.provider, envKey)
+	}
+	return c, nil
 }
 
 // ── POST /api/ai/sessions ────────────────────────────────────────────────────
@@ -432,7 +522,8 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("check daily rate limit: %w", err), http.StatusInternalServerError)
 		return
 	}
-	maxLLMCallsPerSession, maxLLMCallsPerUserPerDay := llmCallCaps()
+	maxLLMCallsPerSession, _ := llmCallCaps()
+	perDay := h.dailyCallLimit(r, a)
 	// The developer's own budget for this session, when they set one (0 =
 	// no per-session cap).
 	byBudget := false
@@ -443,15 +534,15 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("%s", sessionCapMessage(maxLLMCallsPerSession, byBudget)), http.StatusTooManyRequests)
 		return
 	}
-	if dailyCalls >= maxLLMCallsPerUserPerDay {
-		jsonErr(w, fmt.Errorf("you've reached today's limit of %d LLM calls — try again tomorrow", maxLLMCallsPerUserPerDay), http.StatusTooManyRequests)
+	if dailyCalls >= perDay.n {
+		jsonErr(w, errors.New(dailyCapMessage(perDay)), http.StatusTooManyRequests)
 		return
 	}
 	// A session's token budget (AI_SESSION_TOKEN_LIMIT; none by default):
 	// what its calls were billed for, input, cached and output together.
 	if limit := sessionTokenLimit(); limit > 0 {
 		if u, uErr := store.Usage(ctx, sessionID); uErr == nil && u.Total() >= limit {
-			jsonErr(w, fmt.Errorf("this session has used %d tokens, its budget of %d (AI_SESSION_TOKEN_LIMIT): an administrator can raise it", u.Total(), limit), http.StatusTooManyRequests)
+			jsonErr(w, fmt.Errorf("this session has used %d tokens, this server's limit of %d per session (AI_SESSION_TOKEN_LIMIT): %s", u.Total(), limit, serverLimitOwner), http.StatusTooManyRequests)
 			return
 		}
 	}
@@ -825,8 +916,8 @@ turn:
 			sendSSE("error", map[string]string{"error": sessionCapMessage(maxLLMCallsPerSession, byBudget)})
 			return
 		}
-		if dailyCalls >= maxLLMCallsPerUserPerDay {
-			sendSSE("error", map[string]string{"error": fmt.Sprintf("you've reached today's limit of %d LLM calls — try again tomorrow", maxLLMCallsPerUserPerDay)})
+		if dailyCalls >= perDay.n {
+			sendSSE("error", map[string]string{"error": dailyCapMessage(perDay)})
 			return
 		}
 		sessionCalls++
@@ -2144,13 +2235,23 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 	// wondering why their own key had no effect, so say it here rather than
 	// letting the screen imply a personal key is required.
 	tenant := h.tenantAIKey(ctx, h.requestCustomerID(ctx, r, a))
+	var tenantLimit *int
+	if cid := h.requestCustomerID(ctx, r, a); cid != "" && h.lic != nil && h.lic.Usable(license.FeatureTenantAIKeys) {
+		tenantLimit, _ = aikeys.NewStore(h.db.For(ctx)).DailyCallLimit(ctx, cid)
+	}
+	_, serverDaily := llmCallCaps()
+	daily := h.dailyCallLimit(r, a)
 	jsonOK(w, aiSettingsResponse{
-		LLMSettings:    settings,
-		TenantKey:      tenant.OK,
-		TenantEnforced: tenant.OK && tenant.Enforced,
-		TenantProvider: tenantProviderLabel(tenant),
-		DefaultModels:  defaultModels(),
-		BuildAdvice:    buildAdvice(cmp.Or(settings.Provider, "openai"), cmp.Or(settings.Model, defaultModel(cmp.Or(settings.Provider, "openai"))), settings.ReasoningEffort),
+		TenantDailyCallLimit: tenantLimit,
+		ServerDailyCallLimit: serverDaily,
+		DailyLimit:           daily.n,
+		DailyLimitBy:         daily.by,
+		LLMSettings:          settings,
+		TenantKey:            tenant.OK,
+		TenantEnforced:       tenant.OK && tenant.Enforced,
+		TenantProvider:       tenantProviderLabel(tenant),
+		DefaultModels:        defaultModels(),
+		BuildAdvice:          buildAdvice(cmp.Or(settings.Provider, "openai"), cmp.Or(settings.Model, defaultModel(cmp.Or(settings.Provider, "openai"))), settings.ReasoningEffort),
 	})
 }
 
@@ -2167,6 +2268,13 @@ type aiSettingsResponse struct {
 	// BuildAdvice says whether the model and effort suit building a model
 	// (buildAdvice); "" when they do.
 	BuildAdvice string `json:"build_advice,omitempty"`
+	// The daily call limits: the tenant admin's for every developer (nil:
+	// none), the server's default, and the one that applies now with who set
+	// it (dailyLimit: own, tenant, server, server_key).
+	TenantDailyCallLimit *int   `json:"tenant_daily_call_limit,omitempty"`
+	ServerDailyCallLimit int    `json:"server_daily_call_limit"`
+	DailyLimit           int    `json:"daily_limit"`
+	DailyLimitBy         string `json:"daily_limit_by"`
 }
 
 func tenantProviderLabel(t tenantAIKeyResult) string {
@@ -2187,6 +2295,9 @@ type aiSettingsReq struct {
 	APIKey   string `json:"api_key"` // optional; omit to keep existing key
 	// ReasoningEffort: omitted keeps the saved one; "" clears it.
 	ReasoningEffort *string `json:"reasoning_effort"`
+	// DailyCallLimit: the developer's own daily call limit; omitted keeps
+	// it, null clears it.
+	DailyCallLimit optionalLimit `json:"daily_call_limit"`
 }
 
 // validReasoningEffort refuses an effort OpenAI does not take.
@@ -2243,11 +2354,19 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	meta := map[string]string{"provider": req.Provider, "model": req.Model, "api_key_changed": strconv.FormatBool(req.APIKey != "")}
+	if req.DailyCallLimit.set {
+		if err := h.aiChatStore(personalCtx(ctx, a)).SetDailyCallLimit(personalCtx(ctx, a), a.UserID, req.DailyCallLimit.n); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		meta["daily_call_limit"] = limitWord(req.DailyCallLimit.n)
+	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAISettingsUpdated,
 		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 		ResourceType: "ai_settings", ResourceID: a.UserID,
-		Metadata: map[string]string{"provider": req.Provider, "model": req.Model, "api_key_changed": strconv.FormatBool(req.APIKey != "")},
+		Metadata: meta,
 	})
 	jsonOK(w, map[string]string{"status": "ok"})
 }

@@ -18,7 +18,9 @@ session writes there until the developer promotes or discards it. A new
 session starts a fresh draft; there is no separate "new draft" action. The
 session goes on as one thread — no per-session call cap by default
 (`AI_MAX_CALLS_PER_SESSION` sets one per deployment; the developer's call
-budget, the daily cap and `AI_SESSION_TOKEN_LIMIT` still apply), its history
+budget, the daily limit — the developer's own, their tenant admin's or the
+server's default, see [AI_KEYS.md](AI_KEYS.md#daily-call-limits) — and
+`AI_SESSION_TOKEN_LIMIT` still apply), its history
 settled as it grows. Promoting makes the draft the
 developer's **working** revision, not the live one: making a revision active
 is a separate step (**Set active** in Developer › Developer Models; owner decision,

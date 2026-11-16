@@ -2208,6 +2208,15 @@ export interface AISettings {
   reasoning_effort?: string;
   /** Whether the model and effort suit building a model from a workbook (server rule); absent when they do. */
   build_advice?: string;
+  /** The developer's own limit on model calls per UTC day; absent when none. */
+  daily_call_limit?: number;
+  /** The tenant admin's limit for every developer of the tenant (AI keys, enterprise); absent when none. */
+  tenant_daily_call_limit?: number;
+  /** The server's default for a developer with no limit set (AI_MAX_CALLS_PER_DAY). */
+  server_daily_call_limit?: number;
+  /** The limit that applies now, and who set it ("server_key": the server's ceiling on its own key). */
+  daily_limit?: number;
+  daily_limit_by?: "own" | "tenant" | "server" | "server_key";
 }
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
@@ -2227,6 +2236,8 @@ export interface TenantAISettings {
   api_key?: string;
   has_key: boolean;
   enforced: boolean;
+  /** Model calls each developer of the tenant may make per UTC day; absent when none. Send null to clear. */
+  daily_call_limit?: number | null;
   scope?: SettingsScope;
 }
 
@@ -3679,7 +3690,7 @@ export const api = {
   aiGetSettings: () => apiFetch<AISettings>("/api/ai/settings"),
   aiWorkbookMap: (sessionId: string) => apiFetch<AIWorkbookMap>(`/api/ai/sessions/${sessionId}/workbook-map`),
   getConnectorInfo: () => apiFetch<ConnectorInfo>("/api/connector"),
-  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string }) =>
+  aiSaveSettings: (body: { provider: string; model: string; api_key?: string; reasoning_effort?: string; daily_call_limit?: number | null }) =>
     apiFetch<{ status: string }>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
 
 };

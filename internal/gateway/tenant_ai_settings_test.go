@@ -122,6 +122,24 @@ func TestTenantAISettingsGatedByEdition(t *testing.T) {
 		if code != http.StatusOK || body["has_key"] != false || body["enforced"] != false {
 			t.Fatalf("DELETE code=%d body=%+v", code, body)
 		}
+
+		// A daily call limit for every developer of the tenant: set, kept by
+		// a save that leaves it out, refused out of range, cleared by null.
+		code, body = call(t, srv, http.MethodPut, "/api/admin/ai-settings", `{"provider":"anthropic","daily_call_limit":250}`)
+		if code != http.StatusOK || body["daily_call_limit"] != float64(250) {
+			t.Fatalf("limit PUT code=%d body=%+v", code, body)
+		}
+		code, body = call(t, srv, http.MethodPut, "/api/admin/ai-settings", `{"provider":"anthropic"}`)
+		if code != http.StatusOK || body["daily_call_limit"] != float64(250) {
+			t.Fatalf("limit not kept: code=%d body=%+v", code, body)
+		}
+		if code, _ := call(t, srv, http.MethodPut, "/api/admin/ai-settings", `{"provider":"anthropic","daily_call_limit":-3}`); code != http.StatusBadRequest {
+			t.Fatalf("negative limit code=%d, want 400", code)
+		}
+		code, body = call(t, srv, http.MethodPut, "/api/admin/ai-settings", `{"provider":"anthropic","daily_call_limit":null}`)
+		if _, has := body["daily_call_limit"]; code != http.StatusOK || has {
+			t.Fatalf("limit not cleared: code=%d body=%+v", code, body)
+		}
 	})
 }
 
@@ -211,6 +229,33 @@ func TestAIKeyResolutionOrder(t *testing.T) {
 		_, provider, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: otherID, CustomerID: custID})
 		if err != nil || provider != "anthropic" {
 			t.Fatalf("provider=%q err=%v", provider, err)
+		}
+		// The tenant's key is the tenant's money: no server ceiling.
+		if c, err := newHandler(enterpriseManager(t)).chooseAIKey(req, &actor{UserID: otherID, CustomerID: custID}); err != nil || c.serverPays {
+			t.Fatalf("tenant key: serverPays=%v err=%v", c.serverPays, err)
+		}
+	})
+
+	// The server's own key keeps the server's daily limit as the ceiling,
+	// whatever the developer sets for themselves (owner, 2026-11-16).
+	t.Run("the server's env key is the server's money", func(t *testing.T) {
+		t.Setenv("MISTRAL_API_KEY", "sk-server")
+		var thirdID string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('res-dev3', 'dev3@res.dev', 'Dev3', $1::uuid) RETURNING id::text`, custID,
+		).Scan(&thirdID); err != nil {
+			t.Fatal(err)
+		}
+		if err := aiassistant.NewChatStore(pool).SaveSettings(ctx, thirdID, "mistral", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		c, err := newHandler(nil).chooseAIKey(req, &actor{UserID: thirdID, CustomerID: custID})
+		if err != nil || !c.serverPays || c.apiKey != "sk-server" {
+			t.Fatalf("env key: %+v err=%v", c, err)
+		}
+		own := 50_000
+		if l := effectiveDailyLimit(&own, nil, 1000, c.serverPays); l.n != 1000 || l.by != "server_key" {
+			t.Fatalf("limit on the server's key = %+v, want the server's 1000", l)
 		}
 	})
 }

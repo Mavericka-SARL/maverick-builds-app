@@ -490,6 +490,9 @@ type LLMSettings struct {
 	// ReasoningEffort is sent with every OpenAI call when set (migration
 	// 178): "", none, minimal, low, medium, high or xhigh.
 	ReasoningEffort string `json:"reasoning_effort"`
+	// DailyCallLimit is the developer's own cap on their model calls per UTC
+	// day (migration 187); nil is none of their own.
+	DailyCallLimit *int `json:"daily_call_limit,omitempty"`
 }
 
 // ReasoningEfforts are the values ReasoningEffort may hold.
@@ -499,9 +502,9 @@ func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings
 	var ls LLMSettings
 	var apiKeyEnc *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, model, api_key_enc, reasoning_effort
+		SELECT provider, model, api_key_enc, reasoning_effort, daily_call_limit
 		FROM ai_assistant.llm_settings WHERE user_id=$1::uuid
-	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort)
+	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc, &ls.ReasoningEffort, &ls.DailyCallLimit)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// No model: the gateway runs the provider's default.
@@ -537,6 +540,18 @@ func (s *ChatStore) SaveSettingsWithEffort(ctx context.Context, userID, provider
 		      reasoning_effort=COALESCE($5, ai_assistant.llm_settings.reasoning_effort),
 		      updated_at=now()
 	`, userID, provider, model, keyParam, effort)
+	return err
+}
+
+// SetDailyCallLimit sets (n > 0) or clears (nil) the developer's own daily
+// call limit, creating their settings row if they have none (a blank model:
+// the provider's default).
+func (s *ChatStore) SetDailyCallLimit(ctx context.Context, userID string, n *int) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO ai_assistant.llm_settings (user_id, provider, model, daily_call_limit, updated_at)
+		VALUES ($1::uuid, 'openai', '', $2, now())
+		ON CONFLICT (user_id) DO UPDATE SET daily_call_limit = EXCLUDED.daily_call_limit, updated_at = now()
+	`, userID, n)
 	return err
 }
 

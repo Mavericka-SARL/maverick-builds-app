@@ -71,3 +71,35 @@ test("a developer never sees the tab", async ({ page }) => {
   await loadAs(page, "developer");
   await expect(page.getByRole("button", { name: "AI keys", exact: true })).toHaveCount(0);
 });
+
+// A tenant admin's daily call limit for every developer (owner, 2026-11-16).
+test("enterprise: a daily call limit per developer is saved with the settings", async ({ page }) => {
+  await mockApi(page, { license: enterpriseLicense, tenantAI: { ...tenantAISettings, daily_call_limit: 400 } });
+  let saved: Record<string, unknown> | null = null;
+  await page.route("**/api/admin/ai-settings", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    saved = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...tenantAISettings, daily_call_limit: saved.daily_call_limit }) });
+  });
+  await loadAs(page, "platform_admin");
+  await openTab(page);
+
+  const panel = page.getByTestId("tenant-ai-settings");
+  const limit = panel.getByLabel("Daily call limit per developer");
+  await expect(limit).toHaveValue("400");
+  await expect(panel).toContainText("whichever key they use");
+
+  await limit.fill("0");
+  await expect(panel).toContainText("A whole number from 1 to 1,000,000, or blank.");
+  await expect(panel.getByRole("button", { name: "Save settings" })).toBeDisabled();
+
+  await limit.fill("2500");
+  await panel.getByRole("button", { name: "Save settings" }).click();
+  await expect.poll(() => saved?.daily_call_limit).toBe(2500);
+  await expect(limit).toHaveValue("2500");
+
+  await limit.fill("");
+  await panel.getByRole("button", { name: "Save settings" }).click();
+  await expect.poll(() => saved?.daily_call_limit).toBeNull();
+  await expect(limit).toHaveValue("");
+});

@@ -16,13 +16,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xuri/excelize/v2"
 
+	"github.com/mavericks-engine/mavericks/ee/aikeys"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
+	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
@@ -44,7 +47,8 @@ type aiTurnEnv struct {
 	confirm func(proposalID string) (int, string)
 }
 
-func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
+// opts adjust the handler before it serves (a licence, say).
+func newAITurnEnv(t *testing.T, provider providers.Provider, opts ...func(*handler)) aiTurnEnv {
 	t.Helper()
 	ctx := context.Background()
 	pool := testdb.New(t, migrationfs.FS, ".")
@@ -71,6 +75,9 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 	}
 	t.Setenv("DEV_MODE", "true")
 	h := &handler{log: logger.New("test"), db: tenantdb.NewHandle(pool, nil), devMode: true, testProvider: provider}
+	for _, o := range opts {
+		o(h)
+	}
 	mux := http.NewServeMux()
 	h.registerRoutes(mux, nil)
 	srv := httptest.NewServer(appIDMiddleware(mux))
@@ -611,8 +618,88 @@ func TestSendMessage_RecordsTokenUsageAndStopsAtTheBudget(t *testing.T) {
 		t.Fatalf("usage after one call = %+v (%v), want 1 call and 1700 tokens", u, err)
 	}
 	t.Setenv("AI_SESSION_TOKEN_LIMIT", "1500")
-	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "its budget of 1500") {
-		t.Errorf("a turn past the budget: %d %s, want 429 naming the budget", status, body)
+	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "limit of 1500 per session") ||
+		!strings.Contains(body, "whoever runs this server") {
+		t.Errorf("a turn past the budget: %d %s, want 429 naming the limit and who sets it", status, body)
+	}
+}
+
+// The daily call limit is the developer's own (AI Developer settings) or
+// their tenant admin's (AI keys, enterprise), the lower of the two, else the
+// server's default; the refusal names who set it (owner, 2026-11-16).
+func TestSendMessage_DailyLimitByWhoSetIt(t *testing.T) {
+	reply := providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Done."}}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{reply, reply, reply, reply}}
+	enterprise := license.Static(&license.Claims{Edition: license.EditionEnterprise, Customer: "TurnCo", ExpiresAt: time.Now().Add(time.Hour)})
+	env := newAITurnEnv(t, fake, func(h *handler) { h.lic = enterprise })
+	ctx := context.Background()
+	if status, sse := env.send("what does the grid hold"); status != http.StatusOK {
+		t.Fatalf("first turn: %d\n%s", status, sse)
+	}
+	settings := func() map[string]any {
+		t.Helper()
+		status, body := env.get("/api/ai/settings")
+		var out map[string]any
+		if status != http.StatusOK || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("GET settings: %d %s", status, body)
+		}
+		return out
+	}
+	put := func(body string) {
+		t.Helper()
+		if status, out := env.do(http.MethodPut, "/api/ai/settings", []byte(body)); status != http.StatusOK {
+			t.Fatalf("PUT settings %s: %d %s", body, status, out)
+		}
+	}
+
+	// The developer's own limit, below the day's one call.
+	put(`{"provider":"openai","daily_call_limit":1}`)
+	if s := settings(); s["daily_call_limit"] != float64(1) || s["daily_limit"] != float64(1) || s["daily_limit_by"] != "own" {
+		t.Fatalf("settings after own limit: %+v", s)
+	}
+	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "your own limit of 1 model calls a day, set in AI Developer settings") {
+		t.Fatalf("own limit: %d %s", status, body)
+	}
+	// A save that leaves the limit out keeps it; a bad one is refused.
+	put(`{"provider":"openai"}`)
+	if s := settings(); s["daily_call_limit"] != float64(1) {
+		t.Fatalf("limit not kept: %+v", s)
+	}
+	if status, _ := env.do(http.MethodPut, "/api/ai/settings", []byte(`{"provider":"openai","daily_call_limit":-2}`)); status != http.StatusBadRequest {
+		t.Fatalf("negative limit: %d, want 400", status)
+	}
+
+	// The tenant admin's limit, lower than the developer's own.
+	put(`{"provider":"openai","daily_call_limit":5000}`)
+	var custID string
+	if err := env.db.QueryRow(ctx, `SELECT id::text FROM core.customer WHERE name = 'TurnCo'`).Scan(&custID); err != nil {
+		t.Fatal(err)
+	}
+	one := 1
+	if err := aikeys.NewStore(env.db).SetDailyCallLimit(ctx, custID, &one); err != nil {
+		t.Fatal(err)
+	}
+	if s := settings(); s["tenant_daily_call_limit"] != float64(1) || s["daily_limit_by"] != "tenant" {
+		t.Fatalf("settings after tenant limit: %+v", s)
+	}
+	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "your tenant's limit of 1 model calls a day") ||
+		!strings.Contains(body, "a tenant admin changes it under AI keys") {
+		t.Fatalf("tenant limit: %d %s", status, body)
+	}
+
+	// Neither: the server's default, which the developer can go above.
+	if err := aikeys.NewStore(env.db).SetDailyCallLimit(ctx, custID, nil); err != nil {
+		t.Fatal(err)
+	}
+	put(`{"provider":"openai","daily_call_limit":null}`)
+	t.Setenv("AI_MAX_CALLS_PER_DAY", "1")
+	if status, body := env.send("and its dimensions?"); status != http.StatusTooManyRequests || !strings.Contains(body, "this server's default limit of 1 model calls a day") ||
+		!strings.Contains(body, "set a limit of your own in AI Developer settings") {
+		t.Fatalf("server default: %d %s", status, body)
+	}
+	put(`{"provider":"openai","daily_call_limit":10}`)
+	if status, sse := env.send("and its dimensions?"); status != http.StatusOK || strings.Contains(sse, "limit of") {
+		t.Fatalf("own limit above the server's default: %d\n%s", status, sse)
 	}
 }
 

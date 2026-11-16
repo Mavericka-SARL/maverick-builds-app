@@ -44,13 +44,53 @@ test("the model is free text offered the key's models, Google is offered, and sw
 
   await model.fill("gemini-99-ultra-tomorrow");
   await page.getByRole("button", { name: "Save settings" }).click();
-  await expect.poll(() => saved).toEqual({ provider: "google", model: "gemini-99-ultra-tomorrow", reasoning_effort: "" });
+  await expect.poll(() => saved).toEqual({ provider: "google", model: "gemini-99-ultra-tomorrow", reasoning_effort: "", daily_call_limit: null });
 
   await provider.selectOption("openai");
   await page.getByLabel("Reasoning effort").selectOption("none");
   await model.fill("gpt-6-luna");
   await page.getByRole("button", { name: "Save settings" }).click();
-  await expect.poll(() => saved).toEqual({ provider: "openai", model: "gpt-6-luna", reasoning_effort: "none" });
+  await expect.poll(() => saved).toEqual({ provider: "openai", model: "gpt-6-luna", reasoning_effort: "none", daily_call_limit: null });
   // One model runs every turn: no second model field (removed 2026-11-12).
   await expect(page.getByLabel("Model for generated sheet plans")).toHaveCount(0);
+});
+
+// A developer sets their own daily call limit (owner, 2026-11-16): above the
+// server's default if they like; the tenant admin's lower one is named.
+test("the developer's own daily call limit is saved, checked and explained", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/ai/sessions", (route) =>
+    route.request().method() === "GET" ? route.fulfill({ status: 200, contentType: "application/json", body: "[]" }) : route.fallback());
+  let saved: Record<string, unknown> | null = null;
+  await page.route("**/api/ai/settings", async (route) => {
+    if (route.request().method() === "PUT") {
+      saved = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      provider: "openai", model: "", has_key: true, daily_call_limit: 3000,
+      tenant_daily_call_limit: 2000, server_daily_call_limit: 1000, daily_limit: 2000, daily_limit_by: "tenant",
+    }) });
+  });
+
+  await loadAs(page, "developer");
+  await page.getByRole("button", { name: "AI Developer" }).click();
+  await page.getByRole("button", { name: "AI settings" }).click();
+
+  const limit = page.getByLabel("Daily call limit");
+  await expect(limit).toHaveValue("3000");
+  await expect(page.getByText(/Blank uses this server's default of 1,000/)).toBeVisible();
+  await expect(page.getByText(/Your tenant admin's limit is 2,000 a day for each developer; the lower one counts/)).toBeVisible();
+
+  await limit.fill("12.5");
+  await expect(page.getByText("A whole number from 1 to 1,000,000, or blank.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled();
+
+  await limit.fill("1500");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect.poll(() => saved?.daily_call_limit).toBe(1500);
+
+  await limit.fill("");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect.poll(() => saved?.daily_call_limit).toBeNull();
 });

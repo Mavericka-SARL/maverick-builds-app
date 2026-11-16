@@ -33,6 +33,25 @@ the tab renders the feature gate naming the edition that would unlock it.
 A key always brings its own provider and model with it: the key belongs to one
 provider's account, so using the tenant key means using the tenant's provider.
 
+## Daily call limits
+
+Who pays for the calls sets their limit (owner decision, 2026-11-16):
+
+- **A developer** sets their own limit of model calls per day (UTC) in
+  *AI Developer › AI settings › Daily call limit*.
+- **A tenant admin** (enterprise, the same licence as the tenant key) sets one
+  for every developer of the tenant in *AI keys › Daily call limit*, whichever
+  key the developers use.
+- **The server's default**, `AI_MAX_CALLS_PER_DAY` (1000 unless set), applies
+  to a developer with neither.
+
+The lower of the developer's own and the tenant admin's counts, and either may
+go above the server's default. On the server's own key (an environment variable
+above, or the deployment's key a tenant inherits) the server's number stays the
+ceiling, since whoever runs the server pays for those calls. The refusal at the
+limit names who set it and where it is changed; `GET /api/ai/settings` returns
+the limit that applies (`daily_limit`, `daily_limit_by`).
+
 ## Enforcing
 
 **Tenant admin › AI keys › Use the tenant key for every AI call** is the governance

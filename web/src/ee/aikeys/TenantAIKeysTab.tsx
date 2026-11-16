@@ -46,16 +46,22 @@ function TenantAIKeysForm() {
   const [key, setKey] = useState("");
   const [probe, setProbe] = useState<ProviderProbeResult | null>(null);
   const [saved, setSaved] = useState(false);
+  // The daily call limit per developer, as typed (null: untouched).
+  const [limitText, setLimitText] = useState<string | null>(null);
   const form = draft ?? data ?? EMPTY;
+  const limitShown = limitText ?? (form.daily_call_limit ? String(form.daily_call_limit) : "");
+  const limitN = limitShown.trim() === "" ? null : Number(limitShown.trim());
+  const limitBad = limitN !== null && (!Number.isInteger(limitN) || limitN < 1 || limitN > 1_000_000);
 
   const onSettings = (next: TenantAISettings) => {
     qc.setQueryData(["tenant-ai-settings"], next);
     setDraft(null);
     setKey("");
+    setLimitText(null);
   };
 
   const save = useMutation({
-    mutationFn: () => api.updateTenantAISettings({ ...form, api_key: key || undefined }),
+    mutationFn: () => api.updateTenantAISettings({ ...form, api_key: key || undefined, daily_call_limit: limitN }),
     onSuccess: (next) => {
       onSettings(next);
       setSaved(true);
@@ -164,8 +170,27 @@ function TenantAIKeysForm() {
         )}
       </Card>
 
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Daily call limit</div>
+        <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
+          The AI Developer calls each developer of this tenant may make per day (UTC), whichever key they use. A developer
+          can set a lower limit for themselves in AI Developer settings; the lower one counts. Blank leaves each developer
+          to their own limit, or the server&apos;s default.
+        </p>
+        <Field label="Calls per developer per day" error={limitBad ? "A whole number from 1 to 1,000,000, or blank." : undefined}>
+          <TextInput
+            value={limitShown}
+            onChange={(e) => setLimitText(e.target.value)}
+            inputMode="numeric"
+            aria-label="Daily call limit per developer"
+            placeholder="No tenant limit"
+            style={{ width: 220 }}
+          />
+        </Field>
+      </Card>
+
       <div className="mvx-admin-inline-form">
-        <Button variant="primary" loading={save.isPending} loadingLabel="Saving…" onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={limitBad} loading={save.isPending} loadingLabel="Saving…" onClick={() => save.mutate()}>
           {saved ? "Saved" : "Save settings"}
         </Button>
         {save.isError && <span className="mvx-admin-error">{(save.error as Error).message}</span>}
