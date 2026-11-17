@@ -558,6 +558,62 @@ func scopeCalcCells(
 	cells = make(map[string]float64)
 	totals = make(map[string]float64)
 	done := map[string]bool{}
+	// recorded lists a metric's cells, working and withheld, once they are
+	// all there — an input from the start, a calculated metric when done —
+	// so a read over many leaf coordinates visits those only
+	// (rollup.WithRecorded): fetchFor answers nothing anywhere else. A
+	// metric still being worked out, or one whose codes hold the key's ":"
+	// separator, is not known, and its reads walk every coordinate.
+	inputIDs := map[string]bool{}
+	for _, m := range universe {
+		if m.IsInput {
+			inputIDs[m.ID] = true
+		}
+	}
+	cellCoords := map[string][]map[string]string{}
+	recorded := func(_ context.Context, metricID string) ([]map[string]string, bool, error) {
+		if !inputIDs[metricID] && !done[metricID] {
+			return nil, false, nil
+		}
+		if cs, ok := cellCoords[metricID]; ok {
+			return cs, true, nil
+		}
+		ownDims := metricDimIDs[metricID]
+		if len(ownDims) == 0 {
+			return nil, false, nil
+		}
+		prefix := metricID + ":"
+		seen := map[string]bool{}
+		var cs []map[string]string
+		addKey := func(k string) bool {
+			if !strings.HasPrefix(k, prefix) || seen[k] {
+				return true
+			}
+			seen[k] = true
+			codes := strings.Split(k[len(prefix):], ":")
+			if len(codes) != len(ownDims) {
+				return false
+			}
+			c := make(map[string]string, len(ownDims))
+			for i, d := range ownDims {
+				c[d] = codes[i]
+			}
+			cs = append(cs, c)
+			return true
+		}
+		for k := range working {
+			if !addKey(k) {
+				return nil, false, nil
+			}
+		}
+		for k := range withheld {
+			if !addKey(k) {
+				return nil, false, nil
+			}
+		}
+		cellCoords[metricID] = cs
+		return cs, true, nil
+	}
 	// formulaAt reads a formula/rate metric resolved earlier in this pass at
 	// any combination above its leaves: its formula there, never a
 	// combination of its leaves (see aggregateReader).
@@ -624,7 +680,7 @@ func scopeCalcCells(
 				unresolved = append(unresolved, m)
 				continue
 			}
-			scopeOrdinaryMetric(ctx, m, ownDims, refs, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor,
+			scopeOrdinaryMetric(ctx, m, ownDims, refs, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor, recorded,
 				formulaAt, cells, totals, working, withheld)
 			done[m.ID] = true
 		}
@@ -695,7 +751,7 @@ func pinsLeaves(dims map[string]*rollup.Dimension, ownDims []string, combo map[s
 func scopeOrdinaryMetric(
 	ctx context.Context, m metricRow, ownDims, refs []string, byName map[string]metricRow,
 	rollupDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string,
-	sr *scopedReads, fetchFor func(string) rollup.RawValue, formulaAt map[string]aggregateReader,
+	sr *scopedReads, fetchFor func(string) rollup.RawValue, recorded rollup.Recorded, formulaAt map[string]aggregateReader,
 	cells, totals, working map[string]float64, withheld map[string]bool,
 ) {
 	combos := rollup.LeafCombos(rollupDims, ownDims)
@@ -740,7 +796,7 @@ func scopeOrdinaryMetric(
 			// Recorded, as resolveDependency: nothing entered beneath the
 			// cell (a month with no postings on any account) is blank to
 			// ISBLANK and "", and 0 in arithmetic.
-			v, found, err := rollup.ResolveTimeRecorded(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
+			v, found, err := rollup.ResolveTimeRecorded(rollup.WithRecorded(ctx, recorded), rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
 				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 			if err != nil {
 				return 0, err

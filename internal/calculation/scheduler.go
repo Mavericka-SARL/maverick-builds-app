@@ -1101,7 +1101,7 @@ func (s *Scheduler) rateTotal(
 		if total, found := valueMap[dimKey(map[string]string{})]; found {
 			return total, nil
 		}
-		v, _, resolveErr := rollup.ResolveTime(ctx, allDims, id, metricDimIDs[id], rollup.AggRule(d.AggRule), rollup.TimeSummaryRule(d.TimeSummary),
+		v, _, resolveErr := rollup.ResolveTime(rollup.WithRecorded(ctx, recordedOf(id, valueMap)), allDims, id, metricDimIDs[id], rollup.AggRule(d.AggRule), rollup.TimeSummaryRule(d.TimeSummary),
 			map[string]string{}, func(_ context.Context, _ string, combo map[string]string) (float64, bool, error) {
 				val, hit := valueMap[dimKey(combo)]
 				return val, hit, nil

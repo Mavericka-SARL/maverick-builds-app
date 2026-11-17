@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/readset"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -752,7 +754,11 @@ func (r *ChartResolver) resolveMetricPerMember(
 	cc *chartCalc,
 ) ([]*float64, error) {
 	results := make([]*float64, len(members))
-	fetch := r.fetchInput(modelID, revisionID)
+	facts := r.storedInputs(modelID, revisionID)
+	// An input's value below a coordinate is its stored facts there: the
+	// resolver visits those, not every leaf coordinate the axis and the
+	// context span.
+	inputCtx := rollup.WithRecorded(ctx, facts.recorded)
 	aggRule := rollup.AggRule(m.AggRule)
 	// valueAt is the metric at one coordinate. A calculated member anywhere
 	// in it (plotted or a context pin) is its formula over the siblings at
@@ -777,7 +783,7 @@ func (r *ChartResolver) resolveMetricPerMember(
 			return v, ok
 		}
 		if m.IsInput {
-			v, ok, err := rollup.ResolveTime(ctx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, fetch)
+			v, ok, err := rollup.ResolveTime(inputCtx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, facts.fetch)
 			return v, err == nil && ok
 		}
 		v, ok, err := r.evalCalcMetric(ctx, m, combo, allDims, cc)
@@ -808,7 +814,22 @@ func canonicalMemberCode(d *rollup.Dimension, ref string) string {
 	return ref
 }
 
-// fetchInput returns a rollup.RawValue that serves an input metric's values
+// storedValues is one kind of stored per-coordinate values (input facts, or
+// calculated rows), each metric's whole set read once by load: fetch looks
+// one coordinate up, and recorded lists the coordinates there are values
+// at, so a read over many leaf coordinates visits those only
+// (rollup.WithRecorded).
+type storedValues struct {
+	read   func(ctx context.Context, metricID string) (map[string]float64, error)
+	values map[string]map[string]float64 // metricID -> canonical(combo) -> value
+	coords map[string][]map[string]string
+}
+
+func newStoredValues(read func(ctx context.Context, metricID string) (map[string]float64, error)) *storedValues {
+	return &storedValues{read: read, values: map[string]map[string]float64{}, coords: map[string][]map[string]string{}}
+}
+
+// storedInputs is the input metrics' facts (loadInputFactMap): it serves an input metric's values
 // from an in-memory map loaded ONCE per metric, instead of a DB round-trip per
 // combo. rollup.Resolve fans a single chart cell out to the cartesian product
 // of every unpinned dimension's leaves (product=ALL over 500 products × every
@@ -820,22 +841,54 @@ func canonicalMemberCode(d *rollup.Dimension, ref string) string {
 // calc metric's input dependencies (resolved through the same closure) each
 // load at most once too. A miss is (0, false, nil) — a legitimately-absent
 // value, not a hard failure.
-func (r *ChartResolver) fetchInput(modelID, revisionID string) rollup.RawValue {
-	cache := map[string]map[string]float64{} // metricID -> canonical(combo) -> value
-	return func(ctx context.Context, metricID string, combo map[string]string) (float64, bool, error) {
-		fm, loaded := cache[metricID]
-		if !loaded {
-			var err error
-			fm, err = r.loadInputFactMap(ctx, modelID, revisionID, metricID)
-			if err != nil {
-				return 0, false, err
-			}
-			cache[metricID] = fm
-		}
-		key, _ := json.Marshal(combo)
-		v, ok := fm[string(key)]
-		return v, ok, nil
+func (r *ChartResolver) storedInputs(modelID, revisionID string) *storedValues {
+	return newStoredValues(func(ctx context.Context, metricID string) (map[string]float64, error) {
+		return r.loadInputFactMap(ctx, modelID, revisionID, metricID)
+	})
+}
+
+func (f *storedValues) load(ctx context.Context, metricID string) (map[string]float64, error) {
+	if fm, loaded := f.values[metricID]; loaded {
+		return fm, nil
 	}
+	fm, err := f.read(ctx, metricID)
+	if err != nil {
+		return nil, err
+	}
+	f.values[metricID] = fm
+	return fm, nil
+}
+
+func (f *storedValues) fetch(ctx context.Context, metricID string, combo map[string]string) (float64, bool, error) {
+	fm, err := f.load(ctx, metricID)
+	if err != nil {
+		return 0, false, err
+	}
+	key, _ := json.Marshal(combo)
+	v, ok := fm[string(key)]
+	return v, ok, nil
+}
+
+// recorded is a rollup.Recorded for fetch: the coordinates of its map, each
+// the combo whose canonical JSON is the key fetch looks up.
+func (f *storedValues) recorded(ctx context.Context, metricID string) ([]map[string]string, bool, error) {
+	if cs, ok := f.coords[metricID]; ok {
+		return cs, true, nil
+	}
+	fm, err := f.load(ctx, metricID)
+	if err != nil {
+		return nil, false, err
+	}
+	cs := make([]map[string]string, 0, len(fm))
+	for key := range fm {
+		var c map[string]string
+		if err := json.Unmarshal([]byte(key), &c); err != nil {
+			return nil, false, err
+		}
+		cs = append(cs, c)
+	}
+	f.coords[metricID] = cs
+	return cs, true, nil
 }
 
 // loadInputFactMap reads every recorded combo of an input metric (latest-wins
@@ -890,43 +943,32 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 	return m, rows.Err()
 }
 
-// fetchCalc is fetchInput's twin over runtime.calc_result: a calc metric's
-// persisted per-combo rows (latest per combo), loaded once per metric.
-func (r *ChartResolver) fetchCalc(modelID, revisionID string) rollup.RawValue {
-	cache := map[string]map[string]float64{}
-	return func(ctx context.Context, metricID string, combo map[string]string) (float64, bool, error) {
-		fm, loaded := cache[metricID]
-		if !loaded {
-			rows, err := r.pool.Query(ctx, `
-				SELECT DISTINCT ON (dim_members) value, dim_members
-				FROM runtime.calc_result
-				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-				ORDER BY dim_members, calc_at DESC, id DESC
-			`, modelID, revisionID, metricID)
-			if err != nil {
-				return 0, false, err
-			}
-			fm = map[string]float64{}
-			for rows.Next() {
-				var val float64
-				var dm map[string]string
-				if err := rows.Scan(&val, &dm); err != nil {
-					rows.Close()
-					return 0, false, err
-				}
-				key, _ := json.Marshal(dm)
-				fm[string(key)] = val
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return 0, false, err
-			}
-			cache[metricID] = fm
+// storedCalcs is storedInputs' twin over runtime.calc_result: a calculated
+// metric's persisted per-combo rows (latest per combo), loaded once per metric.
+func (r *ChartResolver) storedCalcs(modelID, revisionID string) *storedValues {
+	return newStoredValues(func(ctx context.Context, metricID string) (map[string]float64, error) {
+		rows, err := r.pool.Query(ctx, `
+			SELECT DISTINCT ON (dim_members) value, dim_members
+			FROM runtime.calc_result
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+			ORDER BY dim_members, calc_at DESC, id DESC
+		`, modelID, revisionID, metricID)
+		if err != nil {
+			return nil, err
 		}
-		key, _ := json.Marshal(combo)
-		v, ok := fm[string(key)]
-		return v, ok, nil
-	}
+		defer rows.Close()
+		fm := map[string]float64{}
+		for rows.Next() {
+			var val float64
+			var dm map[string]string
+			if err := rows.Scan(&val, &dm); err != nil {
+				return nil, err
+			}
+			key, _ := json.Marshal(dm)
+			fm[string(key)] = val
+		}
+		return fm, rows.Err()
+	})
 }
 
 // buildDimMembers constructs the dim_members map for a specific plotted member.
@@ -1124,7 +1166,7 @@ func (r *ChartResolver) evalCalcMetricVisited(
 			}
 			return cc.servedFetch()(ctx, metricID, own)
 		}
-		return rollup.ResolveTime(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+		return rollup.ResolveTime(cc.servedCtx(ctx), allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
 			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, cc.servedFetch())
 	}
 
@@ -1172,8 +1214,9 @@ func (r *ChartResolver) evalCalcMetricVisited(
 		// variant also sums each leaf once when the point pins a parent of
 		// a dimension the metric does not carry, where the scheduler, which
 		// evaluates only the metric's own leaves, has nothing to multiply.
-		return rollup.ResolveTimeFlat(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
-			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, leaf)
+		lctx, lfetch := cc.leafRead(ctx, def, allDims, leaf)
+		return rollup.ResolveTimeFlat(lctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, lfetch)
 	}
 	return r.evalFormulaPoint(ctx, def, dimMembers, allDims, cc, visited)
 }
@@ -1187,12 +1230,12 @@ func (r *ChartResolver) evalCalcMetricVisited(
 // department and month (84 × 2.5 = 210). ok is false where nothing was
 // recorded beneath point, a total across a dimension included, as the
 // scheduler binds a variable (blank to ISBLANK and "", 0 in arithmetic).
-func resolveInput(ctx context.Context, allDims map[string]*rollup.Dimension, def *fullMetricDef, point map[string]string, fetch rollup.RawValue) (float64, bool, error) {
+func resolveInput(ctx context.Context, allDims map[string]*rollup.Dimension, def *fullMetricDef, point map[string]string, inputs *storedValues) (float64, bool, error) {
 	if norm, err := rollup.NormalizeCombo(allDims, def.DimensionIDs, point, nil); err == nil {
 		point = norm
 	}
-	return rollup.ResolveTimeRecorded(ctx, allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
-		rollup.TimeSummaryRule(def.TimeSummary), point, fetch)
+	return rollup.ResolveTimeRecorded(rollup.WithRecorded(ctx, inputs.recorded), allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+		rollup.TimeSummaryRule(def.TimeSummary), point, inputs.fetch)
 }
 
 // pinnedBelow reports whether combo pins a dimension other than dimID that
@@ -1241,6 +1284,161 @@ func soleRoot(dim *rollup.Dimension, code string) bool {
 	return found
 }
 
+// leafCoordSet is the leaf coordinates a metric's inputs have facts at,
+// listed and keyed (canonical JSON).
+type leafCoordSet struct {
+	coords []map[string]string
+	keys   map[string]bool
+}
+
+// pureFunctions are the formula functions whose result is their arguments'
+// alone — no member, period, date or stored row read — so a formula calling
+// only these gives the same at every leaf where its inputs are the same.
+var pureFunctions = map[string]bool{
+	"ABS": true, "AND": true, "AVERAGE": true, "CEILING": true, "COUNT": true, "FLOOR": true,
+	"IF": true, "IFERROR": true, "IFNA": true, "IFS": true, "INT": true, "ISBLANK": true,
+	"MAX": true, "MIN": true, "MOD": true, "NOT": true, "OR": true, "POWER": true, "PRODUCT": true,
+	"ROUND": true, "ROUNDDOWN": true, "ROUNDUP": true, "SQRT": true, "SUM": true, "SWITCH": true,
+}
+
+// leafInputCoords is the leaves def's inputs have facts at, when def's value
+// at a leaf can come from nothing else: its formula reads input metrics only,
+// each on def's own dimensions, through arithmetic and pure functions — no
+// member, property, dimension argument, other period or stored row. At any
+// other leaf every input is blank, so def gives there what it gives at any
+// such leaf. nil when that does not hold.
+func (cc *chartCalc) leafInputCoords(ctx context.Context, def *fullMetricDef) (*leafCoordSet, error) {
+	if set, done := cc.leafCoords[def.ID]; done {
+		return set, nil
+	}
+	if cc.leafCoords == nil {
+		cc.leafCoords = map[string]*leafCoordSet{}
+	}
+	set, err := cc.buildLeafInputCoords(ctx, def)
+	if err != nil {
+		return nil, err
+	}
+	cc.leafCoords[def.ID] = set
+	return set, nil
+}
+
+func (cc *chartCalc) buildLeafInputCoords(ctx context.Context, def *fullMetricDef) (*leafCoordSet, error) {
+	an, err := formula.Analyze(def.Formula)
+	if err != nil || an.UsesTimeSeries || an.ServedFromRows || len(an.PropertyRefs) > 0 || len(an.DimensionArgs) > 0 ||
+		len(an.DimensionalCalls) > 0 || len(an.TimeSums) > 0 || len(an.CellDims) > 0 || len(def.DimensionIDs) == 0 {
+		return nil, nil
+	}
+	for _, call := range an.Calls {
+		if !pureFunctions[strings.ToUpper(call)] {
+			return nil, nil
+		}
+	}
+	byName := make(map[string]*fullMetricDef, len(cc.defs))
+	for _, d := range cc.defs {
+		byName[strings.ToUpper(d.Name)] = d
+	}
+	own := slices.Clone(def.DimensionIDs)
+	slices.Sort(own)
+	set := &leafCoordSet{keys: map[string]bool{}}
+	for _, ref := range an.References {
+		in, ok := byName[strings.ToUpper(ref.Name)]
+		if !ok || !in.IsInput {
+			return nil, nil // a dimension's name, or a calculated metric
+		}
+		dims := slices.Clone(in.DimensionIDs)
+		slices.Sort(dims)
+		if !slices.Equal(dims, own) {
+			return nil, nil // read at a coarser or finer coordinate than the leaf
+		}
+		coords, _, err := cc.inputs.recorded(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range coords {
+			key, _ := json.Marshal(c)
+			if !set.keys[string(key)] && len(c) == len(own) {
+				set.keys[string(key)] = true
+				set.coords = append(set.coords, c)
+			}
+		}
+	}
+	return set, nil
+}
+
+// leafRead is the context and fetch for def's per-leaf read through leaf.
+// When leafInputCoords holds, the leaves its inputs have facts at are
+// listed, and every other leaf answers what leaf answers at the first of
+// them — checked on this read: no value (rollup.WithRecordedAbsent) or a
+// recorded 0, a formula reading its blank inputs as 0
+// (rollup.WithRecordedZeros). Anything else, and for a viewer with a hidden
+// member (leaf refuses a withheld leaf, listed or not), the read walks
+// every leaf. leaf works its value out with the list taken off the context
+// (rollup.WithoutRecorded): its own reads of other metrics never see it.
+func (cc *chartCalc) leafRead(ctx context.Context, def *fullMetricDef, allDims map[string]*rollup.Dimension, leaf rollup.RawValue) (context.Context, rollup.RawValue) {
+	fetch := func(ctx context.Context, id string, combo map[string]string) (float64, bool, error) {
+		return leaf(rollup.WithoutRecorded(ctx), id, combo)
+	}
+	if cc.reads.Restricted() {
+		return ctx, fetch
+	}
+	set, err := cc.leafInputCoords(ctx, def)
+	if err != nil || set == nil {
+		return ctx, fetch
+	}
+	empty, found := firstLeafOutside(allDims, def.DimensionIDs, set.keys)
+	if !found {
+		return ctx, fetch // every leaf has a fact: nothing to skip
+	}
+	listed := func(_ context.Context, metricID string) ([]map[string]string, bool, error) {
+		if metricID != def.ID {
+			return nil, false, nil
+		}
+		return set.coords, true, nil
+	}
+	switch v, ok, err := fetch(ctx, def.ID, empty); {
+	case errors.Is(err, rollup.ErrNoValue):
+		return rollup.WithRecordedAbsent(ctx, listed), fetch
+	case err == nil && ok && v == 0 && !math.Signbit(v):
+		return rollup.WithRecordedZeros(ctx, listed), fetch
+	}
+	return ctx, fetch // a value, or a failure, where nothing is recorded
+}
+
+// firstLeafOutside is the first leaf coordinate over dimIDs, in their
+// leaves' order, whose canonical JSON keys does not hold.
+func firstLeafOutside(allDims map[string]*rollup.Dimension, dimIDs []string, keys map[string]bool) (map[string]string, bool) {
+	codes := make([][]string, len(dimIDs))
+	for i, id := range dimIDs {
+		d := allDims[id]
+		if d == nil {
+			return nil, false
+		}
+		if codes[i] = rollup.LeafCodes(d); len(codes[i]) == 0 {
+			return nil, false
+		}
+	}
+	at := make([]int, len(dimIDs))
+	for {
+		c := make(map[string]string, len(dimIDs))
+		for i, id := range dimIDs {
+			c[id] = codes[i][at[i]]
+		}
+		if key, _ := json.Marshal(c); !keys[string(key)] {
+			return c, true
+		}
+		i := len(at) - 1
+		for ; i >= 0; i-- {
+			if at[i]++; at[i] < len(codes[i]) {
+				break
+			}
+			at[i] = 0
+		}
+		if i < 0 {
+			return nil, false
+		}
+	}
+}
+
 // leafWise reports whether a non-served calculated metric's value at an
 // aggregate is its leaf values combined (sum, count, and an average whose
 // formula depends on the members) rather than its formula evaluated once
@@ -1277,7 +1475,7 @@ func (r *ChartResolver) evalFormulaPoint(
 		}
 		var val float64
 		if depDef.IsInput {
-			v, ok, err := resolveInput(ctx, allDims, depDef, dimMembers, cc.fetchInput)
+			v, ok, err := resolveInput(ctx, allDims, depDef, dimMembers, cc.inputs)
 			if err != nil {
 				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
@@ -1334,6 +1532,23 @@ type chartCalc struct {
 	reads      *readset.Set
 	fetchCalc  rollup.RawValue
 	fetchInput rollup.RawValue
+	// calcs and inputs are the stored rows fetchCalc and fetchInput look
+	// up, which can list their coordinates (rollup.WithRecorded).
+	calcs, inputs *storedValues
+	// leafCoords is, per metric worked out at each leaf, the leaves its
+	// inputs have facts at (leafInputCoords); nil inside: not only those.
+	leafCoords map[string]*leafCoordSet
+}
+
+// servedCtx is ctx for a read through servedFetch: its stored rows listed,
+// so a total visits them only — unless the viewer has a hidden member, when
+// servedFetch refuses a withheld coordinate whether or not a row is stored
+// there, and only the walk over every coordinate meets each refusal.
+func (cc *chartCalc) servedCtx(ctx context.Context) context.Context {
+	if cc.reads.Restricted() {
+		return ctx
+	}
+	return rollup.WithRecorded(ctx, cc.calcs.recorded)
 }
 
 // servedFetch reads a served metric's persisted rows, refusing any row
@@ -1373,10 +1588,13 @@ func (r *ChartResolver) loadChartCalc(ctx context.Context, modelID, revisionID s
 	for _, d := range defs {
 		meta.SetMetric(d.Name, d.DimensionIDs, d.PicklistDimID)
 	}
+	calcs, inputs := r.storedCalcs(modelID, revisionID), r.storedInputs(modelID, revisionID)
 	cc := &chartCalc{
 		defs: defs, dimNames: names, meta: meta,
-		fetchCalc:  r.fetchCalc(modelID, revisionID),
-		fetchInput: r.fetchInput(modelID, revisionID),
+		fetchCalc:  calcs.fetch,
+		fetchInput: inputs.fetch,
+		calcs:      calcs,
+		inputs:     inputs,
 	}
 	hidden := map[string]map[string]bool{}
 	for dimID, d := range unfiltered {

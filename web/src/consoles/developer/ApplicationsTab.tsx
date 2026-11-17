@@ -39,6 +39,13 @@ function DevModelRevisions({
     qc.invalidateQueries({ queryKey: ["admin-tenants"] });
     qc.invalidateQueries({ queryKey: ["dev-model"] });
     qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+    // The live revision the User and Business Admin groups work in, and
+    // the Models list naming it: after Set active (or a rename or delete)
+    // User › Dashboards kept the old live revision until a reload, so an
+    // AI draft no longer live went on showing, without the access rules
+    // Set active had moved to the new one (2026-11-17).
+    qc.invalidateQueries({ queryKey: ["demo"] });
+    qc.invalidateQueries({ queryKey: ["apps"] });
   };
 
   const create = useMutation({

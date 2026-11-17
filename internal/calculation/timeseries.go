@@ -243,6 +243,11 @@ type tsEvaluator struct {
 	dimIDToName map[string]string
 	allDefs     map[string]*MetricDef
 	fetch       map[string]rollup.RawValue
+	// stored lists the coordinates of the maps fetch looks up — the pass's
+	// own values for a peer, the persisted ones otherwise — and listed is
+	// ctx with them listed, for the reads through fetch only.
+	stored *storedReads
+	listed context.Context
 	// rows: persisted rows of formula/rate calculated dependencies
 	// (exactRows); a recurrence peer has none.
 	rows map[string]*exactSource
@@ -287,9 +292,10 @@ func (s *Scheduler) newTSEvaluator(
 	e := &tsEvaluator{
 		s: s, ctx: ctx, def: def, node: node, modelID: modelID, revisionID: revisionID, axis: axis,
 		allDims: allDims, metricDims: metricDimIDs, dimIDToName: dimIDToName, allDefs: allDefs,
-		fetch: make(map[string]rollup.RawValue, len(def.DependsOnID)),
-		rows:  map[string]*exactSource{},
-		memo:  map[memoKey]formula.Value{}, varsMemo: map[string]boundValues{},
+		fetch:  make(map[string]rollup.RawValue, len(def.DependsOnID)),
+		stored: newStoredReads(),
+		rows:   map[string]*exactSource{},
+		memo:   map[memoKey]formula.Value{}, varsMemo: map[string]boundValues{},
 	}
 	env := newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs)
 	for _, depID := range def.DependsOnID {
@@ -305,6 +311,7 @@ func (s *Scheduler) newTSEvaluator(
 				v, ok := peer[dimKey(combo)]
 				return v, ok, nil
 			}
+			e.stored.add(depID, peer)
 			continue
 		}
 		valueMap, err := s.valueMap(ctx, depDef, modelID, revisionID)
@@ -315,6 +322,7 @@ func (s *Scheduler) newTSEvaluator(
 			v, ok := valueMap[dimKey(combo)]
 			return v, ok, nil
 		}
+		e.stored.add(depID, valueMap)
 		if src := env.exactSource(ctx, depDef, valueMap); src != nil {
 			e.rows[depID] = src
 		}
@@ -336,6 +344,8 @@ func (s *Scheduler) newTSEvaluator(
 	// refuses dimensional functions in a recurrence anyway
 	// (executeRecurrence); this is the second guard.
 	e.reads = newDimReads(ctx, meta, def, allDefs, metricDimIDs, e.fetch, e.rows, e.varsMemo != nil)
+	e.reads.listed = e.stored.within(ctx)
+	e.listed = e.stored.within(ctx)
 	return e, nil
 }
 
@@ -351,7 +361,7 @@ func (e *tsEvaluator) vars(combo map[string]string) (map[string]formula.Value, m
 			if e.plain != nil && !e.plain[strings.ToUpper(depDef.Name)] {
 				continue // read only through LOOKUP / *IFS / *VALUE
 			}
-			v, found, err := resolveDependency(e.ctx, e.allDims, depDef, e.metricDims[depID], combo, e.fetch[depID], e.rows[depID])
+			v, found, err := resolveDependency(e.ctx, e.allDims, depDef, e.metricDims[depID], combo, e.fetch[depID], e.rows[depID], e.stored)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
@@ -483,12 +493,12 @@ func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positi
 		var ok bool
 		var err error
 		if exact := e.rows[depID]; exact != nil {
-			v, ok, err = resolveDependency(e.ctx, e.allDims, src, srcDims, c, e.fetch[depID], exact)
+			v, ok, err = resolveDependency(e.ctx, e.allDims, src, srcDims, c, e.fetch[depID], exact, e.stored)
 		} else {
 			// At a parent member (EMEA), ResolveTime answers the sum of
 			// nothing for a month no leaf recorded; that period is skipped
 			// like an empty month at a leaf.
-			v, ok, err = rollup.ResolveTimeRecorded(e.ctx, e.allDims, depID, srcDims, rollup.AggRule(src.AggRule),
+			v, ok, err = rollup.ResolveTimeRecorded(e.listed, e.allDims, depID, srcDims, rollup.AggRule(src.AggRule),
 				rollup.TimeSummaryRule(src.TimeSummary), c, e.fetch[depID])
 		}
 		if err != nil {

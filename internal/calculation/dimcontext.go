@@ -401,6 +401,10 @@ type dimReads struct {
 	pinned map[string]pinnedRead
 	// data is set when a read returns a recorded non-zero value.
 	data bool
+	// listed is ctx with the coordinates fetch's maps hold listed
+	// (storedReads.within), for the reads through fetch only: ctx itself
+	// when not known.
+	listed context.Context
 }
 
 type pinnedRead struct {
@@ -412,7 +416,7 @@ func newDimReads(ctx context.Context, meta *DimMetadata, def *MetricDef, allDefs
 	metricDims map[string][]string, fetch map[string]rollup.RawValue, rows map[string]*exactSource, memo bool,
 ) *dimReads {
 	r := &dimReads{
-		ctx: ctx, meta: meta, metricDims: metricDims, fetch: fetch, rows: rows,
+		ctx: ctx, listed: ctx, meta: meta, metricDims: metricDims, fetch: fetch, rows: rows,
 		defs:    make(map[string]*MetricDef, len(def.DependsOnID)),
 		byName:  make(map[string]string, len(def.DependsOnID)),
 		related: map[[2]string]bool{},
@@ -519,7 +523,7 @@ func (r *dimReads) resolve(combo map[string]string, metric string, overrides map
 		// Recorded: a read across the source's own dimensions with nothing
 		// recorded beneath it is not found — blank to a criterion, never a
 		// value counted by AVERAGEIFS — as resolveDependency reads it.
-		v, found, err = rollup.ResolveTimeRecorded(r.ctx, r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule),
+		v, found, err = rollup.ResolveTimeRecorded(r.listed, r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule),
 			rollup.TimeSummaryRule(def.TimeSummary), norm, r.fetch[depID])
 	}
 	if err != nil {
@@ -701,7 +705,7 @@ func noValueByRule(dims map[string]*rollup.Dimension, dep *MetricDef, srcDims []
 }
 
 func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, dep *MetricDef, srcDims []string,
-	combo map[string]string, fetch rollup.RawValue, src *exactSource,
+	combo map[string]string, fetch rollup.RawValue, src *exactSource, stored *storedReads,
 ) (float64, bool, error) {
 	if src != nil {
 		if norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil); err == nil {
@@ -716,6 +720,6 @@ func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, d
 	if norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil); err == nil {
 		combo = norm
 	}
-	return rollup.ResolveTimeRecorded(ctx, dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule),
+	return rollup.ResolveTimeRecorded(stored.within(ctx), dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule),
 		rollup.TimeSummaryRule(dep.TimeSummary), combo, fetch)
 }

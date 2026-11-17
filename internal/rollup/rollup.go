@@ -361,14 +361,15 @@ func resolveFlat(
 		}
 		return 0, false, nil
 	}
-	_, _, err = resolve(ctx, dims, metricID, metricDimIDs, AggSum, "", combo, collect, 0)
+	rctx, zeros := flatCtx(ctx, aggRule)
+	_, _, err = resolve(rctx, dims, metricID, metricDimIDs, AggSum, "", combo, collect, 0)
 	if errors.Is(err, ErrNoValue) {
 		return 0, false, false, nil // every leaf read has no value
 	}
 	if err != nil {
 		return 0, false, false, err
 	}
-	return combineAgg(vals, aggRule), true, len(vals) > 0, nil
+	return combineAgg(vals, aggRule), true, len(vals) > 0 || zeros.seen, nil
 }
 
 // noValue turns an ErrNoValue from the aggregation into "no value".
@@ -588,6 +589,11 @@ func resolve(
 		return fetch(ctx, metricID, exact)
 	}
 
+	// The fetch's stored facts, when the caller listed them (WithRecorded):
+	// the ones inside codeSets, not every coordinate codeSets spans.
+	if v, ok, handled, err := resolveListed(ctx, metricID, metricDimIDs, aggRule, codeSets, fetch); handled {
+		return v, ok, err
+	}
 	combos := cartesianProduct(metricDimIDs, codeSets)
 	if len(combos) == 0 {
 		return 0, true, nil
@@ -632,8 +638,9 @@ func resolveRecorded(
 		}
 		return v, ok, err
 	}
-	v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked, depth)
-	if err != nil || !ok || !recorded {
+	lctx, zeros := listenZeros(ctx)
+	v, ok, err := resolve(lctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked, depth)
+	if err != nil || !ok || (!recorded && !zeros.seen) {
 		return 0, false, err
 	}
 	return v, true, nil
@@ -662,8 +669,9 @@ func ResolveTimeRecorded(
 		}
 		return v, ok, err
 	}
-	v, ok, err := ResolveTime(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked)
-	if err != nil || !ok || !recorded {
+	lctx, zeros := listenZeros(ctx)
+	v, ok, err := ResolveTime(lctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked)
+	if err != nil || !ok || (!recorded && !zeros.seen) {
 		return 0, false, err
 	}
 	return v, true, nil
@@ -1093,8 +1101,9 @@ func resolveTime(
 			}
 			return v, ok, err
 		}
-		v, ok, err := noValue(resolve(ctx, dims, metricID, metricDimIDs, aggRule, ts, c, tracked, 0))
-		return v, ok, recorded, err
+		lctx, zeros := listenZeros(ctx)
+		v, ok, err := noValue(resolve(lctx, dims, metricID, metricDimIDs, aggRule, ts, c, tracked, 0))
+		return v, ok, recorded || zeros.seen, err
 	}
 
 	var axis *Dimension

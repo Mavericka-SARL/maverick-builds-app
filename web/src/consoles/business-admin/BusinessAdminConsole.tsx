@@ -355,10 +355,10 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
   const { data: roles = [] } = useQuery<BARole[]>({ queryKey: ["ba-roles"], queryFn: api.listBARoles });
   // Roles belong to the workspace, so every model of its applications shares
   // them. A model lists the ones it uses and the ones no model uses yet; the
-  // ones only other models use come in on request.
-  const [showOtherModels, setShowOtherModels] = useState(false);
-  const otherModelsOnly = roles.filter(r => !r.used_here && r.other_models.length > 0);
-  const shownRoles = showOtherModels ? roles : roles.filter(r => r.used_here || r.other_models.length === 0);
+  // ones only other models use are those models' business, never shown here
+  // (owner, 2026-11-17: "as business admin of one model I do not want to see
+  // roles of other model").
+  const shownRoles = roles.filter(r => r.used_here || r.other_models.length === 0);
   // Who may be added: the workspace's users. A developer reads them from the
   // tenant's users list (Developer › Users) — a tenant has one workspace —
   // and the server refuses anyone outside the role's workspace.
@@ -522,14 +522,6 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
       {deleteRole.isError && (
         <p className="mvx-admin-error">{(deleteRole.error as Error).message}</p>
       )}
-      {otherModelsOnly.length > 0 && (
-        <Checkbox
-          label={`Show the ${otherModelsOnly.length} role${otherModelsOnly.length !== 1 ? "s" : ""} only other models use`}
-          checked={showOtherModels}
-          onChange={() => setShowOtherModels(v => !v)}
-        />
-      )}
-
       {shownRoles.length === 0 && (
         <EmptyState label={roles.length === 0 ? "No roles yet. Create one above." : "This model uses no role yet. Create one above."} />
       )}
@@ -952,17 +944,11 @@ export function AccessRulesTab() {
             aria-label="Select user"
           >
             <option value="">— select a person or a role —</option>
-            {/* Roles belong to the workspace: this model's (and unused) ones
-                first, the ones only other models use after them. */}
+            {/* Roles belong to the workspace: this model's and unused ones;
+                the ones only other models use are not offered. */}
             {roles.some(r => r.used_here || r.other_models.length === 0) && (
               <optgroup label="Roles (every member holds these)">
                 {roles.filter(r => r.used_here || r.other_models.length === 0)
-                  .map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
-              </optgroup>
-            )}
-            {roles.some(r => !r.used_here && r.other_models.length > 0) && (
-              <optgroup label="Roles only other models use">
-                {roles.filter(r => !r.used_here && r.other_models.length > 0)
                   .map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
               </optgroup>
             )}

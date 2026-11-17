@@ -20861,7 +20861,7 @@ func isUniqueViolation(err error) bool {
 // roleNameTaken: business roles are the workspace's, shared by its apps, so
 // a name another app's role uses is taken (it was a raw 500).
 func roleNameTaken(name string) error {
-	return fmt.Errorf("a business role named %q already exists in this workspace — roles are shared by its applications: give this one another name, or reuse that role", name)
+	return fmt.Errorf("a business role named %q already exists in this workspace — roles are shared by its applications, so another model may hold it: give this one another name", name)
 }
 
 // isCheckViolation reports a CHECK or trigger refusal (SQLSTATE 23514), such

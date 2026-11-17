@@ -17,6 +17,10 @@ export function useDemo(revisionId?: string, options: { enabled?: boolean; stale
   return useQuery({
     queryKey: ["demo", appId, modelId, revisionId ?? ""],
     queryFn: () => api.getDemo(revisionId),
+    // The live revision changes under an open console when a developer
+    // uses Set active: read it again every minute while the console is in
+    // view, so everyone moves to the new one without a reload.
+    refetchInterval: revisionId ? false : 60_000,
     ...options,
   });
 }

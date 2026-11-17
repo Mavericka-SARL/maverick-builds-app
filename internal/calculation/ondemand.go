@@ -131,6 +131,9 @@ type evalEnv struct {
 	sources map[string]*exactSource
 	// building guards against a (validation-refused) cycle.
 	building map[string]bool
+	// stored lists the coordinates of the dependency values
+	// loadDependencies prefetched, for the reads over them.
+	stored *storedReads
 }
 
 func newEvalEnv(s *Scheduler, modelID, revisionID string, allDims map[string]*rollup.Dimension,
@@ -140,6 +143,7 @@ func newEvalEnv(s *Scheduler, modelID, revisionID string, allDims map[string]*ro
 		s: s, modelID: modelID, revisionID: revisionID, allDims: allDims, metricDimIDs: metricDimIDs,
 		dimIDToName: dimIDToName, meta: meta, allDefs: allDefs,
 		sources: map[string]*exactSource{}, building: map[string]bool{},
+		stored: newStoredReads(),
 	}
 }
 
@@ -204,6 +208,7 @@ func (env *evalEnv) loadDependencies(ctx context.Context, def *MetricDef) (map[s
 			v, ok := valueMap[dimKey(combo)]
 			return v, ok, nil
 		}
+		env.stored.add(depID, valueMap)
 		if src := env.exactSource(ctx, depDef, valueMap); src != nil {
 			sources[depID] = src
 		}
@@ -282,6 +287,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 		}
 	}
 	reads := newDimReads(ctx, env.meta, def, allDefs, metricDimIDs, fetch, rows, true)
+	reads.listed = env.stored.within(ctx)
 
 	// A text calculation reads a text metric by a plain reference
 	// (wa_employee_id & "|" & wa_type), and a number formula compares one
@@ -338,7 +344,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				notes[depDef.Name] = noteAt(depID, combo)
 				continue
 			}
-			v, found, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
+			v, found, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID], env.stored)
 			if err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
