@@ -180,7 +180,8 @@ type Deps struct {
 	// TokenClients are the OAuth clients (a token's azp) the REST API
 	// accepts tokens from; empty means DefaultTokenClients.
 	TokenClients []string
-	// MCP mounts the read-only chat-reporting connector (mcp.go); the zero
+	// MCP mounts the chat connector (mcp.go): reads, and cell writes for a
+	// token granted grids:write; the zero
 	// value leaves it off.
 	MCP MCPConfig
 	// ModelLinks, when set, is filled in with this handler so the caller
@@ -1110,7 +1111,7 @@ func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor,
 // restClaims validates a REST request's bearer token: issuer, signature and
 // expiry (identity.JWKSValidator), and the client it was issued to. A token
 // minted for any other client of the realm opens nothing here — above all a
-// chat connector's, whose grant is a read-only one served at /mcp alone: were
+// chat connector's, whose grant is a narrow one served at /mcp alone: were
 // it accepted here it would carry the account's full read-write reach.
 func (h *handler) restClaims(token string) (*identity.Claims, error) {
 	claims, err := h.jwks.Validate(token)

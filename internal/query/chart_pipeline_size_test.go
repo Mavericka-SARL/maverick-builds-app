@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -176,16 +177,26 @@ func TestChartOverAPipelineSizedGridReadsItsDeals(t *testing.T) {
 	}
 
 	resolver := query.NewChartResolver(pool)
+	allThree := []string{dealValue, avgDeal, halfDeal}
 	for _, read := range []struct {
 		name    string
 		along   string
 		context map[string]string
+		metrics []string
 	}{
-		{"Sales dashboard: by stage for one manager, one currency, a year", stage, map[string]string{manager: "M1", currency: "USD", month: "2026"}},
-		{"connector: by manager, nothing else fixed", manager, map[string]string{}},
+		{"Sales dashboard: by stage for one manager, one currency, a year", stage, map[string]string{manager: "M1", currency: "USD", month: "2026"}, allThree},
+		{"connector: by manager, nothing else fixed", manager, map[string]string{}, allThree},
+		// The dashboard's selector bar pins every selector, "All accounts"
+		// and "All service categories" included: a parent member the read
+		// expands child by child. A metric worked out at each leaf still
+		// walks every child there (OBSERVATIONS: "A per-leaf formula under
+		// a pinned parent still walks every child") — half_deal took 90 s
+		// on a CI runner — so it is not read here.
+		{"Sales dashboard as it loads: All accounts, All categories pinned", stage, map[string]string{
+			manager: "M1", currency: "USD", month: "2026", account: "ALL", category: "ALLCAT"}, []string{dealValue, avgDeal}},
 	} {
 		started := time.Now()
-		cfg := &query.ChartConfig{ChartType: query.ChartBar, DimensionID: read.along, MetricIDs: []string{dealValue, avgDeal, halfDeal}}
+		cfg := &query.ChartConfig{ChartType: query.ChartBar, DimensionID: read.along, MetricIDs: read.metrics}
 		result, err := resolver.Resolve(ctx, cfg, read.context, modelID, revisionID, grid, userID)
 		if err != nil {
 			t.Fatalf("%s: %v", read.name, err)
@@ -210,8 +221,10 @@ func TestChartOverAPipelineSizedGridReadsItsDeals(t *testing.T) {
 			if avg := data.Series[1].Values[i]; n > 0 && (avg == nil || math.Abs(*avg-sum/float64(n)) > 1e-6) {
 				t.Errorf("%s: average deal at %s = %v, want %v", read.name, c.Key, avg, sum/float64(n))
 			}
-			if half := data.Series[2].Values[i]; n > 0 && (half == nil || math.Abs(*half-sum/2) > 1e-6) {
-				t.Errorf("%s: half deal at %s = %v, want %v", read.name, c.Key, half, sum/2)
+			if len(data.Series) > 2 {
+				if half := data.Series[2].Values[i]; n > 0 && (half == nil || math.Abs(*half-sum/2) > 1e-6) {
+					t.Errorf("%s: half deal at %s = %v, want %v", read.name, c.Key, half, sum/2)
+				}
 			}
 			checked++
 		}
@@ -219,6 +232,16 @@ func TestChartOverAPipelineSizedGridReadsItsDeals(t *testing.T) {
 			t.Fatalf("%s: no categories", read.name)
 		}
 		t.Logf("%s: %d bars in %v", read.name, checked, took)
+		for _, m := range []struct{ name, id string }{{"deal value", dealValue}, {"average deal", avgDeal}, {"half deal", halfDeal}} {
+			if !slices.Contains(read.metrics, m.id) {
+				continue
+			}
+			one := time.Now()
+			if _, err := resolver.Resolve(ctx, &query.ChartConfig{ChartType: query.ChartBar, DimensionID: read.along, MetricIDs: []string{m.id}}, read.context, modelID, revisionID, grid, userID); err != nil {
+				t.Fatalf("%s, %s alone: %v", read.name, m.name, err)
+			}
+			t.Logf("  %s alone: %v", m.name, time.Since(one))
+		}
 		if took > 30*time.Second {
 			t.Errorf("%s took %v: the read walks every leaf coordinate again", read.name, took)
 		}

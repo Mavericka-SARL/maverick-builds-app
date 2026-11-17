@@ -279,3 +279,93 @@ func combineAggWithEmpty(vals []float64, empty int64, rule AggRule) float64 {
 	}
 	return combineAgg(vals, rule)
 }
+
+// factlessChildren is, when ctx lists metricID's facts with a plain 0
+// elsewhere (WithRecorded), the children of combo[dimID] beneath which no
+// listed fact lies within combo's other pins on the metric's dimensions.
+// Every read below such a child answers an unlisted coordinate's 0, and
+// whatever the structure below — a sum or mean of 0s, a period reduction
+// with nothing recorded, an empty product — the child adds exactly one 0 to
+// its parent: the caller counts it without walking it (the accounts ×
+// categories × periods under "All accounts" that no deal reaches). Not for
+// no value or recorded zeros elsewhere: there the child is a 0 or left out
+// depending on what lies below it. nil when it does not apply.
+func factlessChildren(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	dimID string,
+	combo map[string]string,
+	children []Member,
+) map[string]bool {
+	coords, known, at, err := recordedFor(ctx, metricID)
+	if err != nil || !known || at != elsewhereZero || !slices.Contains(metricDimIDs, dimID) {
+		return nil
+	}
+	dim, parent := dims[dimID], combo[dimID]
+	covered := map[string]bool{}
+	for _, f := range coords {
+		if len(f) != len(metricDimIDs) {
+			continue
+		}
+		within := true
+		for _, p := range metricDimIDs {
+			if code, pinned := combo[p]; pinned && p != dimID && !atOrUnder(dims[p], f[p], code) {
+				within = false
+				break
+			}
+		}
+		if within {
+			if child := childAbove(dim, f[dimID], parent); child != "" {
+				covered[child] = true
+			}
+		}
+	}
+	skip := map[string]bool{}
+	for _, c := range children {
+		if !covered[c.Code] {
+			skip[c.Code] = true
+		}
+	}
+	return skip
+}
+
+// atOrUnder reports whether code is ancestor or one of its descendants in
+// dim. An unknown dimension constrains nothing (true): a child is skipped
+// only when no fact can be beneath it.
+func atOrUnder(dim *Dimension, code, ancestor string) bool {
+	if dim == nil {
+		return true
+	}
+	for depth := 0; depth <= 64; depth++ {
+		if code == ancestor {
+			return true
+		}
+		m := FindMember(dim, code)
+		if m == nil || m.ParentCode == "" {
+			return false
+		}
+		code = m.ParentCode
+	}
+	return true
+}
+
+// childAbove is the child of parent that code is or lies beneath ("" when
+// code is not under parent).
+func childAbove(dim *Dimension, code, parent string) string {
+	if dim == nil {
+		return ""
+	}
+	for depth := 0; depth <= 64; depth++ {
+		m := FindMember(dim, code)
+		if m == nil || m.ParentCode == "" {
+			return ""
+		}
+		if m.ParentCode == parent {
+			return code
+		}
+		code = m.ParentCode
+	}
+	return ""
+}

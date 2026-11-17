@@ -472,8 +472,8 @@ type connectorHost struct {
 // this deployment serves the chat connector, its URL, and each host's client
 // id and secret — what they enter when adding the connector in ChatGPT or
 // Claude (the account menu). The secret is the host's, not the person's:
-// each person who connects signs in with their own account, and reads only
-// what their own access allows.
+// each person who connects signs in with their own account, and reads and
+// writes only what their own access allows.
 func (h *handler) connectorInfo(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.resolveActor(r.Context(), r); err != nil {
 		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)

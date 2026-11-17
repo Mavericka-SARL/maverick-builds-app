@@ -21634,10 +21634,11 @@ func (s *Server) handleGetChartDataRequest(args [1]string, argsEscaped bool, w h
 
 // handleGetConnectorInfoRequest handles getConnectorInfo operation.
 //
-// For any signed-in person: whether this deployment serves the read-only chat connector (/mcp), its
-// URL, and each chat host's registered OAuth client id and secret, which they enter when adding the
-// connector in that host. Every person who connects signs in with their own account and reads only
-// what their access allows.
+// For any signed-in person: whether this deployment serves the chat connector (/mcp), its URL, and
+// each chat host's registered OAuth client id and secret, which they enter when adding the connector
+// in that host. Every person who connects signs in with their own account, reads only what their
+// access allows, and enters values only into the input cells they may edit, when the connection was
+// allowed changes and the tenant has not turned chat writes off.
 //
 // GET /api/connector
 func (s *Server) handleGetConnectorInfoRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

@@ -568,7 +568,7 @@ func mcpConfig(c cfg, log zerolog.Logger) gateway.MCPConfig {
 		log.Warn().Msg("MCP_ENABLED=true but neither MCP_RESOURCE_URL nor CONSOLE_URL is set: the chat connector stays off")
 		return gateway.MCPConfig{}
 	}
-	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp (read-only)")
+	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp")
 	return gateway.MCPConfig{Enabled: true, ResourceURL: resource, AuthorizationServer: c.MCPAuthorizationServer,
 		Scope: c.MCPScope, WriteScope: c.MCPWriteScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion,
 		OpenAIAppsChallenge: c.MCPOpenAIAppsChallenge}

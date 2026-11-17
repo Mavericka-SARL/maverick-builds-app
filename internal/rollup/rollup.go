@@ -525,8 +525,19 @@ func resolve(
 			// persists for the period's row and the *VALUE family computes.
 			children = leafPeriods(dim, combo[dimID])
 		}
+		// With the facts listed, a child none of them lies beneath adds a 0
+		// without being walked: counted in skippedZeros.
+		var skip map[string]bool
+		if !timeParent {
+			skip = factlessChildren(ctx, dims, metricID, metricDimIDs, dimID, combo, children)
+		}
+		skippedZeros := int64(0)
 		vals := make([]float64, 0, len(children))
 		for _, child := range children {
+			if skip[child.Code] {
+				skippedZeros++
+				continue
+			}
 			childCombo := cloneCombo(combo)
 			childCombo[dimID] = child.Code
 			if timeParent {
@@ -552,7 +563,7 @@ func resolve(
 			}
 			vals = append(vals, v)
 		}
-		if !timeParent && len(vals) == 0 {
+		if !timeParent && len(vals) == 0 && skippedZeros == 0 {
 			return 0, false, ErrNoValue
 		}
 		if timeParent {
@@ -561,7 +572,7 @@ func resolve(
 			}
 			return CombineTimeOver(vals, len(children), timeSummary), true, nil
 		}
-		return combineAgg(vals, aggRule), true, nil
+		return combineAggWithEmpty(vals, skippedZeros, aggRule), true, nil
 	}
 
 	// Tier 2 — no pinned dimension has children left to expand: relate each
