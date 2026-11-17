@@ -212,6 +212,37 @@ func (p *plan) readTotals(snap Snapshot, placeable map[string]Metric, rows map[s
 	if p.pivotDim != nil {
 		axes = append(axes, *p.pivotDim)
 	}
+	// Count the points before making them: a combination names a parent
+	// unless every axis's member and every pinned member is a leaf, so
+	// there are (all combinations − leaf-only ones), or all of them when a
+	// pinned member is a parent. The pinned dimensions are never axes. An
+	// export over six dimensions asked for 35 million points, made them
+	// all before this cap, and took a gateway past 3 GiB (2026-11-17).
+	members := make([][]Member, len(axes))
+	all, leafOnly := 1.0, 1.0
+	for i, d := range axes {
+		members[i] = p.allowedLeaves(d)
+		leaves := 0
+		for _, m := range members[i] {
+			if !isParent[d.ID][m.Code] {
+				leaves++
+			}
+		}
+		all *= float64(len(members[i]))
+		leafOnly *= float64(leaves)
+	}
+	count := all - leafOnly
+	for id, c := range p.pinned {
+		if isParent[id][c] {
+			count = all
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	if count > MaxTotalPoints {
+		return fmt.Errorf("this export asks for %.0f totals (combinations naming a parent member), more than %d: filter its dimensions to fewer parents, or let a dashboard download follow its selector bar", count, MaxTotalPoints)
+	}
 	walk = func(i int, codes map[string]string) {
 		if i == len(axes) {
 			cp := make(map[string]string, len(codes)+len(p.pinned))
@@ -233,7 +264,7 @@ func (p *plan) readTotals(snap Snapshot, placeable map[string]Metric, rows map[s
 			}
 			return
 		}
-		for _, m := range p.allowedLeaves(axes[i]) {
+		for _, m := range members[i] {
 			codes[axes[i].ID] = m.Code
 			walk(i+1, codes)
 		}
@@ -242,9 +273,6 @@ func (p *plan) readTotals(snap Snapshot, placeable map[string]Metric, rows map[s
 	walk(0, map[string]string{})
 	if len(points) == 0 {
 		return nil
-	}
-	if len(points) > MaxTotalPoints {
-		return fmt.Errorf("this export asks for %d totals (combinations naming a parent member), more than %d: filter its dimensions to fewer parents, or let a dashboard download follow its selector bar", len(points), MaxTotalPoints)
 	}
 	asked := make([]map[string]string, len(points))
 	for i, pt := range points {
