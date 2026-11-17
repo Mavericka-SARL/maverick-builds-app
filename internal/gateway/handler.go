@@ -18993,11 +18993,16 @@ type baRoleRow struct {
 	Name         string   `json:"name"`
 	MemberCount  int      `json:"member_count"`
 	DashboardIDs []string `json:"dashboard_ids"`
+	// UsedHere is whether the open model uses the role, OtherModels the
+	// other models that do (assignee.Usage): roles belong to the workspace,
+	// so the Roles page shows a model its own and the ones no model uses yet.
+	UsedHere    bool                `json:"used_here"`
+	OtherModels []assignee.ModelUse `json:"other_models"`
 }
 
 func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	wsID, _, err := h.baOrDevWorkspaceModel(ctx, r)
+	wsID, modelID, err := h.baOrDevWorkspaceModel(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve workspace model")
 		return
@@ -19028,8 +19033,24 @@ func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 			_ = rows.Scan(&role.ID, &role.Name, &role.MemberCount, &role.DashboardIDs)
 			out = append(out, role)
 		}
+		rows.Close()
 		if out == nil {
 			out = []baRoleRow{}
+		}
+		use, err := assignee.Usage(ctx, h.db.For(ctx), wsID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		for i := range out {
+			out[i].OtherModels = []assignee.ModelUse{}
+			for _, m := range use[out[i].ID] {
+				if m.ModelID == modelID {
+					out[i].UsedHere = true
+				} else {
+					out[i].OtherModels = append(out[i].OtherModels, m)
+				}
+			}
 		}
 		jsonOK(w, out)
 
@@ -19070,6 +19091,34 @@ func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
+}
+
+// roleChangeConfirmed refuses (409, code role_used_elsewhere) a rename or
+// delete of a business role that models other than the open one use, unless
+// the request says ?confirm_other_models=true: roles belong to the workspace,
+// so the change reaches those models' workflows, records tables, dimensions,
+// dashboards and access rules too. It reports whether to go on.
+func (h *handler) roleChangeConfirmed(w http.ResponseWriter, r *http.Request, wsID, roleID, modelID, verb string) bool {
+	if r.URL.Query().Get("confirm_other_models") == "true" {
+		return true
+	}
+	others, err := assignee.OtherModels(r.Context(), h.db.For(r.Context()), wsID, roleID, modelID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	if len(others) == 0 {
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": fmt.Sprintf("this role is also used by %s; %s it changes them too — send confirm_other_models=true to go ahead",
+			assignee.Labels(others), verb),
+		"code":   "role_used_elsewhere",
+		"models": others,
+	})
+	return false
 }
 
 // ── Business-Admin: /api/business-admin/roles/{id}[/dashboards|/members[/{userId}]] ──
@@ -19129,7 +19178,25 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
-			if _, err := h.db.Exec(ctx,
+			if !h.roleChangeConfirmed(w, r, wsID, roleID, modelID, "renaming") {
+				return
+			}
+			// The rename and its references move together: workflows, runs,
+			// tables of records and dimensions name roles by name, so a
+			// rename that left them behind stopped reaching the members.
+			tx, err := h.db.For(ctx).Begin(ctx)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			defer tx.Rollback(ctx) //nolint:errcheck
+			var oldName string
+			if err := tx.QueryRow(ctx,
+				`SELECT name FROM identity.business_role WHERE id=$1::uuid FOR UPDATE`, roleID).Scan(&oldName); err != nil {
+				jsonErr(w, fmt.Errorf("business role not found"), http.StatusNotFound)
+				return
+			}
+			if _, err := tx.Exec(ctx,
 				`UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, roleID, body.Name); isUniqueViolation(err) {
 				jsonErr(w, roleNameTaken(body.Name), http.StatusConflict)
 				return
@@ -19137,17 +19204,33 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
+			renamed, err := assignee.RenameReferences(ctx, tx, wsID, oldName, body.Name)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			if err := tx.Commit(ctx); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
 			if a, e := h.resolveActor(ctx, r); e == nil {
+				meta := map[string]string{"name": body.Name, "old_name": oldName}
+				if !renamed.Empty() {
+					meta["renamed_in"] = renamed.Summary()
+				}
 				auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 					Category: auditlog.CategoryAdmin, EventType: auditlog.EventRoleUpdated,
 					ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 					ResourceType: "business_role", ResourceID: roleID,
-					Metadata: map[string]string{"name": body.Name},
+					Metadata: meta,
 				})
 			}
-			jsonOK(w, map[string]string{"status": "ok"})
+			jsonOK(w, map[string]any{"status": "ok", "renamed_in": renamed})
 
 		case http.MethodDelete:
+			if !h.roleChangeConfirmed(w, r, wsID, roleID, modelID, "deleting") {
+				return
+			}
 			if _, err := h.db.Exec(ctx,
 				`DELETE FROM identity.business_role WHERE id=$1::uuid`, roleID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)

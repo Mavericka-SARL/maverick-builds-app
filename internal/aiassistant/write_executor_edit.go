@@ -1275,8 +1275,9 @@ func (e *WriteExecutor) resolveBusinessRole(ctx context.Context, ref string) (id
 	return id, name, wsID, nil
 }
 
-// roleUseNote names the workflows of this application whose steps name the
-// role, since assignee_roles and recipient_role match roles by name.
+// roleUseNote names the workflows of this application whose steps name a
+// deleted role, since assignee_roles and recipient_role match roles by name
+// (a rename carries itself into them: assignee.RenameReferences).
 func (e *WriteExecutor) roleUseNote(ctx context.Context, roleName, verb string) string {
 	rows, err := e.pool.Query(ctx, `
 		SELECT DISTINCT wd.name FROM workflow.workflow_def wd
@@ -1301,6 +1302,22 @@ func (e *WriteExecutor) roleUseNote(ctx context.Context, roleName, verb string) 
 		strings.Join(names, ", "), roleName, verb)
 }
 
+// refuseIfUsedElsewhere refuses a rename or delete of a role that models
+// other than this session's use: roles belong to the workspace, and the
+// console's Roles page asks the person to confirm that change
+// (roleChangeConfirmed), which a plan step cannot.
+func (e *WriteExecutor) refuseIfUsedElsewhere(ctx context.Context, wsID, roleID, roleName, verb string) error {
+	others, err := assignee.OtherModels(ctx, e.pool, wsID, roleID, e.modelID)
+	if err != nil {
+		return err
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	return fmt.Errorf("business role '%s' is also used by %s, so %s it here would change them too; leave it as it is, or the developer does it on the Roles page, which asks to confirm",
+		roleName, assignee.Labels(others), verb)
+}
+
 // updateBusinessRole is PATCH /api/business-admin/roles/{id}: a rename.
 func (e *WriteExecutor) updateBusinessRole(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
@@ -1314,7 +1331,7 @@ func (e *WriteExecutor) updateBusinessRole(ctx context.Context, raw json.RawMess
 	if perr != nil || p.Role == "" || strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("role (its name or id) and name are required")
 	}
-	id, old, _, err := e.resolveBusinessRole(ctx, p.Role)
+	id, old, wsID, err := e.resolveBusinessRole(ctx, p.Role)
 	if err != nil {
 		return "", "", err
 	}
@@ -1322,13 +1339,34 @@ func (e *WriteExecutor) updateBusinessRole(ctx context.Context, raw json.RawMess
 	if err := assignee.CheckBusinessRoleName(name); err != nil {
 		return "", "", err
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, id, name); err != nil {
+	if err := e.refuseIfUsedElsewhere(ctx, wsID, id, old, "renaming"); err != nil {
+		return "", "", err
+	}
+	// As PATCH /api/business-admin/roles/{id}: what names the role follows
+	// the new name in the same transaction.
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("rename business role: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, id, name); err != nil {
 		if metricformula.IsUniqueViolation(err) {
 			return "", "", fmt.Errorf("a business role named '%s' already exists", name)
 		}
 		return "", "", fmt.Errorf("rename business role: %w", err)
 	}
-	return fmt.Sprintf("Business role '%s' renamed to '%s'%s", old, name, e.roleUseNote(ctx, old, "renamed")), id, nil
+	renamed, err := assignee.RenameReferences(ctx, tx, wsID, old, name)
+	if err != nil {
+		return "", "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", "", fmt.Errorf("rename business role: %w", err)
+	}
+	note := ""
+	if !renamed.Empty() {
+		note = "; the new name was carried into " + renamed.Summary()
+	}
+	return fmt.Sprintf("Business role '%s' renamed to '%s'%s", old, name, note), id, nil
 }
 
 // deleteBusinessRole is DELETE /api/business-admin/roles/{id}: the role, its
@@ -1344,8 +1382,11 @@ func (e *WriteExecutor) deleteBusinessRole(ctx context.Context, raw json.RawMess
 	if perr != nil || p.Role == "" {
 		return "", "", fmt.Errorf("role (its name or id) is required")
 	}
-	id, name, _, err := e.resolveBusinessRole(ctx, p.Role)
+	id, name, wsID, err := e.resolveBusinessRole(ctx, p.Role)
 	if err != nil {
+		return "", "", err
+	}
+	if err := e.refuseIfUsedElsewhere(ctx, wsID, id, name, "deleting"); err != nil {
 		return "", "", err
 	}
 	if _, err := e.pool.Exec(ctx, `DELETE FROM identity.business_role WHERE id=$1::uuid`, id); err != nil {

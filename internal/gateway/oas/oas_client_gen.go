@@ -10314,6 +10314,27 @@ func (c *Client) sendDeleteBARole(ctx context.Context, params DeleteBARoleParams
 	}
 	uri.AddPathParts(u, pathParts[:]...)
 
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "confirm_other_models" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "confirm_other_models",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ConfirmOtherModels.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "DELETE", u)
 	if err != nil {
@@ -38476,6 +38497,27 @@ func (c *Client) sendUpdateBARole(ctx context.Context, request *BARoleRequest, p
 		pathParts[1] = encoded
 	}
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "confirm_other_models" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "confirm_other_models",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ConfirmOtherModels.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "PATCH", u)

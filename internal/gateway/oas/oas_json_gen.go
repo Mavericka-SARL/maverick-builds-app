@@ -11019,13 +11019,27 @@ func (s *BARole) encodeFields(e *jx.Encoder) {
 		}
 		e.ArrEnd()
 	}
+	{
+		e.FieldStart("used_here")
+		e.Bool(s.UsedHere)
+	}
+	{
+		e.FieldStart("other_models")
+		e.ArrStart()
+		for _, elem := range s.OtherModels {
+			elem.Encode(e)
+		}
+		e.ArrEnd()
+	}
 }
 
-var jsonFieldsNameOfBARole = [4]string{
+var jsonFieldsNameOfBARole = [6]string{
 	0: "id",
 	1: "name",
 	2: "member_count",
 	3: "dashboard_ids",
+	4: "used_here",
+	5: "other_models",
 }
 
 // Decode decodes BARole from json.
@@ -11093,6 +11107,36 @@ func (s *BARole) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"dashboard_ids\"")
 			}
+		case "used_here":
+			requiredBitSet[0] |= 1 << 4
+			if err := func() error {
+				v, err := d.Bool()
+				s.UsedHere = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"used_here\"")
+			}
+		case "other_models":
+			requiredBitSet[0] |= 1 << 5
+			if err := func() error {
+				s.OtherModels = make([]BARoleModelUse, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem BARoleModelUse
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.OtherModels = append(s.OtherModels, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"other_models\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -11103,7 +11147,7 @@ func (s *BARole) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00001111,
+		0b00111111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -11275,6 +11319,136 @@ func (s *BARoleMember) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *BARoleMember) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *BARoleModelUse) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *BARoleModelUse) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("model_id")
+		json.EncodeUUID(e, s.ModelID)
+	}
+	{
+		e.FieldStart("model_name")
+		e.Str(s.ModelName)
+	}
+	{
+		e.FieldStart("application_name")
+		e.Str(s.ApplicationName)
+	}
+}
+
+var jsonFieldsNameOfBARoleModelUse = [3]string{
+	0: "model_id",
+	1: "model_name",
+	2: "application_name",
+}
+
+// Decode decodes BARoleModelUse from json.
+func (s *BARoleModelUse) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode BARoleModelUse to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "model_id":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := json.DecodeUUID(d)
+				s.ModelID = v
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"model_id\"")
+			}
+		case "model_name":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				v, err := d.Str()
+				s.ModelName = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"model_name\"")
+			}
+		case "application_name":
+			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				v, err := d.Str()
+				s.ApplicationName = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"application_name\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode BARoleModelUse")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000111,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfBARoleModelUse) {
+					name = jsonFieldsNameOfBARoleModelUse[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *BARoleModelUse) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *BARoleModelUse) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -63486,6 +63660,39 @@ func (s *OptUUID) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes UpdateBARoleOKRenamedIn as json.
+func (o OptUpdateBARoleOKRenamedIn) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes UpdateBARoleOKRenamedIn from json.
+func (o *OptUpdateBARoleOKRenamedIn) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptUpdateBARoleOKRenamedIn to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptUpdateBARoleOKRenamedIn) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptUpdateBARoleOKRenamedIn) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes UpdateDimensionRequestAggRule as json.
 func (o OptUpdateDimensionRequestAggRule) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -82743,10 +82950,17 @@ func (s *UpdateBARoleOK) encodeFields(e *jx.Encoder) {
 			s.Status.Encode(e)
 		}
 	}
+	{
+		if s.RenamedIn.Set {
+			e.FieldStart("renamed_in")
+			s.RenamedIn.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateBARoleOK = [1]string{
+var jsonFieldsNameOfUpdateBARoleOK = [2]string{
 	0: "status",
+	1: "renamed_in",
 }
 
 // Decode decodes UpdateBARoleOK from json.
@@ -82766,6 +82980,16 @@ func (s *UpdateBARoleOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "renamed_in":
+			if err := func() error {
+				s.RenamedIn.Reset()
+				if err := s.RenamedIn.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"renamed_in\"")
 			}
 		default:
 			return d.Skip()
@@ -82787,6 +83011,159 @@ func (s *UpdateBARoleOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *UpdateBARoleOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *UpdateBARoleOKRenamedIn) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *UpdateBARoleOKRenamedIn) encodeFields(e *jx.Encoder) {
+	{
+		if s.Workflows != nil {
+			e.FieldStart("workflows")
+			e.ArrStart()
+			for _, elem := range s.Workflows {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Runs.Set {
+			e.FieldStart("runs")
+			s.Runs.Encode(e)
+		}
+	}
+	{
+		if s.Tables != nil {
+			e.FieldStart("tables")
+			e.ArrStart()
+			for _, elem := range s.Tables {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Dimensions != nil {
+			e.FieldStart("dimensions")
+			e.ArrStart()
+			for _, elem := range s.Dimensions {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfUpdateBARoleOKRenamedIn = [4]string{
+	0: "workflows",
+	1: "runs",
+	2: "tables",
+	3: "dimensions",
+}
+
+// Decode decodes UpdateBARoleOKRenamedIn from json.
+func (s *UpdateBARoleOKRenamedIn) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode UpdateBARoleOKRenamedIn to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "workflows":
+			if err := func() error {
+				s.Workflows = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Workflows = append(s.Workflows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"workflows\"")
+			}
+		case "runs":
+			if err := func() error {
+				s.Runs.Reset()
+				if err := s.Runs.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"runs\"")
+			}
+		case "tables":
+			if err := func() error {
+				s.Tables = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tables = append(s.Tables, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tables\"")
+			}
+		case "dimensions":
+			if err := func() error {
+				s.Dimensions = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Dimensions = append(s.Dimensions, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimensions\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode UpdateBARoleOKRenamedIn")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *UpdateBARoleOKRenamedIn) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *UpdateBARoleOKRenamedIn) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

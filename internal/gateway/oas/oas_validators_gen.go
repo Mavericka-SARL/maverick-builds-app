@@ -1559,6 +1559,17 @@ func (s *BARole) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if s.OtherModels == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "other_models",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}

@@ -2596,6 +2596,12 @@ func encodeDeleteBARoleResponse(response DeleteBARoleRes, w http.ResponseWriter,
 
 		return nil
 
+	case *DeleteBARoleConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
@@ -10520,6 +10526,12 @@ func encodeUpdateBARoleResponse(response UpdateBARoleRes, w http.ResponseWriter,
 		if _, err := e.WriteTo(w); err != nil {
 			return errors.Wrap(err, "write")
 		}
+
+		return nil
+
+	case *UpdateBARoleConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
 
 		return nil
 

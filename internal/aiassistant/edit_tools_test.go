@@ -602,8 +602,11 @@ func TestBusinessRoleEdits(t *testing.T) {
 			"routes": map[string]string{"approve": "end-completed", "reject": "end-rejected"}}}})
 
 	res, _ := h.must("update_business_role", map[string]any{"role": "finance review", "name": "Finance"})
-	if !strings.Contains(res, "Expense") {
-		t.Errorf("rename result %q does not name the workflow that still names the old role", res)
+	if !strings.Contains(res, "the new name was carried into workflow Expense") {
+		t.Errorf("rename result %q does not name the workflow the new name was carried into", res)
+	}
+	if got := h.scalar(`SELECT steps->0->>'assignee_roles' FROM workflow.workflow_def WHERE name='Expense'`); got != `["Finance"]` {
+		t.Errorf("Expense's step names %s after the rename, want [\"Finance\"]", got)
 	}
 	_, _, err := h.run("update_business_role", map[string]any{"role": "Finance", "name": "Auditors"})
 	h.refused("renaming onto a taken name", err, "already exists")
@@ -627,6 +630,19 @@ func TestBusinessRoleEdits(t *testing.T) {
 	h.must("delete_business_role", map[string]any{"role": "Finance"})
 	if n := h.scalar(`SELECT count(*)::text FROM identity.business_role WHERE id=$1::uuid`, role); n != "0" {
 		t.Error("role not deleted")
+	}
+
+	// Roles belong to the workspace: one another model uses (here, the
+	// editors of its dimension) is not renamed or deleted from this session,
+	// which cannot ask the person to confirm the change reaches that model.
+	otherModel := h.scalar(`INSERT INTO core.model (application_id, name) SELECT application_id, 'Pipeline' FROM core.model WHERE id=$1::uuid RETURNING id::text`, h.modelID)
+	h.scalar(`INSERT INTO model.dimension_def (model_id, name, editor_roles) VALUES ($1::uuid, 'Accounts', '{Auditors}') RETURNING id::text`, otherModel)
+	_, _, err = h.run("update_business_role", map[string]any{"role": "Auditors", "name": "Audit"})
+	h.refused("renaming a role another model uses", err, "also used by Pipeline")
+	_, _, err = h.run("delete_business_role", map[string]any{"role": "Auditors"})
+	h.refused("deleting a role another model uses", err, "also used by Pipeline")
+	if n := h.scalar(`SELECT count(*)::text FROM identity.business_role WHERE name='Auditors'`); n != "1" {
+		t.Error("a refused change still removed or renamed Auditors")
 	}
 }
 

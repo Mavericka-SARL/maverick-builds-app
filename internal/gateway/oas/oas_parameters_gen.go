@@ -3057,6 +3057,9 @@ func decodeDeleteAutomationRuleParams(args [1]string, argsEscaped bool, r *http.
 // DeleteBARoleParams is parameters of deleteBARole operation.
 type DeleteBARoleParams struct {
 	ID uuid.UUID
+	// True to go ahead although models other than the open one use the role; without it such a change
+	// answers 409 (code role_used_elsewhere, with the models).
+	ConfirmOtherModels OptBool `json:",omitempty,omitzero"`
 }
 
 func unpackDeleteBARoleParams(packed middleware.Parameters) (params DeleteBARoleParams) {
@@ -3067,10 +3070,20 @@ func unpackDeleteBARoleParams(packed middleware.Parameters) (params DeleteBARole
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "confirm_other_models",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ConfirmOtherModels = v.(OptBool)
+		}
+	}
 	return params
 }
 
 func decodeDeleteBARoleParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteBARoleParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -3113,6 +3126,47 @@ func decodeDeleteBARoleParams(args [1]string, argsEscaped bool, r *http.Request)
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: confirm_other_models.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "confirm_other_models",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotConfirmOtherModelsVal bool
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToBool(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotConfirmOtherModelsVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ConfirmOtherModels.SetTo(paramsDotConfirmOtherModelsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "confirm_other_models",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -16685,6 +16739,9 @@ func decodeUpdateAutomationRuleParams(args [1]string, argsEscaped bool, r *http.
 // UpdateBARoleParams is parameters of updateBARole operation.
 type UpdateBARoleParams struct {
 	ID uuid.UUID
+	// True to go ahead although models other than the open one use the role; without it such a change
+	// answers 409 (code role_used_elsewhere, with the models).
+	ConfirmOtherModels OptBool `json:",omitempty,omitzero"`
 }
 
 func unpackUpdateBARoleParams(packed middleware.Parameters) (params UpdateBARoleParams) {
@@ -16695,10 +16752,20 @@ func unpackUpdateBARoleParams(packed middleware.Parameters) (params UpdateBARole
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "confirm_other_models",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ConfirmOtherModels = v.(OptBool)
+		}
+	}
 	return params
 }
 
 func decodeUpdateBARoleParams(args [1]string, argsEscaped bool, r *http.Request) (params UpdateBARoleParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -16741,6 +16808,47 @@ func decodeUpdateBARoleParams(args [1]string, argsEscaped bool, r *http.Request)
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: confirm_other_models.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "confirm_other_models",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotConfirmOtherModelsVal bool
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToBool(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotConfirmOtherModelsVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ConfirmOtherModels.SetTo(paramsDotConfirmOtherModelsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "confirm_other_models",
+			In:   "query",
 			Err:  err,
 		}
 	}

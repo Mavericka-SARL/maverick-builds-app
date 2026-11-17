@@ -2101,6 +2101,26 @@ export interface BARole {
   name: string;
   member_count: number;
   dashboard_ids: string[];
+  /** Whether the open model uses the role: its dashboards, access rules,
+   *  workflows, records tables or dimensions, in any revision. */
+  used_here: boolean;
+  /** The other models that use it — roles belong to the workspace, so
+   *  every model of its applications shares them. */
+  other_models: BARoleModelUse[];
+}
+
+/** What a role's rename carried the new name into. */
+export interface BARoleRenamedIn {
+  workflows: string[];
+  runs: number;
+  tables: string[];
+  dimensions: string[];
+}
+
+export interface BARoleModelUse {
+  model_id: string;
+  model_name: string;
+  application_name: string;
 }
 
 export interface BARoleMember {
@@ -3491,10 +3511,14 @@ export const api = {
   listBARoles: () => apiFetch<BARole[]>("/api/business-admin/roles"),
   createBARole: (name: string) =>
     apiFetch<{ id: string }>("/api/business-admin/roles", { method: "POST", body: JSON.stringify({ name }) }),
-  updateBARole: (id: string, name: string) =>
-    apiFetch<{ status: string }>(`/api/business-admin/roles/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
-  deleteBARole: (id: string) =>
-    apiFetch<{ status: string }>(`/api/business-admin/roles/${id}`, { method: "DELETE" }),
+  // confirmOtherModels: the person agreed that the change reaches the other
+  // models using the role; without it the server answers 409
+  // role_used_elsewhere for such a role.
+  // A rename carries the new name into what names the role (renamed_in).
+  updateBARole: (id: string, name: string, confirmOtherModels = false) =>
+    apiFetch<{ status: string; renamed_in?: BARoleRenamedIn }>(`/api/business-admin/roles/${id}${confirmOtherModels ? "?confirm_other_models=true" : ""}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  deleteBARole: (id: string, confirmOtherModels = false) =>
+    apiFetch<{ status: string }>(`/api/business-admin/roles/${id}${confirmOtherModels ? "?confirm_other_models=true" : ""}`, { method: "DELETE" }),
   // revisionId: the revision whose dashboards the list covers (the developer's
   // working revision in Developer › Roles). Omitted, the server uses the live
   // revision of the selected model (Business Admin › Roles).

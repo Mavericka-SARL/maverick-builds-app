@@ -129,6 +129,17 @@ malformed `?revision_id=` query parameter answers **404** as well; a
 revision of another model of that application the caller may open selects that
 model.
 
+Named business roles (`/api/business-admin/roles`) belong to the workspace too,
+so every model of its applications shares them. The list says per role whether
+the open model uses it (`used_here`) and which other models do
+(`other_models`). Renaming or deleting a role other models use answers **409**
+`role_used_elsewhere` (with the models) unless the request carries
+`?confirm_other_models=true`. A rename carries the new name, in the same
+transaction, into everything that names the role: workflow definitions of
+every revision (step assignees, notification recipients, start and reopen
+roles), runs' steps, tables of records' create roles and dimensions' editor
+roles; the answer lists them in `renamed_in`.
+
 Business roles (`business_admin`, `business_user`) are workspace-scoped: one
 opens the applications of the workspace it is held in, and the tenant-level
 applications (no workspace) of that workspace's tenant. A `developer` role

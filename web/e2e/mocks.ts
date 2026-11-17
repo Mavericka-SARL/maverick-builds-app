@@ -241,8 +241,8 @@ const notifications = [
 ];
 
 const roles = [
-  { id: "role-1", name: "Finance Editors", member_count: 2, dashboard_ids: ["dash-1", "dash-2"] },
-  { id: "role-2", name: "Sales Viewers", member_count: 4, dashboard_ids: ["dash-4"] },
+  { id: "role-1", name: "Finance Editors", member_count: 2, dashboard_ids: ["dash-1", "dash-2"], used_here: true, other_models: [] },
+  { id: "role-2", name: "Sales Viewers", member_count: 4, dashboard_ids: ["dash-4"], used_here: true, other_models: [] },
 ];
 
 const baUsers = [

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus, Pencil, Trash2, X } from "lucide-react";
-import { api, type Task, type HistoryInstance, type BARole, type BAUser, type BAAvailableItem, type UserAccessRule } from "../../api/client";
+import { api, type Task, type HistoryInstance, type BARole, type BARoleModelUse, type BARoleRenamedIn, type BAUser, type BAAvailableItem, type UserAccessRule } from "../../api/client";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
@@ -353,6 +353,12 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
   const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   const { data: roles = [] } = useQuery<BARole[]>({ queryKey: ["ba-roles"], queryFn: api.listBARoles });
+  // Roles belong to the workspace, so every model of its applications shares
+  // them. A model lists the ones it uses and the ones no model uses yet; the
+  // ones only other models use come in on request.
+  const [showOtherModels, setShowOtherModels] = useState(false);
+  const otherModelsOnly = roles.filter(r => !r.used_here && r.other_models.length > 0);
+  const shownRoles = showOtherModels ? roles : roles.filter(r => r.used_here || r.other_models.length === 0);
   // Who may be added: the workspace's users. A developer reads them from the
   // tenant's users list (Developer › Users) — a tenant has one workspace —
   // and the server refuses anyone outside the role's workspace.
@@ -375,14 +381,38 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
     mutationFn: (name: string) => api.createBARole(name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ba-roles"] }); setNewName(""); },
   });
+  const [renameNote, setRenameNote] = useState("");
   const updateRole = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => api.updateBARole(id, name),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ba-roles"] }); setEditingId(null); },
+    mutationFn: ({ id, name, confirmOtherModels }: { id: string; name: string; confirmOtherModels?: boolean }) =>
+      api.updateBARole(id, name, confirmOtherModels),
+    onSuccess: (res, { name }) => {
+      // Workflows, tables of records and dimensions changed with the name:
+      // refetch everything, so an open editor cannot save the old name back.
+      qc.invalidateQueries();
+      setEditingId(null);
+      const reached = res.renamed_in ? renamedSummary(res.renamed_in) : "";
+      setRenameNote(reached ? `Renamed to "${name}". The new name was carried into ${reached}.` : "");
+    },
   });
   const deleteRole = useMutation({
-    mutationFn: (id: string) => api.deleteBARole(id),
+    mutationFn: ({ id, confirmOtherModels }: { id: string; confirmOtherModels?: boolean }) =>
+      api.deleteBARole(id, confirmOtherModels),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ba-roles"] }),
   });
+
+  // A rename reaches the other models' workflows, records tables and
+  // dimensions, which name roles; asked first, as the server requires.
+  function renameRole(role: BARole) {
+    const name = editName.trim();
+    if (!name || name === role.name) { setEditingId(null); return; }
+    if (role.other_models.length === 0) { updateRole.mutate({ id: role.id, name }); return; }
+    confirm({
+      title: "Rename a role other models use?",
+      body: `"${role.name}" is ${role.used_here ? "also " : ""}used by ${modelLabels(role.other_models)}. The rename reaches them too: their workflows, tables of records and dimensions will name it "${name}".`,
+      confirmLabel: "Rename role",
+      onConfirm: () => updateRole.mutate({ id: role.id, name, confirmOtherModels: true }),
+    });
+  }
   const setDashboards = useMutation({
     // Developer › Roles edits the working revision's grants; Business Admin ›
     // Roles sends no revision (the live one of the selected model), unless a
@@ -485,12 +515,26 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
       {createRole.isError && (
         <p className="mvx-admin-error">{(createRole.error as Error).message}</p>
       )}
-
-      {roles.length === 0 && (
-        <EmptyState label="No roles yet. Create one above." />
+      {updateRole.isError && (
+        <p className="mvx-admin-error">{(updateRole.error as Error).message}</p>
+      )}
+      {renameNote && !updateRole.isError && <p className="mvx-admin-muted">{renameNote}</p>}
+      {deleteRole.isError && (
+        <p className="mvx-admin-error">{(deleteRole.error as Error).message}</p>
+      )}
+      {otherModelsOnly.length > 0 && (
+        <Checkbox
+          label={`Show the ${otherModelsOnly.length} role${otherModelsOnly.length !== 1 ? "s" : ""} only other models use`}
+          checked={showOtherModels}
+          onChange={() => setShowOtherModels(v => !v)}
+        />
       )}
 
-      {roles.map(role => {
+      {shownRoles.length === 0 && (
+        <EmptyState label={roles.length === 0 ? "No roles yet. Create one above." : "This model uses no role yet. Create one above."} />
+      )}
+
+      {shownRoles.map(role => {
         const expanded = expandedId === role.id;
         return (
           <div key={role.id} className="mvx-admin-object">
@@ -499,9 +543,9 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
               {editingId === role.id ? (
                 <div className="mvx-admin-inline-form" style={{ flex: 1 }}>
                   <TextInput value={editName} onChange={e => setEditName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && updateRole.mutate({ id: role.id, name: editName })}
+                    onKeyDown={e => e.key === "Enter" && renameRole(role)}
                     style={{ maxWidth: 240 }} autoFocus />
-                  <Button variant="primary" size="sm" onClick={() => updateRole.mutate({ id: role.id, name: editName })}>Save</Button>
+                  <Button variant="primary" size="sm" onClick={() => renameRole(role)}>Save</Button>
                   <Button size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
                 </div>
               ) : (
@@ -510,6 +554,9 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
                     <span className="mvx-admin-object__name">{role.name}</span>
                     <div className="mvx-admin-object__meta">
                       {role.member_count} user<Txt>{role.member_count !== 1 ? "s" : ""}</Txt>
+                      {role.other_models.length > 0 && (
+                        <Txt>{` · ${role.used_here ? "Also used by" : "Used by"} ${modelLabels(role.other_models)}`}</Txt>
+                      )}
                     </div>
                   </div>
                   <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} onClick={() => { setEditingId(role.id); setEditName(role.name); }}>
@@ -530,7 +577,16 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
                     aria-label={`Delete role ${role.name}`}
                     title="Delete role"
                     danger
-                    onClick={() => confirm({ title: "Delete role?", body: `This removes "${role.name}" and unassigns all its members and dashboards.`, confirmLabel: "Delete role", onConfirm: () => deleteRole.mutate(role.id) })}
+                    onClick={() => confirm({
+                      title: role.other_models.length > 0 ? "Delete a role other models use?" : "Delete role?",
+                      body: role.other_models.length > 0
+                        ? `This removes "${role.name}" and unassigns all its members and dashboards. It is ${role.used_here ? "also " : ""}used by ${modelLabels(role.other_models)}: their dashboards, access rules and workflows lose this role too.`
+                        : role.used_here
+                          ? `This removes "${role.name}" and unassigns all its members and dashboards. Workflow steps, tables of records and dimensions of this model that name it will name a role that no longer exists.`
+                          : `This removes "${role.name}" and unassigns all its members and dashboards.`,
+                      confirmLabel: "Delete role",
+                      onConfirm: () => deleteRole.mutate({ id: role.id, confirmOtherModels: role.other_models.length > 0 }),
+                    })}
                   >
                     <Trash2 size={14} />
                   </IconButton>
@@ -635,6 +691,33 @@ export function RolesTab({ variant = "business-admin", revisionId, builds = fals
       {confirmElement}
     </div>
   );
+}
+
+// renamedSummary names what a rename reached: "workflow Budget Approval;
+// 2 runs; table of records Requests".
+function renamedSummary(r: BARoleRenamedIn): string {
+  const parts: string[] = [];
+  const n = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  if (r.workflows.length) parts.push(`${n(r.workflows.length, "workflow", "workflows")} ${joinAnd(r.workflows)}`);
+  if (r.runs) parts.push(`${r.runs} ${n(r.runs, "run", "runs")}`);
+  if (r.tables.length) parts.push(`${n(r.tables.length, "table of records", "tables of records")} ${joinAnd(r.tables)}`);
+  if (r.dimensions.length) parts.push(`${n(r.dimensions.length, "dimension", "dimensions")} ${joinAnd(r.dimensions)}`);
+  return parts.join("; ");
+}
+
+function joinAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+// modelLabels names models for a sentence: "T&Q", "A and B", "A, B and C";
+// a model's application is added when its name differs.
+function modelLabels(models: BARoleModelUse[]): string {
+  const labels = models.map(m =>
+    !m.application_name || m.application_name.toLowerCase() === m.model_name.toLowerCase()
+      ? m.model_name
+      : `${m.model_name} (${m.application_name})`);
+  return joinAnd(labels);
 }
 
 function MemberList({ role, onRemove }: { role: BARole; onRemove: (id: string) => void }) {
@@ -869,9 +952,18 @@ export function AccessRulesTab() {
             aria-label="Select user"
           >
             <option value="">— select a person or a role —</option>
-            {roles.length > 0 && (
+            {/* Roles belong to the workspace: this model's (and unused) ones
+                first, the ones only other models use after them. */}
+            {roles.some(r => r.used_here || r.other_models.length === 0) && (
               <optgroup label="Roles (every member holds these)">
-                {roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
+                {roles.filter(r => r.used_here || r.other_models.length === 0)
+                  .map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
+              </optgroup>
+            )}
+            {roles.some(r => !r.used_here && r.other_models.length > 0) && (
+              <optgroup label="Roles only other models use">
+                {roles.filter(r => !r.used_here && r.other_models.length > 0)
+                  .map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
               </optgroup>
             )}
             <optgroup label="People">

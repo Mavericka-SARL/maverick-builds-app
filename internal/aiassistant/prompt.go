@@ -494,9 +494,11 @@ steps carefully.
 - Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
   only removes a draft that never ran); restore_workflow_def returns an archived one to draft, to be published again
   (publish_workflow_def); duplicate_workflow_def {"workflow_def_id", "name"} makes a draft copy.
-- Business roles (live): update_business_role {"role", "name"} renames; delete_business_role {"role"} removes the role
-  with its members and dashboard grants. Steps match roles by name, so the result names every workflow that still
-  names the old role — propose update_workflow_def for them. set_role_dashboards {"role", "dashboards": [ids or names]}
+- Business roles (live): update_business_role {"role", "name"} renames, and the workflows, runs, tables of records and
+  dimensions naming the role follow the new name by themselves (never propose update_workflow_def for that);
+  delete_business_role {"role"} removes the role with its members and dashboard grants. Steps match roles by name,
+  so the delete result names every workflow that still names the deleted role — propose update_workflow_def for them. Roles belong to the workspace and other models may use
+  them; renaming or deleting one another model uses is refused — leave it, the developer does it on the Roles page. set_role_dashboards {"role", "dashboards": [ids or names]}
   replaces which dashboards of this revision the role's members may open ([] = none; grants on the draft's dashboards
   take effect once it is made active). A role is named by name or id. Who is IN a role stays with a business admin.
 - Table integrations: backfill_form_integration {"form_integration_id"} posts every saved record that counts (see

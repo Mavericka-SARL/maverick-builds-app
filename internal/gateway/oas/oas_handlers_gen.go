@@ -12366,6 +12366,10 @@ func (s *Server) handleDeleteBARoleRequest(args [1]string, argsEscaped bool, w h
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "confirm_other_models",
+					In:   "query",
+				}: params.ConfirmOtherModels,
 			},
 			Raw: r,
 		}
@@ -54070,6 +54074,10 @@ func (s *Server) handleUpdateBARoleRequest(args [1]string, argsEscaped bool, w h
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "confirm_other_models",
+					In:   "query",
+				}: params.ConfirmOtherModels,
 			},
 			Raw: r,
 		}

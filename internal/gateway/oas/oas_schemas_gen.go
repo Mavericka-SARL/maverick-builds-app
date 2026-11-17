@@ -5084,6 +5084,13 @@ type BARole struct {
 	Name         string      `json:"name"`
 	MemberCount  int         `json:"member_count"`
 	DashboardIds []uuid.UUID `json:"dashboard_ids"`
+	// Whether the open model uses the role in any revision: dashboards it may open, access rules on the
+	// model's members and metrics, workflows (definitions and running ones) naming it, records tables it
+	// may create in, dimensions it may edit.
+	UsedHere bool `json:"used_here"`
+	// The other models that use the role. Roles belong to the workspace, so every model of its
+	// applications shares them.
+	OtherModels []BARoleModelUse `json:"other_models"`
 }
 
 // GetID returns the value of ID.
@@ -5106,6 +5113,16 @@ func (s *BARole) GetDashboardIds() []uuid.UUID {
 	return s.DashboardIds
 }
 
+// GetUsedHere returns the value of UsedHere.
+func (s *BARole) GetUsedHere() bool {
+	return s.UsedHere
+}
+
+// GetOtherModels returns the value of OtherModels.
+func (s *BARole) GetOtherModels() []BARoleModelUse {
+	return s.OtherModels
+}
+
 // SetID sets the value of ID.
 func (s *BARole) SetID(val uuid.UUID) {
 	s.ID = val
@@ -5124,6 +5141,16 @@ func (s *BARole) SetMemberCount(val int) {
 // SetDashboardIds sets the value of DashboardIds.
 func (s *BARole) SetDashboardIds(val []uuid.UUID) {
 	s.DashboardIds = val
+}
+
+// SetUsedHere sets the value of UsedHere.
+func (s *BARole) SetUsedHere(val bool) {
+	s.UsedHere = val
+}
+
+// SetOtherModels sets the value of OtherModels.
+func (s *BARole) SetOtherModels(val []BARoleModelUse) {
+	s.OtherModels = val
 }
 
 // Ref: #/components/schemas/BARoleMember
@@ -5161,6 +5188,43 @@ func (s *BARoleMember) SetDisplayName(val string) {
 // SetEmail sets the value of Email.
 func (s *BARoleMember) SetEmail(val string) {
 	s.Email = val
+}
+
+// Ref: #/components/schemas/BARoleModelUse
+type BARoleModelUse struct {
+	ModelID         uuid.UUID `json:"model_id"`
+	ModelName       string    `json:"model_name"`
+	ApplicationName string    `json:"application_name"`
+}
+
+// GetModelID returns the value of ModelID.
+func (s *BARoleModelUse) GetModelID() uuid.UUID {
+	return s.ModelID
+}
+
+// GetModelName returns the value of ModelName.
+func (s *BARoleModelUse) GetModelName() string {
+	return s.ModelName
+}
+
+// GetApplicationName returns the value of ApplicationName.
+func (s *BARoleModelUse) GetApplicationName() string {
+	return s.ApplicationName
+}
+
+// SetModelID sets the value of ModelID.
+func (s *BARoleModelUse) SetModelID(val uuid.UUID) {
+	s.ModelID = val
+}
+
+// SetModelName sets the value of ModelName.
+func (s *BARoleModelUse) SetModelName(val string) {
+	s.ModelName = val
+}
+
+// SetApplicationName sets the value of ApplicationName.
+func (s *BARoleModelUse) SetApplicationName(val string) {
+	s.ApplicationName = val
 }
 
 // Ref: #/components/schemas/BARoleRequest
@@ -10278,6 +10342,11 @@ func (s *DeleteAutomationRuleOK) GetStatus() OptString {
 func (s *DeleteAutomationRuleOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+// DeleteBARoleConflict is response for DeleteBARole operation.
+type DeleteBARoleConflict struct{}
+
+func (*DeleteBARoleConflict) deleteBARoleRes() {}
 
 type DeleteBARoleForbidden Error
 
@@ -31038,6 +31107,52 @@ func (o OptUUID) Or(d uuid.UUID) uuid.UUID {
 	return d
 }
 
+// NewOptUpdateBARoleOKRenamedIn returns new OptUpdateBARoleOKRenamedIn with value set to v.
+func NewOptUpdateBARoleOKRenamedIn(v UpdateBARoleOKRenamedIn) OptUpdateBARoleOKRenamedIn {
+	return OptUpdateBARoleOKRenamedIn{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateBARoleOKRenamedIn is optional UpdateBARoleOKRenamedIn.
+type OptUpdateBARoleOKRenamedIn struct {
+	Value UpdateBARoleOKRenamedIn
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateBARoleOKRenamedIn was set.
+func (o OptUpdateBARoleOKRenamedIn) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateBARoleOKRenamedIn) Reset() {
+	var v UpdateBARoleOKRenamedIn
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateBARoleOKRenamedIn) SetTo(v UpdateBARoleOKRenamedIn) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateBARoleOKRenamedIn) Get() (v UpdateBARoleOKRenamedIn, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateBARoleOKRenamedIn) Or(d UpdateBARoleOKRenamedIn) UpdateBARoleOKRenamedIn {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateDimensionRequestAggRule returns new OptUpdateDimensionRequestAggRule with value set to v.
 func NewOptUpdateDimensionRequestAggRule(v UpdateDimensionRequestAggRule) OptUpdateDimensionRequestAggRule {
 	return OptUpdateDimensionRequestAggRule{
@@ -38779,6 +38894,11 @@ type UpdateBARoleBadRequest Error
 
 func (*UpdateBARoleBadRequest) updateBARoleRes() {}
 
+// UpdateBARoleConflict is response for UpdateBARole operation.
+type UpdateBARoleConflict struct{}
+
+func (*UpdateBARoleConflict) updateBARoleRes() {}
+
 type UpdateBARoleForbidden Error
 
 func (*UpdateBARoleForbidden) updateBARoleRes() {}
@@ -38788,7 +38908,8 @@ type UpdateBARoleNotFound Error
 func (*UpdateBARoleNotFound) updateBARoleRes() {}
 
 type UpdateBARoleOK struct {
-	Status OptString `json:"status"`
+	Status    OptString                  `json:"status"`
+	RenamedIn OptUpdateBARoleOKRenamedIn `json:"renamed_in"`
 }
 
 // GetStatus returns the value of Status.
@@ -38796,12 +38917,69 @@ func (s *UpdateBARoleOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRenamedIn returns the value of RenamedIn.
+func (s *UpdateBARoleOK) GetRenamedIn() OptUpdateBARoleOKRenamedIn {
+	return s.RenamedIn
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateBARoleOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetRenamedIn sets the value of RenamedIn.
+func (s *UpdateBARoleOK) SetRenamedIn(val OptUpdateBARoleOKRenamedIn) {
+	s.RenamedIn = val
+}
+
 func (*UpdateBARoleOK) updateBARoleRes() {}
+
+type UpdateBARoleOKRenamedIn struct {
+	Workflows  []string `json:"workflows"`
+	Runs       OptInt   `json:"runs"`
+	Tables     []string `json:"tables"`
+	Dimensions []string `json:"dimensions"`
+}
+
+// GetWorkflows returns the value of Workflows.
+func (s *UpdateBARoleOKRenamedIn) GetWorkflows() []string {
+	return s.Workflows
+}
+
+// GetRuns returns the value of Runs.
+func (s *UpdateBARoleOKRenamedIn) GetRuns() OptInt {
+	return s.Runs
+}
+
+// GetTables returns the value of Tables.
+func (s *UpdateBARoleOKRenamedIn) GetTables() []string {
+	return s.Tables
+}
+
+// GetDimensions returns the value of Dimensions.
+func (s *UpdateBARoleOKRenamedIn) GetDimensions() []string {
+	return s.Dimensions
+}
+
+// SetWorkflows sets the value of Workflows.
+func (s *UpdateBARoleOKRenamedIn) SetWorkflows(val []string) {
+	s.Workflows = val
+}
+
+// SetRuns sets the value of Runs.
+func (s *UpdateBARoleOKRenamedIn) SetRuns(val OptInt) {
+	s.Runs = val
+}
+
+// SetTables sets the value of Tables.
+func (s *UpdateBARoleOKRenamedIn) SetTables(val []string) {
+	s.Tables = val
+}
+
+// SetDimensions sets the value of Dimensions.
+func (s *UpdateBARoleOKRenamedIn) SetDimensions(val []string) {
+	s.Dimensions = val
+}
 
 // UpdateBrandingBadRequest is response for UpdateBranding operation.
 type UpdateBrandingBadRequest struct{}

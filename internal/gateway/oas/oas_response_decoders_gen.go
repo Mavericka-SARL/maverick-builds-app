@@ -6380,6 +6380,9 @@ func decodeDeleteBARoleResponse(resp *http.Response) (res DeleteBARoleRes, _ err
 		default:
 			return res, validate.InvalidContentType(ct)
 		}
+	case 409:
+		// Code 409.
+		return &DeleteBARoleConflict{}, nil
 	}
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }
@@ -25181,6 +25184,9 @@ func decodeUpdateBARoleResponse(resp *http.Response) (res UpdateBARoleRes, _ err
 		default:
 			return res, validate.InvalidContentType(ct)
 		}
+	case 409:
+		// Code 409.
+		return &UpdateBARoleConflict{}, nil
 	}
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }

@@ -2071,12 +2071,33 @@ components:
 
     BARole:
       type: object
-      required: [id, name, member_count, dashboard_ids]
+      required: [id, name, member_count, dashboard_ids, used_here, other_models]
       properties:
         id:            { type: string, format: uuid }
         name:          { type: string }
         member_count:  { type: integer }
         dashboard_ids: { type: array, items: { type: string, format: uuid } }
+        used_here:
+          type: boolean
+          description: >-
+            Whether the open model uses the role in any revision: dashboards
+            it may open, access rules on the model's members and metrics,
+            workflows (definitions and running ones) naming it, records
+            tables it may create in, dimensions it may edit.
+        other_models:
+          description: >-
+            The other models that use the role. Roles belong to the
+            workspace, so every model of its applications shares them.
+          type: array
+          items: { $ref: "#/components/schemas/BARoleModelUse" }
+
+    BARoleModelUse:
+      type: object
+      required: [model_id, model_name, application_name]
+      properties:
+        model_id:         { type: string, format: uuid }
+        model_name:       { type: string }
+        application_name: { type: string }
 
     BARoleRequest:
       type: object
@@ -8754,6 +8775,14 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: confirm_other_models
+          in: query
+          required: false
+          description: >-
+            true to go ahead although models other than the open one use the
+            role; without it such a change answers 409 (code
+            role_used_elsewhere, with the models).
+          schema: { type: boolean }
       requestBody:
         required: true
         content:
@@ -8761,13 +8790,29 @@ paths:
             schema: { $ref: "#/components/schemas/BARoleRequest" }
       responses:
         "200":
-          description: Role updated
+          description: >-
+            Role renamed. Everything that names roles by name follows the new
+            name, in every revision, in the same transaction: workflow
+            definitions (step assignees, notification recipients, start and
+            reopen roles), workflow runs' steps, tables of records' create
+            roles and dimensions' editor roles. renamed_in lists them.
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  renamed_in:
+                    type: object
+                    properties:
+                      workflows:  { type: array, items: { type: string } }
+                      runs:       { type: integer }
+                      tables:     { type: array, items: { type: string } }
+                      dimensions: { type: array, items: { type: string } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Models other than the open one use the role; repeat with confirm_other_models=true }
     delete:
       operationId: deleteBARole
       tags: [Business Admin]
@@ -8777,6 +8822,14 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: confirm_other_models
+          in: query
+          required: false
+          description: >-
+            true to go ahead although models other than the open one use the
+            role; without it such a change answers 409 (code
+            role_used_elsewhere, with the models).
+          schema: { type: boolean }
       responses:
         "200":
           description: Role deleted
@@ -8785,6 +8838,7 @@ paths:
               schema: { type: object, properties: { status: { type: string } } }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Models other than the open one use the role; repeat with confirm_other_models=true }
 
   /api/business-admin/roles/{id}/dashboards:
     get:
