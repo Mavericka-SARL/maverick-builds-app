@@ -439,6 +439,33 @@ type cellBatchCell struct {
 	Member   *string           `json:"member,omitempty"`
 	Text     *string           `json:"text,omitempty"`
 	Clear    bool              `json:"clear,omitempty"`
+	// hasValue: the cell named a value (0 included).
+	hasValue bool
+}
+
+// UnmarshalJSON refuses a key a cell does not have and records whether it
+// named a value: a cell with a misspelt key ({"date": …}) used to be stored
+// as 0, the value it defaulted to, answered "ok" (2026-11-16).
+func (c *cellBatchCell) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for k := range raw {
+		switch k {
+		case "metric_id", "dim_codes", "value", "member", "text", "clear":
+		default:
+			return fmt.Errorf("a cell has no %q: it names metric_id, dim_codes and one of value, member, text or clear", k)
+		}
+	}
+	type plain cellBatchCell
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*c = cellBatchCell(p)
+	_, c.hasValue = raw["value"]
+	return nil
 }
 
 // cellBatchRefusal is one refused cell of a batch, by its index.
@@ -469,6 +496,12 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 	if len(req.Cells) == 0 || len(req.Cells) > maxCellBatch {
 		jsonErr(w, fmt.Errorf("a batch writes 1 to %d cells (this one has %d)", maxCellBatch, len(req.Cells)), http.StatusBadRequest)
 		return
+	}
+	for i, c := range req.Cells {
+		if !c.hasValue && c.Member == nil && c.Text == nil && !c.Clear {
+			jsonErr(w, fmt.Errorf("cell %d names no value: give value (a number), member (a pick-list's member code), text, or clear: true", i), http.StatusBadRequest)
+			return
+		}
 	}
 	revisionID, ref := h.cellRevision(ctx, a, req.ModelID, req.RevisionID)
 	// A chat connection's write, to a model the person may write at all,

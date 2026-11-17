@@ -22,6 +22,8 @@ import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
  *     (router/pageLinks), followed the same way.
  *     Names may hold spaces, so these two links run to the closing ")".
  *   - bullets, 1. numbers
+ *   | a | b |   tables (GitHub's form: a header row, then |---|:---:|---:|
+ *     setting each column's alignment, then the rows; \| is a pipe in a cell)
  *   > quote
  *   ---        rule
  *   blank line separates paragraphs; a single newline is a line break.
@@ -29,6 +31,16 @@ import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
  */
 
 const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|page:[^)\n]+|[^)\s]+)\))/g;
+
+/** The cells of a table row: "| a | b |" → ["a", "b"]; "\|" is a pipe inside a cell. */
+function tableCells(line: string): string[] {
+  let body = line.trim();
+  if (body.startsWith("|")) body = body.slice(1);
+  if (body.endsWith("|") && !body.endsWith("\\|")) body = body.slice(0, -1);
+  return body.split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
+}
+
+const TABLE_DELIMITER = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
 
 /** Only schemes a browser may follow from a tenant's own text. */
 function safeHref(raw: string): string | null {
@@ -122,8 +134,37 @@ export function RichText({ text, style }: { text: string; style?: React.CSSPrope
     list = null;
   };
 
-  for (const raw of src) {
-    const line = raw.trimEnd();
+  for (let at = 0; at < src.length; at++) {
+    const line = src[at].trimEnd();
+    // A table: a header row, a delimiter row, then rows while lines start
+    // with a pipe. A RACI matrix or a data dictionary in a workbook's notes
+    // used to show as its pipes (2026-11-16).
+    if (line.trimStart().startsWith("|") && at + 1 < src.length && src[at + 1].includes("|") && TABLE_DELIMITER.test(src[at + 1].trim())) {
+      flushPara(); flushList();
+      const header = tableCells(line);
+      const align = tableCells(src[at + 1]).map(d => d.startsWith(":") && d.endsWith(":") ? "center" : d.endsWith(":") ? "right" : "left") as ("left" | "center" | "right")[];
+      const rows: string[][] = [];
+      at += 2;
+      while (at < src.length && src[at].trimStart().startsWith("|")) rows.push(tableCells(src[at++]));
+      at--;
+      const key = `t-${blocks.length}`;
+      const cell = { padding: "4px 10px", borderBottom: "1px solid var(--color-border)", verticalAlign: "top" as const };
+      blocks.push(
+        <div key={key} style={{ overflowX: "auto", margin: "0 0 10px" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: "0.95em" }}>
+            <thead>
+              <tr>{header.map((h, i) => <th key={i} style={{ ...cell, textAlign: align[i] ?? "left", fontWeight: 600, background: "var(--color-surface-subtle)" }}>{inline(h, `${key}-h${i}`)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>{header.map((_, ci) => <td key={ci} style={{ ...cell, textAlign: align[ci] ?? "left" }}>{inline(r[ci] ?? "", `${key}-${ri}-${ci}`)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
     const heading = /^(#{1,3})\s+(.*)$/.exec(line);
     const bullet = /^[-*]\s+(.*)$/.exec(line);
     const numbered = /^\d+[.)]\s+(.*)$/.exec(line);

@@ -329,7 +329,9 @@ func (ps *Poster) AccessViewFor(ctx context.Context, userID string, form *crudap
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		hidden := writeguard.ExpandHidden(edges, dimRules)
+		// A rule on a member reaches every member under it, a child
+		// dimension's included (a territory under a read-only region).
+		writeguard.Cascade(edges, dimRules)
 		mark := func(m map[string]map[string]bool, dimID, code string) {
 			if m[dimID] == nil {
 				m[dimID] = map[string]bool{}
@@ -337,10 +339,10 @@ func (ps *Poster) AccessViewFor(ctx context.Context, userID string, form *crudap
 			m[dimID][code] = true
 		}
 		for _, mr := range members {
-			switch {
-			case hidden[mr.id] || dimRules[mr.id] == "hidden":
+			switch dimRules[mr.id] {
+			case "hidden":
 				mark(v.hiddenCodes, mr.dimID, mr.code)
-			case dimRules[mr.id] == "read":
+			case "read":
 				mark(v.readCodes, mr.dimID, mr.code)
 			}
 		}
@@ -618,6 +620,9 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			data[f.Name] = n
 			if f.Type == "metric" && view.metricAccess[f.MetricID] == "hidden" {
 				bad(f, "%s is not a field you can fill in", label)
+			}
+			if msg := crudapp.NumberRefusal(f, n); msg != "" {
+				bad(f, "%s", msg)
 			}
 		case f.Type == "boolean":
 			switch t := v.(type) {

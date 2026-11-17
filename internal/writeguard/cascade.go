@@ -21,11 +21,8 @@ type MemberEdge struct {
 // directly (dimRules[id] == "hidden") or because an ancestor, walked via
 // ParentID (crosses dimensions in one hop exactly like AncestorChain, e.g.
 // an employee's parent is directly its cost-center member), is hidden.
-// Depth-capped at 20, matching AncestorChain. Does not cascade "read" — a
-// read-restricted ancestor does not make its descendants read-only, only an
-// explicit direct rule on a member does; this matches the only pattern
-// actually used today (hidden-only cost-center scoping) and keeps the
-// cascade's blast radius limited to what's actually needed.
+// Depth-capped at 20, matching AncestorChain. "read" cascades separately
+// (ExpandRead; Cascade applies both).
 func ExpandHidden(edges []MemberEdge, dimRules map[string]string) map[string]bool {
 	parent := make(map[string]string, len(edges))
 	for _, e := range edges {
@@ -103,4 +100,54 @@ func ExpandHidden(edges []MemberEdge, dimRules map[string]string) map[string]boo
 		}
 	}
 	return out
+}
+
+// ExpandRead returns every member read-only for a user through an ancestor:
+// a "read" rule on a member makes each member under it read-only too —
+// walked via ParentID as ExpandHidden walks, so a rule on a region reaches
+// the territories of a child dimension under it. Until 2026-11-16 only
+// "hidden" cascaded, although the manuals say a rule on a parent member
+// cascades to its descendants: a business admin making EMEA read-only for
+// the VP of the Americas left every EMEA territory writable for them.
+// A member with a rule of its own is in it only when an ancestor's rule is
+// stricter (the stricter access wins, as for hidden).
+func ExpandRead(edges []MemberEdge, dimRules map[string]string) map[string]bool {
+	parent := make(map[string]string, len(edges))
+	for _, e := range edges {
+		parent[e.ID] = e.ParentID
+	}
+	out := make(map[string]bool)
+	for _, e := range edges {
+		if dimRules[e.ID] == "hidden" || dimRules[e.ID] == "read" {
+			continue
+		}
+		cur := e.ParentID
+		for depth := 0; cur != "" && depth < 20; depth++ {
+			if dimRules[cur] == "read" {
+				out[e.ID] = true
+				break
+			}
+			cur = parent[cur]
+		}
+	}
+	return out
+}
+
+// Cascade applies a user's member rules down the hierarchy in place: every
+// member under a hidden one is "hidden" (ExpandHidden, with its upward
+// closure when the edges carry dimensions), every other member under a
+// read-only one is "read" (ExpandRead). What reads dimRules afterwards — a
+// grid's read-only cells, a picker's marks, the access a record posts
+// within — then needs no walk of its own.
+func Cascade(edges []MemberEdge, dimRules map[string]string) {
+	hidden := ExpandHidden(edges, dimRules)
+	read := ExpandRead(edges, dimRules)
+	for id := range hidden {
+		dimRules[id] = "hidden"
+	}
+	for id := range read {
+		if !hidden[id] {
+			dimRules[id] = "read"
+		}
+	}
 }

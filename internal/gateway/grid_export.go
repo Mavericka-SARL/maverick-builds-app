@@ -365,9 +365,7 @@ func (h *handler) hiddenMemberFilter(ctx context.Context, act *actor, modelID, r
 		return nil, nil, err
 	}
 
-	for id := range writeguard.ExpandHidden(edges, dimRules) {
-		dimRules[id] = "hidden"
-	}
+	writeguard.Cascade(edges, dimRules)
 
 	hidden := map[string]map[string]bool{}
 	for _, mr := range members {

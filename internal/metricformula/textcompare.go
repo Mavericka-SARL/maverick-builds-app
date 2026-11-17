@@ -34,6 +34,12 @@ func textComparedOnly(node formula.Node, name string) bool {
 		case *formula.UnaryExpr:
 			walk(v.Expr, false)
 		case *formula.CallExpr:
+			// VALUE reads its number ("2027"), from the text itself or a
+			// part of it (VALUE(RIGHT(plan_year, 4))): within it the text
+			// is read as text.
+			if strings.EqualFold(v.Name, "VALUE") {
+				return
+			}
 			isBlank := strings.EqualFold(v.Name, "ISBLANK")
 			for _, a := range v.Args {
 				walk(a, isBlank)

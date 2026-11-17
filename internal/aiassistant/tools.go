@@ -284,7 +284,7 @@ var WriteToolNames = []string{
 	"set_user_access_rules",
 	"create_file_integration", "import_file_data", "write_input_values", "create_export_integration", "update_integration", "delete_integration",
 	"create_api_integration", "update_api_integration", "create_connection", "update_connection", "run_integration", "trigger_automation_rule",
-	"recalculate_revision", "clear_input_values", "fill_sample_values",
+	"recalculate_revision", "clear_input_values", "fill_sample_values", "save_records",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.

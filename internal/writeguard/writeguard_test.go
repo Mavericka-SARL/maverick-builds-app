@@ -187,6 +187,43 @@ func TestCheckWriteAllowsUnrestrictedWrite(t *testing.T) {
 	}
 }
 
+// A territory under a region that is read-only for the user takes no input
+// from them: the rule on the region reaches the members of the dimension
+// whose members sit under it (parent_dimension_id), as one on a parent
+// member of the same dimension reaches its children (2026-11-16).
+func TestCheckWriteRefusesUnderAReadOnlyParent(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	f := seedFixture(t, pool)
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	region := q(`INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type) VALUES ($1::uuid,$2::uuid,'region','standard') RETURNING id::text`, f.modelID, f.revisionID)
+	territory := q(`INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type, parent_dimension_id) VALUES ($1::uuid,$2::uuid,'territory','standard',$3::uuid) RETURNING id::text`, f.modelID, f.revisionID, region)
+	emea := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid,'EMEA','EMEA') RETURNING id::text`, region)
+	amer := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid,'AMER','Americas') RETURNING id::text`, region)
+	emTerr := q(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid,'EM-ENT-A','EM-ENT-A',$2::uuid) RETURNING id::text`, territory, emea)
+	amTerr := q(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid,'AM-ENT-A','AM-ENT-A',$2::uuid) RETURNING id::text`, territory, amer)
+	q(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid,'dimension_member',$2,'read') RETURNING id::text`, f.userID, emea)
+
+	reason, err := CheckWrite(ctx, pool, f.modelID, f.revisionID, f.userID, []string{emTerr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reason, "territory EM-ENT-A is under region EMEA, which is read-only for you") {
+		t.Errorf("a write on an EMEA territory: %q, want it refused naming the read-only region", reason)
+	}
+	if reason, err := CheckWrite(ctx, pool, f.modelID, f.revisionID, f.userID, []string{amTerr}); err != nil || reason != "" {
+		t.Errorf("a write on an Americas territory: %q, %v, want it allowed", reason, err)
+	}
+}
+
 // TestMetricScopedWorkflowLockCrossing pins the metric×member crossing
 // semantics: an approved instance whose context declares a "Metric" var
 // locks EXACTLY that metric at its member scope — the same member's other

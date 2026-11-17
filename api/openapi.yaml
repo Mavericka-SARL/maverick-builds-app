@@ -2536,6 +2536,9 @@ components:
         history:         { type: boolean, description: "Each value the field takes is kept, with who gave it and when (GET /api/records/{id}/history)" }
         on_delete:       { type: string, enum: [block, cascade, clear], description: "A dimension field naming a member a table keeps: deleting that record is refused while this field names it (block, the default), deletes this record with it (cascade) or empties this field (clear)" }
         format:          { type: string, enum: [money], description: "A number field shown as money" }
+        min:             { type: number, description: "A number field's lowest accepted value: a record, file row or connector row below it is refused, naming the field" }
+        max:             { type: number, description: "A number field's highest accepted value" }
+        whole:           { type: boolean, description: "A number field that takes whole numbers only" }
         deadline:        { type: boolean, description: "A date field shown as overdue once past, unless done_field holds one of done_values" }
         done_field:      { type: string }
         done_values:     { type: array, items: { type: string } }
@@ -10353,9 +10356,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  rows_imported:   { type: integer }
+                  rows_imported:   { type: integer, description: "Table runs — the records added or updated" }
+                  rows_added:      { type: integer, description: "Table runs — the records added" }
+                  rows_updated:    { type: integer, description: "Table runs into a table whose records have a typed code — the records holding a row's code that the row changed (updated, not added again)" }
+                  rows_unchanged:  { type: integer, description: "Table runs — the records holding a row's code that the row left as they were" }
                   rows_replaced:   { type: integer, description: "Table runs of a loader whose config names replace_by — the earlier records the run replaced (with dry_run, would replace)" }
                   values_imported: { type: integer, description: Grid runs — one row can carry several metrics' values }
+                  recalculating:   { type: boolean, description: "Grid runs — the calculated metrics the values reach are still being recalculated: a read right away can show them from before the load; GET /api/grid says recalc_pending until the pass lands" }
                   error_rows:      { type: integer }
                   dry_run:         { type: boolean }
                   rows:            { type: integer, description: With dry_run — the rows that would be imported }
@@ -10761,12 +10768,17 @@ paths:
                 properties:
                   status:           { type: string }
                   records_created:  { type: integer }
+                  records_updated:  { type: integer, description: "A table whose records have a typed code — the records holding a row's code that the row changed: a file loaded again updates them" }
+                  records_unchanged: { type: integer, description: "The records holding a row's code that the row left as they were" }
                   records_replaced: { type: integer, description: With replace_by — the earlier records deleted (not in a replayed answer) }
                   job_id:           { type: string, format: uuid, description: The import's line in Recent Imports }
                   replayed:         { type: boolean, description: "true when this is the answer of an import sent before under the same Idempotency-Key; nothing was created" }
                   dry_run:          { type: boolean }
                   rows_replaced:    { type: integer, description: With dry_run and replace_by — the earlier records the file would replace }
-                  rows:            { type: integer, description: With dry_run — the records that would be created }
+                  rows:            { type: integer, description: With dry_run — the records that would be created or updated }
+                  rows_added:      { type: integer, description: With dry_run — the records that would be added }
+                  rows_updated:    { type: integer, description: With dry_run — the records holding a row's code that would be updated }
+                  rows_unchanged:  { type: integer, description: With dry_run — the records holding a row's code that would stay as they are }
                   error_rows:      { type: integer }
                   errors:
                     type: array

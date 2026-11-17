@@ -435,6 +435,7 @@
 <tr><td class="sig" id="fn-UPPER">UPPER(text) · LOWER(text)</td><td>Upper or lower case.</td><td><code>UPPER("aBc")</code> = "ABC"</td></tr>
 <tr><td class="sig" id="fn-TRIM">TRIM(text)</td><td>Removes leading and trailing spaces and collapses inner runs to one space.</td><td><code>TRIM("  a   b  ")</code> = "a b"</td></tr>
 <tr><td class="sig" id="fn-TEXT">TEXT(x, format)</td><td>A number as text. Formats: <code>"0"</code> or <code>"#"</code> (no decimals), <code>"0.0"</code>, <code>"0.00"</code>, <code>"0.000"</code>… (that many decimals, rounded as ROUND does), or a date layout containing <code>yyyy</code> with <code>mm</code> and <code>dd</code> (any case). Any other format gives the plain number; a text <i>x</i> is returned as is.</td><td><code>TEXT(3.14159, "0.00")</code> = "3.14", <code>TEXT(DATE(2026, 3, 5), "yyyy-mm-dd")</code> = "2026-03-05", <code>TEXT(START(), "yyyy-mm")</code> = "2026-03"</td></tr>
+<tr><td class="sig" id="fn-VALUE">VALUE(text)</td><td>A text as a number, as Excel's VALUE: spaces and thousands commas are ignored and a trailing <code>%</code> divides by 100; a number is returned as is and a blank is 0; a text that is no number is <code>#VALUE!</code>. A number formula reads a <b>text metric</b> through it (as in a comparison): <code>VALUE(RIGHT(plan_year, 4))</code> is 2027 for "FY 2027".</td><td><code>VALUE("1,234.5")</code> = 1234.5, <code>VALUE("5%")</code> = 0.05</td></tr>
 <tr><td class="sig" id="fn-SUBSTITUTE">SUBSTITUTE(text, old, new [, instance])</td><td>Replaces every <i>old</i> (case-sensitive), or only the <i>instance</i>-th one (1 or more). Empty <i>old</i> changes nothing.</td><td><code>SUBSTITUTE("a-b-c", "-", "+", 2)</code> = "a-b+c"</td></tr>
 </table>
 <p>Typical uses: <code>IF(LEFT(region, 2) = "DE", …)</code>, a wildcard criterion built from the cell's member <code>SUMIFS(sales, product, LEFT(product, 1) &amp; "*")</code>, or a member code assembled for LOOKUP <code>LOOKUP(budget, period, TEXT(START(), "yyyy") &amp; "-01")</code>.</p>
@@ -523,6 +524,7 @@
 <tr><td class="sig" id="fn-SUMIF">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
 <tr><td class="sig" id="fn-AVERAGEIF">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
 <tr><td class="sig" id="fn-COUNTIF">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
+<tr><td class="sig" id="fn-MEMBERIFS">MEMBERIFS(range1, criterion1 [, …])</td><td>The <b>code</b> of the first member of the first range's dimension, in the dimension's order, at a combination every criterion matches — LOOKUP the other way round: not "the value at this member" but "the member with this value". <code>MEMBERIFS(rep_territory, territory)</code> is the seller whose territory is this one (a pick-list metric on the sellers), <code>MEMBERIFS(rep.territory, territory)</code> the same from a member property. In a pick-list metric of that dimension it is the member chosen; it can also name the member a LOOKUP reads: <code>LOOKUP(rep_capacity, rep, MEMBERIFS(rep_territory, territory))</code>.</td><td><code>#N/A</code> (wrap in <code>IFNA</code>)</td></tr>
 </table>
 <ul>
   <li>A <b>range</b> is a dimension (its member codes are tested), <code>dimension.property</code> (the members' typed property values are tested), or a <b>metric</b> whose dimensions are all the source's or related to them (its value is tested at every leaf combination of its dimensions; see <i>A metric as the range</i> below). A name that is both a dimension and a metric is the dimension.</li>
@@ -855,6 +857,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-UPPER">LOWER</a></td><td>LOWER(text)</td><td>Lower case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-MAX">MAX</a></td><td>MAX(a, b, …)</td><td>Largest argument</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-MINIFS">MAXIFS</a></td><td>MAXIFS(source, range, criterion, …)</td><td>Largest recorded matching value</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-MEMBERIFS">MEMBERIFS</a></td><td>MEMBERIFS(range, criterion, …)</td><td>The first member that matches (a reverse LOOKUP)</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-MID">MID</a></td><td>MID(text, start, n)</td><td>Characters from a position</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-MIN">MIN</a></td><td>MIN(a, b, …)</td><td>Smallest argument</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-MINIFS">MINIFS</a></td><td>MINIFS(source, range, criterion, …)</td><td>Smallest recorded matching value</td><td><a href="#conditional">13</a></td></tr>
@@ -889,6 +892,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-TODAY">TODAY</a></td><td>TODAY()</td><td>Today's date</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-VALUE">VALUE</a></td><td>VALUE(text)</td><td>A text as a number</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>

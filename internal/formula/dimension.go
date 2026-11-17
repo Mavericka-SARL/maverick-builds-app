@@ -124,6 +124,7 @@ const (
 	conditionalAverageIfs        = "AVERAGEIFS"
 	conditionalMinIfs            = "MINIFS"
 	conditionalMaxIfs            = "MAXIFS"
+	conditionalMemberIfs         = "MEMBERIFS"
 	isoDateLayout                = "2006-01-02"
 	maxConditionalTuples         = 1_000_000 // a guard against a runaway cartesian product
 	memoKeySeparator             = "\x1f"
@@ -139,7 +140,7 @@ const (
 var DimensionalFunctionNames = []string{
 	dimensionalFuncLookup,
 	conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs,
-	conditionalSumIf, conditionalAverageIf, conditionalCountIf,
+	conditionalSumIf, conditionalAverageIf, conditionalCountIf, conditionalMemberIfs,
 }
 
 // IsDimensionalFunction reports whether name (any case) is one of
@@ -157,7 +158,7 @@ func IsDimensionalFunction(name string) bool {
 func init() {
 	builtins[dimensionalFuncParent] = fnPARENT
 	builtins[dimensionalFuncLookup] = fnLOOKUP
-	for _, name := range []string{conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs, conditionalSumIf, conditionalAverageIf, conditionalCountIf} {
+	for _, name := range []string{conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs, conditionalSumIf, conditionalAverageIf, conditionalCountIf, conditionalMemberIfs} {
 		fn := name
 		builtins[fn] = func(ctx *EvalContext, args []Node) Value { return conditional(ctx, fn, args) }
 	}
@@ -424,7 +425,7 @@ func conditionalShape(fn string, args []Node) (source Node, pairs [][2]Node, fer
 			return nil, nil, errValue(fmt.Sprintf("%s: expected (range, criterion, source), got %d arguments", fn, len(args)))
 		}
 		return args[2], pairsFrom(args[:2]), nil
-	case conditionalCountIfs:
+	case conditionalCountIfs, conditionalMemberIfs:
 		if len(args) < 2 || len(args)%2 != 0 {
 			return nil, nil, errValue(fmt.Sprintf("%s: expected range, criterion pairs, got %d arguments", fn, len(args)))
 		}
@@ -616,6 +617,40 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 	}
 	if len(metricCrits) > 0 && d.Resolve == nil {
 		return ErrorVal(dimCallbackMissing(fn, "dimensional reads"))
+	}
+	// MEMBERIFS: the code of the first member of the first range's dimension
+	// (in its order) at a combination every criterion holds — the reverse of
+	// LOOKUP: the seller whose territory is this one, MEMBERIFS(rep_terr,
+	// territory) or MEMBERIFS(rep.territory, territory). #N/A when none.
+	if fn == conditionalMemberIfs {
+		if tuples > 0 {
+			idx := make([]int, len(dimOrder))
+			overrides := make(map[string]string, len(dimOrder))
+			for {
+				for i, dim := range dimOrder {
+					overrides[dim] = matches[i][idx[i]]
+				}
+				keep, ferr := metricCriteriaMatch(d, metricCrits, overrides)
+				if ferr != nil {
+					return ErrorVal(ferr)
+				}
+				if keep {
+					return StringVal(overrides[dimOrder[0]])
+				}
+				k := len(idx) - 1
+				for ; k >= 0; k-- {
+					idx[k]++
+					if idx[k] < len(matches[k]) {
+						break
+					}
+					idx[k] = 0
+				}
+				if k < 0 {
+					break
+				}
+			}
+		}
+		return ErrorVal(&FormulaError{Code: codeNA, Message: fmt.Sprintf("%s: no member matches", fn)})
 	}
 	var sum, lo, hi float64
 	found, counted := 0, 0

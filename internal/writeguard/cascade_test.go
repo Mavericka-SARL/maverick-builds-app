@@ -184,3 +184,30 @@ func TestExpandHiddenUpwardClosureLimits(t *testing.T) {
 		t.Error("an explicit read rule must keep the parent visible")
 	}
 }
+
+// A read-only rule on a member reaches every member under it, a child
+// dimension's included, as the manuals say; a hidden rule stays stricter.
+// Until 2026-11-16 only "hidden" cascaded: making EMEA read-only for the VP
+// of the Americas left every EMEA territory writable for them.
+func TestCascadeReadReachesDescendants(t *testing.T) {
+	edges := []MemberEdge{
+		{ID: "all", DimID: "region"},
+		{ID: "emea", ParentID: "all", DimID: "region"},
+		{ID: "amer", ParentID: "all", DimID: "region"},
+		{ID: "em-ent-a", ParentID: "emea", DimID: "territory"}, // a child dimension's member
+		{ID: "em-ent-b", ParentID: "emea", DimID: "territory"},
+		{ID: "am-ent-a", ParentID: "amer", DimID: "territory"},
+		{ID: "acc-1", ParentID: "em-ent-a", DimID: "account"},
+	}
+	rules := map[string]string{"emea": "read", "em-ent-b": "hidden", "acc-1": "write"}
+	Cascade(edges, rules)
+	want := map[string]string{
+		"emea": "read", "em-ent-a": "read", "acc-1": "read", // the stricter rule above wins
+		"em-ent-b": "hidden", "amer": "", "am-ent-a": "", "all": "",
+	}
+	for id, w := range want {
+		if rules[id] != w {
+			t.Errorf("%s: %q, want %q", id, rules[id], w)
+		}
+	}
+}

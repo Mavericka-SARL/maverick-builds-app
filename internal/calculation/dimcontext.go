@@ -193,6 +193,12 @@ func (m *DimMetadata) EncodeResult(metric string, v formula.Value) formula.Value
 }
 
 // dimID maps a dimension name as written in a formula to its ID.
+// DimensionID is the ID of the dimension a formula names, for the cell at
+// combo (the one pinned there when two share the name).
+func (m *DimMetadata) DimensionID(name string, combo map[string]string) (string, *formula.FormulaError) {
+	return m.dimID(name, combo)
+}
+
 func (m *DimMetadata) dimID(name string, combo map[string]string) (string, *formula.FormulaError) {
 	ids := m.byName[strings.ToUpper(name)]
 	switch len(ids) {
@@ -627,7 +633,7 @@ func nonValueArg(fn string, i int) bool {
 	switch strings.ToUpper(fn) {
 	case "LOOKUP", "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
 		return i == 0 || i%2 == 1 // source, then dimension/range at odd positions
-	case "COUNTIFS":
+	case "COUNTIFS", "MEMBERIFS":
 		return i%2 == 0 // ranges
 	case "COUNTIF":
 		return i == 0

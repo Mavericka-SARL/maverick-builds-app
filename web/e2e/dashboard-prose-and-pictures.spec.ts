@@ -108,3 +108,32 @@ test("the dev server serves the bundled manuals, and a missing document is a 404
   expect((await request.get("/docs/nope.html")).status()).toBe(404);
   expect((await request.get("/docs/developer-manual/parts/00-head.html")).status()).toBe(404);
 });
+
+test("a text widget renders a Markdown table", async ({ page }) => {
+  await mockApi(page);
+  // A RACI matrix or a data dictionary from a workbook's notes: it used to
+  // show as its pipes (2026-11-16).
+  await page.route("**/api/dashboards/dash-5", (route) =>
+    route.fulfill({
+      json: {
+        id: "dash-5", name: "Explainer", tags: ["guide"], folder_id: null,
+        widgets: [{
+          id: "w5", widget_type: "text", ref_id: null, sort_order: 0, col_start: 1, col_span: 12,
+          pos_x: 0, pos_y: 0, size_w: 600, size_h: 200,
+          content: "| Stage | Who | Quota ($k) |\n|---|:---:|---:|\n| 1 | **Finance** | 40,000 |\n| 2 | RevOps \\| CRM | 1,250 |\n\nAfter the table.",
+        }],
+      },
+    }));
+  await loadAs(page, "business_admin");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" }).click();
+  await page.getByRole("button", { name: "Explainer" }).first().click();
+
+  const table = page.getByRole("table");
+  await expect(table.getByRole("columnheader")).toHaveText(["Stage", "Who", "Quota ($k)"]);
+  await expect(table.getByRole("row")).toHaveCount(3);
+  await expect(table.locator("strong", { hasText: "Finance" })).toBeVisible();
+  await expect(table.getByRole("cell", { name: "RevOps | CRM" })).toBeVisible();
+  await expect(table.getByRole("cell", { name: "1,250" })).toHaveCSS("text-align", "right");
+  await expect(page.getByText("After the table.")).toBeVisible();
+  await expect(page.getByText("|---|")).toHaveCount(0);
+});

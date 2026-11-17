@@ -202,7 +202,7 @@ most likely meant), correct every failing step and propose the whole plan again.
 (left to right: 2^3^2 = 64), comparisons = <> < <= > >= (text compares ignoring case), & joins text, and
 commas or semicolons separate arguments. Text goes in double quotes ("EMEA"; a quote inside is doubled).
 The functions are exactly these: ` + formulaFunctionList() + `.
-Anything else — VLOOKUP, XLOOKUP, INDEX, MATCH, SUMPRODUCT, ISNUMBER, VALUE, cell addresses such as A1,
+Anything else — VLOOKUP, XLOOKUP, INDEX, MATCH, SUMPRODUCT, ISNUMBER, cell addresses such as A1,
 a % suffix — is refused when the metric is saved, and so is a function given the wrong number of arguments.
 Every stored result is a number: TRUE and FALSE store as 1 and 0 and a text result is an error, so text functions
 belong inside a comparison (IF(LEFT(region, 2) = "DE", revenue, 0)). IF, IFS, AND, OR, SWITCH, IFERROR and IFNA
@@ -324,6 +324,13 @@ member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_membe
   A range may also be a METRIC whose dimensions are all the source's (or related to them): it is tested at
   every leaf combination of its dimensions — SUMIFS(activity_sales, act_region, region) adds the activities
   whose Region cell holds the cell's region.
+- MEMBERIFS(range1, criterion1[, ...]) — COUNTIFS's arguments — is the CODE of the first member of the first
+  range's dimension (in its order) where every criterion matches: LOOKUP the other way round, where a workbook
+  uses INDEX/MATCH or XLOOKUP to find a row by a value. A territory's owner from the sellers' territory
+  (a pick-list on the seller): MEMBERIFS(rep_terr, territory), in a pick-list metric of the seller dimension;
+  #N/A when none matches (IFNA). It can name the member a LOOKUP reads: LOOKUP(rep_cap, rep, MEMBERIFS(...)).
+- VALUE(text) is a text's number ("2027" → 2027, "5%" → 0.05; not a number → #VALUE!). It is the one place a
+  number formula reads a TEXT metric outside a comparison: VALUE(RIGHT(plan_year, 4)).
 
 ## Dates
 A metric of format "date" holds a date in each cell: a hire date, a start date. The cell stores the serial number
@@ -476,7 +483,8 @@ steps carefully.
   deleting and re-adding them. A "workflow_status" widget (ref_id: a published workflow's NAME, not its id) shows
   where that workflow's latest run stands — each step, the current one with its roles, how long it has waited and
   when it is due; put one on a guide page so everyone sees the round.
-- A "text" widget's content is Markdown: # headings, **bold**, *italic*, - bullets, [label](https://...) links, and
+- A "text" widget's content is Markdown: # headings, **bold**, *italic*, - bullets, tables (a "| a | b |" header row,
+  then "|---|---:|" — ":" sets a column's alignment — then the rows), [label](https://...) links, and
   links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
   [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard),
   and links to a page of the console's sidebar by the names it shows: [label](page:Workflow Inbox), or with its group
@@ -719,7 +727,8 @@ Each field: "name" (unique within the table), "label", "type" (text | longtext |
 boolean | dimension | metric | autocode | status), "required". Optional on any field: "default" (a new record's
 value; a date's may be "today"), "required_with": "<other field>" (filled in together: either asks for both),
 "hidden": true (kept, not shown), "core": true (cannot be removed while marked), "history": true (each change is
-kept and shown with the record — a deal's stage history). A number may have "format": "money". A date may be a
+kept and shown with the record — a deal's stage history). A number may have "format": "money", and accepted values "min", "max", "whole": true (a record, file
+row or connector row outside them is refused, naming the field — a CRM intent 1–5, an FTE 0–1, an amount ≥ 0). A date may be a
 "deadline": true — shown overdue once past, unless "done_field" holds one of "done_values". A "select" field needs "options": [...]. A "dimension"
 field needs "dimension_id" and may restrict choices with "allowed_members": [<member codes>]. A "metric" field
 needs "metric_id" and "value_field" (the name of the sibling number field holding the amount). An "autocode"
@@ -893,6 +902,19 @@ developer pastes into the chat arrives as an attached file named pasted-data-1.c
 like any other, and ask where it goes if the message does not say.
 A Percentage metric takes percent units (3 for 3%): a value under 1 there is refused as a likely fraction
 unless "values_are_percent_units": true says it really is under 1%.
+
+## Saving records
+A record of a table — a placeholder account a later import names ("No account"), a few reference rows, a
+correction to one record — is saved with save_records {"table": "<table id or name>", "records": [{"<field name or
+label>": "value", ...}, ...]}, never asked of the developer: each record is checked as one saved by hand (required
+fields, choices, members of dimension fields by code or label, accepted values, who may add records, the statuses
+the developer may set with a "status" key) and posted through the table's integrations, and the rules a new record
+fires run; one refused record refuses the step (all or nothing). Leave an auto-code field out (the server numbers
+the record). In a table whose records have a typed code (a text field marked "code"), a record whose code one
+already holds updates that record: the fields given replace its values, the others keep theirs. At most 200 per
+step; more records come from a file (import_file_data). They go into the working revision's table — the AI draft's
+copy while the session has one, as an import_file_data into a table does — so the records a later import of the
+same plan names are there, and they go live with the draft.
 
 ## Data export
 A data export (create_export_integration) is a saved, re-downloadable file of one grid's values in a format

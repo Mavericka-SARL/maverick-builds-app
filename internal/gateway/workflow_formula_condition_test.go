@@ -189,3 +189,84 @@ func TestWorkflowConditionReadsTheModel(t *testing.T) {
 		t.Errorf("a broken condition formula: %v, want a parse error", errs)
 	}
 }
+
+// A condition reads one member with LOOKUP: "gate 2 passed → go on". Such a
+// condition passed Validate and then stalled the run at its step, "LOOKUP
+// needs dimension member data, which this evaluation does not have"
+// (Territory & Quota build, 2026-11-16); the model needed one dimensionless
+// metric per gate to work round it.
+func TestWorkflowConditionReadsAMemberWithLookup(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	ctx := context.Background()
+	dev := "rollup-test-approver"
+	rev := f.workingRevID
+	must := func(method, path string, body any) string {
+		t.Helper()
+		status, raw := doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+		if status != http.StatusOK && status != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, status, raw)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out.ID
+	}
+	gate := must("POST", "/api/developer/dimensions", map[string]any{"name": "round_gate", "revision_id": rev})
+	for _, c := range []string{"G1", "G2"} {
+		must("POST", "/api/developer/dimensions/"+gate+"/members", map[string]any{"code": c, "label": c})
+	}
+	pass := must("POST", "/api/developer/metrics", map[string]any{"name": "gate_pass", "is_input": true, "revision_id": rev})
+	grid := must("POST", "/api/developer/grids", map[string]any{"name": "Gates", "revision_id": rev})
+	must("POST", "/api/developer/grids/"+grid+"/dimensions/"+gate, nil)
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+pass, nil)
+	write := func(code string, v float64) {
+		t.Helper()
+		body := map[string]any{"model_id": f.modelID, "revision_id": rev, "metric_id": pass, "value": v, "dim_codes": map[string]string{gate: code}}
+		if status, raw := doAs(t, f.rollupFixture, "POST", "/api/cells", dev, f.appID, body); status != http.StatusOK {
+			t.Fatalf("write: %d %s", status, raw)
+		}
+	}
+	write("G1", 0)
+	write("G2", 1)
+
+	store := workflow.NewStore(f.pool)
+	def, err := store.CreateWorkflowDefFull(ctx, f.appID, rev, "Gates "+t.Name(), "", "manual", f.approverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := json.RawMessage(`[
+		{"id":"check","name":"Gate 2 passed?","type":"condition","condition":{"formula":"AND(LOOKUP(gate_pass, round_gate, \"G2\") = 1, LOOKUP(gate_pass, round_gate, \"G1\") = 0)"},
+		 "routes":{"true":"end-completed","false":"end-rejected"}}
+	]`)
+	if _, err := store.UpdateWorkflowDefFull(ctx, def.ID, def.Name, "", "manual", "", f.approverID, steps, json.RawMessage(`[]`), nil); err != nil {
+		t.Fatal(err)
+	}
+	full, err := store.GetWorkflowDefFull(ctx, def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := append(workflow.ValidateDef(full), store.CheckConditionNames(ctx, full)...); len(errs) > 0 {
+		t.Fatalf("a LOOKUP condition is refused: %v", errs)
+	}
+	if _, err := store.PublishWorkflowDef(ctx, def.ID, f.approverID); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := store.StartWorkflow(ctx, def.ID, f.managerID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision, comment, status string
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = f.pool.QueryRow(ctx, `SELECT COALESCE(decision,''), COALESCE(comment,''), status::text FROM workflow.workflow_step
+			WHERE instance_id=$1::uuid AND step_def_id='check'`, inst.Id).Scan(&decision, &comment, &status)
+		if decision != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if decision != "true" {
+		t.Errorf("LOOKUP of gate 2 (1) and gate 1 (0): decision %q, status %s (%s), want true", decision, status, comment)
+	}
+}

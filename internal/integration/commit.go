@@ -518,6 +518,9 @@ func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []
 	written, rowErrs, err := recordpost.OnPool(c.Pool, c.Log).ImportRows(ctx, recordpost.ImportRequest{
 		Form: form, CreatorID: runBy, Header: header, Rows: raw, NewStatus: newStatus,
 		StatusRefusal: func(string) string { return "" },
+		// A row whose code a record holds updates it: the run's principal
+		// may set any status, as when it adds one.
+		UpdateRefusal: func(*crudapp.FormRecord, string) string { return "" },
 		AppID:         appID, RevisionID: revisionID,
 		DryRun: dryRun, Inline: true, Partial: true,
 		// A run replacing by a field is whole or nothing: a period whose

@@ -1382,6 +1382,10 @@ export interface FormField {
   on_delete?: "block" | "cascade" | "clear";
   /** A number shown as money. */
   format?: "money";
+  /** A number field's accepted values: none below min, none above max, whole numbers only. */
+  min?: number;
+  max?: number;
+  whole?: boolean;
   /** A date shown as overdue once past — unless done_field holds one of done_values. */
   deadline?: boolean;
   done_field?: string;
@@ -2067,6 +2071,10 @@ export interface ImportCheck {
   rows: number;
   // A table load replacing by a field: the earlier records it would replace.
   rows_replaced?: number;
+  // A table whose records have a typed code: rows whose code a record holds
+  // update it (rows_updated) or leave it as it is (rows_unchanged).
+  rows_updated?: number;
+  rows_unchanged?: number;
   values?: number;
   error_rows: number;
   errors: Array<{ row: number; column: string; message: string; code?: string; raw_value?: string }>;
@@ -3097,7 +3105,7 @@ export const api = {
   // under it, a run into a grid or a table is answered from the first and
   // loads nothing.
   runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string; parameters?: Record<string, string> }, rowLines?: number[], about?: ImportAbout, mapped?: boolean, key?: string) =>
-    apiFetch<{ rows_imported: number; rows_replaced?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[]; replayed?: boolean }>(`/api/integrations/${id}/run`, {
+    apiFetch<{ rows_imported: number; rows_replaced?: number; rows_updated?: number; rows_unchanged?: number; values_imported?: number; error_rows: number; errors?: ImportRowError[]; notices?: string[]; replayed?: boolean }>(`/api/integrations/${id}/run`, {
       method: "POST",
       body: JSON.stringify({ ...(typeof file === "string" ? { csv: file } : (file ?? {})), ...(rowLines ? { row_lines: rowLines } : {}), ...(about?.fileName ? { file_name: about.fileName } : {}), ...(mapped ? { mapped: true } : {}) }),
       ...(key ? { headers: { "Idempotency-Key": key } } : {}),
@@ -3153,7 +3161,7 @@ export const api = {
   // config.replace_by); omitted, the file's records are added.
   // key: the import's Idempotency-Key (newImportKey), as for uploadImport.
   importFormRecords: (formId: string, csv: string, rowLines?: number[], about?: ImportAbout, replaceBy?: string, key?: string) =>
-    apiFetch<{ status: string; records_created: number; records_replaced?: number; job_id?: string; replayed?: boolean }>(`/api/forms/${formId}/import`, {
+    apiFetch<{ status: string; records_created: number; records_updated?: number; records_unchanged?: number; records_replaced?: number; job_id?: string; replayed?: boolean }>(`/api/forms/${formId}/import`, {
       method: "POST",
       body: JSON.stringify({ csv, row_lines: rowLines, file_name: about?.fileName, ...(replaceBy ? { replace_by: replaceBy } : {}) }),
       ...(key ? { headers: { "Idempotency-Key": key } } : {}),

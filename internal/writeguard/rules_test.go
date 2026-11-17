@@ -3,6 +3,7 @@ package writeguard
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -423,6 +424,41 @@ func TestHiddenGroupingMemberHidesTheMembersItGroups(t *testing.T) {
 	var stored int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity.user_access_rule WHERE user_id = $1::uuid`, lf.f.userID).Scan(&stored); err != nil || stored != 1 {
 		t.Errorf("stored rules = %d, %v; want the administrator's 1", stored, err)
+	}
+}
+
+// Access by a member's property: a read-only rule on a member of a property
+// grouping makes the members it groups read-only — a Regional VP who may
+// read every account but change only their own region's (Territory & Quota
+// build, 2026-11-16). Only "hidden" reached them before (166), and a write
+// on an EMEA account went through for the VP of the Americas.
+func TestReadOnlyGroupingMemberMakesItsMembersReadOnly(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	lf := newLineageFixture(t, pool)
+
+	accounts := lf.dim(lf.revA, "Accounts", "")
+	acc1, acc2 := lf.member(accounts, "ACC-1", ""), lf.member(accounts, "ACC-2", "")
+	lf.exec(`UPDATE model.dimension_member SET properties = '{"region":"EMEA"}' WHERE id = $1::uuid`, acc1)
+	lf.exec(`UPDATE model.dimension_member SET properties = '{"region":"Americas"}' WHERE id = $1::uuid`, acc2)
+	byRegion := lf.q(`INSERT INTO model.dimension_def (model_id, name, revision_id, source_dimension_id, source_property)
+		VALUES ($1::uuid, 'Account region', $2::uuid, $3::uuid, 'region') RETURNING id::text`, lf.f.modelID, lf.revA, accounts)
+	emea := lf.member(byRegion, "EMEA", "")
+	lf.member(byRegion, "Americas", "")
+	lf.setRules(RuleInput{"dimension_member", emea, "read"})
+
+	for id, want := range map[string]string{acc1: "read", acc2: ""} {
+		if got, err := HiddenAccess(ctx, pool, lf.f.userID, id); err != nil || got != want {
+			t.Errorf("HiddenAccess(%s) = %q, %v; want %q", id, got, err, want)
+		}
+	}
+	reason, err := CheckWrite(ctx, pool, lf.f.modelID, lf.revA, lf.f.userID, []string{acc1})
+	if err != nil || !strings.Contains(reason, "ACC-1 is read-only for you") {
+		t.Errorf("a write on an EMEA account: %q, %v; want it refused as read-only", reason, err)
+	}
+	if reason, err := CheckWrite(ctx, pool, lf.f.modelID, lf.revA, lf.f.userID, []string{acc2}); err != nil || reason != "" {
+		t.Errorf("a write on an Americas account: %q, %v; want it allowed", reason, err)
 	}
 }
 

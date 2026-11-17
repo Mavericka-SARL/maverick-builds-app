@@ -61,7 +61,7 @@ func periodCriterion(call *formula.CallExpr, rd *revisionDims) (string, formula.
 	switch strings.ToUpper(call.Name) {
 	case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
 		first = 1
-	case "COUNTIFS", "COUNTIF", "SUMIF", "AVERAGEIF":
+	case "COUNTIFS", "COUNTIF", "SUMIF", "AVERAGEIF", "MEMBERIFS":
 		first = 0
 	default:
 		return "", nil

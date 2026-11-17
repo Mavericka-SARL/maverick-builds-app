@@ -11,6 +11,7 @@ package crudapp
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"slices"
 	"strconv"
@@ -251,6 +252,19 @@ func validateFieldOptions(f FormField, fields []FormField) error {
 	if f.History && serverOwned {
 		return fmt.Errorf("a %s field keeps no history of its own", f.Type)
 	}
+	if f.Min != nil || f.Max != nil || f.Whole {
+		switch {
+		case f.Type != "number":
+			return fmt.Errorf("accepted values (min, max, whole) are a number field's")
+		case f.Min != nil && f.Max != nil && *f.Min > *f.Max:
+			return fmt.Errorf("its lowest accepted value %v is above its highest %v", *f.Min, *f.Max)
+		}
+		if n, ok := f.Default.(float64); ok {
+			if msg := NumberRefusal(f, n); msg != "" {
+				return fmt.Errorf("its default: %s", msg)
+			}
+		}
+	}
 	if f.Hidden && f.Required && f.Default == nil {
 		return fmt.Errorf("a hidden field nobody sees cannot be required without a default")
 	}
@@ -426,6 +440,35 @@ func StatusInDataProblem(form *FormDef, data map[string]any, effective string) s
 		}
 		return fmt.Sprintf("the status is set with the top-level \"status\" field, not inside data (data.%s = %v; the record would be %s)",
 			f.Name, v, effective)
+	}
+	return ""
+}
+
+// NumberRefusal says why number field f does not accept n ("" when it
+// does): below its Min, above its Max, or not whole when it takes whole
+// numbers only. The sentence names the field and what it accepts.
+func NumberRefusal(f FormField, n float64) string {
+	label := f.Label
+	if label == "" {
+		label = f.Name
+	}
+	accepts := func() string {
+		kind := "a number"
+		if f.Whole {
+			kind = "a whole number"
+		}
+		switch {
+		case f.Min != nil && f.Max != nil:
+			return fmt.Sprintf("%s from %v to %v", kind, *f.Min, *f.Max)
+		case f.Min != nil:
+			return fmt.Sprintf("%s of at least %v", kind, *f.Min)
+		case f.Max != nil:
+			return fmt.Sprintf("%s of at most %v", kind, *f.Max)
+		}
+		return kind
+	}
+	if (f.Min != nil && n < *f.Min) || (f.Max != nil && n > *f.Max) || (f.Whole && n != math.Trunc(n)) {
+		return fmt.Sprintf("%s takes %s, not %v", label, accepts(), n)
 	}
 	return ""
 }

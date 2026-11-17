@@ -96,6 +96,11 @@ type Hooks struct {
 	// Import Wizard's pipeline (parse, column map, name resolution, write
 	// guard, plan limits, recalculation, audit) and returns a summary.
 	ImportFile func(ctx context.Context, req FileImportRequest) (string, error)
+	// SaveRecords saves a save_records step's records through the table
+	// import (importFormRows): each checked as a record saved by hand, the
+	// file whole or nothing, a row whose typed code a record holds updating
+	// it. A proposal check runs it as a dry run.
+	SaveRecords func(ctx context.Context, req RecordsSave) (string, error)
 	// WriteValues writes a write_input_values step's values through the same
 	// pipeline, as typed cells (write guard, plan limits, recalculation,
 	// audit), and returns a summary.
@@ -559,6 +564,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.clearInputValues(ctx, params)
 	case "fill_sample_values":
 		return e.fillSampleValues(ctx, params)
+	case "save_records":
+		return e.saveRecords(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)

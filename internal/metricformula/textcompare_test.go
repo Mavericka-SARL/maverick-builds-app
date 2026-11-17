@@ -18,6 +18,9 @@ func TestTextComparedOnly(t *testing.T) {
 		`LEN(chk_status)`:                            false,
 		`IF(chk_status, 1, 0)`:                       false,
 		`-chk_status`:                                false,
+		`VALUE(chk_status) * 2`:                      true, // VALUE reads its number
+		`VALUE(RIGHT(chk_status, 4)) + 1`:            true,
+		`RIGHT(chk_status, 4) + VALUE(chk_status)`:   false,
 	} {
 		node, err := formula.Parse(text)
 		if err != nil {

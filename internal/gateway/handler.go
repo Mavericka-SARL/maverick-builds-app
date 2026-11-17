@@ -3192,6 +3192,15 @@ func applyGridTotalRules(dims []gridDimension, rules rollup.RevisionTotalRules) 
 	}
 }
 
+// dimNamesOf maps each dimension's id to its name.
+func dimNamesOf(dims []gridDimension) map[string]string {
+	out := make(map[string]string, len(dims))
+	for _, d := range dims {
+		out[d.ID] = d.Name
+	}
+	return out
+}
+
 // gridAccessRules echoes the reader's own rules, its hidden ones left out.
 type gridAccessRules struct {
 	DimMembers map[string]string `json:"dim_members"` // memberID → "write"|"read"
@@ -3681,9 +3690,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				edges = append(edges, writeguard.MemberEdge{ID: m.ID, ParentID: m.ParentMemberID, DimID: d.ID})
 			}
 		}
-		for id := range writeguard.ExpandHidden(edges, dimRules) {
-			dimRules[id] = "hidden"
-		}
+		writeguard.Cascade(edges, dimRules)
 	}
 	// ── context scoping ────────────────────────────────────────────────────
 	// Optional `scope` param (URL-encoded JSON {dimensionID: memberCode}) is
@@ -4547,6 +4554,18 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// past its memory. A whole-model read (no grid_def_id) still answers for
 	// every metric.
 	if gridDefID != "" {
+		// A child dimension's rows grouped by its parent dimension's members
+		// (a territory's region): the ratios' values at those members, from
+		// every metric's cells, before the grid keeps its own.
+		if !totalsOnly && !metaOnly {
+			for i := range metrics {
+				metrics[i].AggregateEvaluated = aggregateEvaluated(metrics[i], dimNamesOf(allDims))
+			}
+			for i := range allMetrics {
+				allMetrics[i].AggregateEvaluated = aggregateEvaluated(allMetrics[i], dimNamesOf(allDims))
+			}
+			addParentDimensionCells(dims, allDims, metrics, allMetrics, metricDims, hiddenByDim, scopePinned, cells)
+		}
 		withheld = keepGridMetrics(gridMetricSet(metrics), cells, texts, totals, withheld)
 	}
 
@@ -7348,9 +7367,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			allRows.Close()
-			for id := range writeguard.ExpandHidden(edges, dimRules) {
-				dimRules[id] = "hidden"
-			}
+			writeguard.Cascade(edges, dimRules)
 		}
 	}
 
@@ -8633,6 +8650,10 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		"revision_id": revisionID,
 		"rows":        okRows,
 		"values":      len(staged),
+		// The calculated metrics the values reach are being recalculated:
+		// a read right away can still show them from before the load (the
+		// grid read says recalc_pending until the pass lands).
+		"recalculating": h.recalcPending(ctx, revisionID),
 	})
 }
 
@@ -10380,8 +10401,8 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jobRecorded := false
 		if !dryRun {
 			recordJob = func(ctx context.Context, tx pgx.Tx, res recordpost.ImportResult) error {
-				job := tableJob(res.Created)
-				if job.ModelID == "" || res.Created == 0 {
+				job := tableJob(res.Written())
+				if job.ModelID == "" || res.Written() == 0 {
 					return nil
 				}
 				_, err := importpkg.RecordJobTx(ctx, tx, job, key)
@@ -10390,9 +10411,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, string(cfg.ReplaceBy), recordJob)
-		imported, rowErrs := res.Created, res.Errors
+		imported, rowErrs := res.Written(), res.Errors
 		if dryRun && iErr == nil {
-			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
+			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_added": res.Created, "rows_updated": res.Updated, "rows_unchanged": res.Unchanged,
+				"rows_replaced": res.Replaced, "error_rows": len(rowErrs), "errors": rowErrs})
 			return
 		}
 		if errors.Is(iErr, importpkg.ErrImportKeyInUse) {
@@ -10418,15 +10440,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonFormRowErrs(w, rowErrs)
 			return
 		}
-		note := ""
-		if res.Replaced > 0 {
-			note = replacedNote(res.Replaced)
-		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", note)
-		if !jobRecorded {
+		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", loadNote(res))
+		if !jobRecorded && imported > 0 {
 			h.recordImportJob(ctx, tableJob(imported))
 		}
-		jsonOK(w, map[string]any{"rows_imported": imported, "rows_replaced": res.Replaced, "error_rows": 0})
+		jsonOK(w, map[string]any{"rows_imported": imported, "rows_added": res.Created, "rows_updated": res.Updated, "rows_unchanged": res.Unchanged,
+			"rows_replaced": res.Replaced, "error_rows": 0})
 
 	case "dimension":
 		cr, colIdx, cErr := rowsCSV(header, rows)
@@ -11686,9 +11705,7 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 				edges = append(edges, writeguard.MemberEdge{ID: m.ID, ParentID: parentID, DimID: d.ID})
 			}
 		}
-		for id := range writeguard.ExpandHidden(edges, dimRules) {
-			dimRules[id] = "hidden"
-		}
+		writeguard.Cascade(edges, dimRules)
 		for i, d := range dims {
 			kept := d.Members[:0]
 			for _, m := range d.Members {
@@ -18856,9 +18873,7 @@ func (h *handler) baAvailable(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				allRows.Close()
-				for id := range writeguard.ExpandHidden(edges, dimRules) {
-					dimRules[id] = "hidden"
-				}
+				writeguard.Cascade(edges, dimRules)
 			}
 		}
 

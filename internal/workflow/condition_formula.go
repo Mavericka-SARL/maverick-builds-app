@@ -170,7 +170,8 @@ func (s *Store) evalConditionFormula(ctx context.Context, instanceID, text strin
 	for _, ref := range an.References {
 		names = append(names, ref.Name)
 	}
-	values, err := query.NewChartResolver(s.pool).MetricValuesAt(ctx, modelID, revisionID, names, point)
+	resolver := query.NewChartResolver(s.pool)
+	values, err := resolver.MetricValuesAt(ctx, modelID, revisionID, names, point)
 	if err != nil {
 		return false, false, fmt.Sprintf("the model could not be read: %v", err)
 	}
@@ -190,7 +191,12 @@ func (s *Store) evalConditionFormula(ctx context.Context, instanceID, text strin
 			vars[strings.ToUpper(name)] = formula.StringVal(raw)
 		}
 	}
-	v := formula.EvalNode(&formula.EvalContext{Vars: vars}, node)
+	// LOOKUP and the *IFS family read the model at other members through
+	// the revision's values (query.EvalAt).
+	v, err := resolver.EvalAt(ctx, modelID, revisionID, node, vars, point)
+	if err != nil {
+		return false, false, fmt.Sprintf("the model could not be read: %v", err)
+	}
 	if v.IsError() {
 		return false, false, fmt.Sprintf("it evaluates to %s: %s", v.Err().Code, v.Err().Message)
 	}

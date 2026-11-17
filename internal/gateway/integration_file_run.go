@@ -305,6 +305,10 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 	jsonOK(w, map[string]any{
 		"rows_imported": okRows, "values_imported": len(staged),
 		"error_rows": 0, "errors": []any{},
+		// What the values reach is being recalculated: a read right away can
+		// still show it from before the load (2026-11-16); the grid read
+		// says recalc_pending until the pass lands.
+		"recalculating": h.recalcPending(ctx, revisionID),
 	})
 }
 

@@ -109,12 +109,14 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 // the records import writes its Recent Imports line, with its
 // Idempotency-Key, there.
 func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool, replaceBy string, beforeCommit func(context.Context, pgx.Tx, recordpost.ImportResult) error) (recordpost.ImportResult, error) {
-	// Each record of a table keeping a dimension is a new member: within the
-	// edition's members per dimension, as a record saved by hand is.
+	// Each record a file adds to a table keeping a dimension is a new
+	// member: within the edition's members per dimension, as a record saved
+	// by hand is. A row updating the record holding its code adds none.
+	var newMembers func(n int) error
 	if form.KeepsDimension() && h.plans != nil {
 		if cid, _ := h.customerOfDimension(ctx, form.KeepsDimensionID); cid != "" {
-			if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, form.KeepsDimensionID, len(rawRows)); err != nil {
-				return recordpost.ImportResult{}, err
+			newMembers = func(n int) error {
+				return h.plans.CheckMembers(ctx, h.db.For(ctx), cid, form.KeepsDimensionID, n)
 			}
 		}
 	}
@@ -153,6 +155,26 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			}
 			return ""
 		},
+		// A row whose code a record holds updates it, as act may by hand.
+		UpdateRefusal: func(rec *crudapp.FormRecord, status string) string {
+			access := scope.access(rec)
+			switch {
+			case access.ParentDecided && !access.Admin:
+				msg, _, err := h.parentRefusal(ctx, &scope, rec.Data)
+				if err != nil {
+					parentErr = err
+					return "the record it belongs to could not be read"
+				}
+				return strings.TrimPrefix(msg, "forbidden: ")
+			case access.CanUpdate(rec.Status, status):
+			case status != rec.Status:
+				return fmt.Sprintf("you may not move it from %s to %s", rec.Status, status)
+			default:
+				return "you may not change it"
+			}
+			return ""
+		},
+		NewMembers: newMembers,
 	})
 	if err == nil && parentErr != nil {
 		err = parentErr
@@ -208,6 +230,25 @@ func (r *replaceBySpec) UnmarshalJSON(b []byte) error {
 }
 
 // replacedNote is what a run that replaced records says of them.
+// loadNote says what a table load did besides adding records: the records
+// it updated by their code, those whose row changed nothing, the earlier
+// records it replaced ("" when none).
+func loadNote(res recordpost.ImportResult) string {
+	var parts []string
+	if res.Updated == 1 {
+		parts = append(parts, "updated 1 record by its code")
+	} else if res.Updated > 1 {
+		parts = append(parts, fmt.Sprintf("updated %d records by their code", res.Updated))
+	}
+	if res.Unchanged > 0 {
+		parts = append(parts, fmt.Sprintf("%d unchanged", res.Unchanged))
+	}
+	if res.Replaced > 0 {
+		parts = append(parts, replacedNote(res.Replaced))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func replacedNote(n int) string {
 	if n == 1 {
 		return "replaced 1 earlier record"

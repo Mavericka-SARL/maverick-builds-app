@@ -66,6 +66,15 @@ type FormField struct {
 	// Format shows a number field's values: "money" (two decimals, grouped
 	// thousands); "" plain.
 	Format string `json:"format,omitempty"`
+	// Min, Max and Whole are a number field's accepted values, as an input
+	// metric's (model.metric_def.input_rules): no value below Min, none
+	// above Max, whole numbers only. Every save checks them — by hand, a
+	// file, a connector — naming the field: a CRM intent outside 1–5 or an
+	// FTE above 1 used to come in through records unchecked, though the
+	// metrics they post into refused the same value typed (2026-11-16).
+	Min   *float64 `json:"min,omitempty"`
+	Max   *float64 `json:"max,omitempty"`
+	Whole bool     `json:"whole,omitempty"`
 	// Deadline marks a date field whose date, once past, shows the record
 	// as overdue — unless DoneField holds one of DoneValues (a task that is
 	// completed is not overdue).

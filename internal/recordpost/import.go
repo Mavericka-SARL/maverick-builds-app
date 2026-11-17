@@ -2,6 +2,8 @@ package recordpost
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 // RowError is one row an import refuses.
@@ -72,20 +75,38 @@ type ImportRequest struct {
 	// writes its Recent Imports line there, holding the Idempotency-Key the
 	// file was sent under, so a file sent again is not created twice.
 	BeforeCommit func(ctx context.Context, tx pgx.Tx, res ImportResult) error
+	// UpdateRefusal says why CreatorID may not change rec, the record
+	// holding a row's code in a table whose records have a typed code, to
+	// status ("" when they may): the row then updates that record instead
+	// of adding one. Nil refuses every such row (the code is taken).
+	UpdateRefusal func(rec *crudapp.FormRecord, status string) string
+	// NewMembers, when set, is told how many records the file adds before
+	// anything is written (a table keeping a dimension: each is a new
+	// member); its error refuses the file.
+	NewMembers func(n int) error
 }
 
 // ImportResult is what an import did, or would do in a dry run.
 type ImportResult struct {
 	Created int
+	// Updated counts the records a row changed: a row whose typed code a
+	// record already holds updates that record (a CRM extract loaded
+	// again). Unchanged counts those the row left as they were.
+	Updated   int
+	Unchanged int
 	// Replaced counts the records a ReplaceBy load deleted.
 	Replaced int
 	Errors   []RowError
 }
 
-// ImportRows is Import for a caller that does not replace.
+// Written is how many records the import created or changed.
+func (r ImportResult) Written() int { return r.Created + r.Updated }
+
+// ImportRows is Import for a caller that does not replace: created counts
+// the records it added or updated.
 func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created int, errs []RowError, err error) {
 	res, err := ps.Import(ctx, req)
-	return res.Created, res.Errors, err
+	return res.Written(), res.Errors, err
 }
 
 // ImportRows creates a record of req.Form for each row, posts it through the
@@ -159,29 +180,75 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	type stagedRecord struct {
 		data   map[string]any
 		status string
+		// target is the record the row updates: the one holding its typed
+		// code. Nil adds a record.
+		target *crudapp.FormRecord
 	}
 	var staged []stagedRecord
 	memberLeaves := NewMemberCache()
 	today := time.Now().UTC().Format("2006-01-02")
 	codeRows := map[string]int{} // typed code → the row that first gives it
+	// A table whose records have a typed code: a row giving a code a record
+	// holds updates that record — a CRM extract or an HRIS roster loaded
+	// again refreshes its accounts and sellers. Each such load used to be
+	// refused whole ("is taken") although a kept dimension's records are
+	// documented as added and updated by their code (2026-11-16).
+	codeField := form.TypedCodeField()
+	var byCode map[string]*crudapp.FormRecord
+	if codeField != nil {
+		if byCode, err = recordsByCode(ctx, ps.db(ctx), form.ID, codeField.Name); err != nil {
+			return res, err
+		}
+	}
 
 	for _, row := range req.Rows {
+		var target *crudapp.FormRecord
+		if codeField != nil {
+			target = byCode[strings.TrimSpace(row.Cells[headerOf[codeField.Name]])]
+		}
 		data := map[string]any{}
-		for col, field := range fieldByHeader {
-			if raw := strings.TrimSpace(row.Cells[col]); raw != "" {
-				data[field.Name] = raw
+		if target != nil {
+			// The file's columns replace the record's values (an empty cell
+			// empties its field); a field the file has no column for keeps
+			// its value. A cell holding what the record holds keeps the
+			// stored value, typed as stored.
+			for k, v := range target.Data {
+				data[k] = v
+			}
+			for col, field := range fieldByHeader {
+				raw := strings.TrimSpace(row.Cells[col])
+				old, had := data[field.Name]
+				switch {
+				case raw == "":
+					delete(data, field.Name)
+				case had && sameValue(old, raw):
+				default:
+					data[field.Name] = raw
+				}
+			}
+			data = crudapp.KeepServerValues(form, target.Data, data)
+		} else {
+			for col, field := range fieldByHeader {
+				if raw := strings.TrimSpace(row.Cells[col]); raw != "" {
+					data[field.Name] = raw
+				}
 			}
 		}
 		statusRaw := ""
 		if statusCol != "" {
 			statusRaw = strings.ToLower(strings.TrimSpace(row.Cells[statusCol]))
 		}
-		if len(data) == 0 && statusRaw == "" {
+		if target == nil && len(data) == 0 && statusRaw == "" {
 			continue // blank row
 		}
-		crudapp.ApplyDefaults(form, data, today)
+		var current map[string]any
+		if target != nil {
+			current = target.Data
+		} else {
+			crudapp.ApplyDefaults(form, data, today)
+		}
 		rowValid := true
-		problems, pErr := ps.RecordValueProblems(ctx, view, form, nil, data, true, memberLeaves)
+		problems, pErr := ps.RecordValueProblems(ctx, view, form, current, data, true, memberLeaves)
 		if pErr != nil {
 			return res, pErr
 		}
@@ -194,15 +261,32 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			rowValid = false
 		}
 		status := req.NewStatus
+		if target != nil {
+			status = target.Status // a row naming no status keeps the record's
+		}
 		if statusRaw != "" {
 			if !crudapp.ValidRecordStatus(statusRaw) {
 				errs = append(errs, RowError{Row: row.RowNumber, Column: statusCol, Message: fmt.Sprintf("%q is not a valid status (draft, submitted, approved, rejected)", statusRaw)})
 				rowValid = false
+			} else if target != nil {
+				status = statusRaw // UpdateRefusal checks the move below
 			} else if msg := req.StatusRefusal(statusRaw); msg != "" {
 				errs = append(errs, RowError{Row: row.RowNumber, Column: statusCol, Message: msg})
 				rowValid = false
 			} else {
 				status = statusRaw
+			}
+		}
+		if target != nil && rowValid {
+			msg, label, code := "", firstNonEmpty(codeField.Label, codeField.Name), fmt.Sprint(target.Data[codeField.Name])
+			if req.UpdateRefusal == nil {
+				msg = fmt.Sprintf("%s %q is taken: another record of %s has it", label, code, form.Label)
+			} else if m := req.UpdateRefusal(target, status); m != "" {
+				msg = fmt.Sprintf("%s %q is a record this file would update: %s", label, code, m)
+			}
+			if msg != "" {
+				errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[codeField.Name], Message: msg})
+				rowValid = false
 			}
 		}
 		if req.RecordRefusal != nil && rowValid {
@@ -237,12 +321,20 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		}
 		// A row holding a value with a mapped field empty would post at a
 		// partial coordinate: refused naming its column, whoever imports.
-		if field, msg := checks.emptyMappedField("", &RecordState{Status: status, Data: data}); field != "" {
+		targetID := ""
+		if target != nil {
+			if status == target.Status && sameData(data, target.Data) {
+				res.Unchanged++
+				continue
+			}
+			targetID = target.ID
+		}
+		if field, msg := checks.emptyMappedField(targetID, &RecordState{Status: status, Data: data}); field != "" {
 			errs = append(errs, RowError{Row: row.RowNumber, Column: firstNonEmpty(headerOf[field], field), Message: msg})
 			continue
 		}
 		if req.CreatorID != "" {
-			code, msg, rErr := ps.postingRefusal(ctx, checks, req.CreatorID, true, "", &RecordState{Status: status, Data: data})
+			code, msg, rErr := ps.postingRefusal(ctx, checks, req.CreatorID, true, targetID, &RecordState{Status: status, Data: data})
 			if rErr != nil {
 				return res, rErr
 			}
@@ -251,7 +343,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				continue
 			}
 		}
-		staged = append(staged, stagedRecord{data: data, status: status})
+		staged = append(staged, stagedRecord{data: data, status: status, target: target})
 	}
 
 	res.Errors = errs
@@ -262,11 +354,34 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	for k := range replaceKeys {
 		keys = append(keys, k)
 	}
+	// A row whose code a record the load replaces holds adds the record
+	// anew: the old one goes with its period.
+	count := func(replaced []*crudapp.FormRecord) error {
+		gone := make(map[string]bool, len(replaced))
+		for _, r := range replaced {
+			gone[r.ID] = true
+		}
+		res.Created, res.Updated = 0, 0
+		for i := range staged {
+			if t := staged[i].target; t != nil && gone[t.ID] {
+				staged[i].target = nil
+			}
+			if staged[i].target == nil {
+				res.Created++
+			} else {
+				res.Updated++
+			}
+		}
+		if req.NewMembers != nil && res.Created > 0 {
+			return req.NewMembers(res.Created)
+		}
+		return nil
+	}
 	if req.DryRun {
-		res.Created = len(staged)
+		var recs []*crudapp.FormRecord
 		if replaceBy != nil && len(keys) > 0 {
-			recs, rErr := recordsToReplace(ctx, ps.db(ctx), form, replaceBy, keys, false)
-			if rErr != nil {
+			var rErr error
+			if recs, rErr = recordsToReplace(ctx, ps.db(ctx), form, replaceBy, keys, false); rErr != nil {
 				return res, rErr
 			}
 			if msg, rErr := ps.replaceRefusal(ctx, req, checks, replaceBy, recs); rErr != nil {
@@ -276,7 +391,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			}
 			res.Replaced = len(recs)
 		}
-		return res, nil
+		return res, count(recs)
 	}
 
 	membersAdded := false
@@ -296,9 +411,10 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after Commit
 	// The records the file replaces go first, in the same transaction: a
 	// load that fails part-way leaves the month as it was.
+	var old []*crudapp.FormRecord
 	if replaceBy != nil && len(keys) > 0 {
-		old, rErr := recordsToReplace(ctx, tx, form, replaceBy, keys, true)
-		if rErr != nil {
+		var rErr error
+		if old, rErr = recordsToReplace(ctx, tx, form, replaceBy, keys, true); rErr != nil {
 			return res, rErr
 		}
 		if msg, rErr := ps.replaceRefusal(ctx, req, checks, replaceBy, old); rErr != nil {
@@ -317,9 +433,25 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		}
 		res.Replaced = len(ids)
 	}
+	if err := count(old); err != nil {
+		return ImportResult{}, err
+	}
 	txStore := crudapp.NewStoreOn(tx)
 	recs := make([]*crudapp.FormRecord, 0, len(staged))
+	var moved []*crudapp.FormRecord // updated records whose status the file changed
 	for _, sr := range staged {
+		if sr.target != nil {
+			rec, uErr := ps.updateImported(ctx, tx, form, sr.target, sr.status, sr.data, req.CreatorID, &membersAdded)
+			if uErr != nil {
+				membersAdded = false
+				return ImportResult{}, uErr
+			}
+			recs = append(recs, rec)
+			if rec.Status != sr.target.Status {
+				moved = append(moved, rec)
+			}
+			continue
+		}
 		rec, cErr := txStore.CreateRecordThen(ctx, form.ID, req.CreatorID, sr.status, sr.data, ps.AfterRecordCreated(req.CreatorID, &membersAdded))
 		if cErr != nil {
 			membersAdded = false
@@ -328,9 +460,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		recs = append(recs, rec)
 	}
 	if req.BeforeCommit != nil {
-		done := res
-		done.Created = len(recs)
-		if err := req.BeforeCommit(ctx, tx, done); err != nil {
+		if err := req.BeforeCommit(ctx, tx, res); err != nil {
 			membersAdded = false
 			return ImportResult{}, err
 		}
@@ -339,7 +469,6 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		membersAdded = false
 		return ImportResult{}, fmt.Errorf("create records: %w", err)
 	}
-	res.Created = len(recs)
 	creator := req.CreatorID
 	// Replaced records posted through the table's mappings too: every total
 	// is rebuilt, so a cell only an old record posted into empties.
@@ -359,8 +488,15 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	// workflow per submitted expense did not start for imported ones. The
 	// records exist now whatever happens to the request.
 	dispatchCtx := context.WithoutCancel(ctx)
-	for _, rec := range recs {
-		ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator, true)
+	for i, rec := range recs {
+		if staged[i].target == nil {
+			ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator, true)
+		}
+	}
+	// A record the file moved into submitted or approved fires what a
+	// record moved there by hand fires.
+	for _, rec := range moved {
+		ps.DispatchRecordStatus(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator)
 	}
 	return res, nil
 }
@@ -397,4 +533,105 @@ func (ps *Poster) postBatch(ctx context.Context, form *crudapp.FormDef, recs []*
 		}
 	}
 	ps.totals(ctx, tp, touched, userID)
+}
+
+// recordsByCode reads formID's records by the typed code their field holds:
+// the records a file's rows update.
+func recordsByCode(ctx context.Context, db dbx.DB, formID, field string) (map[string]*crudapp.FormRecord, error) {
+	rows, err := db.Query(ctx, `
+		SELECT id::text, COALESCE(status::text, ''), data, created_by::text, created_at, updated_at
+		FROM runtime.form_record
+		WHERE form_id = $1::uuid AND COALESCE(data->>$2, '') <> ''`, formID, field)
+	if err != nil {
+		return nil, fmt.Errorf("read the table's records by code: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]*crudapp.FormRecord{}
+	for rows.Next() {
+		r := &crudapp.FormRecord{FormID: formID}
+		var raw []byte
+		if err := rows.Scan(&r.ID, &r.Status, &raw, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &r.Data); err != nil {
+			return nil, err
+		}
+		out[strings.TrimSpace(fmt.Sprint(r.Data[field]))] = r
+	}
+	return out, rows.Err()
+}
+
+// sameData reports whether a and b hold the same value in every field.
+func sameData(a, b map[string]any) bool {
+	for k, v := range a {
+		w, ok := b[k]
+		if !ok || !sameValue(v, w) {
+			return false
+		}
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// updateImported saves data and status on rec, the record a file's row
+// updates, in the import's transaction tx — only while the record is still
+// as it was read, or the whole file is refused — and keeps what a save by
+// hand keeps: the member the record is (relabelled, its properties set,
+// *changed when the dimension changed) and its fields' history.
+func (ps *Poster) updateImported(ctx context.Context, tx pgx.Tx, form *crudapp.FormDef, rec *crudapp.FormRecord, status string, data map[string]any, userID string, changed *bool) (*crudapp.FormRecord, error) {
+	dataJSON, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	var updatedAt time.Time
+	err = tx.QueryRow(ctx, `
+		UPDATE runtime.form_record
+		SET data = $2, status = NULLIF($3, '')::runtime.record_status, updated_at = now()
+		WHERE id = $1::uuid AND updated_at = $4
+		RETURNING updated_at`, rec.ID, dataJSON, status, rec.UpdatedAt).Scan(&updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		cf := form.CodeField()
+		return nil, &ReplaceError{Msg: fmt.Sprintf("the record %v of %s changed while the file was loading; nothing was loaded: load the file again",
+			rec.Data[cf.Name], form.Label)}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update record: %w", err)
+	}
+	c, err := KeepMember(ctx, tx, form, data)
+	if err != nil {
+		return nil, err
+	}
+	if c && changed != nil {
+		*changed = true
+	}
+	if err := crudapp.LogFieldChanges(ctx, tx, form, rec.ID, rec.Data, data, userID); err != nil {
+		return nil, err
+	}
+	out := *rec
+	out.Data, out.Status, out.UpdatedAt = data, status, updatedAt
+	return &out, nil
+}
+
+// DispatchRecordStatus fires the rules a record moved into status by hand
+// fires — form_submit into submitted, form_approval into approved — for a
+// record a file's row moved there.
+func (ps *Poster) DispatchRecordStatus(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
+	event := ""
+	switch status {
+	case crudapp.StatusSubmitted:
+		event = "form_submit"
+	case crudapp.StatusApproved:
+		event = "form_approval"
+	default:
+		return
+	}
+	bgCtx := context.WithoutCancel(ctx)
+	go func() {
+		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": status, "record_source": "import"}
+		ps.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, event, formID, userID, payload)
+	}()
 }

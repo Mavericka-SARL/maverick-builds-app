@@ -2154,7 +2154,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           ) : (
             /* Metrics in COLS */
             <table className="mvx-grid-frozen" style={{ borderCollapse: "collapse", fontSize: 13, width: "100%",
-              minWidth: Math.max(500, effectiveColCombos.length * numMetrics * 86 + (hasRowDims ? 160 : 80)) }}>
+              // What the columns need, and no more: a floor of 500 px pushed a
+              // one-column grid in a 360 px widget past its edge, its values
+              // out of view (2026-11-16).
+              minWidth: effectiveColCombos.length * numMetrics * 86 + (hasRowDims ? (labelWidth ?? 160) : 80) }}>
               <thead>
                 {metricsOuter ? (<>
                   <tr style={{ background: "var(--color-surface-faint)", borderBottom: "1px solid var(--color-grid-col-header-border)" }}>

@@ -32924,6 +32924,24 @@ func (s *FormField) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Min.Set {
+			e.FieldStart("min")
+			s.Min.Encode(e)
+		}
+	}
+	{
+		if s.Max.Set {
+			e.FieldStart("max")
+			s.Max.Encode(e)
+		}
+	}
+	{
+		if s.Whole.Set {
+			e.FieldStart("whole")
+			s.Whole.Encode(e)
+		}
+	}
+	{
 		if s.Deadline.Set {
 			e.FieldStart("deadline")
 			s.Deadline.Encode(e)
@@ -32947,7 +32965,7 @@ func (s *FormField) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfFormField = [21]string{
+var jsonFieldsNameOfFormField = [24]string{
 	0:  "name",
 	1:  "label",
 	2:  "type",
@@ -32966,9 +32984,12 @@ var jsonFieldsNameOfFormField = [21]string{
 	15: "history",
 	16: "on_delete",
 	17: "format",
-	18: "deadline",
-	19: "done_field",
-	20: "done_values",
+	18: "min",
+	19: "max",
+	20: "whole",
+	21: "deadline",
+	22: "done_field",
+	23: "done_values",
 }
 
 // Decode decodes FormField from json.
@@ -33184,6 +33205,36 @@ func (s *FormField) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"format\"")
+			}
+		case "min":
+			if err := func() error {
+				s.Min.Reset()
+				if err := s.Min.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"min\"")
+			}
+		case "max":
+			if err := func() error {
+				s.Max.Reset()
+				if err := s.Max.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"max\"")
+			}
+		case "whole":
+			if err := func() error {
+				s.Whole.Reset()
+				if err := s.Whole.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"whole\"")
 			}
 		case "deadline":
 			if err := func() error {
@@ -44927,6 +44978,18 @@ func (s *ImportFormRecordsOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.RecordsUpdated.Set {
+			e.FieldStart("records_updated")
+			s.RecordsUpdated.Encode(e)
+		}
+	}
+	{
+		if s.RecordsUnchanged.Set {
+			e.FieldStart("records_unchanged")
+			s.RecordsUnchanged.Encode(e)
+		}
+	}
+	{
 		if s.RecordsReplaced.Set {
 			e.FieldStart("records_replaced")
 			s.RecordsReplaced.Encode(e)
@@ -44963,6 +45026,24 @@ func (s *ImportFormRecordsOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.RowsAdded.Set {
+			e.FieldStart("rows_added")
+			s.RowsAdded.Encode(e)
+		}
+	}
+	{
+		if s.RowsUpdated.Set {
+			e.FieldStart("rows_updated")
+			s.RowsUpdated.Encode(e)
+		}
+	}
+	{
+		if s.RowsUnchanged.Set {
+			e.FieldStart("rows_unchanged")
+			s.RowsUnchanged.Encode(e)
+		}
+	}
+	{
 		if s.ErrorRows.Set {
 			e.FieldStart("error_rows")
 			s.ErrorRows.Encode(e)
@@ -44980,17 +45061,22 @@ func (s *ImportFormRecordsOK) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfImportFormRecordsOK = [10]string{
-	0: "status",
-	1: "records_created",
-	2: "records_replaced",
-	3: "job_id",
-	4: "replayed",
-	5: "dry_run",
-	6: "rows_replaced",
-	7: "rows",
-	8: "error_rows",
-	9: "errors",
+var jsonFieldsNameOfImportFormRecordsOK = [15]string{
+	0:  "status",
+	1:  "records_created",
+	2:  "records_updated",
+	3:  "records_unchanged",
+	4:  "records_replaced",
+	5:  "job_id",
+	6:  "replayed",
+	7:  "dry_run",
+	8:  "rows_replaced",
+	9:  "rows",
+	10: "rows_added",
+	11: "rows_updated",
+	12: "rows_unchanged",
+	13: "error_rows",
+	14: "errors",
 }
 
 // Decode decodes ImportFormRecordsOK from json.
@@ -45020,6 +45106,26 @@ func (s *ImportFormRecordsOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"records_created\"")
+			}
+		case "records_updated":
+			if err := func() error {
+				s.RecordsUpdated.Reset()
+				if err := s.RecordsUpdated.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"records_updated\"")
+			}
+		case "records_unchanged":
+			if err := func() error {
+				s.RecordsUnchanged.Reset()
+				if err := s.RecordsUnchanged.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"records_unchanged\"")
 			}
 		case "records_replaced":
 			if err := func() error {
@@ -45080,6 +45186,36 @@ func (s *ImportFormRecordsOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "rows_added":
+			if err := func() error {
+				s.RowsAdded.Reset()
+				if err := s.RowsAdded.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_added\"")
+			}
+		case "rows_updated":
+			if err := func() error {
+				s.RowsUpdated.Reset()
+				if err := s.RowsUpdated.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_updated\"")
+			}
+		case "rows_unchanged":
+			if err := func() error {
+				s.RowsUnchanged.Reset()
+				if err := s.RowsUnchanged.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_unchanged\"")
 			}
 		case "error_rows":
 			if err := func() error {
@@ -73075,6 +73211,24 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.RowsAdded.Set {
+			e.FieldStart("rows_added")
+			s.RowsAdded.Encode(e)
+		}
+	}
+	{
+		if s.RowsUpdated.Set {
+			e.FieldStart("rows_updated")
+			s.RowsUpdated.Encode(e)
+		}
+	}
+	{
+		if s.RowsUnchanged.Set {
+			e.FieldStart("rows_unchanged")
+			s.RowsUnchanged.Encode(e)
+		}
+	}
+	{
 		if s.RowsReplaced.Set {
 			e.FieldStart("rows_replaced")
 			s.RowsReplaced.Encode(e)
@@ -73084,6 +73238,12 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 		if s.ValuesImported.Set {
 			e.FieldStart("values_imported")
 			s.ValuesImported.Encode(e)
+		}
+	}
+	{
+		if s.Recalculating.Set {
+			e.FieldStart("recalculating")
+			s.Recalculating.Encode(e)
 		}
 	}
 	{
@@ -73132,16 +73292,20 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfRunIntegrationOK = [9]string{
-	0: "rows_imported",
-	1: "rows_replaced",
-	2: "values_imported",
-	3: "error_rows",
-	4: "dry_run",
-	5: "rows",
-	6: "values",
-	7: "errors",
-	8: "notices",
+var jsonFieldsNameOfRunIntegrationOK = [13]string{
+	0:  "rows_imported",
+	1:  "rows_added",
+	2:  "rows_updated",
+	3:  "rows_unchanged",
+	4:  "rows_replaced",
+	5:  "values_imported",
+	6:  "recalculating",
+	7:  "error_rows",
+	8:  "dry_run",
+	9:  "rows",
+	10: "values",
+	11: "errors",
+	12: "notices",
 }
 
 // Decode decodes RunIntegrationOK from json.
@@ -73162,6 +73326,36 @@ func (s *RunIntegrationOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"rows_imported\"")
 			}
+		case "rows_added":
+			if err := func() error {
+				s.RowsAdded.Reset()
+				if err := s.RowsAdded.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_added\"")
+			}
+		case "rows_updated":
+			if err := func() error {
+				s.RowsUpdated.Reset()
+				if err := s.RowsUpdated.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_updated\"")
+			}
+		case "rows_unchanged":
+			if err := func() error {
+				s.RowsUnchanged.Reset()
+				if err := s.RowsUnchanged.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows_unchanged\"")
+			}
 		case "rows_replaced":
 			if err := func() error {
 				s.RowsReplaced.Reset()
@@ -73181,6 +73375,16 @@ func (s *RunIntegrationOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"values_imported\"")
+			}
+		case "recalculating":
+			if err := func() error {
+				s.Recalculating.Reset()
+				if err := s.Recalculating.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"recalculating\"")
 			}
 		case "error_rows":
 			if err := func() error {

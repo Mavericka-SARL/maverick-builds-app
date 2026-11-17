@@ -899,7 +899,7 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 		return 0, "", table, fmt.Errorf("you cannot add records to table '%s'", table)
 	}
 	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun, replaceBy, nil)
-	n, rowErrs := res.Created, res.Errors
+	n, rowErrs := res.Written(), res.Errors
 	if err != nil {
 		return 0, "", table, err
 	}
@@ -911,13 +911,12 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 		return 0, fmt.Sprintf("%d row(s) fail validation — a table import is all-or-nothing, so nothing would be imported until they are fixed "+
 			"(map each column to a field name or label of the table, or \"ignore\"):\n%s", len(rowErrs), importErrorLines(lines, 15)), table, nil
 	}
-	if n == 0 {
+	if n == 0 && res.Unchanged == 0 {
 		return 0, "", table, fmt.Errorf("%s holds no rows for table '%s'", f.describe(), table)
 	}
-	if res.Replaced > 0 {
-		note := replacedNote(res.Replaced)
+	if note := loadNote(res); note != "" {
 		if dryRun {
-			note = "would replace" + strings.TrimPrefix(note, "replaced")
+			note = "would have " + note
 		}
 		table += " (" + note + ")"
 	}

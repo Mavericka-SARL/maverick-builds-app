@@ -195,6 +195,16 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 		WriteValues: func(ctx context.Context, req aiassistant.ValuesWriteRequest) (string, error) {
 			return h.aiCheckWriteValues(ctx, tx, req)
 		},
+		// Records are checked outside the plan's transaction, as a file
+		// import into a table is: a table this plan creates cannot be.
+		SaveRecords: func(ctx context.Context, req aiassistant.RecordsSave) (string, error) {
+			var exists bool
+			_ = h.db.For(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.form_def WHERE id=$1::uuid)`, req.TableID).Scan(&exists)
+			if !exists {
+				return "", aiassistant.ErrNotDryRunnable
+			}
+			return h.aiSaveRecords(ctx, userID, req, true)
+		},
 		PostFormIntegration: func(ctx context.Context, mappingID string) (int, error) {
 			return checkFormPosting(ctx, tx, mappingID)
 		},

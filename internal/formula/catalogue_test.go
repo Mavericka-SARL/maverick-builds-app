@@ -252,6 +252,13 @@ func scalarCatalogue() []catCase {
 		{`TRIM("  a   b  ")`, text("a b")},
 		{`TEXT(3.14159, "0.00")`, text("3.14")},
 		{`TEXT(3.6, "0")`, text("4")},
+		{`VALUE("2027")`, num(2027)},
+		{`VALUE(" 1,234.5 ")`, num(1234.5)},
+		{`VALUE("5%")`, num(0.05)},
+		{`VALUE(RIGHT("FY 2027", 4)) + 1`, num(2028)},
+		{`VALUE(TEXT(3.6, "0"))`, num(4)},
+		{`VALUE(7)`, num(7)},
+		{`VALUE("FY 2027")`, fails("#VALUE!")},
 		{`TEXT(1.23456, "0.000")`, text("1.235")},
 		{`TEXT(DATE(2026, 3, 5), "yyyy-mm-dd")`, text("2026-03-05")},
 		{`TEXT(DATE(2026, 3, 5), "DD/MM/YYYY")`, text("05/03/2026")},
@@ -584,6 +591,14 @@ func dimCatalogue() []catCase {
 		{`SWITCH(region.currency, "EUR", 1.1, "USD", 1, 0) * LOOKUP(sales, product, "A200")`, num(22)},
 		{`SUMIFS(sales, region, "<>" & region) - SUMIF(region.currency, "USD", sales)`, num(1)},
 		{`MAX(0, MAXIFS(sales, region.currency, "EUR") - MINIFS(sales, region.currency, "EUR"))`, num(9)},
+
+		// MEMBERIFS: the reverse of LOOKUP — the first member matching.
+		{`MEMBERIFS(region.currency, "USD")`, text("US")},
+		{`MEMBERIFS(region.currency, "EUR")`, text("DE")},
+		{`MEMBERIFS(region.currency, "EUR", region.headcount, "<5")`, text("FR")},
+		{`MEMBERIFS(region.currency, "GBP")`, fails("#N/A")},
+		{`IFNA(MEMBERIFS(region.currency, "GBP"), "none")`, text("none")},
+		{`LOOKUP(sales, region, MEMBERIFS(region.currency, "USD"))`, num(100)},
 	}
 }
 
@@ -657,7 +672,7 @@ func TestCatalogueArgumentCounts(t *testing.T) {
 	for _, text := range []string{
 		`PARENT()`, `PARENT(region, product)`, `LOOKUP(sales)`, `LOOKUP(sales, region)`,
 		`SUMIFS(sales)`, `SUMIFS(sales, region)`, `AVERAGEIFS(sales, region)`, `MINIFS(sales)`, `MAXIFS(sales, region)`,
-		`COUNTIFS()`, `COUNTIFS(region)`, `SUMIF(region, "DE")`, `AVERAGEIF(region)`, `COUNTIF(region)`,
+		`MEMBERIFS()`, `MEMBERIFS(region)`, `VALUE()`, `VALUE("1", "2")`, `COUNTIFS()`, `COUNTIFS(region)`, `SUMIF(region, "DE")`, `AVERAGEIF(region)`, `COUNTIF(region)`,
 	} {
 		fails("#VALUE!").check(t, text, evalIn(t, m.ctx(map[string]string{"region": "DE", "product": "A100"}), text))
 	}

@@ -606,7 +606,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
 export function IntegrationButtonWidget({ integrationId, label, buttonColor, corners }: { integrationId: string; label: string; buttonColor?: string; corners?: ButtonCorners }) {
   const radius = { borderRadius: buttonRadius(corners) };
   const fileRef = React.useRef<HTMLInputElement>(null);
-  const [result, setResult] = useState<{ rows_imported?: number; rows_replaced?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
+  const [result, setResult] = useState<{ rows_imported?: number; rows_replaced?: number; rows_updated?: number; rows_unchanged?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
 
   // A google_sheets integration needs no file — the server re-fetches its
   // configured sheet on every run — so its button syncs on click instead of
@@ -695,7 +695,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor, cor
         <div style={{ fontSize: 12, color: result.message ? "var(--color-danger)" : "var(--color-live)" }}>
           {result.message
             ? result.message
-            : `${result.rows_imported ?? 0} rows imported${result.rows_replaced ? `, replacing ${result.rows_replaced} earlier record${result.rows_replaced === 1 ? "" : "s"}` : ""}${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
+            : `${result.rows_imported ?? 0} rows imported${result.rows_updated ? ` (${result.rows_updated} updated by ${result.rows_updated === 1 ? "its" : "their"} code)` : ""}${result.rows_unchanged ? `, ${result.rows_unchanged} unchanged` : ""}${result.rows_replaced ? `, replacing ${result.rows_replaced} earlier record${result.rows_replaced === 1 ? "" : "s"}` : ""}${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
           {result.errors && result.errors.length > 0 && (
             <div style={{ color: "var(--color-danger)" }}>
               Row {result.errors[0].row}: {result.errors[0].message}<Txt>{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}</Txt>

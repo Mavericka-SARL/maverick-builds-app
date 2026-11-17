@@ -59,6 +59,7 @@ func init() {
 		"LOWER":      fnLOWER,
 		"TRIM":       fnTRIM,
 		"TEXT":       fnTEXT,
+		"VALUE":      fnVALUE,
 		"SUBSTITUTE": fnSUBSTITUTE,
 
 		// Date
@@ -742,6 +743,41 @@ func fnTEXT(ctx *EvalContext, args []Node) Value {
 		return StringVal(formatDate(serialToTime(n), fmtStr))
 	}
 	return StringVal(numberText15(n))
+}
+
+// fnVALUE is a text's number, as Excel's VALUE: "2027" → 2027, " 1,234.5 "
+// → 1234.5, "5%" → 0.05; a number is itself, a blank 0; a text that is no
+// number is #VALUE!. A number formula reads a text metric through it — the
+// year a planning-year text names, a count a pick-list's code carries —
+// where text read as a number is 0 (2026-11-16).
+func fnVALUE(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("VALUE", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	v := ctx.eval(args[0])
+	switch v.Kind() {
+	case KindError:
+		return v
+	case KindNumber, KindBool, KindBlank:
+		n, _ := v.Number()
+		return NumberVal(n)
+	case KindString:
+	}
+	raw := strings.TrimSpace(v.String())
+	if raw == "" {
+		return NumberVal(0)
+	}
+	pct := strings.HasSuffix(raw, "%")
+	clean := strings.ReplaceAll(strings.TrimSpace(strings.TrimSuffix(raw, "%")), ",", "")
+	clean = strings.ReplaceAll(clean, " ", "")
+	n, err := strconv.ParseFloat(clean, 64)
+	if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+		return ErrorVal(errValue(fmt.Sprintf("VALUE: %q is not a number", raw)))
+	}
+	if pct {
+		n /= 100
+	}
+	return NumberVal(n)
 }
 
 // fixedFormat recognises the number formats TEXT supports: "0" or "#" (no

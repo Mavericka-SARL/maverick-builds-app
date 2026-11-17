@@ -1143,6 +1143,15 @@ func (r *ChartResolver) evalCalcMetricVisited(
 		leaf := func(ctx context.Context, _ string, combo map[string]string) (float64, bool, error) {
 			point := make(map[string]string, len(dimMembers)+len(combo))
 			for k, v := range dimMembers {
+				// A pin on a dimension above one the leaf pins (a region
+				// over the territory) is what the leaf already says: kept,
+				// it made the leaf an aggregate, so a metric with a value
+				// at a territory only (a region's pool shared out, total
+				// rule none) read blank and a region's quotas 0 in charts
+				// and the chat connector (2026-11-16).
+				if pinnedBelow(allDims, combo, k) {
+					continue
+				}
 				point[k] = v
 			}
 			for k, v := range combo {
@@ -1184,6 +1193,18 @@ func resolveInput(ctx context.Context, allDims map[string]*rollup.Dimension, def
 	}
 	return rollup.ResolveTimeRecorded(ctx, allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
 		rollup.TimeSummaryRule(def.TimeSummary), point, fetch)
+}
+
+// pinnedBelow reports whether combo pins a dimension other than dimID that
+// relates to it — a child dimension's member (a territory under a region)
+// or a member a property grouping groups.
+func pinnedBelow(dims map[string]*rollup.Dimension, combo map[string]string, dimID string) bool {
+	for d := range combo {
+		if d != dimID && rollup.Relates(dims, d, dimID) {
+			return true
+		}
+	}
+	return false
 }
 
 // ownPoint keeps the members of point on the metric's own dimensions

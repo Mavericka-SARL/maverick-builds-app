@@ -402,12 +402,11 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 		}
 		// A member with no rule of its own still isn't writable if an
 		// ancestor (structural or cross-dimension, walking parent_member_id
-		// exactly like WorkflowLockReason below) is hidden — e.g. an
-		// employee under a cost center hidden from this user, even though
-		// only the cost center itself carries an explicit rule. Mirrors
-		// ExpandHidden's read-side cascade; "read" on an ancestor does not
-		// cascade (only a direct rule on the member itself blocks a
-		// read-only write), matching ExpandHidden's scope.
+		// exactly like WorkflowLockReason below) is hidden or read-only —
+		// e.g. an employee under a cost center hidden from this user, or a
+		// territory under a region that is read-only for them, even though
+		// only the cost center or the region carries an explicit rule.
+		// Mirrors Cascade's read-side walk.
 		chain, chainErr := AncestorChain(ctx, pool, memberID)
 		if chainErr != nil {
 			return "", fmt.Errorf("check ancestor chain: %w", chainErr)
@@ -422,6 +421,9 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 			}
 			if ancAccess == "hidden" {
 				return memberRefusal(ctx, pool, memberID, "under hidden"), nil
+			}
+			if ancAccess == "read" {
+				return underReadRefusal(ctx, pool, memberID, anc), nil
 			}
 		}
 	}
@@ -462,6 +464,21 @@ func memberRefusal(ctx context.Context, pool *pgxpool.Pool, memberID, access str
 		return fmt.Sprintf("access denied: %s %s is read-only for you (an access rule), so its cells take no input from you", dim, code)
 	}
 	return fmt.Sprintf("access denied: the member of %s this write names is hidden from you (an access rule)", dim)
+}
+
+// underReadRefusal says why memberID takes no input from the user: anc, a
+// member above it, is read-only for them.
+func underReadRefusal(ctx context.Context, pool *pgxpool.Pool, memberID string, anc AncestorRef) string {
+	var dim, code, ancDim string
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(d.name, ''), 'a dimension'), m.code,
+		       (SELECT COALESCE(NULLIF(name, ''), 'a dimension') FROM model.dimension_def WHERE id = $2::uuid)
+		FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
+		WHERE m.id = $1::uuid`, memberID, anc.DimensionID).Scan(&dim, &code, &ancDim); err != nil {
+		return "access denied: the write references a dimension member outside your access scope"
+	}
+	return fmt.Sprintf("access denied: %s %s is under %s %s, which is read-only for you (an access rule), so its cells take no input from you",
+		dim, code, ancDim, anc.Code)
 }
 
 // RevisionLockReason reports whether revisionID is locked by a company-wide

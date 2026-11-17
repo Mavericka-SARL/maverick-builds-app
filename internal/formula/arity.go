@@ -24,7 +24,7 @@ var arity = map[string][2]int{
 	"SUM": {1, -1}, "AVERAGE": {1, -1}, "MIN": {1, -1}, "MAX": {1, -1}, "COUNT": {1, -1}, "COUNTA": {1, -1},
 
 	"CONCAT": {1, -1}, "TEXTJOIN": {3, -1}, "LEN": {1, 1}, "LEFT": {1, 2}, "RIGHT": {1, 2}, "MID": {3, 3},
-	"UPPER": {1, 1}, "LOWER": {1, 1}, "TRIM": {1, 1}, "TEXT": {2, 2}, "SUBSTITUTE": {3, 4},
+	"UPPER": {1, 1}, "LOWER": {1, 1}, "TRIM": {1, 1}, "TEXT": {2, 2}, "SUBSTITUTE": {3, 4}, "VALUE": {1, 1},
 
 	"TODAY": {0, 0}, "DATE": {3, 3}, "YEAR": {1, 1}, "MONTH": {1, 1}, "DAY": {1, 1}, "DAYS": {2, 2},
 	"EDATE": {2, 2}, "EOMONTH": {2, 2}, "DAYSINMONTH": {2, 2}, "DAYSINYEAR": {1, 1},

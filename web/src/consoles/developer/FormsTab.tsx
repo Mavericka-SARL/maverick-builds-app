@@ -96,6 +96,18 @@ function FieldOptions({ f, fields, onUpdate, keeper }: {
             label="Deadline (overdue once past)" />
         )}
       </div>
+      {f.type === "number" && (
+        <div style={row}>
+          <span className="mvx-admin-muted">Accepted values: lowest</span>
+          <TextInput value={f.min === undefined ? "" : String(f.min)} aria-label="Lowest accepted value" style={{ width: 100 }} type="number" placeholder="none"
+            onChange={e => onUpdate({ min: e.target.value === "" ? undefined : Number(e.target.value) })} />
+          <span className="mvx-admin-muted">highest</span>
+          <TextInput value={f.max === undefined ? "" : String(f.max)} aria-label="Highest accepted value" style={{ width: 100 }} type="number" placeholder="none"
+            onChange={e => onUpdate({ max: e.target.value === "" ? undefined : Number(e.target.value) })} />
+          <Checkbox checked={!!f.whole} onChange={e => onUpdate({ whole: e.target.checked || undefined })} label="Whole numbers only" />
+          <span className="mvx-admin-muted">— a record, a file row or a connector row outside them is refused, naming the field</span>
+        </div>
+      )}
       {f.type === "date" && f.deadline && (
         <div style={row}>
           <span className="mvx-admin-muted">Not overdue when</span>

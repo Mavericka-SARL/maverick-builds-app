@@ -13264,6 +13264,13 @@ type FormField struct {
 	OnDelete OptFormFieldOnDelete `json:"on_delete"`
 	// A number field shown as money.
 	Format OptFormFieldFormat `json:"format"`
+	// A number field's lowest accepted value: a record, file row or connector row below it is refused,
+	// naming the field.
+	Min OptFloat64 `json:"min"`
+	// A number field's highest accepted value.
+	Max OptFloat64 `json:"max"`
+	// A number field that takes whole numbers only.
+	Whole OptBool `json:"whole"`
 	// A date field shown as overdue once past, unless done_field holds one of done_values.
 	Deadline   OptBool   `json:"deadline"`
 	DoneField  OptString `json:"done_field"`
@@ -13358,6 +13365,21 @@ func (s *FormField) GetOnDelete() OptFormFieldOnDelete {
 // GetFormat returns the value of Format.
 func (s *FormField) GetFormat() OptFormFieldFormat {
 	return s.Format
+}
+
+// GetMin returns the value of Min.
+func (s *FormField) GetMin() OptFloat64 {
+	return s.Min
+}
+
+// GetMax returns the value of Max.
+func (s *FormField) GetMax() OptFloat64 {
+	return s.Max
+}
+
+// GetWhole returns the value of Whole.
+func (s *FormField) GetWhole() OptBool {
+	return s.Whole
 }
 
 // GetDeadline returns the value of Deadline.
@@ -13463,6 +13485,21 @@ func (s *FormField) SetOnDelete(val OptFormFieldOnDelete) {
 // SetFormat sets the value of Format.
 func (s *FormField) SetFormat(val OptFormFieldFormat) {
 	s.Format = val
+}
+
+// SetMin sets the value of Min.
+func (s *FormField) SetMin(val OptFloat64) {
+	s.Min = val
+}
+
+// SetMax sets the value of Max.
+func (s *FormField) SetMax(val OptFloat64) {
+	s.Max = val
+}
+
+// SetWhole sets the value of Whole.
+func (s *FormField) SetWhole(val OptBool) {
+	s.Whole = val
 }
 
 // SetDeadline sets the value of Deadline.
@@ -18381,6 +18418,11 @@ func (*ImportFormRecordsNotFound) importFormRecordsRes() {}
 type ImportFormRecordsOK struct {
 	Status         OptString `json:"status"`
 	RecordsCreated OptInt    `json:"records_created"`
+	// A table whose records have a typed code — the records holding a row's code that the row changed:
+	// a file loaded again updates them.
+	RecordsUpdated OptInt `json:"records_updated"`
+	// The records holding a row's code that the row left as they were.
+	RecordsUnchanged OptInt `json:"records_unchanged"`
 	// With replace_by — the earlier records deleted (not in a replayed answer).
 	RecordsReplaced OptInt `json:"records_replaced"`
 	// The import's line in Recent Imports.
@@ -18391,9 +18433,15 @@ type ImportFormRecordsOK struct {
 	DryRun   OptBool `json:"dry_run"`
 	// With dry_run and replace_by — the earlier records the file would replace.
 	RowsReplaced OptInt `json:"rows_replaced"`
-	// With dry_run — the records that would be created.
-	Rows      OptInt `json:"rows"`
-	ErrorRows OptInt `json:"error_rows"`
+	// With dry_run — the records that would be created or updated.
+	Rows OptInt `json:"rows"`
+	// With dry_run — the records that would be added.
+	RowsAdded OptInt `json:"rows_added"`
+	// With dry_run — the records holding a row's code that would be updated.
+	RowsUpdated OptInt `json:"rows_updated"`
+	// With dry_run — the records holding a row's code that would stay as they are.
+	RowsUnchanged OptInt `json:"rows_unchanged"`
+	ErrorRows     OptInt `json:"error_rows"`
 	// With dry_run — each problem, by the row's line in the file.
 	Errors []ImportFormRecordsOKErrorsItem `json:"errors"`
 }
@@ -18406,6 +18454,16 @@ func (s *ImportFormRecordsOK) GetStatus() OptString {
 // GetRecordsCreated returns the value of RecordsCreated.
 func (s *ImportFormRecordsOK) GetRecordsCreated() OptInt {
 	return s.RecordsCreated
+}
+
+// GetRecordsUpdated returns the value of RecordsUpdated.
+func (s *ImportFormRecordsOK) GetRecordsUpdated() OptInt {
+	return s.RecordsUpdated
+}
+
+// GetRecordsUnchanged returns the value of RecordsUnchanged.
+func (s *ImportFormRecordsOK) GetRecordsUnchanged() OptInt {
+	return s.RecordsUnchanged
 }
 
 // GetRecordsReplaced returns the value of RecordsReplaced.
@@ -18438,6 +18496,21 @@ func (s *ImportFormRecordsOK) GetRows() OptInt {
 	return s.Rows
 }
 
+// GetRowsAdded returns the value of RowsAdded.
+func (s *ImportFormRecordsOK) GetRowsAdded() OptInt {
+	return s.RowsAdded
+}
+
+// GetRowsUpdated returns the value of RowsUpdated.
+func (s *ImportFormRecordsOK) GetRowsUpdated() OptInt {
+	return s.RowsUpdated
+}
+
+// GetRowsUnchanged returns the value of RowsUnchanged.
+func (s *ImportFormRecordsOK) GetRowsUnchanged() OptInt {
+	return s.RowsUnchanged
+}
+
 // GetErrorRows returns the value of ErrorRows.
 func (s *ImportFormRecordsOK) GetErrorRows() OptInt {
 	return s.ErrorRows
@@ -18456,6 +18529,16 @@ func (s *ImportFormRecordsOK) SetStatus(val OptString) {
 // SetRecordsCreated sets the value of RecordsCreated.
 func (s *ImportFormRecordsOK) SetRecordsCreated(val OptInt) {
 	s.RecordsCreated = val
+}
+
+// SetRecordsUpdated sets the value of RecordsUpdated.
+func (s *ImportFormRecordsOK) SetRecordsUpdated(val OptInt) {
+	s.RecordsUpdated = val
+}
+
+// SetRecordsUnchanged sets the value of RecordsUnchanged.
+func (s *ImportFormRecordsOK) SetRecordsUnchanged(val OptInt) {
+	s.RecordsUnchanged = val
 }
 
 // SetRecordsReplaced sets the value of RecordsReplaced.
@@ -18486,6 +18569,21 @@ func (s *ImportFormRecordsOK) SetRowsReplaced(val OptInt) {
 // SetRows sets the value of Rows.
 func (s *ImportFormRecordsOK) SetRows(val OptInt) {
 	s.Rows = val
+}
+
+// SetRowsAdded sets the value of RowsAdded.
+func (s *ImportFormRecordsOK) SetRowsAdded(val OptInt) {
+	s.RowsAdded = val
+}
+
+// SetRowsUpdated sets the value of RowsUpdated.
+func (s *ImportFormRecordsOK) SetRowsUpdated(val OptInt) {
+	s.RowsUpdated = val
+}
+
+// SetRowsUnchanged sets the value of RowsUnchanged.
+func (s *ImportFormRecordsOK) SetRowsUnchanged(val OptInt) {
+	s.RowsUnchanged = val
 }
 
 // SetErrorRows sets the value of ErrorRows.
@@ -35057,14 +35155,25 @@ type RunIntegrationNotFound Error
 func (*RunIntegrationNotFound) runIntegrationRes() {}
 
 type RunIntegrationOK struct {
+	// Table runs — the records added or updated.
 	RowsImported OptInt `json:"rows_imported"`
+	// Table runs — the records added.
+	RowsAdded OptInt `json:"rows_added"`
+	// Table runs into a table whose records have a typed code — the records holding a row's code that
+	// the row changed (updated, not added again).
+	RowsUpdated OptInt `json:"rows_updated"`
+	// Table runs — the records holding a row's code that the row left as they were.
+	RowsUnchanged OptInt `json:"rows_unchanged"`
 	// Table runs of a loader whose config names replace_by — the earlier records the run replaced
 	// (with dry_run, would replace).
 	RowsReplaced OptInt `json:"rows_replaced"`
 	// Grid runs — one row can carry several metrics' values.
-	ValuesImported OptInt  `json:"values_imported"`
-	ErrorRows      OptInt  `json:"error_rows"`
-	DryRun         OptBool `json:"dry_run"`
+	ValuesImported OptInt `json:"values_imported"`
+	// Grid runs — the calculated metrics the values reach are still being recalculated: a read right
+	// away can show them from before the load; GET /api/grid says recalc_pending until the pass lands.
+	Recalculating OptBool `json:"recalculating"`
+	ErrorRows     OptInt  `json:"error_rows"`
+	DryRun        OptBool `json:"dry_run"`
 	// With dry_run — the rows that would be imported.
 	Rows OptInt `json:"rows"`
 	// With dry_run — the values they hold (grid).
@@ -35081,6 +35190,21 @@ func (s *RunIntegrationOK) GetRowsImported() OptInt {
 	return s.RowsImported
 }
 
+// GetRowsAdded returns the value of RowsAdded.
+func (s *RunIntegrationOK) GetRowsAdded() OptInt {
+	return s.RowsAdded
+}
+
+// GetRowsUpdated returns the value of RowsUpdated.
+func (s *RunIntegrationOK) GetRowsUpdated() OptInt {
+	return s.RowsUpdated
+}
+
+// GetRowsUnchanged returns the value of RowsUnchanged.
+func (s *RunIntegrationOK) GetRowsUnchanged() OptInt {
+	return s.RowsUnchanged
+}
+
 // GetRowsReplaced returns the value of RowsReplaced.
 func (s *RunIntegrationOK) GetRowsReplaced() OptInt {
 	return s.RowsReplaced
@@ -35089,6 +35213,11 @@ func (s *RunIntegrationOK) GetRowsReplaced() OptInt {
 // GetValuesImported returns the value of ValuesImported.
 func (s *RunIntegrationOK) GetValuesImported() OptInt {
 	return s.ValuesImported
+}
+
+// GetRecalculating returns the value of Recalculating.
+func (s *RunIntegrationOK) GetRecalculating() OptBool {
+	return s.Recalculating
 }
 
 // GetErrorRows returns the value of ErrorRows.
@@ -35126,6 +35255,21 @@ func (s *RunIntegrationOK) SetRowsImported(val OptInt) {
 	s.RowsImported = val
 }
 
+// SetRowsAdded sets the value of RowsAdded.
+func (s *RunIntegrationOK) SetRowsAdded(val OptInt) {
+	s.RowsAdded = val
+}
+
+// SetRowsUpdated sets the value of RowsUpdated.
+func (s *RunIntegrationOK) SetRowsUpdated(val OptInt) {
+	s.RowsUpdated = val
+}
+
+// SetRowsUnchanged sets the value of RowsUnchanged.
+func (s *RunIntegrationOK) SetRowsUnchanged(val OptInt) {
+	s.RowsUnchanged = val
+}
+
 // SetRowsReplaced sets the value of RowsReplaced.
 func (s *RunIntegrationOK) SetRowsReplaced(val OptInt) {
 	s.RowsReplaced = val
@@ -35134,6 +35278,11 @@ func (s *RunIntegrationOK) SetRowsReplaced(val OptInt) {
 // SetValuesImported sets the value of ValuesImported.
 func (s *RunIntegrationOK) SetValuesImported(val OptInt) {
 	s.ValuesImported = val
+}
+
+// SetRecalculating sets the value of Recalculating.
+func (s *RunIntegrationOK) SetRecalculating(val OptBool) {
+	s.Recalculating = val
 }
 
 // SetErrorRows sets the value of ErrorRows.

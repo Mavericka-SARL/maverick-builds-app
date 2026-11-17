@@ -1692,6 +1692,9 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks.WriteValues = func(ctx context.Context, req aiassistant.ValuesWriteRequest) (string, error) {
 		return h.aiWriteValues(ctx, a, req)
 	}
+	hooks.SaveRecords = func(ctx context.Context, req aiassistant.RecordsSave) (string, error) {
+		return h.aiSaveRecords(ctx, a.UserID, req, false)
+	}
 	hooks.RecallPreview = func(ctx context.Context, file, sheet string) (aiassistant.FileImportRequest, bool) {
 		return h.recallCleanPreview(ctx, sessionID, file, sheet)
 	}

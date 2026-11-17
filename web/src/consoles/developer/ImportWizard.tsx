@@ -110,6 +110,9 @@ interface CommitResult {
   rowsImported: number;
   // A table load replacing by a field: the earlier records it replaced.
   replaced?: number;
+  // Records a row updated by their code; those it left as they were.
+  updated?: number;
+  unchanged?: number;
   values?: number; // a grid's: a row of a wide file is one value per metric
   errorRows: number;
   status: "success" | "error";
@@ -401,6 +404,11 @@ async function checkOnServer(cfg: WizardConfig, pf: ParsedFile, csv: string): Pr
   if (res?.rows_replaced) {
     found.push({ row: 0, index: -1, col: "—", value: "", sev: "warning",
       issue: `Loading this file replaces ${res.rows_replaced} earlier record${res.rows_replaced === 1 ? "" : "s"} holding the same values` });
+  }
+  if (res?.rows_updated) {
+    found.push({ row: 0, index: -1, col: "—", value: "", sev: "warning",
+      issue: `Loading this file updates ${res.rows_updated} record${res.rows_updated === 1 ? "" : "s"} already holding ${res.rows_updated === 1 ? "its" : "their"} code` +
+        (res.rows_unchanged ? `; ${res.rows_unchanged} stay as they are` : "") });
   }
   return found;
 }
@@ -1204,12 +1212,13 @@ function CommitStep({
       const content = JSON.stringify([config.integrationId ?? "", config.targetType, config.targetId, config.revisionId, config.importMode, config.replaceBy ?? "", csv]);
       if (importKeyRef.current?.content !== content) importKeyRef.current = { content, key: newImportKey() };
       const key = importKeyRef.current.key;
-      let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number; notices?: string[] };
+      let out: { rows_imported: number; error_rows: number; values?: number; replaced?: number; updated?: number; unchanged?: number; notices?: string[] };
       if (config.integrationId) {
         // Mapped here, by the Map step the person may have edited: the run
         // applies the saved column map no second time.
         const res = await api.runIntegration(config.integrationId, csv, rowLines, about, true, key);
-        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced, notices: res.notices };
+        out = { rows_imported: res.rows_imported, error_rows: res.error_rows, values: res.values_imported, replaced: res.rows_replaced,
+          updated: res.rows_updated, unchanged: res.rows_unchanged, notices: res.notices };
       } else if (config.targetType === "dimension") {
         // One-off dimension imports have their own endpoint — the generic
         // upload endpoint is the GRID importer and rejects dimension CSVs
@@ -1219,7 +1228,8 @@ function CommitStep({
         // Records too: sent to the grid importer, a table's columns were
         // refused as matching no metric or dimension.
         const res = await api.importFormRecords(config.targetId, csv, rowLines, about, config.replaceBy, key);
-        out = { rows_imported: res.records_created, error_rows: 0, replaced: res.records_replaced };
+        out = { rows_imported: res.records_created + (res.records_updated ?? 0), error_rows: 0, replaced: res.records_replaced,
+          updated: res.records_updated, unchanged: res.records_unchanged };
       } else {
         const res = await api.uploadImport(csv, config.revisionId, config.importMode, rowLines, about, key);
         out = { rows_imported: res.rows ?? res.valid_rows, error_rows: res.error_rows, values: res.values };
@@ -1264,7 +1274,8 @@ function CommitStep({
         if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
         void invalidateModelData(qc);
       }
-      setResult({ rowsImported: data.rows_imported, values: data.values, replaced: data.replaced, errorRows: data.error_rows, status: "success", notices: data.notices });
+      setResult({ rowsImported: data.rows_imported, values: data.values, replaced: data.replaced, updated: data.updated, unchanged: data.unchanged,
+        errorRows: data.error_rows, status: "success", notices: data.notices });
     },
     onError: (e) => {
       const rows = (e as ApiError).body?.errors;
@@ -1285,6 +1296,8 @@ function CommitStep({
               {result.rowsImported} rows imported
               <Txt>{result.values && result.values !== result.rowsImported ? ` (${result.values} values)` : ""}</Txt>
               <Txt>{result.replaced ? `, ${result.replaced} earlier record${result.replaced === 1 ? "" : "s"} replaced` : ""}</Txt>
+              <Txt>{result.updated ? ` (${result.updated} updated by ${result.updated === 1 ? "its" : "their"} code)` : ""}</Txt>
+              <Txt>{result.unchanged ? `, ${result.unchanged} unchanged` : ""}</Txt>
               <Txt>{result.errorRows > 0 ? `, ${result.errorRows} rows had errors` : ""}</Txt>
             </p>
             {result.notices?.map((n, i) => (

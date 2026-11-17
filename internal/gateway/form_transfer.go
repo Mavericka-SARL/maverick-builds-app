@@ -227,8 +227,8 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	var recordJob func(context.Context, pgx.Tx, recordpost.ImportResult) error
 	if !body.DryRun {
 		recordJob = func(ctx context.Context, tx pgx.Tx, res recordpost.ImportResult) error {
-			job := tableJob(res.Created, nil, nil)
-			if job.ModelID == "" || res.Created == 0 {
+			job := tableJob(res.Written(), nil, nil)
+			if job.ModelID == "" || res.Written() == 0 {
 				return nil
 			}
 			id, err := importpkg.RecordJobTx(ctx, tx, job, key)
@@ -239,7 +239,8 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun, string(body.ReplaceBy), recordJob)
 	created, errs := res.Created, res.Errors
 	if body.DryRun && err == nil {
-		jsonOK(w, map[string]any{"dry_run": true, "rows": created, "rows_replaced": res.Replaced, "error_rows": len(errs), "errors": errs})
+		jsonOK(w, map[string]any{"dry_run": true, "rows": res.Written(), "rows_added": created, "rows_updated": res.Updated, "rows_unchanged": res.Unchanged,
+			"rows_replaced": res.Replaced, "error_rows": len(errs), "errors": errs})
 		return
 	}
 	if errors.Is(err, importpkg.ErrImportKeyInUse) {
@@ -251,7 +252,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	}
 	if !body.DryRun && (err != nil || len(errs) > 0) {
 		// A refused file's line holds no key: its correction goes under it.
-		h.recordImportJob(ctx, tableJob(created, errs, err))
+		h.recordImportJob(ctx, tableJob(res.Written(), errs, err))
 	}
 	if err != nil {
 		h.jsonImportErr(w, err)
@@ -261,7 +262,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		jsonFormRowErrs(w, errs)
 		return
 	}
-	if created == 0 {
+	if res.Written() == 0 && res.Unchanged == 0 {
 		jsonErr(w, fmt.Errorf("file contained no usable data rows"), http.StatusBadRequest)
 		return
 	}
@@ -270,9 +271,9 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID, RevisionID: revisionID,
-		Metadata: map[string]string{"records_created": strconv.Itoa(created), "records_replaced": strconv.Itoa(res.Replaced)},
+		Metadata: map[string]string{"records_created": strconv.Itoa(created), "records_updated": strconv.Itoa(res.Updated), "records_replaced": strconv.Itoa(res.Replaced)},
 	})
-	out := map[string]any{"status": "ok", "records_created": created, "records_replaced": res.Replaced}
+	out := map[string]any{"status": "ok", "records_created": created, "records_updated": res.Updated, "records_unchanged": res.Unchanged, "records_replaced": res.Replaced}
 	if jobID != "" {
 		out["job_id"] = jobID
 	}
