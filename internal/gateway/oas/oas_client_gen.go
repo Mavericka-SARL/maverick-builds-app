@@ -696,6 +696,15 @@ type Invoker interface {
 	//
 	// POST /api/developer/workflows/{id}/duplicate
 	DuplicateWorkflow(ctx context.Context, request OptDuplicateWorkflowRequest, params DuplicateWorkflowParams) (*WorkflowDefFull, error)
+	// EdgeResetPassword invokes edgeResetPassword operation.
+	//
+	// Called by deploy/compose/Caddyfile for every request to the realm's reset-credentials form, with
+	// the visitor's address in X-Forwarded-For and the request's method in X-Forwarded-Method. A
+	// submission (POST) takes one from the visitor's budget of five a minute; anything else is always
+	// allowed.
+	//
+	// GET /edge/reset-password
+	EdgeResetPassword(ctx context.Context, params EdgeResetPasswordParams) (EdgeResetPasswordRes, error)
 	// EnableAdminUser invokes enableAdminUser operation.
 	//
 	// The reverse of disable, under the same permission (user.enabled in the audit log).
@@ -14048,6 +14057,100 @@ func (c *Client) sendDuplicateWorkflow(ctx context.Context, request OptDuplicate
 
 	stage = "DecodeResponse"
 	result, err := decodeDuplicateWorkflowResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// EdgeResetPassword invokes edgeResetPassword operation.
+//
+// Called by deploy/compose/Caddyfile for every request to the realm's reset-credentials form, with
+// the visitor's address in X-Forwarded-For and the request's method in X-Forwarded-Method. A
+// submission (POST) takes one from the visitor's budget of five a minute; anything else is always
+// allowed.
+//
+// GET /edge/reset-password
+func (c *Client) EdgeResetPassword(ctx context.Context, params EdgeResetPasswordParams) (EdgeResetPasswordRes, error) {
+	res, err := c.sendEdgeResetPassword(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendEdgeResetPassword(ctx context.Context, params EdgeResetPasswordParams) (res EdgeResetPasswordRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("edgeResetPassword"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/edge/reset-password"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, EdgeResetPasswordOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/edge/reset-password"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "X-Forwarded-Method",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.XForwardedMethod.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeEdgeResetPasswordResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

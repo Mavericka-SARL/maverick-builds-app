@@ -676,6 +676,15 @@ type Handler interface {
 	//
 	// POST /api/developer/workflows/{id}/duplicate
 	DuplicateWorkflow(ctx context.Context, req OptDuplicateWorkflowRequest, params DuplicateWorkflowParams) (*WorkflowDefFull, error)
+	// EdgeResetPassword implements edgeResetPassword operation.
+	//
+	// Called by deploy/compose/Caddyfile for every request to the realm's reset-credentials form, with
+	// the visitor's address in X-Forwarded-For and the request's method in X-Forwarded-Method. A
+	// submission (POST) takes one from the visitor's budget of five a minute; anything else is always
+	// allowed.
+	//
+	// GET /edge/reset-password
+	EdgeResetPassword(ctx context.Context, params EdgeResetPasswordParams) (EdgeResetPasswordRes, error)
 	// EnableAdminUser implements enableAdminUser operation.
 	//
 	// The reverse of disable, under the same permission (user.enabled in the audit log).

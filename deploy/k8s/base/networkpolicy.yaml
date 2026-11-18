@@ -196,6 +196,18 @@ spec:
     # Postgres dependency today; add a postgres/pgbouncer egress rule here
     # if that ever switches to KC_DB=postgres.
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # Outbound HTTPS to identity providers: Keycloak exchanges the sign-in
+    # code for tokens with Google (scripts/keycloak-google-setup.sh) and with
+    # a tenant's single sign-on provider, and reads their keys, from the
+    # server. Without it the person signs in at the provider and then sees
+    # "Unexpected error when authenticating with identity provider"; the pod
+    # log says "Network is unreachable" (2026-11-18). Public addresses only:
+    # a provider URL a tenant admin types cannot reach into the cluster.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+      ports: [{protocol: TCP, port: 443}]
 
 ---
 apiVersion: networking.k8s.io/v1

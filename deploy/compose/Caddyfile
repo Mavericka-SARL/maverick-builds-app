@@ -26,5 +26,15 @@
 # Keycloak: the sign-in pages, the token endpoint the console calls, and the
 # admin console at /admin.
 {$AUTH_HOST} {
+	# "Forgot password?" mails a link to whatever registered address is typed,
+	# and Keycloak does not limit how often. Caddy has no rate limiting of its
+	# own, so it asks the gateway first: five submissions a minute per visitor
+	# pass, the rest answer 429 (internal/gateway/edge_ratelimit.go). The
+	# gateway is reached inside this stack only; /edge is not routed above.
+	@reset_password path_regexp ^/realms/[^/]+/login-actions/reset-credentials
+	forward_auth @reset_password gateway:8080 {
+		uri /edge/reset-password
+	}
+
 	reverse_proxy keycloak:8080
 }

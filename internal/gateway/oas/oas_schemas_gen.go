@@ -11787,6 +11787,16 @@ func (s *DuplicateWorkflowRequest) SetName(val OptString) {
 	s.Name = val
 }
 
+// EdgeResetPasswordNoContent is response for EdgeResetPassword operation.
+type EdgeResetPasswordNoContent struct{}
+
+func (*EdgeResetPasswordNoContent) edgeResetPasswordRes() {}
+
+// EdgeResetPasswordTooManyRequests is response for EdgeResetPassword operation.
+type EdgeResetPasswordTooManyRequests struct{}
+
+func (*EdgeResetPasswordTooManyRequests) edgeResetPasswordRes() {}
+
 type EnableAdminUserForbidden Error
 
 func (*EnableAdminUserForbidden) enableAdminUserRes() {}

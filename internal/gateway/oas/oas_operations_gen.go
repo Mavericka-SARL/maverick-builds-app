@@ -98,6 +98,7 @@ const (
 	DownloadExportIntegrationOperation       OperationName = "DownloadExportIntegration"
 	DuplicateIntegrationOperation            OperationName = "DuplicateIntegration"
 	DuplicateWorkflowOperation               OperationName = "DuplicateWorkflow"
+	EdgeResetPasswordOperation               OperationName = "EdgeResetPassword"
 	EnableAdminUserOperation                 OperationName = "EnableAdminUser"
 	ExportAuditOperation                     OperationName = "ExportAudit"
 	ExportFormRecordsOperation               OperationName = "ExportFormRecords"

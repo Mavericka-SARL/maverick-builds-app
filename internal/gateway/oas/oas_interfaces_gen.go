@@ -297,6 +297,10 @@ type DuplicateIntegrationRes interface {
 	duplicateIntegrationRes()
 }
 
+type EdgeResetPasswordRes interface {
+	edgeResetPasswordRes()
+}
+
 type EnableAdminUserRes interface {
 	enableAdminUserRes()
 }

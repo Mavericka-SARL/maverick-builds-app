@@ -134,6 +134,9 @@ type handler struct {
 	signupLimit discoverLimiter
 	// google caches whether the realm offers Google sign-in (google_signin.go).
 	google googleOffer
+	// resetLimit throttles "Forgot password?" submissions per visitor for the
+	// Compose stack's Caddy (edge_ratelimit.go).
+	resetLimit discoverLimiter
 	// legalCfg is who operates this deployment and which documents it
 	// publishes (legal.go).
 	legalCfg LegalConfig
@@ -248,6 +251,7 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 		signupCfg:   deps.Signup,
 		legalCfg:    deps.Legal,
 		signupLimit: discoverLimiter{rate: signupRate, burst: signupBurst},
+		resetLimit:  discoverLimiter{rate: resetPasswordRate, burst: resetPasswordBurst},
 	}
 	h.tempPasswords = deps.TemporaryPasswords && !deps.Signup.Enabled && !deps.Signup.Playground
 	h.plans = deps.Plans
@@ -364,6 +368,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// Step 1); every other block below still registers bare patterns
 	// pending the same treatment in a later batch.
 	register("GET", "/healthz", "public", h.healthz)
+	register("GET", "/edge/reset-password", "public", h.edgeResetPassword)
 	register("GET", "/api/dev/personas", "any", cors(h.devPersonaList))
 	register("GET", "/api/apps", "any", cors(h.userApps))
 	register("GET", "/api/demo", "any", cors(h.demo))

@@ -5372,6 +5372,68 @@ func decodeDuplicateWorkflowParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// EdgeResetPasswordParams is parameters of edgeResetPassword operation.
+type EdgeResetPasswordParams struct {
+	XForwardedMethod OptString `json:",omitempty,omitzero"`
+}
+
+func unpackEdgeResetPasswordParams(packed middleware.Parameters) (params EdgeResetPasswordParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "X-Forwarded-Method",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.XForwardedMethod = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeEdgeResetPasswordParams(args [0]string, argsEscaped bool, r *http.Request) (params EdgeResetPasswordParams, _ error) {
+	h := uri.NewHeaderDecoder(r.Header)
+	// Decode header: X-Forwarded-Method.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "X-Forwarded-Method",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotXForwardedMethodVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotXForwardedMethodVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.XForwardedMethod.SetTo(paramsDotXForwardedMethodVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "X-Forwarded-Method",
+			In:   "header",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // EnableAdminUserParams is parameters of enableAdminUser operation.
 type EnableAdminUserParams struct {
 	ID uuid.UUID

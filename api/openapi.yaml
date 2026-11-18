@@ -3124,6 +3124,21 @@ components:
         formula: { type: string }
 
 paths:
+  /edge/reset-password:
+    get:
+      operationId: edgeResetPassword
+      summary: Whether the Compose stack's Caddy may pass a request on to Keycloak's reset-password form (forward_auth; internal, not routed publicly)
+      description: >-
+        Called by deploy/compose/Caddyfile for every request to the realm's reset-credentials form, with the
+        visitor's address in X-Forwarded-For and the request's method in X-Forwarded-Method. A submission (POST)
+        takes one from the visitor's budget of five a minute; anything else is always allowed.
+      security: []
+      parameters:
+        - { in: header, name: X-Forwarded-Method, required: false, schema: { type: string } }
+      responses:
+        "204": { description: Pass the request on }
+        "429": { description: Too many submissions from this address; the text says so and Retry-After when to try again }
+
   /healthz:
     get:
       operationId: healthz

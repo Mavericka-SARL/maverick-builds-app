@@ -3605,6 +3605,25 @@ func encodeDuplicateWorkflowResponse(response *WorkflowDefFull, w http.ResponseW
 	return nil
 }
 
+func encodeEdgeResetPasswordResponse(response EdgeResetPasswordRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *EdgeResetPasswordNoContent:
+		w.WriteHeader(204)
+		span.SetStatus(codes.Ok, http.StatusText(204))
+
+		return nil
+
+	case *EdgeResetPasswordTooManyRequests:
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeEnableAdminUserResponse(response EnableAdminUserRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *EnableAdminUserOK:

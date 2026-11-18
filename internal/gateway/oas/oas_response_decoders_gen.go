@@ -8673,6 +8673,18 @@ func decodeDuplicateWorkflowResponse(resp *http.Response) (res *WorkflowDefFull,
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }
 
+func decodeEdgeResetPasswordResponse(resp *http.Response) (res EdgeResetPasswordRes, _ error) {
+	switch resp.StatusCode {
+	case 204:
+		// Code 204.
+		return &EdgeResetPasswordNoContent{}, nil
+	case 429:
+		// Code 429.
+		return &EdgeResetPasswordTooManyRequests{}, nil
+	}
+	return res, validate.UnexpectedStatusCodeWithResponse(resp)
+}
+
 func decodeEnableAdminUserResponse(resp *http.Response) (res EnableAdminUserRes, _ error) {
 	switch resp.StatusCode {
 	case 200:

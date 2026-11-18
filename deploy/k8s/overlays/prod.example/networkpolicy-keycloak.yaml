@@ -24,5 +24,17 @@ spec:
     # 587 submission with STARTTLS, 465 implicit TLS.
     - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
       ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
+    # Outbound HTTPS to identity providers: Keycloak exchanges the sign-in
+    # code for tokens with Google (scripts/keycloak-google-setup.sh) and with
+    # a tenant's single sign-on provider, and reads their keys, from the
+    # server. Without it the person signs in at the provider and then sees
+    # "Unexpected error when authenticating with identity provider"; the pod
+    # log says "Network is unreachable" (2026-11-18). Public addresses only:
+    # a provider URL a tenant admin types cannot reach into the cluster.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+      ports: [{protocol: TCP, port: 443}]
     # Restated because this list replaces base's.
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
