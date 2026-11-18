@@ -2,10 +2,10 @@ package gateway
 
 import (
 	"context"
-	"os"
-	"strconv"
 	"strings"
-	"sync"
+
+	"github.com/mavericks-engine/mavericks/internal/fairshare"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // gridMetricIDs is the ids of the metrics a grid read shows.
@@ -58,33 +58,25 @@ func keepGridMetrics(on map[string]bool, cells map[string]float64, texts map[str
 	return kept
 }
 
-// gridReadsAtOnce is how many full grid reads a gateway answers at once
-// (GRID_READ_CONCURRENCY, default 4). Reads beyond it wait their turn rather
-// than fail: they are bound by the processor anyway, so a burst takes as
-// long as before, without its memory. Measured 2026-10-15: each read of a
-// 108,000-cell grid held ~55 MB, sixteen at once ~900 MB; both production
-// gateways were OOM-killed at 512 MiB while a tester's reads ran in
-// parallel, and the ingress answered 503 until they came back.
-func gridReadsAtOnce() int {
-	if n, err := strconv.Atoi(os.Getenv("GRID_READ_CONCURRENCY")); err == nil && n > 0 {
-		return n
-	}
-	return 4
+// heavyTurn waits for a turn of heavy work — a grid or chart read — under
+// the tenant the request reads (fairshare): a tenant's reads beyond its share
+// wait behind its own, never behind another tenant's. The tenant is the
+// routed one (a dedicated database); in a shared database it is the actor's
+// own tenant, else the actor. The returned ctx holds the turn, so a read
+// that reads again within itself does not wait for a second one.
+func (h *handler) heavyTurn(ctx context.Context, act *actor) (context.Context, func(), error) {
+	return fairshare.Default().Acquire(ctx, heavyKey(ctx, act))
 }
 
-var (
-	gridReadSlotsOnce sync.Once
-	gridReadSlots     chan struct{}
-)
-
-// gridReadSlot waits for a turn to read a grid in full and returns its
-// release; an error when ctx ends first (the caller went away).
-func gridReadSlot(ctx context.Context) (func(), error) {
-	gridReadSlotsOnce.Do(func() { gridReadSlots = make(chan struct{}, gridReadsAtOnce()) })
-	select {
-	case gridReadSlots <- struct{}{}:
-		return func() { <-gridReadSlots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+func heavyKey(ctx context.Context, act *actor) string {
+	if id := tenantdb.TenantFrom(ctx); id != "" {
+		return id
 	}
+	if act != nil && act.CustomerID != "" {
+		return act.CustomerID
+	}
+	if act != nil {
+		return "user:" + act.UserID
+	}
+	return ""
 }

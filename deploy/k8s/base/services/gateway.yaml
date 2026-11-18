@@ -208,12 +208,16 @@ spec:
                   name: mavericks-license
                   key: key
                   optional: true
+          # cpu: Go runs as many threads as the limit allows — one at 500m,
+          # where one tenant's dashboards over large models held back every
+          # other request (2026-11-18). The limit is a ceiling, not a
+          # reservation; heavy work also takes turns per tenant (fairshare).
           resources:
             requests:
               cpu: "100m"
               memory: "128Mi"
             limits:
-              cpu: "500m"
+              cpu: "2"
               memory: "512Mi"
           # The gateway serves /healthz only once its start-up has migrated
           # the control plane and every tenant database. A migration that

@@ -1143,8 +1143,9 @@ func (r *ChartResolver) evalCalcMetricVisited(
 	visited[metricID] = true
 	defer func() { delete(visited, metricID) }()
 
-	dimConditional := calculation.FormulaReferencesDims(def.Formula, cc.dimNames)
-	if readset.Served(def.Formula) || cc.readsText(def) {
+	facts := cc.factsOf(def)
+	dimConditional := facts.dimConditional
+	if facts.served || cc.readsText(def) {
 		if !leafWise(def.AggRule, dimConditional) {
 			// The scheduler re-evaluates these rules (formula, rate, and a
 			// pure-ratio average — tsEvaluator.finish's useEval) AT the
@@ -1203,6 +1204,10 @@ func (r *ChartResolver) evalCalcMetricVisited(
 			switch {
 			case errors.Is(err, errWithheld):
 				return 0, false, err
+			case ctx.Err() != nil:
+				// The request is gone: stop, never a value made of the
+				// leaves read before it went.
+				return 0, false, ctx.Err()
 			case err != nil, !ok:
 				return 0, false, rollup.ErrNoValue
 			}
@@ -1538,6 +1543,36 @@ type chartCalc struct {
 	// leafCoords is, per metric worked out at each leaf, the leaves its
 	// inputs have facts at (leafInputCoords); nil inside: not only those.
 	leafCoords map[string]*leafCoordSet
+	// facts is, per metric, what its formula says about how a point reads
+	// it (factsOf).
+	facts map[string]formulaFacts
+}
+
+// formulaFacts is what a metric's formula says about how a chart point reads
+// it: whether its value depends on the cell's members
+// (calculation.FormulaReferencesDims) and whether it is served from its
+// persisted rows (readset.Served).
+type formulaFacts struct {
+	dimConditional, served bool
+}
+
+// factsOf analyses def's formula once per chart. A chart evaluates a formula
+// at every leaf under every point, and each evaluation reads its
+// dependencies' facts too: parsing the formulas there again was 40% of a
+// gateway's CPU on the Playground's dashboards (2026-11-18).
+func (cc *chartCalc) factsOf(def *fullMetricDef) formulaFacts {
+	if f, ok := cc.facts[def.ID]; ok {
+		return f
+	}
+	if cc.facts == nil {
+		cc.facts = map[string]formulaFacts{}
+	}
+	f := formulaFacts{
+		dimConditional: calculation.FormulaReferencesDims(def.Formula, cc.dimNames),
+		served:         readset.Served(def.Formula),
+	}
+	cc.facts[def.ID] = f
+	return f
 }
 
 // servedCtx is ctx for a read through servedFetch: its stored rows listed,

@@ -13,9 +13,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/mavericks-engine/mavericks/internal/fairshare"
 	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // Scheduler drives the incremental calculation of a revision: the gateway
@@ -354,7 +356,7 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 	inc := s.newIncremental(ctx, modelID, revisionID, timePartition, req, allDims, metricDimIDs, dimIDToName, defs)
 	defer s.prefetchHeld(ctx, components, inc, modelID, revisionID)()
 
-	s.runComponents(ctx, components, defs, largeComponent(defs, allDims, metricDimIDs), func(comp metricformula.Component) {
+	s.runComponents(ctx, s.passTurnKey(ctx, modelID), components, defs, largeComponent(defs, allDims, metricDimIDs), func(comp metricformula.Component) {
 		incs, run := inc.plan(comp)
 		if !run {
 			return
@@ -405,11 +407,27 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 // A large component (largeComponent) runs alone: each holds a metric of
 // very many cells, or the values of one it reads, and four of them at once
 // took the gateway past its memory limit (2026-10-22).
-func (s *Scheduler) runComponents(ctx context.Context, components []metricformula.Component, defs map[string]*MetricDef, large func(metricformula.Component) bool, fn func(metricformula.Component)) {
+//
+// Each component takes a turn of turnKey's — the pass's tenant — while it
+// runs (fairshare), as a grid or chart read does: a tenant's recalculation
+// and its dashboards share its turns, and never take another tenant's
+// (2026-11-18). The turn comes before the large-component lock: a worker
+// holding that lock while waiting for a turn could wait for ever on workers
+// holding turns and waiting for the lock.
+func (s *Scheduler) runComponents(ctx context.Context, turnKey string, components []metricformula.Component, defs map[string]*MetricDef, large func(metricformula.Component) bool, fn func(metricformula.Component)) {
+	turn := func() func() {
+		_, release, err := fairshare.Default().Acquire(ctx, turnKey)
+		if err != nil {
+			return func() {} // the pass is ending: the component fails on its own
+		}
+		return release
+	}
 	workers := passWorkers(s.store.pool)
 	if workers <= 1 || len(components) < 2 {
 		for _, comp := range components {
+			release := turn()
 			fn(comp)
+			release()
 		}
 		return
 	}
@@ -455,6 +473,7 @@ func (s *Scheduler) runComponents(ctx context.Context, components []metricformul
 		go func() {
 			defer wg.Done()
 			for i := range ready {
+				release := turn()
 				if large != nil && large(components[i]) {
 					alone.Lock()
 					fn(components[i])
@@ -464,6 +483,7 @@ func (s *Scheduler) runComponents(ctx context.Context, components []metricformul
 					fn(components[i])
 					alone.RUnlock()
 				}
+				release()
 				mu.Lock()
 				for _, d := range dependents[i] {
 					if waiting[d]--; waiting[d] == 0 {
@@ -478,6 +498,19 @@ func (s *Scheduler) runComponents(ctx context.Context, components []metricformul
 		}()
 	}
 	wg.Wait()
+}
+
+// passTurnKey is the tenant whose turns a pass's components take: the routed
+// tenant (a dedicated database), else the tenant owning the model.
+func (s *Scheduler) passTurnKey(ctx context.Context, modelID string) string {
+	if id := tenantdb.TenantFrom(ctx); id != "" {
+		return id
+	}
+	var id string
+	_ = s.store.db.QueryRow(ctx, `
+		SELECT a.customer_id::text FROM core.model m JOIN core.application a ON a.id = m.application_id
+		WHERE m.id = $1::uuid`, modelID).Scan(&id)
+	return id
 }
 
 // passWorkers is how many components of a pass run at once on pool: two of

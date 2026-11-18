@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mavericks-engine/mavericks/internal/fairshare"
 )
 
 // A grid's read answers for the metrics it shows: every other metric's
@@ -79,42 +81,62 @@ func TestGridReadAnswersForItsOwnMetrics(t *testing.T) {
 	_ = ctx
 }
 
-// Full grid reads beyond gridReadsAtOnce wait their turn instead of all
-// holding a grid in memory at once; a caller that goes away while waiting
-// stops waiting.
-func TestGridReadsTakeTurns(t *testing.T) {
-	n := gridReadsAtOnce()
-	var releases []func()
-	for i := 0; i < n; i++ {
-		release, err := gridReadSlot(context.Background())
-		if err != nil {
-			t.Fatalf("slot %d: %v", i, err)
-		}
-		releases = append(releases, release)
+// One tenant's heavy work never holds back another's (2026-11-18): with
+// another tenant holding its whole share of turns, a grid read is answered
+// at once; with the reader's own tenant at its share, the read waits behind
+// its own tenant's work — its caller giving up first — and is answered once
+// a turn of its tenant's frees. The dev user has no tenant of its own, so its
+// work is keyed by the user.
+func TestGridReadsWaitBehindTheirOwnTenantOnly(t *testing.T) {
+	f := setupDevAuthoringFixture(t)
+	ctx := context.Background()
+	var userID string
+	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE keycloak_sub = 'dev-audit-pa'`).Scan(&userID); err != nil {
+		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	lim := fairshare.Default()
+	_, share := lim.Limits()
+	hold := func(key string) func() {
+		var releases []func()
+		for range share {
+			_, release, err := lim.Acquire(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			releases = append(releases, release)
+		}
+		return func() {
+			for _, r := range releases {
+				r()
+			}
+		}
+	}
+	path := "/api/grid?revision_id=" + f.revID
+
+	releaseOther := hold("another-tenant")
+	if status, out := f.do(t, http.MethodGet, path, nil); status != http.StatusOK {
+		t.Fatalf("a read while another tenant holds its share: %d %v", status, out)
+	}
+	releaseOther()
+
+	releaseOwn := hold("user:" + userID)
+	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
-	if _, err := gridReadSlot(ctx); err == nil {
-		t.Fatalf("a read beyond %d at once got a turn", n)
+	req, _ := http.NewRequestWithContext(waitCtx, http.MethodGet, f.srv.URL+path, nil)
+	req.Header.Set("X-Dev-User", "dev-audit-pa")
+	req.Header.Set("X-App-Id", f.appID)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("a read with its own tenant at its share was answered %d without waiting", resp.StatusCode)
 	}
-	got := make(chan error, 1)
-	go func() {
-		release, err := gridReadSlot(context.Background())
-		if err == nil {
-			release()
-		}
-		got <- err
-	}()
-	releases[0]()
-	select {
-	case err := <-got:
-		if err != nil {
-			t.Fatalf("the waiting read: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the waiting read never got the freed turn")
+	releaseOwn()
+	if status, out := f.do(t, http.MethodGet, path, nil); status != http.StatusOK {
+		t.Fatalf("a read once its tenant's turns freed: %d %v", status, out)
 	}
-	for _, release := range releases[1:] {
-		release()
+	// Metadata reads are light and take no turn.
+	releaseOwn = hold("user:" + userID)
+	defer releaseOwn()
+	if status, out := f.do(t, http.MethodGet, path+"&meta_only=1", nil); status != http.StatusOK {
+		t.Fatalf("a metadata read with its tenant at its share: %d %v", status, out)
 	}
 }

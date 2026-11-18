@@ -218,7 +218,10 @@ func combineRecorded(
 	slices.SortFunc(hits, func(a, b hit) int { return slices.Compare(a.at, b.at) })
 
 	vals := make([]float64, 0, len(hits))
-	for _, h := range hits {
+	for i, h := range hits {
+		if err := stopped(ctx, i); err != nil {
+			return 0, false, 0, err
+		}
 		exact := make(map[string]string, len(dimIDs))
 		for _, id := range dimIDs {
 			exact[id] = h.combo[id]

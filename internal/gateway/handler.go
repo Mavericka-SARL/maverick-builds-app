@@ -3446,17 +3446,21 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("forbidden: model is outside your access scope"), http.StatusForbidden)
 		return
 	}
-	// A full read holds the grid's cells in memory while it is answered:
-	// reads arriving together take their turn (gridReadSlot), so a script
-	// or an assistant reading many grids at once cannot take the gateway
-	// past its memory. Metadata and totals reads are small and not counted.
-	if q := r.URL.Query(); q.Get("meta_only") != "1" && q.Get("totals_only") != "1" {
-		release, slotErr := gridReadSlot(ctx)
+	// Every read but metadata takes a turn of its tenant's (heavyTurn): a
+	// full read holds the grid's cells in memory, and a totals or scoped
+	// read (a dashboard's KPIs) works the calculated metrics out at the
+	// scope — 39 at once of one tenant's took a gateway's processors from
+	// every other tenant (2026-11-18). A tenant's reads beyond its share
+	// wait behind its own, never behind another tenant's.
+	if r.URL.Query().Get("meta_only") != "1" {
+		turnCtx, release, slotErr := h.heavyTurn(ctx, act)
 		if slotErr != nil {
 			jsonErr(w, fmt.Errorf("the read was cancelled while waiting its turn"), http.StatusServiceUnavailable)
 			return
 		}
 		defer release()
+		ctx = turnCtx
+		r = r.WithContext(ctx)
 	}
 
 	// ── resolve revision ─────────────────────────────────────────────────────
@@ -20807,6 +20811,14 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	// Working a chart out is heavy: it takes a turn of its tenant's, as a
+	// grid read does (heavyTurn).
+	ctx, release, err := h.heavyTurn(ctx, a)
+	if err != nil {
+		jsonErr(w, fmt.Errorf("the chart was cancelled while waiting its turn"), http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
 	resolver := query.NewChartResolver(h.db.For(ctx))
 	result, err := resolver.Resolve(ctx, cfg, req.Context, modelID, revisionID, gridDefID, a.UserID)
 	if err != nil {

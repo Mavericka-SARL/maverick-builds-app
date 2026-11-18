@@ -372,6 +372,17 @@ func resolveFlat(
 	return combineAgg(vals, aggRule), true, len(vals) > 0 || zeros.seen, nil
 }
 
+// stopped is ctx's error at every 256th step i of a loop over leaves: a read
+// whose request has gone (a dashboard tab left, a chart's filters changed)
+// stops instead of finishing for nobody, and the CPU it held goes back to the
+// requests still waiting (2026-11-18).
+func stopped(ctx context.Context, i int) error {
+	if i&255 != 0 {
+		return nil
+	}
+	return ctx.Err()
+}
+
 // noValue turns an ErrNoValue from the aggregation into "no value".
 func noValue(v float64, ok bool, err error) (float64, bool, error) {
 	if errors.Is(err, ErrNoValue) {
@@ -490,6 +501,9 @@ func resolve(
 ) (float64, bool, error) {
 	if depth > maxDepth {
 		return 0, false, ErrDepthExceeded
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
 	}
 	if len(metricDimIDs) == 0 {
 		return fetch(ctx, metricID, map[string]string{})
@@ -610,7 +624,10 @@ func resolve(
 		return 0, true, nil
 	}
 	vals := make([]float64, 0, len(combos))
-	for _, c := range combos {
+	for i, c := range combos {
+		if err := stopped(ctx, i); err != nil {
+			return 0, false, err
+		}
 		v, _, err := fetch(ctx, metricID, c)
 		if errors.Is(err, ErrNoValue) {
 			continue // no value: left out, not a 0

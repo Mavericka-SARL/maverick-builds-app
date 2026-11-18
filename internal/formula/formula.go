@@ -2,7 +2,11 @@
 // for use in Metric formulas and Form field formulas.
 package formula
 
-import "strings"
+import (
+	"strings"
+	"sync"
+	"sync/atomic"
+)
 
 // Parse parses a formula string into an AST node.
 // The leading "=" and legacy {name} references are normalised automatically.
@@ -14,7 +18,7 @@ func Parse(text string) (Node, error) {
 // Variable names are matched case-insensitively.
 // Returns a Value; callers should check Value.IsError() before using the result.
 func Eval(text string, vars map[string]Value) (Value, error) {
-	node, err := parse(text)
+	node, err := parseShared(text)
 	if err != nil {
 		return ErrorVal(ErrValue), err
 	}
@@ -25,7 +29,7 @@ func Eval(text string, vars map[string]Value) (Value, error) {
 // EvalWithContext evaluates a formula using the provided EvalContext.
 // Variable keys in ctx.Vars are matched case-insensitively.
 func EvalWithContext(text string, ctx *EvalContext) (Value, error) {
-	node, err := parse(text)
+	node, err := parseShared(text)
 	if err != nil {
 		return ErrorVal(ErrValue), err
 	}
@@ -81,4 +85,39 @@ func upperKeys(m map[string]Value) map[string]Value {
 		out[strings.ToUpper(k)] = v
 	}
 	return out
+}
+
+// parsed holds parse's answer per formula text for evaluation. A grid read,
+// a chart or a recalculation evaluates the same metric formulas at every
+// cell, and parsing each again there took a tenth to a fifth of a gateway's
+// CPU on the Playground (2026-11-18). Nothing changes a tree once parsed, so
+// evaluations on any goroutine share it; Parse still returns a tree of the
+// caller's own. Formula texts change with every edit in every tenant, so the
+// cache is emptied when it reaches maxParsed rather than growing for ever.
+var (
+	parsed      sync.Map // formula text → parsedFormula
+	parsedCount atomic.Int64
+)
+
+const maxParsed = 20000
+
+type parsedFormula struct {
+	node Node
+	err  error
+}
+
+// parseShared is parse through the parsed cache.
+func parseShared(text string) (Node, error) {
+	if p, ok := parsed.Load(text); ok {
+		f := p.(parsedFormula)
+		return f.node, f.err
+	}
+	node, err := parse(text)
+	if _, loaded := parsed.LoadOrStore(text, parsedFormula{node: node, err: err}); !loaded {
+		if parsedCount.Add(1) > maxParsed {
+			parsed.Clear()
+			parsedCount.Store(0)
+		}
+	}
+	return node, err
 }

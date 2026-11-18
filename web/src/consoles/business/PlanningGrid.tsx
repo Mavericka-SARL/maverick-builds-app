@@ -812,7 +812,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // ("…") and takes no input.
   const { data: cellsData, error: cellsError, isPlaceholderData } = useQuery({
     queryKey: ["grid-cells", ctx.revision_id, gridDefId ?? "all", scopeKey],
-    queryFn: () => api.getGrid(ctx.revision_id, gridDefId, { scope }),
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, gridDefId, { scope, signal }),
     enabled: pivotContextReady,
     // While a write's dependents are being recalculated the grid asks every
     // 0.4 s instead of every 2 s, so the result shows as soon as it lands.

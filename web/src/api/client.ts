@@ -2801,13 +2801,15 @@ export const api = {
   // map of the pinned context; the server returns only that slice's cells
   // (each pinned member expanded to its subtree), keeping a 500-member grid
   // sub-second instead of returning the whole cross-product.
-  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; scope?: Record<string, string> }) => {
+  // signal: React Query's, so a read nobody waits for any more (a tab left,
+  // a filter changed) is cancelled and the server stops working it out.
+  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; scope?: Record<string, string>; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ revision_id: revisionId });
     if (gridDefId) params.set("grid_def_id", gridDefId);
     if (opts?.metaOnly) params.set("meta_only", "1");
     if (opts?.totalsOnly) params.set("totals_only", "1");
     if (opts?.scope && Object.keys(opts.scope).length > 0) params.set("scope", JSON.stringify(opts.scope));
-    return apiFetch<GridData>(`/api/grid?${params.toString()}`);
+    return apiFetch<GridData>(`/api/grid?${params.toString()}`, opts?.signal ? { signal: opts.signal } : undefined);
   },
 
   // Exports this grid's raw input-metric values (one row per dimension-member
@@ -3439,10 +3441,13 @@ export const api = {
 
   // shared: the dashboard's selector values; the server applies those on the
   // chart's own dimensions (a first request, before the chart knows them).
-  getChartData: (widgetId: string, context: Record<string, string>, shared?: Record<string, string>) =>
+  // signal: React Query's — leaving the dashboard tab cancels the request and
+  // the server stops working the chart out (2026-11-18).
+  getChartData: (widgetId: string, context: Record<string, string>, shared?: Record<string, string>, signal?: AbortSignal) =>
     apiFetch<ChartData>(`/api/dashboard-widgets/${widgetId}/chart-data`, {
       method: "POST",
       body: JSON.stringify(shared ? { context, shared } : { context }),
+      signal,
     }),
 
 

@@ -483,7 +483,7 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   // computation over raw grid cells.
   const { data: chartData, isPending, isError } = useQuery({
     queryKey: ["chart-data", ctx.revision_id, widget.id, context, shared],
-    queryFn: () => api.getChartData(widget.id, context, shared),
+    queryFn: ({ signal }) => api.getChartData(widget.id, context, shared, signal),
     enabled: !!chartConfig && isChartConfigComplete(chartConfig),
     staleTime: 0,
     refetchInterval: refreshMs,
