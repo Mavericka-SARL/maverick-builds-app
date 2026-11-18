@@ -512,7 +512,7 @@ Then **Save**, **Validate**, try it with **Test Run**, and **Publish**. What you
 
 		devText(`## Triggers
 
-Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in **User › Workflow Inbox**. Anything else — a dashboard button, a schedule, a saved record, an import or an outside call — starts a workflow through a rule.
+Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in the Inbox of **User › Workflow**. Anything else — a dashboard button, a schedule, a saved record, an import or an outside call — starts a workflow through a rule.
 
 **Developer › Triggers** → **New rule**: choose the **Workflow**, and the **Trigger type** follows its trigger event. A *Manual* workflow offers *manual* (a button) or *schedule* (a cron expression); any other is fixed to its event — *form_submit*, *integration_completed*, *integration_failed* or *api*. Then press **Create rule**. **Create Trigger** in a workflow's row menu does the same from the Workflows list.
 
@@ -731,7 +731,7 @@ func devWiring() string {
 	s += arrow(436, 135, 38)
 	s += box(480, 104, 180, 62, "Workflow", "published", false)
 	s += arrow(666, 135, 30)
-	s += box(700, 104, 140, 62, "Workflow Inbox", "the step's roles", false)
+	s += box(700, 104, 140, 62, "Workflow › Inbox", "the step's roles", false)
 	// Row 3: imports fill the model.
 	s += box(20, 188, 410, 62, "Excel / CSV · Google Sheets · REST API", "Developer › Integrations", false)
 	s += arrow(436, 219, 38)

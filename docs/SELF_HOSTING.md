@@ -221,6 +221,7 @@ readable only by you, and fills in every secret with a random value. Then edit
 | `SMTP_HOST`, `SMTP_PORT` | Your relay; 587 for STARTTLS, 465 for TLS, 25 for an internal relay |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | The relay's credentials; leave both empty for a relay without authentication |
 | `SMTP_FROM` | The sender, on a domain the relay is allowed to send for, e.g. `no-reply@example.com` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional: a Google OAuth client, for **Sign in with Google** (see `.env.example`) |
 
 Two choices are easier to make now than later:
 
@@ -833,7 +834,11 @@ kubectl -n mavericks patch secret mavericks-secrets \
   -p "{\"stringData\":{\"KEYCLOAK_ADMIN_CLIENT_SECRET\":\"$SECRET\"}}"
 kubectl -n mavericks rollout restart deployment/gateway
 
-# 2. Keycloak's e-mail, with a real test message.
+# 2. Keycloak's e-mail, with a real test message. With mail working, the
+#    sign-in page also offers "Forgot password?" (RESET_PASSWORD=false keeps
+#    it off). On Kubernetes the reset form is rate-limited per visitor
+#    (base/ingress.yaml); behind the Compose stack's Caddy it is not, so keep
+#    it off there if your sign-in page is public and that matters.
 SMTP_HOST=smtp.example.com SMTP_PORT=587 SMTP_USER=... SMTP_PASSWORD=... \
 SMTP_FROM=no-reply@example.com SMTP_TEST_TO=you@example.com \
   bash scripts/keycloak-smtp-setup.sh
@@ -846,6 +851,14 @@ bash scripts/keycloak-master-hardening.sh
 #    upgrade too, after `kubectl -n mavericks rollout restart
 #    deployment/keycloak` has loaded the new theme files.
 bash scripts/keycloak-invitation-mail.sh
+
+# 5. Optional: Sign in with Google. First create an OAuth client at Google
+#    Cloud Console › APIs & Services › Credentials (type "Web application")
+#    with the authorised redirect URI
+#    https://auth.<domain>/realms/mavericks/broker/google/endpoint.
+#    Accounts with the same address sign in with Google; with
+#    SIGNUP_ENABLED=true a new Google account signs up.
+GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... bash scripts/keycloak-google-setup.sh
 ```
 
 While the certificates are still from `letsencrypt-staging`, or come from your

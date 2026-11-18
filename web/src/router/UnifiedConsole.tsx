@@ -11,7 +11,7 @@ import { useModelSwitches } from "../consoles/business/modelSelection";
 import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
-import { enabledSections, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
+import { enabledSections, pageTab, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
 import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
 import { useDemo } from "../api/useDemo";
 import { DateFormatContext } from "../consoles/dateFormat";
@@ -81,7 +81,7 @@ export default function UnifiedConsole() {
     <AppShell
       brand={<BrandMark markClassName="mvx-app-shell__mark" logoClassName="mvx-app-shell__brand-img" />}
       navGroups={navGroups}
-      activeNavId={tab}
+      activeNavId={pageTab(tab)}
       onNavSelect={(item) => setTab(item.id)}
       utility={
         <>

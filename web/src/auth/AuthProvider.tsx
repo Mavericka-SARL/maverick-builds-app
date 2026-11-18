@@ -6,6 +6,10 @@ import { config } from "../config";
 import { useBrand } from "../branding/brand";
 import { PublicPage } from "../public/PublicPage";
 import { LegalFooter } from "../public/LegalFooter";
+import { GoogleButton } from "../public/GoogleButton";
+
+/** The realm's Google identity provider (internal/gateway/google_signin.go). */
+const GOOGLE_IDP = "google";
 
 const DEV_MODE = config.devMode;
 
@@ -98,7 +102,7 @@ function DevAuthProvider({ children }: { children: ReactNode }) {
  * all, and — given an address — which provider to send the person to. The
  * endpoint is public and answers only what a sign-in page must know.
  */
-async function discoverSso(email?: string): Promise<{ sso: boolean; alias?: string; display_name?: string }> {
+async function discoverSso(email?: string): Promise<{ sso: boolean; alias?: string; display_name?: string; google?: boolean }> {
   const q = email ? `?email=${encodeURIComponent(email)}` : "";
   const res = await fetch(`/api/sso/discover${q}`);
   if (!res.ok) return { sso: false };
@@ -111,7 +115,7 @@ async function discoverSso(email?: string): Promise<{ sso: boolean; alias?: stri
  * always did. A person types their work address; if the domain belongs to a
  * tenant with a provider they are sent there, otherwise to the usual login.
  */
-function SignIn({ onPassword }: { onPassword: () => void }) {
+function SignIn({ onPassword, google }: { onPassword: () => void; google: boolean }) {
   const brand = useBrand();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -140,6 +144,7 @@ function SignIn({ onPassword }: { onPassword: () => void }) {
           {busy ? "Looking up…" : "Continue with company account"}
         </button>
         <button className="mvx-public__button mvx-public__button--ghost" type="button" onClick={onPassword}>Sign in with password</button>
+        {google && <GoogleButton label="Sign in with Google" onClick={() => void keycloak.login({ idpHint: GOOGLE_IDP })} />}
       </form>
       {note && <p role="status" className="mvx-public__note">{note}</p>}
       <LegalFooter />
@@ -152,6 +157,7 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | undefined>();
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [googleOffered, setGoogleOffered] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
 
   useEffect(() => {
@@ -163,7 +169,15 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
       .init({ onLoad: "check-sso", pkceMethod: "S256" })
       .then(async (auth) => {
         if (!auth) {
+          // "Sign up with Google" on the sign-up page lands here: straight
+          // to Google, and back to the console, which makes the workspace.
+          const params = new URLSearchParams(window.location.search);
+          if (params.get("sign_in") === GOOGLE_IDP) {
+            await keycloak.login({ idpHint: GOOGLE_IDP, redirectUri: window.location.origin + "/" });
+            return;
+          }
           const d = await discoverSso();
+          setGoogleOffered(!!d.google);
           if (d.sso) setNeedsSignIn(true);
           else await keycloak.login();
           return;
@@ -209,13 +223,13 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
-  if (needsSignIn && !authenticated) return <SignIn onPassword={() => void keycloak.login()} />;
+  if (needsSignIn && !authenticated) return <SignIn onPassword={() => void keycloak.login()} google={googleOffered} />;
   if (!authenticated) return null;
   if (refused) {
     return (
       <PublicPage testId="sign-in-refused">
         <h1>Your account could not be created</h1>
-        <p>{refused.replace(/^\w+ \d+: ?/, "")}</p>
+        <p>{refused.replace(/^(\w+ )?\d+: ?/, "")}</p>
         <button className="mvx-public__button mvx-public__button--ghost" type="button" onClick={() => keycloak.logout()}>Sign out</button>
       </PublicPage>
     );

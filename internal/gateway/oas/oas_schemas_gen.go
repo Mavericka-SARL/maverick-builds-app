@@ -15738,6 +15738,11 @@ type GetLicenseUnauthorized struct{}
 
 func (*GetLicenseUnauthorized) getLicenseRes() {}
 
+// GetMeForbidden is response for GetMe operation.
+type GetMeForbidden struct{}
+
+func (*GetMeForbidden) getMeRes() {}
+
 // GetMeUnauthorized is response for GetMe operation.
 type GetMeUnauthorized struct{}
 
@@ -36670,9 +36675,11 @@ func (*SignupConflict) signupRes() {}
 type SignupOptions struct {
 	Enabled bool `json:"enabled"`
 	// Why sign-up is closed.
-	Reason     OptString            `json:"reason"`
-	ContactURL OptString            `json:"contact_url"`
-	Plan       OptSignupOptionsPlan `json:"plan"`
+	Reason     OptString `json:"reason"`
+	ContactURL OptString `json:"contact_url"`
+	// Sign-up is open and the realm offers Google: a first Google sign-in signs up on these terms.
+	Google OptBool              `json:"google"`
+	Plan   OptSignupOptionsPlan `json:"plan"`
 }
 
 // GetEnabled returns the value of Enabled.
@@ -36688,6 +36695,11 @@ func (s *SignupOptions) GetReason() OptString {
 // GetContactURL returns the value of ContactURL.
 func (s *SignupOptions) GetContactURL() OptString {
 	return s.ContactURL
+}
+
+// GetGoogle returns the value of Google.
+func (s *SignupOptions) GetGoogle() OptBool {
+	return s.Google
 }
 
 // GetPlan returns the value of Plan.
@@ -36708,6 +36720,11 @@ func (s *SignupOptions) SetReason(val OptString) {
 // SetContactURL sets the value of ContactURL.
 func (s *SignupOptions) SetContactURL(val OptString) {
 	s.ContactURL = val
+}
+
+// SetGoogle sets the value of Google.
+func (s *SignupOptions) SetGoogle(val OptBool) {
+	s.Google = val
 }
 
 // SetPlan sets the value of Plan.
@@ -37017,6 +37034,9 @@ type SsoDiscovery struct {
 	SSO         bool      `json:"sso"`
 	Alias       OptString `json:"alias"`
 	DisplayName OptString `json:"display_name"`
+	// Whether the realm offers Sign in with Google (Keycloak identity provider "google"), whatever the
+	// licence.
+	Google OptBool `json:"google"`
 }
 
 // GetSSO returns the value of SSO.
@@ -37034,6 +37054,11 @@ func (s *SsoDiscovery) GetDisplayName() OptString {
 	return s.DisplayName
 }
 
+// GetGoogle returns the value of Google.
+func (s *SsoDiscovery) GetGoogle() OptBool {
+	return s.Google
+}
+
 // SetSSO sets the value of SSO.
 func (s *SsoDiscovery) SetSSO(val bool) {
 	s.SSO = val
@@ -37047,6 +37072,11 @@ func (s *SsoDiscovery) SetAlias(val OptString) {
 // SetDisplayName sets the value of DisplayName.
 func (s *SsoDiscovery) SetDisplayName(val OptString) {
 	s.DisplayName = val
+}
+
+// SetGoogle sets the value of Google.
+func (s *SsoDiscovery) SetGoogle(val OptBool) {
+	s.Google = val
 }
 
 func (*SsoDiscovery) ssoDiscoverRes() {}
@@ -42027,9 +42057,13 @@ type WorkflowInstance struct {
 	ContextDisplay []TaskContextEntry `json:"context_display"`
 	Steps          []WorkflowStep     `json:"steps"`
 	// GET /api/workflow/my-history: the application the run belongs to.
-	ApplicationID OptUUID        `json:"application_id"`
-	StartedAt     time.Time      `json:"started_at"`
-	CompletedAt   OptNilDateTime `json:"completed_at"`
+	ApplicationID OptUUID `json:"application_id"`
+	// History lists: who started the run (name, else e-mail).
+	SubmittedBy OptString `json:"submitted_by"`
+	// History lists: the model the run is about.
+	ModelName   OptString      `json:"model_name"`
+	StartedAt   time.Time      `json:"started_at"`
+	CompletedAt OptNilDateTime `json:"completed_at"`
 }
 
 // GetID returns the value of ID.
@@ -42065,6 +42099,16 @@ func (s *WorkflowInstance) GetSteps() []WorkflowStep {
 // GetApplicationID returns the value of ApplicationID.
 func (s *WorkflowInstance) GetApplicationID() OptUUID {
 	return s.ApplicationID
+}
+
+// GetSubmittedBy returns the value of SubmittedBy.
+func (s *WorkflowInstance) GetSubmittedBy() OptString {
+	return s.SubmittedBy
+}
+
+// GetModelName returns the value of ModelName.
+func (s *WorkflowInstance) GetModelName() OptString {
+	return s.ModelName
 }
 
 // GetStartedAt returns the value of StartedAt.
@@ -42112,6 +42156,16 @@ func (s *WorkflowInstance) SetApplicationID(val OptUUID) {
 	s.ApplicationID = val
 }
 
+// SetSubmittedBy sets the value of SubmittedBy.
+func (s *WorkflowInstance) SetSubmittedBy(val OptString) {
+	s.SubmittedBy = val
+}
+
+// SetModelName sets the value of ModelName.
+func (s *WorkflowInstance) SetModelName(val OptString) {
+	s.ModelName = val
+}
+
 // SetStartedAt sets the value of StartedAt.
 func (s *WorkflowInstance) SetStartedAt(val time.Time) {
 	s.StartedAt = val
@@ -42140,6 +42194,7 @@ const (
 	WorkflowInstanceStatusCompleted WorkflowInstanceStatus = "completed"
 	WorkflowInstanceStatusCancelled WorkflowInstanceStatus = "cancelled"
 	WorkflowInstanceStatusFailed    WorkflowInstanceStatus = "failed"
+	WorkflowInstanceStatusReopened  WorkflowInstanceStatus = "reopened"
 )
 
 // AllValues returns all WorkflowInstanceStatus values.
@@ -42149,6 +42204,7 @@ func (WorkflowInstanceStatus) AllValues() []WorkflowInstanceStatus {
 		WorkflowInstanceStatusCompleted,
 		WorkflowInstanceStatusCancelled,
 		WorkflowInstanceStatusFailed,
+		WorkflowInstanceStatusReopened,
 	}
 }
 
@@ -42162,6 +42218,8 @@ func (s WorkflowInstanceStatus) MarshalText() ([]byte, error) {
 	case WorkflowInstanceStatusCancelled:
 		return []byte(s), nil
 	case WorkflowInstanceStatusFailed:
+		return []byte(s), nil
+	case WorkflowInstanceStatusReopened:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -42182,6 +42240,9 @@ func (s *WorkflowInstanceStatus) UnmarshalText(data []byte) error {
 		return nil
 	case WorkflowInstanceStatusFailed:
 		*s = WorkflowInstanceStatusFailed
+		return nil
+	case WorkflowInstanceStatusReopened:
+		*s = WorkflowInstanceStatusReopened
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)

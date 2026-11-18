@@ -27,6 +27,7 @@ import {
   TextInput,
   useConfirm,
   type DesignTone,
+  Txt,
 } from "../../ui";
 import { CopyField } from "../../shell/ChatConnectorDialog";
 import { accessRemovalNotice } from "./accessRemoval";
@@ -272,6 +273,20 @@ export function UsersPanel({
     for (const t of tenants) for (const app of t.applications) map.set(app.id, app.name);
     return map;
   }, [tenants]);
+  // The search's application and model choices; with several tenants
+  // listed, an application's name says whose it is.
+  const appOfModel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tenants) for (const app of t.applications) for (const m of app.models) map.set(m.id, app.id);
+    return map;
+  }, [tenants]);
+  const [appFilter, setAppFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const appChoices = tenants.flatMap(t => t.applications.map(app => ({
+    id: app.id, label: tenants.length > 1 ? `${t.name} › ${app.name}` : app.name, models: app.models,
+  })));
+  const modelChoices = appChoices.filter(a => !appFilter || a.id === appFilter)
+    .flatMap(a => a.models.map(m => ({ id: m.id, label: appFilter ? m.name : `${a.label} › ${m.name}` })));
 
   const inv = () => {
     qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -440,12 +455,26 @@ export function UsersPanel({
   const inviteTakesWorkspace = (role: string) =>
     inviteNeedsWorkspace(role) || (canManageResourceAccess && BUILDER_ROLES.includes(role));
 
-  // A person matches by name, e-mail, a role they hold, or the workspace or
-  // tenant a role is held in; the one being edited stays in view.
+  // A person matches by name, e-mail, a role they hold, the workspace or
+  // tenant a role is held in, or an application or model their access names;
+  // the one being edited stays in view.
   const q = search.trim().toLowerCase();
-  const shownUsers = users.filter(u => !q || u.id === editId
-    || [u.display_name, u.email, ...(u.assignments ?? []).flatMap(a => [a.role, roleLabel(a.role), a.workspace_name, a.customer_name])]
-      .some(v => v?.toLowerCase().includes(q)));
+  // Who reaches an application or model, as the engine decides it: any
+  // application grant limits a person to the applications granted, any
+  // model grant to the models granted ("All apps/models": neither).
+  const reachesApp = (u: AdminUser, appId: string) =>
+    (!(u.app_ids ?? []).length || u.app_ids!.includes(appId))
+    && (!(u.model_ids ?? []).length || u.model_ids!.some(m => appOfModel.get(m) === appId));
+  const reachesModel = (u: AdminUser, modelId: string) =>
+    reachesApp(u, appOfModel.get(modelId) ?? "")
+    && (!(u.model_ids ?? []).length || u.model_ids!.includes(modelId));
+  const filtering = !!(q || appFilter || modelFilter);
+  const shownUsers = users.filter(u => u.id === editId || (
+    (!q || [u.display_name, u.email, ...(u.assignments ?? []).flatMap(a => [a.role, roleLabel(a.role), a.workspace_name, a.customer_name]),
+      ...(u.app_ids ?? []).map(id => appNames.get(id)), ...(u.model_ids ?? []).map(id => modelNames.get(id))]
+      .some(v => v?.toLowerCase().includes(q)))
+    && (!appFilter || reachesApp(u, appFilter))
+    && (!modelFilter || reachesModel(u, modelFilter))));
 
   return (
     <div>
@@ -458,8 +487,22 @@ export function UsersPanel({
             {showCreate ? "Cancel" : "Invite user"}
           </Button>
           <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, e-mail, role, workspace…" width={320} />
-          {q && <span className="mvx-admin-muted">{shownUsers.length} of {users.length} users</span>}
+            placeholder="Search name, e-mail, role, workspace, app, model…" width={320} />
+          {appChoices.length > 0 && (
+            <Select value={appFilter} aria-label="Filter by application" style={{ width: 200, flex: "0 0 auto" }}
+              onChange={(e) => { setAppFilter(e.target.value); setModelFilter(""); }}>
+              <option value="">Any application</option>
+              {appChoices.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </Select>
+          )}
+          {modelChoices.length > 0 && (
+            <Select value={modelFilter} aria-label="Filter by model" style={{ width: 200, flex: "0 0 auto" }}
+              onChange={(e) => setModelFilter(e.target.value)}>
+              <option value="">Any model</option>
+              {modelChoices.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </Select>
+          )}
+          {filtering && <span className="mvx-admin-muted">{shownUsers.length} of {users.length} users</span>}
         </div>
         {showCreate && (
           <div className="mvx-panel" style={{ padding: 16, maxWidth: 640 }}>
@@ -592,8 +635,11 @@ export function UsersPanel({
             </tr>
           </thead>
           <tbody>
-            {q && shownUsers.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">No users match "{search.trim()}"</td></tr>
+            {filtering && shownUsers.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">
+                {q ? `No users match "${search.trim()}"` : "No users"}
+                <Txt>{appFilter || modelFilter ? ` with access to ${modelFilter ? modelChoices.find(m => m.id === modelFilter)?.label : appChoices.find(a => a.id === appFilter)?.label}` : ""}</Txt>
+              </td></tr>
             )}
             {shownUsers.map((u) => editId === u.id ? (
               <tr key={`${u.tenant_id ?? ""}:${u.id}`}>

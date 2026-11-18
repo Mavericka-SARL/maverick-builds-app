@@ -1305,7 +1305,8 @@ func (UnimplementedHandler) GetMe(ctx context.Context) (r GetMeRes, _ error) {
 // The caller's runs — started, assigned a step, or notified of — in the selected application
 // (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
 // answer for it. With instance_id, that one run of the caller's in any application, with its
-// application_id, so a notification about another application's run can switch there.
+// application_id, so a notification about another application's run can switch there. With before,
+// the 50 runs older than the one it names.
 //
 // GET /api/workflow/my-history
 func (UnimplementedHandler) GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) (r []WorkflowInstance, _ error) {
@@ -1423,10 +1424,10 @@ func (UnimplementedHandler) GetWorkflowDefinition(ctx context.Context, params Ge
 //
 //	When X-App-Id names an application, only that application's instances are listed. A developer's
 //
-// test runs are never listed.
+// test runs are never listed. With before, the 50 runs older than the one it names.
 //
 // GET /api/workflow/history
-func (UnimplementedHandler) GetWorkflowHistory(ctx context.Context) (r []WorkflowInstance, _ error) {
+func (UnimplementedHandler) GetWorkflowHistory(ctx context.Context, params GetWorkflowHistoryParams) (r []WorkflowInstance, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

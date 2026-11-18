@@ -69,6 +69,9 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 		out["reason"] = "No edition is open for self-service sign-up."
 	default:
 		out["enabled"] = true
+		// "Sign up with Google": a first Google sign-in is a sign-up on
+		// these terms (google_signin.go).
+		out["google"] = h.googleSignInOffered(ctx)
 		offered := map[string]any{"key": p.Key, "name": p.Name, "description": p.Description, "limits": p.Limits, "limit_note": p.LimitNote}
 		if h.signupCfg.Playground {
 			// The terms quote these, in the Playground only: when a
@@ -189,77 +192,17 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. The tenant: its own database when the deployment runs that way.
-	var customerID, workspaceID string
-	tctx := ctx
-	if h.db.Dedicated() {
-		customerID, workspaceID, err = h.provisionTenant(ctx, req.Company, p.Key)
-		if err != nil {
-			fail(http.StatusInternalServerError, fmt.Errorf("create tenant: %w", err))
-			return
-		}
-		undo = append(undo, func() {
-			if err := h.db.Router().Deprovision(bg, customerID); err != nil {
-				h.log.Error().Err(err).Str("tenant", customerID).Msg("sign-up rollback: tenant database not dropped")
-			}
-		})
-		tctx = h.tenantCtx(ctx, customerID)
-	} else {
-		if err := h.db.QueryRow(ctx, `INSERT INTO core.customer (name, plan) VALUES ($1, $2) RETURNING id::text`, req.Company, p.Key).Scan(&customerID); err != nil {
-			fail(http.StatusInternalServerError, fmt.Errorf("create tenant: %w", err))
-			return
-		}
-		undo = append(undo, func() {
-			// Applications first: the starter model's rows name the person
-			// who "entered" them, so the user row can only go once the
-			// model has.
-			for _, stmt := range []string{
-				`DELETE FROM core.application WHERE customer_id = $1::uuid`,
-				`DELETE FROM identity.user WHERE customer_id = $1::uuid`,
-				`DELETE FROM core.customer WHERE id = $1::uuid`,
-			} {
-				if _, err := h.db.Exec(bg, stmt, customerID); err != nil {
-					h.log.Error().Err(err).Str("tenant", customerID).Str("stmt", stmt).Msg("sign-up rollback: statement failed")
-				}
-			}
-		})
-		if err := h.db.QueryRow(ctx, `INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, customerID).Scan(&workspaceID); err != nil {
-			fail(http.StatusInternalServerError, fmt.Errorf("create workspace: %w", err))
-			return
-		}
-	}
-	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, p.Key); err != nil {
-		fail(http.StatusInternalServerError, fmt.Errorf("assign edition: %w", err))
-		return
-	}
-
-	// 3. The person, every tenant role, and the "Getting started"
-	//    application, in one transaction on the tenant's database: all of
-	//    them or none.
-	var userID string
-	var gs gettingStarted
-	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
-		if err := tx.QueryRow(tctx, `
-			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
-			VALUES ($1, $2, $3, $4::uuid) RETURNING id::text`,
-			sub, req.Email, req.FirstName+" "+req.LastName, customerID).Scan(&userID); err != nil {
-			return fmt.Errorf("create user: %w", err)
-		}
-		if err := grantEveryTenantRole(tctx, tx, userID, workspaceID, userID); err != nil {
-			return err
-		}
-		var err error
-		gs, err = installGettingStarted(tctx, tx, customerID, workspaceID, userID)
-		return err
-	})
+	// 2–3. The tenant, the person holding every tenant role, and the
+	//      "Getting started" application (createSignupTenant).
+	made, undoTenant, err := h.createSignupTenant(ctx, req.Company, req.Email, req.FirstName+" "+req.LastName, sub, p)
 	if err != nil {
 		fail(http.StatusInternalServerError, err)
 		return
 	}
+	undo = append(undo, undoTenant...)
+	customerID, userID, gs := made.customerID, made.userID, made.gs
+	tctx := h.signupCtx(ctx, customerID)
 	appID, modelID := gs.appID, gs.landingModelID()
-	h.noteUser(tctx, sub, req.Email)
-	h.noteApplication(tctx, appID)
-	h.recalcGettingStarted(tctx, gs)
 
 	// 4. The invitation, which is what makes the account usable. Without
 	//    it there is nothing to show for the sign-up, so its failure undoes
@@ -312,6 +255,106 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+// signedUpTenant is what a self-service sign-up made: the tenant, its first
+// workspace, the person and their "Getting started" application.
+type signedUpTenant struct {
+	customerID, workspaceID, userID string
+	gs                              gettingStarted
+}
+
+// signupCtx is ctx routed to a signed-up tenant's database: its own when the
+// deployment runs dedicated databases, else ctx itself.
+func (h *handler) signupCtx(ctx context.Context, customerID string) context.Context {
+	if h.db.Dedicated() {
+		return h.tenantCtx(ctx, customerID)
+	}
+	return ctx
+}
+
+// createSignupTenant makes a signed-up person's tenant on edition p — its
+// own database when the deployment runs that way — with them in it holding
+// every tenant role, and the "Getting started" application: the part of a
+// sign-up the form (POST /api/signup) and a first Google sign-in
+// (googleSignUp) share. sub is their identity-provider account, which the
+// caller made or was given. A step that fails undoes what this made; on
+// success it returns how to undo it, for a later step of the caller's.
+func (h *handler) createSignupTenant(ctx context.Context, company, email, displayName, sub string, p plan.Plan) (signedUpTenant, []func(), error) {
+	var out signedUpTenant
+	var undo []func()
+	rollback := func() {
+		for i := len(undo) - 1; i >= 0; i-- {
+			undo[i]()
+		}
+	}
+	bg := context.WithoutCancel(ctx)
+	var err error
+	if h.db.Dedicated() {
+		out.customerID, out.workspaceID, err = h.provisionTenant(ctx, company, p.Key)
+		if err != nil {
+			return out, nil, fmt.Errorf("create tenant: %w", err)
+		}
+		customerID := out.customerID
+		undo = append(undo, func() {
+			if err := h.db.Router().Deprovision(bg, customerID); err != nil {
+				h.log.Error().Err(err).Str("tenant", customerID).Msg("sign-up rollback: tenant database not dropped")
+			}
+		})
+	} else {
+		if err := h.db.QueryRow(ctx, `INSERT INTO core.customer (name, plan) VALUES ($1, $2) RETURNING id::text`, company, p.Key).Scan(&out.customerID); err != nil {
+			return out, nil, fmt.Errorf("create tenant: %w", err)
+		}
+		customerID := out.customerID
+		undo = append(undo, func() {
+			// Applications first: the starter model's rows name the person
+			// who "entered" them, so the user row can only go once the
+			// model has.
+			for _, stmt := range []string{
+				`DELETE FROM core.application WHERE customer_id = $1::uuid`,
+				`DELETE FROM identity.user WHERE customer_id = $1::uuid`,
+				`DELETE FROM core.customer WHERE id = $1::uuid`,
+			} {
+				if _, err := h.db.Exec(bg, stmt, customerID); err != nil {
+					h.log.Error().Err(err).Str("tenant", customerID).Str("stmt", stmt).Msg("sign-up rollback: statement failed")
+				}
+			}
+		})
+		if err := h.db.QueryRow(ctx, `INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, customerID).Scan(&out.workspaceID); err != nil {
+			rollback()
+			return out, nil, fmt.Errorf("create workspace: %w", err)
+		}
+	}
+	tctx := h.signupCtx(ctx, out.customerID)
+	if err := plan.SetPlan(tctx, h.db.For(tctx), out.customerID, p.Key); err != nil {
+		rollback()
+		return out, nil, fmt.Errorf("assign edition: %w", err)
+	}
+
+	// The person, every tenant role, and the "Getting started" application,
+	// in one transaction on the tenant's database: all of them or none.
+	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
+		if err := tx.QueryRow(tctx, `
+			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+			VALUES ($1, $2, $3, $4::uuid) RETURNING id::text`,
+			sub, email, displayName, out.customerID).Scan(&out.userID); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+		if err := grantEveryTenantRole(tctx, tx, out.userID, out.workspaceID, out.userID); err != nil {
+			return err
+		}
+		var err error
+		out.gs, err = installGettingStarted(tctx, tx, out.customerID, out.workspaceID, out.userID)
+		return err
+	})
+	if err != nil {
+		rollback()
+		return out, nil, err
+	}
+	h.noteUser(tctx, sub, email)
+	h.noteApplication(tctx, out.gs.appID)
+	h.recalcGettingStarted(tctx, out.gs)
+	return out, undo, nil
+}
+
 func validateSignup(req signupRequest) error {
 	switch {
 	case len(req.Company) < 2 || len(req.Company) > signupMaxField:
@@ -334,14 +377,8 @@ func validateSignup(req signupRequest) error {
 // the control plane, any dedicated tenant's directory, or the identity
 // provider.
 func (h *handler) emailRegistered(ctx context.Context, email string) (bool, error) {
-	var n int
-	if err := h.db.Control().QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM identity."user" WHERE lower(email) = $1)
-		     + (SELECT count(*) FROM platform.user_directory WHERE lower(email) = $1)`, email).Scan(&n); err != nil {
-		return false, err
-	}
-	if n > 0 {
-		return true, nil
+	if taken, err := h.emailOnPlatform(ctx, email); err != nil || taken {
+		return taken, err
 	}
 	if h.kc != nil {
 		existing, err := h.kc.FindUserByEmail(ctx, email)
@@ -351,6 +388,19 @@ func (h *handler) emailRegistered(ctx context.Context, email string) (bool, erro
 		return existing != "", nil
 	}
 	return false, nil
+}
+
+// emailOnPlatform reports whether an account of the platform — in the
+// control plane or any dedicated tenant's directory — has this address,
+// whatever the identity provider holds.
+func (h *handler) emailOnPlatform(ctx context.Context, email string) (bool, error) {
+	var n int
+	if err := h.db.Control().QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM identity."user" WHERE lower(email) = $1)
+		     + (SELECT count(*) FROM platform.user_directory WHERE lower(email) = $1)`, email).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // resendPendingInvite sends the invitation again to the identity-provider

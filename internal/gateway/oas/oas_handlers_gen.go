@@ -23980,7 +23980,8 @@ func (s *Server) handleGetMeRequest(args [0]string, argsEscaped bool, w http.Res
 // The caller's runs — started, assigned a step, or notified of — in the selected application
 // (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
 // answer for it. With instance_id, that one run of the caller's in any application, with its
-// application_id, so a notification about another application's run can switch there.
+// application_id, so a notification about another application's run can switch there. With before,
+// the 50 runs older than the one it names.
 //
 // GET /api/workflow/my-history
 func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -24125,6 +24126,10 @@ func (s *Server) handleGetMyWorkflowHistoryRequest(args [0]string, argsEscaped b
 					Name: "instance_id",
 					In:   "query",
 				}: params.InstanceID,
+				{
+					Name: "before",
+					In:   "query",
+				}: params.Before,
 			},
 			Raw: r,
 		}
@@ -25948,7 +25953,7 @@ func (s *Server) handleGetWorkflowDefinitionRequest(args [1]string, argsEscaped 
 //
 //	When X-App-Id names an application, only that application's instances are listed. A developer's
 //
-// test runs are never listed.
+// test runs are never listed. With before, the 50 runs older than the one it names.
 //
 // GET /api/workflow/history
 func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -26066,6 +26071,16 @@ func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped boo
 			return
 		}
 	}
+	params, err := decodeGetWorkflowHistoryParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -26078,13 +26093,18 @@ func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped boo
 			OperationID:      "getWorkflowHistory",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "before",
+					In:   "query",
+				}: params.Before,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = GetWorkflowHistoryParams
 			Response = []WorkflowInstance
 		)
 		response, err = middleware.HookMiddleware[
@@ -26094,14 +26114,14 @@ func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped boo
 		](
 			m,
 			mreq,
-			nil,
+			unpackGetWorkflowHistoryParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.GetWorkflowHistory(ctx)
+				response, err = s.h.GetWorkflowHistory(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.GetWorkflowHistory(ctx)
+		response, err = s.h.GetWorkflowHistory(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)

@@ -23,8 +23,8 @@ const VIEWPORTS = [
 ];
 
 const PERSONAS: { persona: string; screens: string[] }[] = [
-  { persona: "dept_head", screens: ["Dashboards", "Workflow Inbox", "Workflow History", "Models"] },
-  { persona: "finance", screens: ["Dashboards", "Workflow Inbox", "Workflow History", "Roles", "Access Rules"] },
+  { persona: "dept_head", screens: ["Dashboards", "Workflow", "Models"] },
+  { persona: "finance", screens: ["Dashboards", "Workflow", "Roles", "Access Rules"] },
   { persona: "developer", screens: ["Developer Models", "Metrics", "Dimensions", "Grids", "Dashboards", "Triggers", "Integrations"] },
   { persona: "platform_admin", screens: ["Applications", "Users", "Audit Log"] },
 ];
@@ -48,8 +48,8 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByLabel("Switch persona")).toBeVisible();
 
       for (const screen of screens) {
-        // A label two groups share (Workflow History: the person's own and,
-        // for a business admin, the application's) is visited in each.
+        // A label two groups share (Workflow: the person's own and, for a
+        // business admin, the application's runs) is visited in each.
         const items = page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: screen, exact: true });
         for (let i = 0; i < await items.count(); i++) {
           await items.nth(i).click();

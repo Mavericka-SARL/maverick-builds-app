@@ -65,10 +65,41 @@ export function localTab(tab: string): string {
   return idx > 0 ? tab.slice(idx + 1) : tab;
 }
 
+/**
+ * A view of a sidebar page: "business:workflow/history" is the History view
+ * of User › Workflow. The sidebar marks the page (pageTab); the page shows
+ * the view (tabView), and a remembered tab reopens it.
+ */
+export function viewTab(tab: string, view: string): string {
+  return view ? `${tab}/${view}` : tab;
+}
+
+/** The sidebar page a tab is a view of — the tab itself when it has no view. */
+export function pageTab(tab: string): string {
+  const idx = tab.indexOf("/");
+  return idx > 0 ? tab.slice(0, idx) : tab;
+}
+
+/** The view part of a tab ("history"); "" for none. */
+export function tabView(tab: string): string {
+  const idx = tab.indexOf("/");
+  return idx > 0 ? tab.slice(idx + 1) : "";
+}
+
+// Pages merged into another one's views (owner, 2026-11-18: "merge Workflow
+// Inbox and Workflow History to one tab Workflow"): a tab remembered from
+// before opens the view it became.
+const MERGED_TABS: Record<string, string> = {
+  "business:inbox": "business:workflow",
+  "business:history": "business:workflow/history",
+  "business-admin:inbox": "business-admin:workflow",
+  "business-admin:history": "business-admin:workflow/history",
+};
+
 /** The tab a section opens on when it is the landing one. */
 export const SECTION_LANDING: Record<SectionId, string> = {
   business: tabId("business", "dashboards"),
-  "business-admin": tabId("business-admin", "inbox"),
+  "business-admin": tabId("business-admin", "workflow"),
   developer: tabId("developer", "applications"),
   "tenant-admin": tabId("tenant-admin", "applications"),
   "platform-admin": tabId("platform-admin", "applications"),
@@ -76,6 +107,7 @@ export const SECTION_LANDING: Record<SectionId, string> = {
 
 /** A remembered/selected tab, or the landing tab when it belongs to no enabled section. */
 export function resolveTab(tab: string, sections: SectionId[]): string {
+  tab = MERGED_TABS[tab] ?? tab;
   const owner = sectionOf(tab);
   if (owner && sections.includes(owner)) return tab;
   return sections.length ? SECTION_LANDING[sections[0]] : "";

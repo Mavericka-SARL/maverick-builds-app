@@ -10,8 +10,8 @@ function json(body: unknown) {
   return { status: 200, contentType: "application/json", body: JSON.stringify(body) };
 }
 
-// The Business Admin group's screen: "Workflow History" is also the User
-// group's name for the person's own runs.
+// The Business Admin group's screen: "Workflow" is also the User group's
+// name for the person's own inbox and runs.
 async function open(page: Page, tab: string) {
   await loadAs(page, "finance");
   const group = page.getByRole("navigation", { name: "Primary" }).locator(".mvx-sidebar-nav__group", {
@@ -32,7 +32,7 @@ test("an approved run is reopened with a reason, not by a status change", async 
     reason = (r.request().postDataJSON() as { reason: string }).reason;
     await r.fulfill(json({ status: "cancelled", notified: 1 }));
   });
-  await open(page, "Workflow History");
+  await open(page, "Workflow"); // finance holds the user role: the History alone
   await expect(page.getByLabel("Change instance status")).toHaveCount(0);
   await page.getByRole("button", { name: "Reopen Lock the approved budget" }).click();
   await page.getByLabel("Reason").fill("March was locked with a wrong figure");

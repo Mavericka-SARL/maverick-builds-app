@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Configure the realm's SMTP server so Keycloak can send invitation emails.
+# Configure the realm's SMTP server so Keycloak can send invitation emails —
+# and, now that it can send mail, offer "Forgot password?" on the sign-in
+# page (resetPasswordAllowed). Without mail the link would lead to a page that
+# cannot send anything, so the realm import leaves it off and this script is
+# what turns it on.
 #
 # Without this, creating a user fails: POST /api/admin/users sets no password
 # and relies entirely on the set-your-password link, so an invitation that
@@ -87,13 +91,16 @@ realm["smtpServer"] = {
     "starttls": "true" if os.environ["SMTP_PORT"] == "587" else "false",
     "ssl": "true" if os.environ["SMTP_PORT"] == "465" else "false",
 }
+# "Forgot password?" sends its link through this server (password-reset in
+# the realm's e-mail theme). RESET_PASSWORD=false keeps it off.
+realm["resetPasswordAllowed"] = os.environ.get("RESET_PASSWORD", "true") != "false"
 json.dump(realm, open(path, "w"))
 PY
 
 curl -sf -o /dev/null -X PUT "$API" \
   -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
   --data @"$TMP"
-log "SMTP configured: ${SMTP_USER}@${SMTP_HOST}:${SMTP_PORT}, from ${SMTP_FROM}"
+log "SMTP configured: ${SMTP_USER}@${SMTP_HOST}:${SMTP_PORT}, from ${SMTP_FROM}; Forgot password? $([ "${RESET_PASSWORD:-true}" = false ] && echo off || echo on)"
 
 # Reading the config back proves nothing about whether mail can actually be
 # sent; only a real send does.

@@ -464,6 +464,8 @@ export interface LegalInfo {
 
 export interface SignupOptions {
   enabled: boolean;
+  /** The realm offers Google: "Sign up with Google" (a first Google sign-in signs up). */
+  google?: boolean;
   /** The hosted Playground: the one deployment that retires unused workspaces. */
   playground?: boolean;
   reason?: string;
@@ -679,6 +681,10 @@ export interface HistoryInstance {
   context_display?: TaskContextEntry[];
   /** The application the run belongs to (GET /api/workflow/my-history). */
   application_id?: string;
+  /** Who started the run: name, else e-mail. */
+  submitted_by?: string;
+  /** The model the run is about. */
+  model_name?: string;
   /** Finished and approved: only Reopen, with a reason, takes it out of completed. */
   reopenable?: boolean;
 }
@@ -2900,9 +2906,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  getWorkflowHistory: () => apiFetch<HistoryInstance[]>("/api/workflow/history"),
-  // The person's runs in the selected application (X-App-Id).
-  getMyWorkflowHistory: () => apiFetch<HistoryInstance[]>("/api/workflow/my-history"),
+  // A page of runs, newest first; before: the id of the last run shown.
+  getWorkflowHistory: (before?: string) =>
+    apiFetch<HistoryInstance[]>(`/api/workflow/history${before ? `?before=${encodeURIComponent(before)}` : ""}`),
+  // The person's runs in the selected application (X-App-Id), a page at a time.
+  getMyWorkflowHistory: (before?: string) =>
+    apiFetch<HistoryInstance[]>(`/api/workflow/my-history${before ? `?before=${encodeURIComponent(before)}` : ""}`),
   // One run of the person's, in whichever application it is, with its application_id.
   findMyWorkflowRun: (instanceId: string) =>
     apiFetch<HistoryInstance[]>(`/api/workflow/my-history?instance_id=${encodeURIComponent(instanceId)}`),

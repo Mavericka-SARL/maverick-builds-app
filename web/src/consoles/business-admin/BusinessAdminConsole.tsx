@@ -6,6 +6,8 @@ import { TaskContextSummary } from "../TaskContextSummary";
 import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
 import { useReopenRun } from "../useReopenRun";
+import { useWorkflowHistory } from "../useWorkflowHistory";
+import { HistoryRunMeta } from "../HistoryRunMeta";
 import { useDateFormat } from "../dateFormat";
 import { momentDate, momentDateTime } from "../dateSerial";
 import {
@@ -145,19 +147,13 @@ const DECISION_TONE: Record<string, DesignTone> = {
 export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string } = {}) {
   const qc = useQueryClient();
   const dateFormat = useDateFormat();
-  const { data: instances = [], isLoading } = useQuery({
-    queryKey: ["wf-history"],
-    queryFn: api.getWorkflowHistory,
-    refetchInterval: 10_000,
-  });
+  const { instances, shown: filtered, isLoading, toolbar, more, noMatch } = useWorkflowHistory("wf-history", api.getWorkflowHistory);
 
   useEffect(() => {
     if (!focusInstanceId) return;
     document.getElementById(`wf-history-${focusInstanceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [focusInstanceId, instances]);
 
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [nameFilter, setNameFilter] = useState<string>("");
   const [stepComments, setStepComments] = useState<Record<string, string>>({});
   const [instanceStatus, setInstanceStatus] = useState<Record<string, string>>({});
 
@@ -181,40 +177,14 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
 
   const reopenRun = useReopenRun();
 
-  const filtered = useMemo(() => {
-    return instances.filter((inst: HistoryInstance) => {
-      if (statusFilter !== "all" && inst.status !== statusFilter) return false;
-      if (nameFilter.trim() && !inst.workflow_name.toLowerCase().includes(nameFilter.trim().toLowerCase())) return false;
-      return true;
-    });
-  }, [instances, statusFilter, nameFilter]);
-
   if (isLoading) return <LoadingState label="Loading history…" />;
 
   return (
     <div className="mvx-admin-stack">
-      <Toolbar>
-        <ToolbarGroup>
-          <SearchInput
-            placeholder="Search by workflow name…"
-            value={nameFilter}
-            onChange={e => setNameFilter(e.target.value)}
-            width={240}
-          />
-          <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ minWidth: 140 }}>
-            <option value="all">All statuses</option>
-            <option value="running">Running</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="reopened">Reopened</option>
-            <option value="failed">Failed</option>
-          </Select>
-          <span className="mvx-admin-muted">{filtered.length} of {instances.length}</span>
-        </ToolbarGroup>
-      </Toolbar>
+      {toolbar}
 
       {filtered.length === 0 && (
-        <EmptyState label="No workflow history matching the current filter." />
+        <EmptyState label={instances.length === 0 ? "No workflow has run yet." : noMatch} />
       )}
 
       {filtered.map((inst: HistoryInstance) => {
@@ -234,6 +204,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
                     {inst.context.revision}
                   </span>
                 )}
+                <HistoryRunMeta inst={inst} />
               </div>
               <span className="mvx-admin-muted" style={{ whiteSpace: "nowrap" }}>{momentDate(inst.started_at, dateFormat)}</span>
               <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
@@ -314,6 +285,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
           </div>
         );
       })}
+      {more}
       {reopenRun.error && <p className="mvx-admin-error">{reopenRun.error}</p>}
       {reopenRun.confirmElement}
     </div>

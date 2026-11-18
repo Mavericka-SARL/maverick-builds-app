@@ -2044,7 +2044,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">Content</div>
                 <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>; a link to a dashboard is <code>[label](dashboard:Model name/Dashboard name)</code>, to a page of the sidebar <code>[label](page:Workflow Inbox)</code> or <code>[label](page:Developer › Dimensions)</code>
+                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>; a link to a dashboard is <code>[label](dashboard:Model name/Dashboard name)</code>, to a page of the sidebar <code>[label](page:Workflow)</code> or <code>[label](page:Developer › Dimensions)</code>
                 </div>
                 <Textarea
                   ref={propTextRef}

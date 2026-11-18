@@ -4779,6 +4779,12 @@ func encodeGetMeResponse(response GetMeRes, w http.ResponseWriter, span trace.Sp
 
 		return nil
 
+	case *GetMeForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}

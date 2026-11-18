@@ -935,7 +935,8 @@ type Invoker interface {
 	// The caller's runs — started, assigned a step, or notified of — in the selected application
 	// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
 	// answer for it. With instance_id, that one run of the caller's in any application, with its
-	// application_id, so a notification about another application's run can switch there.
+	// application_id, so a notification about another application's run can switch there. With before,
+	// the 50 runs older than the one it names.
 	//
 	// GET /api/workflow/my-history
 	GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error)
@@ -1016,10 +1017,10 @@ type Invoker interface {
 	// per-application grants when they have any. A caller who is also tenant_admin covers the
 	// applications of its tenants; a platform_admin or platform-level developer covers every application.
 	//  When X-App-Id names an application, only that application's instances are listed. A developer's
-	// test runs are never listed.
+	// test runs are never listed. With before, the 50 runs older than the one it names.
 	//
 	// GET /api/workflow/history
-	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	GetWorkflowHistory(ctx context.Context, params GetWorkflowHistoryParams) ([]WorkflowInstance, error)
 	// GetWorkflowInstance invokes getWorkflowInstance operation.
 	//
 	// For whoever may administer the run (the application's business admins and developers) or took part
@@ -18606,7 +18607,8 @@ func (c *Client) sendGetMe(ctx context.Context) (res GetMeRes, err error) {
 // The caller's runs — started, assigned a step, or notified of — in the selected application
 // (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
 // answer for it. With instance_id, that one run of the caller's in any application, with its
-// application_id, so a notification about another application's run can switch there.
+// application_id, so a notification about another application's run can switch there. With before,
+// the 50 runs older than the one it names.
 //
 // GET /api/workflow/my-history
 func (c *Client) GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error) {
@@ -18667,6 +18669,23 @@ func (c *Client) sendGetMyWorkflowHistory(ctx context.Context, params GetMyWorkf
 
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.InstanceID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "before" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "before",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Before.Get(); ok {
 				return e.EncodeValue(conv.UUIDToString(val))
 			}
 			return nil
@@ -19904,15 +19923,15 @@ func (c *Client) sendGetWorkflowDefinition(ctx context.Context, params GetWorkfl
 //
 //	When X-App-Id names an application, only that application's instances are listed. A developer's
 //
-// test runs are never listed.
+// test runs are never listed. With before, the 50 runs older than the one it names.
 //
 // GET /api/workflow/history
-func (c *Client) GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error) {
-	res, err := c.sendGetWorkflowHistory(ctx)
+func (c *Client) GetWorkflowHistory(ctx context.Context, params GetWorkflowHistoryParams) ([]WorkflowInstance, error) {
+	res, err := c.sendGetWorkflowHistory(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendGetWorkflowHistory(ctx context.Context) (res []WorkflowInstance, err error) {
+func (c *Client) sendGetWorkflowHistory(ctx context.Context, params GetWorkflowHistoryParams) (res []WorkflowInstance, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("getWorkflowHistory"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -19952,6 +19971,27 @@ func (c *Client) sendGetWorkflowHistory(ctx context.Context) (res []WorkflowInst
 	var pathParts [1]string
 	pathParts[0] = "/api/workflow/history"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "before" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "before",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Before.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)

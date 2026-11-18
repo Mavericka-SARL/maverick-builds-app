@@ -413,7 +413,7 @@ var markdownLink = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
 const dashboardScheme = "dashboard:"
 
 // pageScheme starts a link to a page of the console's sidebar, by the names
-// it shows (the console's router/pageLinks.ts): page:Workflow Inbox,
+// it shows (the console's router/pageLinks.ts): page:Workflow,
 // page:Developer › Dimensions.
 const pageScheme = "page:"
 

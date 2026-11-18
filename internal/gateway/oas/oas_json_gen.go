@@ -77097,6 +77097,12 @@ func (s *SignupOptions) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Google.Set {
+			e.FieldStart("google")
+			s.Google.Encode(e)
+		}
+	}
+	{
 		if s.Plan.Set {
 			e.FieldStart("plan")
 			s.Plan.Encode(e)
@@ -77104,11 +77110,12 @@ func (s *SignupOptions) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfSignupOptions = [4]string{
+var jsonFieldsNameOfSignupOptions = [5]string{
 	0: "enabled",
 	1: "reason",
 	2: "contact_url",
-	3: "plan",
+	3: "google",
+	4: "plan",
 }
 
 // Decode decodes SignupOptions from json.
@@ -77151,6 +77158,16 @@ func (s *SignupOptions) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"contact_url\"")
+			}
+		case "google":
+			if err := func() error {
+				s.Google.Reset()
+				if err := s.Google.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"google\"")
 			}
 		case "plan":
 			if err := func() error {
@@ -77825,12 +77842,19 @@ func (s *SsoDiscovery) encodeFields(e *jx.Encoder) {
 			s.DisplayName.Encode(e)
 		}
 	}
+	{
+		if s.Google.Set {
+			e.FieldStart("google")
+			s.Google.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfSsoDiscovery = [3]string{
+var jsonFieldsNameOfSsoDiscovery = [4]string{
 	0: "sso",
 	1: "alias",
 	2: "display_name",
+	3: "google",
 }
 
 // Decode decodes SsoDiscovery from json.
@@ -77873,6 +77897,16 @@ func (s *SsoDiscovery) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"display_name\"")
+			}
+		case "google":
+			if err := func() error {
+				s.Google.Reset()
+				if err := s.Google.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"google\"")
 			}
 		default:
 			return d.Skip()
@@ -91314,6 +91348,18 @@ func (s *WorkflowInstance) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.SubmittedBy.Set {
+			e.FieldStart("submitted_by")
+			s.SubmittedBy.Encode(e)
+		}
+	}
+	{
+		if s.ModelName.Set {
+			e.FieldStart("model_name")
+			s.ModelName.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("started_at")
 		json.EncodeDateTime(e, s.StartedAt)
 	}
@@ -91325,16 +91371,18 @@ func (s *WorkflowInstance) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfWorkflowInstance = [9]string{
-	0: "id",
-	1: "workflow_name",
-	2: "status",
-	3: "context",
-	4: "context_display",
-	5: "steps",
-	6: "application_id",
-	7: "started_at",
-	8: "completed_at",
+var jsonFieldsNameOfWorkflowInstance = [11]string{
+	0:  "id",
+	1:  "workflow_name",
+	2:  "status",
+	3:  "context",
+	4:  "context_display",
+	5:  "steps",
+	6:  "application_id",
+	7:  "submitted_by",
+	8:  "model_name",
+	9:  "started_at",
+	10: "completed_at",
 }
 
 // Decode decodes WorkflowInstance from json.
@@ -91434,8 +91482,28 @@ func (s *WorkflowInstance) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"application_id\"")
 			}
+		case "submitted_by":
+			if err := func() error {
+				s.SubmittedBy.Reset()
+				if err := s.SubmittedBy.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"submitted_by\"")
+			}
+		case "model_name":
+			if err := func() error {
+				s.ModelName.Reset()
+				if err := s.ModelName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"model_name\"")
+			}
 		case "started_at":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.StartedAt = v
@@ -91466,8 +91534,8 @@ func (s *WorkflowInstance) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
-		0b10000111,
-		0b00000000,
+		0b00000111,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -91595,6 +91663,8 @@ func (s *WorkflowInstanceStatus) Decode(d *jx.Decoder) error {
 		*s = WorkflowInstanceStatusCancelled
 	case WorkflowInstanceStatusFailed:
 		*s = WorkflowInstanceStatusFailed
+	case WorkflowInstanceStatusReopened:
+		*s = WorkflowInstanceStatusReopened
 	default:
 		*s = WorkflowInstanceStatus(v)
 	}

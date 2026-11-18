@@ -270,18 +270,21 @@ func (h *handler) ssoDiscover(w http.ResponseWriter, r *http.Request) {
 	// sign-on is an enterprise feature: without it in the licence there is
 	// nothing to discover, whatever domains an earlier licence left behind.
 	// Sign-in keeps working through a key's transition period.
+	// Google sign-in is not single sign-on: offered whatever the licence,
+	// so the sign-in page can show it beside a company's provider.
+	ctx := r.Context()
+	google := h.googleSignInOffered(ctx)
 	if h.lic.RequireUse(license.FeatureSSO) != nil {
-		jsonOK(w, map[string]any{"sso": false})
+		jsonOK(w, map[string]any{"sso": false, "google": google})
 		return
 	}
-	ctx := r.Context()
 	domains := sso.NewDomains(h.db.Control())
 	hasSSO, err := domains.Any(ctx)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	out := map[string]any{"sso": hasSSO}
+	out := map[string]any{"sso": hasSSO, "google": google}
 	email := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("email")))
 	if hasSSO && strings.Contains(email, "@") {
 		customerID, alias, err := domains.Lookup(ctx, email[strings.LastIndex(email, "@")+1:])

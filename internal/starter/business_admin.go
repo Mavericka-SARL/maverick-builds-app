@@ -153,11 +153,11 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 **User** is where the day's work happens:
 
 - **Dashboards** — every dashboard of the model you have open, with grids you can type into, and records you review
-- **Workflow Inbox** — the requests waiting for your decision
+- **Workflow** — its **Inbox** holds the requests waiting for your decision, its **History** the ones you took part in
 
 **Business Admin** is where you set things up:
 
-- **Workflow History** — the latest requests, with every decision and comment; where you unstick one, or reopen an approved one, with a reason
+- **Workflow** — every request of the application, with every decision and comment; where you unstick one, or reopen an approved one, with a reason
 - **Roles** — groups of people, and which dashboards each group may open
 - **Access Rules** — per person or per role, which numbers they may change, only read, or not see
 - **Copy values** — write one member's values into another, such as the plan into the budget, before you lock it
@@ -318,7 +318,7 @@ A developer designs the workflows; users submit requests through them; you decid
 
 		baText(`## Workflow Inbox
 
-**User › Workflow Inbox** lists the steps waiting for you: those assigned to business admins (or to developers or tenant admins, if your account is one too) and those assigned to a role you are in. Each card names the workflow and the step, who asked (**Requested by**), and what the request is about — an office, a region.
+**User › Workflow**, in its **Inbox**, lists the steps waiting for you: those assigned to business admins (or to developers or tenant admins, if your account is one too) and those assigned to a role you are in. Each card names the workflow and the step, who asked (**Requested by**), and what the request is about — an office, a region.
 
 - Type a comment in the box. Some steps require one; their buttons stay disabled until you do.
 - An approval step has **Approve** and **Reject**.
@@ -327,7 +327,7 @@ A developer designs the workflows; users submit requests through them; you decid
 
 You decide requests; you do not submit them — users do. An account that is also a developer or tenant admin, like the one that signed up, can submit as well.`, 296),
 
-		baPicture(baRequest(), "A user submits, you decide in the Workflow Inbox; approved numbers stay locked, rejected or cancelled ones are released", 860, 232),
+		baPicture(baRequest(), "A user submits, you decide in the Workflow page's Inbox; approved numbers stay locked, rejected or cancelled ones are released", 860, 232),
 
 		baText(`## Locks keep agreed numbers still
 
@@ -337,7 +337,7 @@ A company-wide round — one about no particular member or record, such as a pla
 
 		baText(`## History
 
-**Business Admin › Workflow History** shows the 50 most recent requests, newest first, with each step's decision and comment. It covers the application you have open, or your whole workspace if you have not opened one, and leaves out a developer's test runs. Narrow it with **Search by workflow name…** and **All statuses**. Each request has its own status list and **Apply**:
+**Business Admin › Workflow** shows the requests, newest first, with who submitted each, its model, and each step's decision and comment; **Load older runs** at the bottom reaches further back. It covers the application you have open, or your whole workspace if you have not opened one, and leaves out a developer's test runs. Find a request by typing any of what its card shows — the workflow, who submitted it, the stage it waits at, the model — or narrow it by status, stage, model and submitter. Each request has its own status list and **Apply**:
 
 - **Cancelled** stops a stuck request: its open steps are skipped and its lock is released.
 - **Running** reopens a finished one and puts its most recent step back in the inbox.
@@ -421,7 +421,7 @@ func baRequest() string {
 	s := svgHead(860, 232)
 	s += box(10, 84, 190, 64, "Submitted", "by a user", false)
 	s += arrow(208, 116, 40)
-	s += box(256, 84, 220, 64, "Your decision", "User › Workflow Inbox", true)
+	s += box(256, 84, 220, 64, "Your decision", "User › Workflow", true)
 	s += `<text x="366" y="68" text-anchor="middle" font-size="12" fill="` + muted + `">numbers locked while it waits</text>`
 	s += `<text x="366" y="170" text-anchor="middle" font-size="12" fill="` + muted + `">stuck? cancel it in History</text>`
 	s += `<line x1="476" y1="116" x2="512" y2="116" stroke="` + muted + `" stroke-width="1.5"/>`

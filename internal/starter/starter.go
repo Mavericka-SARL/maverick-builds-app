@@ -471,7 +471,7 @@ A **table of records** collects structured entries — an expense, a request, a 
 
 A **workflow** moves something through the people who must see it: submit, review, approve, rework. Steps are assigned to *roles*, not to named people, so the chain keeps working when someone is away or leaves.
 
-Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a record is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
+Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A user starts one from the Inbox of their **Workflow** page; a step waiting for you appears there too, under **User › Workflow**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a record is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
 
 	p.text(`## Who sees what
 

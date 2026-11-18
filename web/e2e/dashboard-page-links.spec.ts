@@ -15,6 +15,7 @@ const guide = {
     pos_x: 0, pos_y: 0, size_w: 800, size_h: 240,
     content: [
       "Your steps wait in [your inbox](page:Workflow Inbox).",
+      "What ran: [the history](page:Workflow History).",
       "Who sees what: [the roles](page:business admin > roles).",
       "The structure: [the dimensions](page:Developer › Dimensions).",
       "Revisions: [the models](page:Developer › Models).",
@@ -45,8 +46,15 @@ test("a page link opens that page of the sidebar", async ({ page }) => {
   await withGuide(page);
   await loadAs(page, "finance"); // business admin + business user
   await openGuide(page);
+  // Workflow Inbox is now the Inbox view of Workflow: the link opens it.
   await page.getByRole("link", { name: "your inbox" }).click();
-  await expect(nav(page).getByRole("button", { name: "Workflow Inbox" })).toHaveAttribute("aria-current", "page");
+  await expect(nav(page).getByRole("button", { name: "Workflow", exact: true }).first()).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: /^Inbox/ })).toHaveAttribute("aria-pressed", "true");
+  // …and Workflow History its History view.
+  await openGuide(page);
+  await page.getByRole("link", { name: "the history" }).click();
+  await expect(nav(page).getByRole("button", { name: "Workflow", exact: true }).first()).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute("aria-pressed", "true");
 
   // The group, in any case and with ">", picks the page among groups.
   await openGuide(page);

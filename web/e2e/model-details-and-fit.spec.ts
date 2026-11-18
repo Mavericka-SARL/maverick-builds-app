@@ -63,7 +63,10 @@ test("a developer who does not administer the tenant cannot rename", async ({ pa
   await mockModels(page, () => ({ name: "In Order Planning", description: "Weekly order proposals." }), () => ({ name: "Planning", description: "" }));
   await loadAs(page, "developer");
   await expect(page.locator(".mvx-admin-model", { hasText: "In Order Planning" })).toContainText("Weekly order proposals.", { timeout: 15_000 });
-  await expect(page.getByRole("button", { name: /^Edit (model|application) / })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Edit application / })).toHaveCount(0);
+  // A model's Edit is the developer's date format alone (next test).
+  await page.getByRole("button", { name: "Edit model In Order Planning" }).click();
+  await expect(page.getByRole("group", { name: "Edit model In Order Planning" }).getByLabel("Model name")).toHaveCount(0);
 });
 
 test("a tag stays inside its pill and a long label inside its graph node", async ({ page }) => {
@@ -99,6 +102,60 @@ test("a tag stays inside its pill and a long label inside its graph node", async
   expect(l!.x + l!.width).toBeLessThanOrEqual(n!.x + n!.width);
   expect(l!.y + l!.height).toBeLessThanOrEqual(n!.y + n!.height);
   if (SHOTS) await page.locator("g", { has: label }).screenshot({ path: `${SHOTS}/graph-node.png` });
+});
+
+// Owner, 2026-11-18: the model's date format belongs in its Edit form,
+// beside its description — not as a control on the model's row.
+test("the date format is edited with the model's name and description", async ({ page }) => {
+  const model = { name: "In Order Planning", description: "", date_format: "" };
+  let patched: Record<string, unknown> | null = null;
+  let format: string | null = null;
+  await mockModels(page, () => model, () => ({ name: "Planning", description: "" }));
+  await page.route("**/api/admin/models/model-1", (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    patched = route.request().postDataJSON();
+    return route.fulfill(json({ status: "ok" }));
+  });
+  await page.route("**/api/developer/models/model-1/date-format", (route) => {
+    format = (route.request().postDataJSON() as { date_format: string }).date_format;
+    model.date_format = format;
+    return route.fulfill(json({ status: "ok" }));
+  });
+
+  await loadAs(page, "dev_admin");
+  await expect(page.getByRole("button", { name: "Edit model In Order Planning" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByLabel("Date format of model In Order Planning")).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit model In Order Planning" }).click();
+  const editor = page.getByRole("group", { name: "Edit model In Order Planning" });
+  await editor.getByLabel("Description").fill("Weekly order proposals per store.");
+  await editor.getByLabel("Date format").selectOption("DD/MM/YYYY");
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect.poll(() => format).toBe("DD/MM/YYYY");
+  await expect.poll(() => patched).toEqual({ name: "In Order Planning", description: "Weekly order proposals per store." });
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator(".mvx-admin-model", { hasText: "In Order Planning" })).toContainText("Dates: DD/MM/YYYY (31/12/2026)");
+});
+
+test("a developer who is not an administrator edits the date format alone", async ({ page }) => {
+  const model = { name: "In Order Planning", description: "", date_format: "" };
+  let format: string | null = null;
+  let patchedDetails = false;
+  await mockModels(page, () => model, () => ({ name: "Planning", description: "" }));
+  await page.route("**/api/admin/models/model-1", (route) => { patchedDetails = true; return route.fulfill(json({ status: "ok" })); });
+  await page.route("**/api/developer/models/model-1/date-format", (route) => {
+    format = (route.request().postDataJSON() as { date_format: string }).date_format;
+    return route.fulfill(json({ status: "ok" }));
+  });
+
+  await loadAs(page, "developer");
+  await page.getByRole("button", { name: "Edit model In Order Planning" }).click({ timeout: 15_000 });
+  const editor = page.getByRole("group", { name: "Edit model In Order Planning" });
+  await expect(editor.getByLabel("Model name")).toHaveCount(0);
+  await expect(editor.getByLabel("Description")).toHaveCount(0);
+  await editor.getByLabel("Date format").selectOption("YYYY-MM-DD");
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect.poll(() => format).toBe("YYYY-MM-DD");
+  expect(patchedDetails).toBe(false);
 });
 
 test("the tenant administrator describes a model from Applications too", async ({ page }) => {

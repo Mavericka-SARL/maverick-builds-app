@@ -4,7 +4,7 @@
  * deployment keeps sign-up closed the page says so instead of a form.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi } from "./mocks";
+import { mockApi, signupOptions } from "./mocks";
 
 test("a visitor registers and is told to check their mail", async ({ page }) => {
   await mockApi(page);
@@ -58,4 +58,23 @@ test("an address that already has an account is sent to sign in", async ({ page 
   const err = page.getByTestId("sign-up-error");
   await expect(err).toContainText("already exists");
   await expect(err.getByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
+// Owner, 2026-11-18: Google sign-in, new sign-ups included. Where the realm
+// offers Google the page offers it beside the form; the console then sends
+// the person to Google (?sign_in=google) and makes the workspace on return.
+test("sign up with Google: offered only where the realm has Google", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/signup");
+  await expect(page.getByText("Create your workspace")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign up with Google" })).toHaveCount(0);
+
+  await mockApi(page, { signup: { ...signupOptions, google: true } });
+  await page.goto("/signup");
+  const google = page.getByRole("button", { name: "Sign up with Google" });
+  await expect(google).toBeVisible();
+  // Under the same agreement line as the form.
+  await expect(page.getByTestId("sign-up-legal")).toBeVisible();
+  await google.click();
+  await page.waitForURL((u) => u.pathname === "/" && u.searchParams.get("sign_in") === "google");
 });

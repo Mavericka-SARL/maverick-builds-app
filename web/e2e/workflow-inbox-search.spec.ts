@@ -1,5 +1,5 @@
 /**
- * The Workflow Inbox names each task's model and searches by anything its
+ * The Workflow page's Inbox names each task's model and searches by anything its
  * card shows — workflow, model, step, its state, who asked — every word typed
  * matching (owner, 2026-11-09: the Inbox spans every application, and a card
  * did not say which model it was about). Mocked: CI runs without a gateway.
@@ -26,7 +26,7 @@ test("inbox: each task names its model, and the search matches every word agains
   await page.route("**/api/workflow/definitions", (route) => route.fulfill(json([])));
 
   await loadAs(page, "dept_head");
-  await page.getByRole("button", { name: "Workflow Inbox", exact: true }).click();
+  await page.getByRole("button", { name: "Workflow", exact: true }).click(); // its Inbox view
   await expect(page.getByText("Load GL postings")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Model: Restaurant FP&A")).toBeVisible();
   await expect(page.getByText("3 of 3")).toBeVisible();

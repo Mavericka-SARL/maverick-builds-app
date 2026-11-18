@@ -177,3 +177,21 @@ spec:
               env:
                 - name: BACKUP_DATABASES
                   value: "all,keycloak"
+---
+# The reset form's rate-limited route (base/ingress.yaml) on the auth host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mavericks-auth-reset
+  namespace: mavericks
+spec:
+  tls:
+    - hosts: [auth.mavericks.example.com]                       # CHANGE
+      secretName: mavericks-auth-tls
+  rules:
+    - host: auth.mavericks.example.com                       # CHANGE
+      http:
+        paths:
+          - path: /realms/mavericks/login-actions/reset-credentials
+            pathType: Prefix
+            backend: { service: { name: keycloak, port: { number: 8080 } } }

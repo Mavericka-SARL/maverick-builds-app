@@ -327,3 +327,25 @@
     display: none;
   }
 }
+
+/* Sign in / sign up with Google: the mark beside the words, and "or"
+   between it and the form. */
+.mvx-public__button--google {
+  gap: 10px;
+}
+
+.mvx-public__or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+  color: var(--public-text-quiet);
+  font-size: 0.8125rem;
+}
+
+.mvx-public__or::before,
+.mvx-public__or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--public-line-strong);
+}

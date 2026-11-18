@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { api, type HistoryInstance, type HistoryStep } from "../../api/client";
 import { Button, LoadingState, EmptyState, StatusBadge, type DesignTone } from "../../ui";
 import { useReopenRun } from "../useReopenRun";
@@ -7,6 +6,8 @@ import { StepTypeIcon } from "./WorkflowInboxTab";
 import { TaskContextSummary } from "../TaskContextSummary";
 import { useDateFormat } from "../dateFormat";
 import { momentDate } from "../dateSerial";
+import { useWorkflowHistory } from "../useWorkflowHistory";
+import { HistoryRunMeta } from "../HistoryRunMeta";
 
 const WF_STATUS_TONE: Record<string, DesignTone> = {
   running: "info",
@@ -27,11 +28,7 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
   // Offered for runs whose definition names a role of the person as the one
   // that reopens them (a CFO who released a close).
   const reopenRun = useReopenRun();
-  const { data: instances = [], isLoading } = useQuery({
-    queryKey: ["my-wf-history"],
-    queryFn: api.getMyWorkflowHistory,
-    refetchInterval: 10_000,
-  });
+  const { instances, shown, isLoading, toolbar, more, noMatch } = useWorkflowHistory("my-wf-history", api.getMyWorkflowHistory);
 
   useEffect(() => {
     if (!focusInstanceId) return;
@@ -44,9 +41,11 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
 
   return (
     <div className="mvx-admin-stack">
+      {toolbar}
       {reopenRun.error && <p className="mvx-admin-error">{reopenRun.error}</p>}
       {reopenRun.confirmElement}
-      {instances.map((inst: HistoryInstance) => (
+      {shown.length === 0 && <EmptyState label={noMatch} />}
+      {shown.map((inst: HistoryInstance) => (
         <div
           key={inst.id}
           id={`wf-history-${inst.id}`}
@@ -61,6 +60,7 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
                   {inst.context.revision}
                 </span>
               )}
+              <HistoryRunMeta inst={inst} />
             </div>
             <span className="mvx-admin-muted">{momentDate(inst.started_at, dateFormat)}</span>
             <StatusBadge tone={WF_STATUS_TONE[inst.status] ?? "neutral"}>{inst.status}</StatusBadge>
@@ -90,6 +90,7 @@ export function WorkflowMyHistory({ focusInstanceId }: { focusInstanceId?: strin
           </div>
         </div>
       ))}
+      {more}
     </div>
   );
 }

@@ -8451,6 +8451,8 @@ func decodeGetIntegrationRunParams(args [1]string, argsEscaped bool, r *http.Req
 // GetMyWorkflowHistoryParams is parameters of getMyWorkflowHistory operation.
 type GetMyWorkflowHistoryParams struct {
 	InstanceID OptUUID `json:",omitempty,omitzero"`
+	// The id of the last run already shown; lists the older runs after it.
+	Before OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackGetMyWorkflowHistoryParams(packed middleware.Parameters) (params GetMyWorkflowHistoryParams) {
@@ -8461,6 +8463,15 @@ func unpackGetMyWorkflowHistoryParams(packed middleware.Parameters) (params GetM
 		}
 		if v, ok := packed[key]; ok {
 			params.InstanceID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "before",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Before = v.(OptUUID)
 		}
 	}
 	return params
@@ -8505,6 +8516,47 @@ func decodeGetMyWorkflowHistoryParams(args [0]string, argsEscaped bool, r *http.
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "instance_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: before.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "before",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotBeforeVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotBeforeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Before.SetTo(paramsDotBeforeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "before",
 			In:   "query",
 			Err:  err,
 		}
@@ -8896,6 +8948,71 @@ func decodeGetWorkflowDefinitionParams(args [1]string, argsEscaped bool, r *http
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetWorkflowHistoryParams is parameters of getWorkflowHistory operation.
+type GetWorkflowHistoryParams struct {
+	// The id of the last run already shown; lists the older runs after it.
+	Before OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetWorkflowHistoryParams(packed middleware.Parameters) (params GetWorkflowHistoryParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "before",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Before = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetWorkflowHistoryParams(args [0]string, argsEscaped bool, r *http.Request) (params GetWorkflowHistoryParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: before.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "before",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotBeforeVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotBeforeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Before.SetTo(paramsDotBeforeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "before",
+			In:   "query",
 			Err:  err,
 		}
 	}

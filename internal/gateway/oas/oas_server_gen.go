@@ -915,7 +915,8 @@ type Handler interface {
 	// The caller's runs — started, assigned a step, or notified of — in the selected application
 	// (X-App-Id), as GET /api/workflow/history lists the application's: with one model chosen, both
 	// answer for it. With instance_id, that one run of the caller's in any application, with its
-	// application_id, so a notification about another application's run can switch there.
+	// application_id, so a notification about another application's run can switch there. With before,
+	// the 50 runs older than the one it names.
 	//
 	// GET /api/workflow/my-history
 	GetMyWorkflowHistory(ctx context.Context, params GetMyWorkflowHistoryParams) ([]WorkflowInstance, error)
@@ -996,10 +997,10 @@ type Handler interface {
 	// per-application grants when they have any. A caller who is also tenant_admin covers the
 	// applications of its tenants; a platform_admin or platform-level developer covers every application.
 	//  When X-App-Id names an application, only that application's instances are listed. A developer's
-	// test runs are never listed.
+	// test runs are never listed. With before, the 50 runs older than the one it names.
 	//
 	// GET /api/workflow/history
-	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
+	GetWorkflowHistory(ctx context.Context, params GetWorkflowHistoryParams) ([]WorkflowInstance, error)
 	// GetWorkflowInstance implements getWorkflowInstance operation.
 	//
 	// For whoever may administer the run (the application's business admins and developers) or took part

@@ -19,6 +19,11 @@ export interface NavItem {
   href?: string;
   /** Former labels a page link may still name (a renamed page keeps its links). */
   aliases?: string[];
+  /**
+   * Former pages that are now views of this one: a page link naming one
+   * opens that view (id: the view's tab, router/sections viewTab).
+   */
+  views?: { label: string; id: string }[];
 }
 
 export interface NavGroup {

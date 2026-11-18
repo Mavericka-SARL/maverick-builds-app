@@ -132,6 +132,8 @@ type handler struct {
 	plans       *plan.Enforcer
 	signupCfg   SignupConfig
 	signupLimit discoverLimiter
+	// google caches whether the realm offers Google sign-in (google_signin.go).
+	google googleOffer
 	// legalCfg is who operates this deployment and which documents it
 	// publishes (legal.go).
 	legalCfg LegalConfig
@@ -1102,6 +1104,16 @@ func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor,
 		} else if np := (*errNotProvisionable)(nil); errors.As(jitErr, &np) {
 			return nil, jitErr
 		}
+		// A first sign-in with Google: a self-service sign-up
+		// (google_signin.go), made in a tenant of its own.
+		if g, gErr := h.googleSignUp(ctx, r, claims); gErr == nil {
+			if routed := tenantdb.TenantFrom(ctx); routed != "" && routed != g.CustomerID {
+				return nil, fmt.Errorf("unauthorized")
+			}
+			return g, nil
+		} else if np := (*errNotProvisionable)(nil); errors.As(gErr, &np) {
+			return nil, gErr
+		}
 		return nil, err
 	}
 	h.followIdentity(ctx, a, claims)
@@ -1921,6 +1933,13 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
+		// A refused first login (single sign-on, Google) carries a reason:
+		// the console reads it here and shows it instead of an empty page.
+		// It used to answer a bare 401, so the reason never reached anyone.
+		if np := (*errNotProvisionable)(nil); errors.As(err, &np) {
+			jsonErr(w, err, http.StatusForbidden)
+			return
+		}
 		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)
 		return
 	}
@@ -6438,8 +6457,12 @@ type historyInstance struct {
 	CompletedAt *string        `json:"completed_at,omitempty"`
 	// ApplicationID is the application the run belongs to: the console
 	// switches to it to show a run another application's notification names.
-	ApplicationID string        `json:"application_id,omitempty"`
-	Steps         []historyStep `json:"steps"`
+	ApplicationID string `json:"application_id,omitempty"`
+	// SubmittedBy is who started the run (name, else e-mail); ModelName the
+	// model it is about — what the history's search finds a run by.
+	SubmittedBy string        `json:"submitted_by,omitempty"`
+	ModelName   string        `json:"model_name,omitempty"`
+	Steps       []historyStep `json:"steps"`
 	// Reopenable: finished and approved, so only the reopen route may take it
 	// out of completed.
 	Reopenable bool `json:"reopenable,omitempty"`
@@ -6508,6 +6531,83 @@ const workflowAdminScopeSQL = `(
 	         OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid AND application_id = app.id)))
 )`
 
+// historyPageSize is how many runs a history page lists; ?before= (the id of
+// the last run shown) asks for the page of older runs after it.
+const historyPageSize = 50
+
+// historyRunJoinSQL and historyRunColumnsSQL add what a run is searched by
+// in the history: who started it (submitter) and the model it is about
+// (run_model, the same choice as the Inbox's taskRow.ModelName). The join
+// goes after "FROM workflow.workflow_instance wi JOIN workflow.workflow_def wd".
+const historyRunJoinSQL = `
+		LEFT JOIN identity.user submitter ON submitter.id = wi.started_by
+		LEFT JOIN LATERAL (
+			SELECT m.name FROM core.model m
+			WHERE m.application_id = wd.application_id
+			ORDER BY (m.id = (SELECT r.model_id FROM model.revision r WHERE r.id::text = wi.context->>'revision_id')) DESC NULLS LAST,
+			         (m.id = (SELECT r.model_id FROM model.revision r WHERE r.id = wd.revision_id)) DESC NULLS LAST,
+			         m.created_at
+			LIMIT 1
+		) run_model ON true`
+
+const historyRunColumnsSQL = `COALESCE(NULLIF(submitter.display_name, ''), submitter.email, ''), COALESCE(run_model.name, '')`
+
+// historyBeforeSQL keeps the runs older than the one $n names (keyset on
+// started_at, id: runs one automation started in a single transaction
+// share a started_at). An empty $n keeps every run.
+func historyBeforeSQL(n int) string {
+	return fmt.Sprintf(`($%[1]d = '' OR (wi.started_at, wi.id) < (SELECT b.started_at, b.id FROM workflow.workflow_instance b WHERE b.id::text = $%[1]d))`, n)
+}
+
+// loadHistorySteps fills in the steps of every listed run with one query
+// (it used to be one query per run).
+func (h *handler) loadHistorySteps(ctx context.Context, instances []historyInstance) error {
+	if len(instances) == 0 {
+		return nil
+	}
+	ids := make([]string, len(instances))
+	at := make(map[string]int, len(instances))
+	for i, inst := range instances {
+		ids[i] = inst.ID
+		at[inst.ID] = i
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT ws.instance_id::text, ws.id::text, ws.step_def_id, ws.status::text, ws.decision, ws.comment,
+		       ws.assignee_user_id::text,
+		       CASE WHEN ws.completed_at IS NOT NULL THEN ws.completed_at::text END,
+		       COALESCE(step_def.elem->>'name', ws.step_def_id),
+		       CASE step_def.elem->>'type'
+		            WHEN '2' THEN 'approval'   WHEN 'approval'      THEN 'approval'
+		            WHEN '3' THEN 'notification' WHEN 'notification' THEN 'notification'
+		            WHEN '4' THEN 'condition'  WHEN 'condition'     THEN 'condition'
+		            ELSE 'task' END
+		FROM workflow.workflow_step ws
+		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		LEFT JOIN LATERAL (
+			SELECT elem FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
+			WHERE elem->>'id' = ws.step_def_id LIMIT 1
+		) step_def ON true
+		WHERE ws.instance_id = ANY($1::uuid[])
+		ORDER BY ws.instance_id, ws.created_at
+	`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var instanceID string
+		var s historyStep
+		if err := rows.Scan(&instanceID, &s.ID, &s.StepDefID, &s.Status, &s.Decision, &s.Comment, &s.AssigneeID, &s.CompletedAt, &s.StepName, &s.StepType); err != nil {
+			return err
+		}
+		if i, ok := at[instanceID]; ok {
+			instances[i].Steps = append(instances[i].Steps, s)
+		}
+	}
+	return rows.Err()
+}
+
 // workflowHistory serves GET /api/workflow/history: the latest instances of
 // the workflows this business admin administers (workflowAdminScopeSQL) —
 // of the application the console has open when it names one — without a
@@ -6533,17 +6633,20 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 		       CASE WHEN wi.completed_at IS NOT NULL THEN wi.completed_at::text END,
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
 		       (`+writeguard.ReopenableSQL+` AND (jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) = 0
-		        OR `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`))
+		        OR `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`)),
+		       `+historyRunColumnsSQL+`
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		JOIN core.application app ON app.id = wd.application_id
 		`+writeguard.LastApprovalJoinSQL+`
+		`+historyRunJoinSQL+`
 		WHERE wi.test_run = false
 		  AND ($4 = '' OR app.id::text = $4)
+		  AND `+historyBeforeSQL(5)+`
 		  AND `+workflowAdminScopeSQL+`
-		ORDER BY wi.started_at DESC
-		LIMIT 50
-	`, scope.args(appID)...)
+		ORDER BY wi.started_at DESC, wi.id DESC
+		LIMIT `+strconv.Itoa(historyPageSize)+`
+	`, scope.args(appID, strings.TrimSpace(r.URL.Query().Get("before")))...)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -6554,7 +6657,7 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inst historyInstance
 		var ctxJSON, schemaJSON []byte
-		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.Reopenable); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.Reopenable, &inst.SubmittedBy, &inst.ModelName); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6568,39 +6671,9 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load steps for each instance
-	for i, inst := range instances {
-		sRows, err := h.db.Query(ctx, `
-			SELECT ws.id::text, ws.step_def_id, ws.status::text, ws.decision, ws.comment,
-			       ws.assignee_user_id::text,
-			       CASE WHEN ws.completed_at IS NOT NULL THEN ws.completed_at::text END,
-			       COALESCE(
-			           (SELECT elem->>'name' FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
-			            WHERE elem->>'id' = ws.step_def_id LIMIT 1),
-			           ws.step_def_id),
-			       CASE (SELECT elem->>'type' FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
-			                  WHERE elem->>'id' = ws.step_def_id LIMIT 1)
-			            WHEN '2' THEN 'approval'   WHEN 'approval'      THEN 'approval'
-			            WHEN '3' THEN 'notification' WHEN 'notification' THEN 'notification'
-			            WHEN '4' THEN 'condition'  WHEN 'condition'     THEN 'condition'
-			            ELSE 'task' END
-			FROM workflow.workflow_step ws
-			JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
-			JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-			WHERE ws.instance_id = $1::uuid
-			ORDER BY ws.created_at
-		`, inst.ID)
-		if err != nil {
-			continue
-		}
-		for sRows.Next() {
-			var s historyStep
-			if err := sRows.Scan(&s.ID, &s.StepDefID, &s.Status, &s.Decision, &s.Comment, &s.AssigneeID, &s.CompletedAt, &s.StepName, &s.StepType); err != nil {
-				continue
-			}
-			instances[i].Steps = append(instances[i].Steps, s)
-		}
-		sRows.Close()
+	if err := h.loadHistorySteps(ctx, instances); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
 	}
 
 	if instances == nil {
@@ -6723,13 +6796,16 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		       -- names as reopening it (a CFO who released a close); the
 		       -- administrators' Reopen is in Business Admin › History.
 		       (`+writeguard.ReopenableSQL+` AND jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) > 0
-		        AND `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`)
+		        AND `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`),
+		       `+historyRunColumnsSQL+`
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		`+writeguard.LastApprovalJoinSQL+`
+		`+historyRunJoinSQL+`
 		WHERE `+myHistoryReachSQL+`
 		  AND ($2 = '' OR wd.application_id::text = $2)
 		  AND ($3 = '' OR wi.id::text = $3)
+		  AND `+historyBeforeSQL(4)+`
 		  AND (wi.started_by = $1::uuid
 		   OR EXISTS (
 		       SELECT 1 FROM workflow.workflow_step ws
@@ -6745,9 +6821,9 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		       WHERE n.recipient_user_id = $1::uuid
 		         AND n.resource_type = 'workflow_instance' AND n.resource_id = wi.id::text
 		   ))
-		ORDER BY wi.started_at DESC
-		LIMIT 50
-	`, a.UserID, appID, instanceID)
+		ORDER BY wi.started_at DESC, wi.id DESC
+		LIMIT `+strconv.Itoa(historyPageSize)+`
+	`, a.UserID, appID, instanceID, strings.TrimSpace(r.URL.Query().Get("before")))
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -6758,7 +6834,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inst historyInstance
 		var ctxJSON, schemaJSON []byte
-		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.ApplicationID, &inst.Reopenable); err != nil {
+		if err := rows.Scan(&inst.ID, &inst.WFName, &inst.Status, &ctxJSON, &inst.StartedAt, &inst.CompletedAt, &schemaJSON, &inst.ApplicationID, &inst.Reopenable, &inst.SubmittedBy, &inst.ModelName); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6773,38 +6849,9 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for i, inst := range instances {
-		sRows, err := h.db.Query(ctx, `
-			SELECT ws.id::text, ws.step_def_id, ws.status::text, ws.decision, ws.comment,
-			       ws.assignee_user_id::text,
-			       CASE WHEN ws.completed_at IS NOT NULL THEN ws.completed_at::text END,
-			       COALESCE(
-			           (SELECT elem->>'name' FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
-			            WHERE elem->>'id' = ws.step_def_id LIMIT 1),
-			           ws.step_def_id),
-			       CASE (SELECT elem->>'type' FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
-			                  WHERE elem->>'id' = ws.step_def_id LIMIT 1)
-			            WHEN '2' THEN 'approval'   WHEN 'approval'      THEN 'approval'
-			            WHEN '3' THEN 'notification' WHEN 'notification' THEN 'notification'
-			            WHEN '4' THEN 'condition'  WHEN 'condition'     THEN 'condition'
-			            ELSE 'task' END
-			FROM workflow.workflow_step ws
-			JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
-			JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-			WHERE ws.instance_id = $1::uuid
-			ORDER BY ws.created_at
-		`, inst.ID)
-		if err != nil {
-			continue
-		}
-		for sRows.Next() {
-			var s historyStep
-			if err := sRows.Scan(&s.ID, &s.StepDefID, &s.Status, &s.Decision, &s.Comment, &s.AssigneeID, &s.CompletedAt, &s.StepName, &s.StepType); err != nil {
-				continue
-			}
-			instances[i].Steps = append(instances[i].Steps, s)
-		}
-		sRows.Close()
+	if err := h.loadHistorySteps(ctx, instances); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
 	}
 
 	if instances == nil {

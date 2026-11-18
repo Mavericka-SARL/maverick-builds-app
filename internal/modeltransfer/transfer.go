@@ -435,7 +435,7 @@ func (p *Package) LockNotes(carried []bool) []string {
 	for i, l := range p.ApprovedLocks {
 		scope := strings.Join(l.Scope, ", ")
 		if i < len(carried) && carried[i] {
-			out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from: the approval came with the model, so those values are locked here too. A business admin can reopen it in Workflow History, with a reason.",
+			out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from: the approval came with the model, so those values are locked here too. A business admin can reopen it in Business Admin › Workflow, with a reason.",
 				l.Workflow, scope))
 			continue
 		}

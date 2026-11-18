@@ -11364,6 +11364,9 @@ func decodeGetMeResponse(resp *http.Response) (res GetMeRes, _ error) {
 	case 401:
 		// Code 401.
 		return &GetMeUnauthorized{}, nil
+	case 403:
+		// Code 403.
+		return &GetMeForbidden{}, nil
 	}
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }

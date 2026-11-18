@@ -63,7 +63,7 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks"] });
-      qc.invalidateQueries({ queryKey: ["wf-my-history"] });
+      qc.invalidateQueries({ queryKey: ["my-wf-history"] });
     },
   });
 

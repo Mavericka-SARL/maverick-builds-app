@@ -4,6 +4,7 @@ import { api, type ApiError, type SignupRequest } from "../api/client";
 import { PublicPage } from "../public/PublicPage";
 import { planAllowance } from "../public/planAllowance";
 import { externalAttrs } from "../public/legalLinks";
+import { GoogleButton } from "../public/GoogleButton";
 import "../public/public.css";
 
 const EMPTY: SignupRequest = { company: "", first_name: "", last_name: "", email: "" };
@@ -165,6 +166,15 @@ export function SignUpPage() {
               {submit.isPending ? "Creating your workspace…" : "Create workspace"}
             </button>
           </form>
+
+          {/* A first Google sign-in is a sign-up on these terms: the console
+              sends the person to Google and makes their workspace on return. */}
+          {opts.google && (
+            <>
+              <div className="mvx-public__or">or</div>
+              <GoogleButton label="Sign up with Google" onClick={() => window.location.assign("/?sign_in=google")} />
+            </>
+          )}
 
           {submit.isError && (
             <p role="alert" className="mvx-public__error" data-testid="sign-up-error">

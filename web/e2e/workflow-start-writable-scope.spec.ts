@@ -29,7 +29,7 @@ test("start dialog: only members the person may write in full are offered", asyn
   }])));
 
   await loadAs(page, "dept_head");
-  await page.getByRole("button", { name: "Workflow Inbox", exact: true }).click();
+  await page.getByRole("button", { name: "Workflow", exact: true }).click(); // its Inbox view
   await page.getByRole("button", { name: "Start", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Start: Budget approval")).toBeVisible({ timeout: 15_000 });

@@ -1,5 +1,5 @@
 /**
- * The Workflow Inbox lists every application's tasks; opening a task of
+ * The Workflow page's Inbox lists every application's tasks; opening a task of
  * another model switches the consoles to that model, and opening one of the
  * model already selected changes nothing (owner decision 2026-11-09).
  * Mocked: CI runs without a gateway.
@@ -28,7 +28,7 @@ test("inbox: opening a task of another model switches to it", async ({ page }) =
   await page.route((url) => url.pathname === "/api/apps", (route) => route.fulfill(json(apps)));
 
   await loadAs(page, "dept_head");
-  await page.getByRole("button", { name: "Workflow Inbox", exact: true }).click();
+  await page.getByRole("button", { name: "Workflow", exact: true }).click(); // its Inbox view
   await expect(page.getByText("Task here")).toBeVisible({ timeout: 15_000 });
   // A switch shows in what the console asks next: the mocked context always
   // answers app-1, so the selection it stores is not read back here.

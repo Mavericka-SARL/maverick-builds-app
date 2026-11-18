@@ -172,7 +172,7 @@ data:
     # way that must reach people who have already been here.
     parent=keycloak
     import=common/keycloak
-    styles=css/login.css css/brand.css?v=3
+    styles=css/login.css css/brand.css?v=5
     scripts=js/brand.js
   brand.css: |
     /*
@@ -274,6 +274,42 @@ data:
       font-family: var(--mvx-font) !important;
     }
 
+    /* The note under a form ("Enter the e-mail address you sign in with…" on
+       Forgot password?): stock PatternFly paints it as a light grey band. */
+    #kc-info,
+    #kc-info-wrapper {
+      background: transparent !important;
+      border: 0 !important;
+      color: var(--mvx-muted) !important;
+      font-family: var(--mvx-font) !important;
+      text-align: left !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    /* …and pulls it 40px past the form on each side, off a phone's screen. */
+    #kc-info {
+      margin: 1.25rem 0 0 !important;
+    }
+
+    /* On a phone the form ran to the screen's edges. */
+    @media (max-width: 540px) {
+      .login-pf-page .card-pf {
+        padding: 0 1rem !important;
+      }
+    }
+
+    /* Bootstrap's grid rows (the Forgot password? form, among others) reach
+       20px past their columns' padding, which is narrower on a phone: the page
+       scrolled sideways. Flush rows and columns line up with the sign-in form. */
+    .login-pf-page .form-horizontal .form-group {
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+    .login-pf-page .form-horizontal .form-group > [class*="col-"] {
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+
     input[type="text"],
     input[type="password"],
     input[type="email"],
@@ -372,6 +408,35 @@ data:
     .login-pf-page .kc-social-item:hover {
       background: rgba(255, 255, 255, 0.06) !important;
       text-decoration: none !important;
+    }
+
+    /* "Or sign in with" (the realm's Google provider: scripts/keycloak-google-
+       setup.sh): a divider as quiet as the form's own lines, and Google's
+       coloured "G" beside its name instead of the stock grey glyph. */
+    #kc-social-providers hr {
+      border: 0 !important;
+      border-top: 1px solid var(--mvx-line) !important;
+    }
+    #social-google {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 10px !important;
+    }
+    #social-google .kc-social-provider-logo {
+      position: static !important;
+      display: inline-block !important;
+      width: 18px !important;
+      height: 18px !important;
+      margin: 0 !important;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/%3E%3Cpath fill='%234285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'/%3E%3Cpath fill='%23FBBC05' d='M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'/%3E%3Cpath fill='%2334A853' d='M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+    }
+    #social-google .kc-social-provider-logo::before {
+      content: none !important;
+    }
+    /* The stock label is pulled 15px left, over where the grey glyph sat. */
+    #social-google .kc-social-icon-text {
+      left: 0 !important;
     }
 
     a,
@@ -485,6 +550,14 @@ data:
     proceedWithAction=Continue &raquo;
     requiredAction.UPDATE_PASSWORD=choose your password
     requiredAction.VERIFY_EMAIL=confirm your e-mail address
+
+    # "Forgot password?" (resetPasswordAllowed, on once the realm can send mail:
+    # scripts/keycloak-smtp-setup.sh) and the page it opens.
+    doForgotPassword=Forgot password?
+    emailForgotTitle=Forgot your password?
+    emailInstruction=Enter the e-mail address you sign in with. We will send you a link to choose a new password.
+    emailSentMessage=If an account uses that address, a link to choose a new password is on its way.
+    backToLogin=&laquo; Back to sign in
   email-theme.properties: |
     # The invitation mail — Keycloak's execute-actions mail, which is how every
     # account here gets its first password — says who it is from and what it is
@@ -505,6 +578,12 @@ data:
     mvxLinkWorks=The link works for {0}.
     mvxSignupIgnore=If you did not sign up, ignore this mail: nothing happens without the password.
     mvxInviteIgnore=If you were not expecting this, ignore this mail: nothing happens without the password.
+
+    # "Forgot password?" (password-reset.ftl of the base theme): {0} the link,
+    # {2} the realm's name, {3} how long the link works.
+    passwordResetSubject=Choose a new password
+    passwordResetBody=Someone asked to reset the password of your {2} account. If it was you, choose a new password here:\n\n{0}\n\nThe link works for {3}. If it was not you, ignore this mail: your password stays as it is.
+    passwordResetBodyHtml=<p>Someone asked to reset the password of your {2} account. If it was you, choose a new password:</p><p><a href="{0}">Choose a new password</a></p><p>The link works for {3}. If it was not you, ignore this mail: your password stays as it is.</p>
   email-executeActions-html.ftl: |
     <#-- The invitation. The names come from account attributes, so every
          sentence goes through FreeMarker's escaping, not kcSanitize (which

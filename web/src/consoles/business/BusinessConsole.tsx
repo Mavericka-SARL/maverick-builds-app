@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { useDemo } from "../../api/useDemo";
-import { LayoutDashboard, Inbox, History as HistoryIcon, Boxes } from "lucide-react";
+import { LayoutDashboard, Workflow, Boxes } from "lucide-react";
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
-import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
+import { tabId, localTab, pageTab, tabView, viewTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
+import { WorkflowViews, type WorkflowView } from "../WorkflowViews";
 import { WorkflowInbox } from "./WorkflowInboxTab";
 import { WorkflowMyHistory } from "./WorkflowHistoryTab";
 import { DashboardsView } from "./DashboardsView";
@@ -19,8 +20,8 @@ const SECTION: SectionId = "business";
 
 /**
  * The user role's section of the console (key business_user): User ›
- * Dashboards, Workflow Inbox, Workflow History, Models — whatever other roles the
- * person holds (see router/sections.ts).
+ * Dashboards, Workflow (its Inbox and History), Models — whatever other roles
+ * the person holds (see router/sections.ts).
  */
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
@@ -44,8 +45,9 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
 
   if (!enabled) return null;
   const t = (id: string) => tabId(SECTION, id);
+  const workflowView = (view: WorkflowView) => viewTab(t("workflow"), view === "inbox" ? "" : view);
   const openInstance = (instanceId: string) => {
-    setTab(t("history"));
+    setTab(workflowView("history"));
     setFocusInstanceId(instanceId);
     // Workflow History lists the selected application's runs; a notification
     // may name another application's run: switch there to show it.
@@ -60,8 +62,14 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
       label: "User",
       items: [
         { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
-        { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
-        { id: t("history"), label: "Workflow History", icon: <HistoryIcon size={16} /> },
+        {
+          id: t("workflow"), label: "Workflow", icon: <Workflow size={16} />,
+          // The two pages it replaced: a dashboard's link to one opens its view.
+          views: [
+            { label: "Workflow Inbox", id: workflowView("inbox") },
+            { label: "Workflow History", id: workflowView("history") },
+          ],
+        },
         { id: t("models"), label: "Models", icon: <Boxes size={16} /> },
       ],
     }],
@@ -75,7 +83,8 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
       return true;
     },
     render: (active) => {
-      const local = localTab(active);
+      const local = localTab(pageTab(active));
+      const view: WorkflowView = tabView(active) === "history" ? "history" : "inbox";
       return (
         // A dashboard scrolls sideways by itself; without a scroll box of
         // the page's own its selector bar stays in view as the window scrolls.
@@ -90,8 +99,14 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
               onOpenInstance={openInstance}
             />
           )}
-          {ctx && local === "inbox" && <WorkflowInbox />}
-          {local === "history" && <WorkflowMyHistory focusInstanceId={focusInstanceId} />}
+          {local === "workflow" && (
+            <WorkflowViews
+              view={view}
+              onView={(v) => setTab(workflowView(v))}
+              inbox={<>{ctx && <WorkflowInbox />}</>}
+              history={<WorkflowMyHistory focusInstanceId={focusInstanceId} />}
+            />
+          )}
           {local === "models" && <AppsTab />}
         </PageLayout>
       );

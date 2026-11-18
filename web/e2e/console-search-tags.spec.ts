@@ -191,7 +191,7 @@ test("users: search by name, e-mail or role", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "developer");
   await nav(page, "Users").click();
-  const search = page.getByPlaceholder("Search name, e-mail, role, workspace…");
+  const search = page.getByPlaceholder("Search name, e-mail, role, workspace, app, model…");
   const rows = page.locator("table.mvx-table tbody tr");
   // The list loads after the page: counted at once, a slow run read 0 rows.
   await expect(rows.nth(1)).toBeVisible();
@@ -200,6 +200,57 @@ test("users: search by name, e-mail or role", async ({ page }) => {
   await expect(rows.first()).toContainText("Alex Smith");
   await search.fill("no-such-person");
   await expect(page.getByText('No users match "no-such-person"')).toBeVisible();
+});
+
+// Owner, 2026-11-18: "add search by app and model". A person's Access names
+// applications and models; the filters ask who reaches one, as the engine
+// decides it (any application grant limits to those, any model grant to
+// those; neither: all).
+test("users: filter by the application or model a person reaches, and search their names", async ({ page }) => {
+  await mockApi(page);
+  const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  const model = (id: string, name: string) => ({ id, name, storage_type: "oltp", active_revision: "R1", revisions: [] });
+  const tenants = [{
+    id: "tenant-1", name: "Acme Corp", plan: "enterprise", created_at: "2026-01-01T00:00:00Z",
+    applications: [
+      { id: "app-crm", name: "CRM", mode: "planning", status: "active", models: [model("m-crm", "CRM")] },
+      { id: "app-bud", name: "Budgeting app", mode: "planning", status: "active", models: [model("m-bud", "Budget"), model("m-hr", "HR plan")] },
+    ],
+  }];
+  // A developer's Users tab lists the applications it builds.
+  await page.route("**/api/developer/applications*", (route) => route.fulfill(json(tenants)));
+  await page.route("**/api/admin/tenants*", (route) => route.fulfill(json(tenants)));
+  const person = (id: string, display_name: string, app_ids: string[], model_ids: string[]) => ({
+    id, display_name, email: `${id}@example.com`, created_at: "2026-01-05T00:00:00Z",
+    assignments: [{ role: "business_user", workspace_id: "ws-1", workspace_name: "Finance", customer_name: "Acme Corp" }], app_ids, model_ids,
+  });
+  await page.route("**/api/admin/users*", (route) => route.fulfill(json([
+    person("liza", "Liza Herdt", ["app-crm"], ["m-crm"]),
+    person("kos", "Konstantin", ["app-bud"], ["m-bud"]),
+    person("all", "Every App", [], []),
+  ])));
+  await loadAs(page, "developer");
+  await nav(page, "Users").click();
+  const rows = page.locator("table.mvx-table tbody tr");
+  await expect(rows).toHaveCount(3);
+
+  await page.getByLabel("Filter by application").selectOption({ label: "CRM" });
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByRole("row", { name: /Liza Herdt/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Every App/ })).toBeVisible();
+
+  // The model choices narrow to the chosen application's.
+  await page.getByLabel("Filter by application").selectOption({ label: "Budgeting app" });
+  await expect(page.getByLabel("Filter by model").locator("option")).toHaveText(["Any model", "Budget", "HR plan"]);
+  await page.getByLabel("Filter by model").selectOption({ label: "HR plan" });
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByRole("row", { name: /Every App/ })).toBeVisible();
+
+  await page.getByLabel("Filter by application").selectOption({ label: "Any application" });
+  const search = page.getByPlaceholder("Search name, e-mail, role, workspace, app, model…");
+  await search.fill("crm");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Liza Herdt");
 });
 
 test("sidebar: drag to resize, remembered, double-click resets", async ({ page }) => {

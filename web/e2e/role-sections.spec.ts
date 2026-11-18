@@ -45,7 +45,7 @@ test("tenant_admin + business_admin: tenant-admin tabs sit in the business admin
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
   // Business-admin groups (no Dashboards without the user role)…
-  await expect(nav(page, "Workflow Inbox")).toBeVisible();
+  await expect(nav(page, "Workflow")).toBeVisible();
   await expect(nav(page, "Access Rules")).toBeVisible();
   await expect(nav(page, "Dashboards")).toHaveCount(0);
   // …and the tenant-admin group, in the same sidebar.
@@ -71,10 +71,13 @@ test("business_user + business_admin: the user role's User group and the admin s
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
   await expect(nav(page, "Dashboards")).toHaveCount(1);
-  await expect(nav(page, "Workflow Inbox")).toHaveCount(1);
   await expect(nav(page, "Models")).toHaveCount(1);
-  // The person's own history (User) and the application's (Business Admin).
-  await expect(nav(page, "Workflow History")).toHaveCount(2);
+  // The person's own inbox and runs (User) and the application's runs (Business Admin).
+  await expect(nav(page, "Workflow")).toHaveCount(2);
+  await nav(page, "Workflow").first().click();
+  await expect(page.getByRole("button", { name: /^Inbox/ })).toHaveCount(1);
+  await nav(page, "Workflow").nth(1).click();
+  await expect(page.getByRole("button", { name: /^Inbox/ })).toHaveCount(0);
   await expect(nav(page, "Roles")).toBeVisible();
 });
 
@@ -83,7 +86,7 @@ test("business_admin alone: the admin screens, and no dashboards — those come 
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
   await expect(nav(page, "Dashboards")).toHaveCount(0);
-  for (const screen of ["Workflow Inbox", "Workflow History", "Roles", "Access Rules", "Models"]) {
+  for (const screen of ["Workflow", "Roles", "Access Rules", "Models"]) {
     await expect(nav(page, screen)).toBeVisible();
   }
 });

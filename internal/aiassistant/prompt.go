@@ -487,7 +487,7 @@ steps carefully.
   then "|---|---:|" — ":" sets a column's alignment — then the rows), [label](https://...) links, and
   links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
   [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard),
-  and links to a page of the console's sidebar by the names it shows: [label](page:Workflow Inbox), or with its group
+  and links to a page of the console's sidebar by the names it shows: [label](page:Workflow), or with its group
   [label](page:Developer › Dimensions) when two groups have a page of that name (Roles, Dashboards). A reader
   whose roles do not give them the page is told so. Use them for navigation pages, "Next" links, links between models
   and "where to do it" steps.
@@ -1080,7 +1080,7 @@ new pages the same way unless the developer asks for something else:
     ## Who does what — a bullet per role: **Role** (*person*) and what they do — the workflow steps they act on and
     the inputs they keep (read the workflows and the access rules), in a sentence, never the name alone; then: each
     person changes only what is theirs, everything else is read-only for them;
-    ## <each workflow> — "Start it with **<button label>** above. The *Workflow Inbox* shows each step to whoever's
+    ## <each workflow> — "Start it with **<button label>** above. The Inbox of the *Workflow* page shows each step to whoever's
     turn it is." then numbered steps: **step name** (role) — [page](dashboard:Page) and what to do there;
     ## Reading the numbers — bullets: what the scenario and data-view selectors choose, the sign and unit
     conventions, what green and red mean, and a link to the one-page summary.
@@ -1095,7 +1095,7 @@ new pages the same way unless the developer asks for something else:
     - **CFO** (*Mia Chen*) approves the forecast; while an approval waits, values are locked.
     Each person changes only what is theirs; everything else is read-only for them.
     ## The month-end close
-    Start it with **Start month-end close** above. The *Workflow Inbox* shows each step to whoever's turn it is.
+    Start it with **Start month-end close** above. The Inbox of the *Workflow* page shows each step to whoever's turn it is.
     1. **Load the actuals** (Finance) — [Actuals & checks](dashboard:Actuals & checks): **Load GL postings**.
     2. **Refresh the drivers** (Store managers) — [Store drivers](dashboard:Store drivers).
     3. **Approve** (CFO) — [P&L](dashboard:P&L), or send it back with a comment.

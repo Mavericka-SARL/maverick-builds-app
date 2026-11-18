@@ -150,6 +150,14 @@ cmd_keycloak() {
       "(set the SMTP_* lines, or TEMPORARY_PASSWORDS=true)"
   fi
 
+  if [ -n "$(env_get GOOGLE_CLIENT_ID)" ]; then
+    log "offering Sign in with Google"
+    KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \
+      CURL_OPTS="$curl_opts" \
+      GOOGLE_CLIENT_ID="$(env_get GOOGLE_CLIENT_ID)" GOOGLE_CLIENT_SECRET="$(env_get GOOGLE_CLIENT_SECRET)" \
+      bash "$ROOT/scripts/keycloak-google-setup.sh"
+  fi
+
   log "restarting the gateway with the new secret"
   docker compose up -d gateway
   log "done — next: ./setup.sh admin you@example.com \"Your Name\" (sign in at https://${console_host})"

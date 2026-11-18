@@ -35,7 +35,7 @@ test("inbox: a stalled condition asks for the branch; approval and task keep the
   await page.route("**/api/workflow/definitions", (route) => route.fulfill(json([])));
 
   await loadAs(page, "dept_head");
-  await page.getByRole("button", { name: "Workflow Inbox", exact: true }).click();
+  await page.getByRole("button", { name: "Workflow", exact: true }).click(); // its Inbox view
   await expect(page.getByText("Over budget?")).toBeVisible({ timeout: 15_000 });
 
   // Condition card: explanation naming the missing input, branch buttons, no generic Complete.

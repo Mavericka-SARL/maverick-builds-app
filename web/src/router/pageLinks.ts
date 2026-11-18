@@ -5,7 +5,7 @@ import type { NavGroup } from "../ui/types";
  * Links from a text widget to a page of the console's sidebar, written in
  * its Markdown as
  *
- *   [label](page:Workflow Inbox)              the page, in whichever group has it first
+ *   [label](page:Workflow)                    the page, in whichever group has it first
  *   [label](page:Developer › Dimensions)      the page of that group ("›" or ">")
  *
  * By the names the sidebar shows, never by an internal tab id, so a guide
@@ -50,6 +50,12 @@ export function resolvePageLink(target: PageLinkTarget, groups: NavGroup[]): str
     if (target.group !== null && !same(g.label, target.group)) continue;
     const item = g.items.find(i => !i.disabled && (same(i.label, target.page) || (i.aliases ?? []).some(a => same(a, target.page))));
     if (item) return item.id;
+    // A former page that is now a view of one ("Workflow History" is the
+    // History view of Workflow).
+    for (const i of g.items) {
+      const view = !i.disabled && (i.views ?? []).find(v => same(v.label, target.page));
+      if (view) return view.id;
+    }
   }
   return null;
 }

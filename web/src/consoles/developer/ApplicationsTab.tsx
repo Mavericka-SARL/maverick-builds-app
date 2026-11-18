@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant, type ApiError } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
-import { DATE_FORMATS, formatIsoDate } from "../dateSerial";
+import { formatIsoDate } from "../dateSerial";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle, Txt } from "../../ui";
 
 function DevModelRevisions({
@@ -387,17 +387,6 @@ export function DevApplicationsTab({
     },
   });
 
-  // How a model's dates read for everyone using it: grids, tables of
-  // records, KPIs and date fields.
-  const setDateFormat = useMutation({
-    mutationFn: ({ modelId, tenantId, dateFormat }: { modelId: string; tenantId: string; dateFormat: string }) =>
-      withTenant(tenantId, () => api.setModelDateFormat(modelId, dateFormat)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["dev-applications"] });
-      qc.invalidateQueries({ queryKey: ["demo"] });
-    },
-  });
-
   const apps = tenants.flatMap((t) => t.applications ?? []);
   // The list spans every database the caller reaches; an action on a row is
   // addressed to the row's tenant.
@@ -478,7 +467,9 @@ export function DevApplicationsTab({
                   <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
                   <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
                   {!modelOpen && <span className="mvx-admin-muted">{revisions} revision<Txt>{revisions !== 1 ? "s" : ""}</Txt><Txt>{m.active_revision ? ` · active: ${m.active_revision}` : ""}</Txt></span>}
-                  {canEdit(tenantOfApp.get(app.id) ?? "") && editing !== `model:${m.id}` && (
+                  {/* A developer edits the model's date format; its tenant's
+                      administrator its name and description too. */}
+                  {editing !== `model:${m.id}` && (
                     <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} aria-label={`Edit model ${m.name}`} onClick={() => setEditing(`model:${m.id}`)}>
                       Edit
                     </Button>
@@ -495,21 +486,16 @@ export function DevApplicationsTab({
                       Set as business default
                     </Button>
                   )}
-                  <Select
-                    value={m.date_format ?? ""}
-                    aria-label={`Date format of model ${m.name}`}
-                    title="How dates read for everyone using this model: grids, tables of records, KPIs and date fields"
-                    style={{ width: 210, marginLeft: "auto", height: 28 }}
-                    disabled={setDateFormat.isPending}
-                    onChange={(e) => setDateFormat.mutate({ modelId: m.id, tenantId: tenantOfApp.get(app.id) ?? "", dateFormat: e.target.value })}
-                  >
-                    <option value="">Dates: each browser's format</option>
-                    {DATE_FORMATS.map((f) => <option key={f} value={f}>Dates: {f} ({formatIsoDate("2026-12-31", f)})</option>)}
-                  </Select>
+                  {m.date_format && (
+                    <span className="mvx-admin-muted" style={{ marginLeft: "auto" }} title="The model's date format (Edit changes it)">
+                      Dates: {m.date_format} ({formatIsoDate("2026-12-31", m.date_format)})
+                    </span>
+                  )}
                 </div>
                 {m.description && <p className="mvx-admin-muted" style={{ margin: "2px 0 6px" }}>{m.description}</p>}
                 {editing === `model:${m.id}` && (
-                  <DetailsEditor kind="model" id={m.id} tenantId={tenantOfApp.get(app.id) ?? ""} name={m.name} description={m.description ?? ""} onClose={() => setEditing("")} />
+                  <DetailsEditor kind="model" id={m.id} tenantId={tenantOfApp.get(app.id) ?? ""} name={m.name} description={m.description ?? ""}
+                    dateFormat={m.date_format ?? ""} canRename={canEdit(tenantOfApp.get(app.id) ?? "")} onClose={() => setEditing("")} />
                 )}
                 {modelOpen && <DevModelRevisions model={m} appId={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} revisionId={revisionId} onSelect={onSelect} />}
               </div>

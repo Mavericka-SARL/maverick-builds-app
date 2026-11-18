@@ -102,3 +102,62 @@ spec:
                 name: keycloak
                 port:
                   number: 8080
+---
+# "Forgot password?" mails a reset link to whatever registered address is
+# typed, and Keycloak does not limit how often (resetPasswordAllowed, turned
+# on by scripts/keycloak-smtp-setup.sh). Without a limit anyone could fill a
+# person's mailbox, and spend the mail relay's quota until invitations fail
+# too. Each visitor's address (Traefik sees it: the PROXY protocol,
+# bootstrap/traefik-values.yaml) gets a few tries a minute on the reset form
+# alone; the rest of the sign-in pages are untouched. Per Traefik replica, in
+# memory: with two replicas a visitor gets at most twice this.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: reset-password-ratelimit
+  namespace: mavericks
+  labels:
+    app.kubernetes.io/name: mavericks
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  rateLimit:
+    average: 5
+    period: 1m
+    burst: 5
+---
+# The reset form's own route, so the limit applies to it and nothing else:
+# Traefik ranks routers by the length of their rule, so this longer path
+# wins over the auth host's "/". No cert-manager annotation: the certificate
+# is the one the "mavericks" Ingress already requests for this host.
+# Overlays set the host and secret as they do for "mavericks".
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mavericks-auth-reset
+  namespace: mavericks
+  labels:
+    app.kubernetes.io/name: mavericks
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: mavericks-engine
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # <namespace>-<middleware>@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: mavericks-reset-password-ratelimit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - auth.mavericks.example.com
+      secretName: mavericks-auth-tls
+  rules:
+    - host: auth.mavericks.example.com
+      http:
+        paths:
+          - path: /realms/mavericks/login-actions/reset-credentials
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080

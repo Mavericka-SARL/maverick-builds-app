@@ -10279,6 +10279,8 @@ func (s WorkflowInstanceStatus) Validate() error {
 		return nil
 	case "failed":
 		return nil
+	case "reopened":
+		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)
 	}

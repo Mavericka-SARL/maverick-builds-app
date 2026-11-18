@@ -327,6 +327,7 @@ components:
         sso: { type: boolean }
         alias: { type: string }
         display_name: { type: string }
+        google: { type: boolean, description: "Whether the realm offers Sign in with Google (Keycloak identity provider \"google\"), whatever the licence" }
 
     ScimToken:
       type: object
@@ -617,6 +618,7 @@ components:
         enabled:     { type: boolean }
         reason:      { type: string, description: Why sign-up is closed }
         contact_url: { type: string }
+        google:      { type: boolean, description: "Sign-up is open and the realm offers Google: a first Google sign-in signs up on these terms" }
         plan:
           type: object
           properties:
@@ -930,7 +932,7 @@ components:
       properties:
         id:            { type: string, format: uuid }
         workflow_name: { type: string }
-        status:        { type: string, enum: [running, completed, cancelled, failed] }
+        status:        { type: string, enum: [running, completed, cancelled, failed, reopened] }
         context:       { type: object, additionalProperties: {} }
         context_display:
           type: array
@@ -941,6 +943,12 @@ components:
           type: string
           format: uuid
           description: "GET /api/workflow/my-history: the application the run belongs to"
+        submitted_by:
+          type: string
+          description: "History lists: who started the run (name, else e-mail)"
+        model_name:
+          type: string
+          description: "History lists: the model the run is about"
         started_at:    { type: string, format: date-time }
         completed_at:  { type: string, format: date-time, nullable: true }
 
@@ -3154,6 +3162,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Actor" }
         "401": { description: Unauthorized }
+        "403": { description: "A first sign-in (company single sign-on, Google) refused; the error says why, for the console to show" }
 
   /api/me/preferences:
     patch:
@@ -4517,7 +4526,13 @@ paths:
         per-application grants when they have any. A caller who is also tenant_admin covers the
         applications of its tenants; a platform_admin or platform-level developer covers every
         application. When X-App-Id names an application, only that application's instances are listed.
-        A developer's test runs are never listed.
+        A developer's test runs are never listed. With before, the 50 runs older than the one it names.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: The id of the last run already shown; lists the older runs after it.
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Workflow history
@@ -4536,11 +4551,17 @@ paths:
         The caller's runs — started, assigned a step, or notified of — in the selected application (X-App-Id),
         as GET /api/workflow/history lists the application's: with one model chosen, both answer for it.
         With instance_id, that one run of the caller's in any application, with its application_id, so a
-        notification about another application's run can switch there.
+        notification about another application's run can switch there. With before, the 50 runs older
+        than the one it names.
       parameters:
         - name: instance_id
           in: query
           required: false
+          schema: { type: string, format: uuid }
+        - name: before
+          in: query
+          required: false
+          description: The id of the last run already shown; lists the older runs after it.
           schema: { type: string, format: uuid }
       responses:
         "200":
