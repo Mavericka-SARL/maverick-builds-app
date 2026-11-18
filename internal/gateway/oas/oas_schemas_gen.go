@@ -31429,6 +31429,52 @@ func (o OptUpdateRecordRequestData) Or(d UpdateRecordRequestData) UpdateRecordRe
 	return d
 }
 
+// NewOptUpdateRecordRequestFields returns new OptUpdateRecordRequestFields with value set to v.
+func NewOptUpdateRecordRequestFields(v UpdateRecordRequestFields) OptUpdateRecordRequestFields {
+	return OptUpdateRecordRequestFields{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateRecordRequestFields is optional UpdateRecordRequestFields.
+type OptUpdateRecordRequestFields struct {
+	Value UpdateRecordRequestFields
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateRecordRequestFields was set.
+func (o OptUpdateRecordRequestFields) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateRecordRequestFields) Reset() {
+	var v UpdateRecordRequestFields
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateRecordRequestFields) SetTo(v UpdateRecordRequestFields) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateRecordRequestFields) Get() (v UpdateRecordRequestFields, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateRecordRequestFields) Or(d UpdateRecordRequestFields) UpdateRecordRequestFields {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateRecordRequestStatus returns new OptUpdateRecordRequestStatus with value set to v.
 func NewOptUpdateRecordRequestStatus(v UpdateRecordRequestStatus) OptUpdateRecordRequestStatus {
 	return OptUpdateRecordRequestStatus{
@@ -40402,10 +40448,17 @@ func (*UpdateNotificationSettingsForbidden) updateNotificationSettingsRes() {}
 
 // Ref: #/components/schemas/UpdateRecordRequest
 type UpdateRecordRequest struct {
-	// The record's new fields; omitted, the record keeps its fields.
+	// The record's new fields, every one (a field left out is emptied); omitted, the record keeps its
+	// fields. Not with fields.
 	Data OptUpdateRecordRequestData `json:"data"`
+	// Only the fields to change, by name; the record's other fields keep their values. A name that is
+	// not a field of the table is refused (400). Not with data.
+	Fields OptUpdateRecordRequestFields `json:"fields"`
 	// The record's new status; omitted, the record keeps its status.
 	Status OptUpdateRecordRequestStatus `json:"status"`
+	// Check the change as a save would (access, status, field values, a decided parent) and write
+	// nothing; 200 answers status "valid" with the record as it would be saved.
+	DryRun OptBool `json:"dry_run"`
 }
 
 // GetData returns the value of Data.
@@ -40413,9 +40466,19 @@ func (s *UpdateRecordRequest) GetData() OptUpdateRecordRequestData {
 	return s.Data
 }
 
+// GetFields returns the value of Fields.
+func (s *UpdateRecordRequest) GetFields() OptUpdateRecordRequestFields {
+	return s.Fields
+}
+
 // GetStatus returns the value of Status.
 func (s *UpdateRecordRequest) GetStatus() OptUpdateRecordRequestStatus {
 	return s.Status
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *UpdateRecordRequest) GetDryRun() OptBool {
+	return s.DryRun
 }
 
 // SetData sets the value of Data.
@@ -40423,15 +40486,39 @@ func (s *UpdateRecordRequest) SetData(val OptUpdateRecordRequestData) {
 	s.Data = val
 }
 
+// SetFields sets the value of Fields.
+func (s *UpdateRecordRequest) SetFields(val OptUpdateRecordRequestFields) {
+	s.Fields = val
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateRecordRequest) SetStatus(val OptUpdateRecordRequestStatus) {
 	s.Status = val
 }
 
-// The record's new fields; omitted, the record keeps its fields.
+// SetDryRun sets the value of DryRun.
+func (s *UpdateRecordRequest) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// The record's new fields, every one (a field left out is emptied); omitted, the record keeps its
+// fields. Not with fields.
 type UpdateRecordRequestData map[string]jx.Raw
 
 func (s *UpdateRecordRequestData) init() UpdateRecordRequestData {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+// Only the fields to change, by name; the record's other fields keep their values. A name that is
+// not a field of the table is refused (400). Not with data.
+type UpdateRecordRequestFields map[string]jx.Raw
+
+func (s *UpdateRecordRequestFields) init() UpdateRecordRequestFields {
 	m := *s
 	if m == nil {
 		m = map[string]jx.Raw{}

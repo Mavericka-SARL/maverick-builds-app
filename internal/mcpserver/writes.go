@@ -11,7 +11,7 @@ import (
 // errReadOnly is a write through a connection granted reading only: one
 // made before the write scope existed, or whose person did not allow it.
 var errReadOnly = &reporting.Error{Code: "read_only",
-	Message: "this connection may only read. To change data from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values"}
+	Message: "this connection may only read. To change data from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values and records"}
 
 type cellIn struct {
 	MetricID string            `json:"metric_id" jsonschema:"an input metric's id from describe_source"`
@@ -26,6 +26,15 @@ type writeIn struct {
 	ModelContext
 	Cells  []cellIn `json:"cells" jsonschema:"the cells to write, 1 to 500; give each exactly one of value, text, member or clear"`
 	DryRun bool     `json:"dry_run,omitempty" jsonschema:"check every cell and write none"`
+}
+
+type recordUpdateIn struct {
+	ModelContext
+	TableID  string         `json:"table_id" jsonschema:"the table's id from list_tables"`
+	RecordID string         `json:"record_id" jsonschema:"the record's id from query_records"`
+	Fields   map[string]any `json:"fields,omitempty" jsonschema:"the fields to change, by field name from list_tables, with their new values as query_records shows them: a number, a text, a select's option, a date as yyyy-mm-dd, true or false, a dimension field's member code or label; null empties a field. Fields not named keep their values"`
+	Status   string         `json:"status,omitempty" jsonschema:"the record's new status (draft, submitted, approved or rejected), for a table whose records have one; omitted, the status stays"`
+	DryRun   bool           `json:"dry_run,omitempty" jsonschema:"check the change and save nothing"`
 }
 
 func (t *tools) registerWrites(s *sdk.Server) {
@@ -47,5 +56,19 @@ func (t *tools) registerWrites(s *sdk.Server) {
 					Value: cell.Value, Text: cell.Text, Member: cell.Member, Clear: cell.Clear})
 			}
 			return s.WriteCells(ctx, p, cells, in.DryRun)
+		}))
+
+	sdk.AddTool(s, &sdk.Tool{Name: "update_record",
+		Annotations: &sdk.ToolAnnotations{Title: "Update a record", ReadOnlyHint: false, DestructiveHint: &yes, IdempotentHint: true, OpenWorldHint: &f},
+		Description: "Change one record of a model's table as you — a deal, a request, an expense: the fields you name (the others keep their values) and/or its status. Checked as the console's record form checks a save: your permissions on the record, which status moves you may make, a parent record already decided, and each field's rules; a refusal says why and saves nothing. Grids the table feeds follow the record — change the deal, not the grid it feeds. Confirm the change with the person before saving; dry_run checks it without saving. The record's history keeps the earlier values."},
+		called(t, "update_record", func(ctx context.Context, s *reporting.Session, c call, in recordUpdateIn) (any, error) {
+			if !c.writes {
+				return nil, errReadOnly
+			}
+			p, err := in.pin(ctx, s)
+			if err != nil {
+				return nil, err
+			}
+			return s.UpdateRecord(ctx, p, in.TableID, in.RecordID, in.Fields, in.Status, in.DryRun)
 		}))
 }

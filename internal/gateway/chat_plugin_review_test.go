@@ -245,13 +245,16 @@ func TestChatPluginReviewCases(t *testing.T) {
 		}
 	})
 
-	t.Run("negative cases — only input cells can be changed", func(t *testing.T) {
+	t.Run("negative cases — only input cells and records can be changed", func(t *testing.T) {
 		list, err := c.cs.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, tool := range list.Tools {
-			if (tool.Name != "write_cells" && !tool.Annotations.ReadOnlyHint) || strings.HasPrefix(tool.Name, "update") || strings.HasPrefix(tool.Name, "delete") {
+			// The two writes change values and records; nothing changes a
+			// model's structure or deletes anything.
+			write := tool.Name == "write_cells" || tool.Name == "update_record"
+			if (!write && !tool.Annotations.ReadOnlyHint) || (!write && strings.HasPrefix(tool.Name, "update")) || strings.HasPrefix(tool.Name, "delete") {
 				t.Errorf("%s is not a pure read", tool.Name)
 			}
 		}

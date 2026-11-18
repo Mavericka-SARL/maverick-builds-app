@@ -1,7 +1,7 @@
 /**
  * Tenant admin › Chat connector (web/src/consoles/admin/ChatConnectorSettingsTab.tsx):
  * a tenant administrator decides whether the tenant's people may change grid
- * values from ChatGPT or Claude. The switch says what it covers and saves at
+ * values and records from ChatGPT or Claude. The switch says what it covers and saves at
  * once; a business user has no such tab.
  */
 import { test, expect } from "@playwright/test";
@@ -23,8 +23,8 @@ test("a tenant administrator turns chat writes off", async ({ page }) => {
   await page.getByRole("button", { name: "Chat connector", exact: true }).click();
 
   const panel = page.getByTestId("connector-settings");
-  await expect(panel).toContainText("under their own access rules and workflow locks");
-  const box = panel.getByRole("checkbox", { name: "Allow changing grid values from a chat" });
+  await expect(panel).toContainText("under their own access rules, workflow locks and record permissions");
+  const box = panel.getByRole("checkbox", { name: "Allow changing grid values and records from a chat" });
   await expect(box).toBeChecked();
   await box.uncheck();
   await expect(box).not.toBeChecked();

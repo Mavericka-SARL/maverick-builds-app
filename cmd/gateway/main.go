@@ -130,7 +130,7 @@ type cfg struct {
 	// The chat connector at /mcp (docs/CHAT_CONNECTOR.md). MCPResourceURL
 	// defaults to CONSOLE_URL + "/mcp"; its tokens must carry it as their
 	// audience, and the MCP_SCOPE scope (default models:read); write_cells
-	// also needs MCP_WRITE_SCOPE (default grids:write).
+	// and update_record also need MCP_WRITE_SCOPE (default grids:write).
 	MCPEnabled             bool   `mapstructure:"MCP_ENABLED"`
 	MCPResourceURL         string `mapstructure:"MCP_RESOURCE_URL"`
 	MCPAuthorizationServer string `mapstructure:"MCP_AUTHORIZATION_SERVER"`

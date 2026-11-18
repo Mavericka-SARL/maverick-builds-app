@@ -160,7 +160,7 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 	reed := f.as(f.ro)
 	dev := f.as(f.dev)
 
-	t.Run("every tool but write_cells is a read", func(t *testing.T) {
+	t.Run("every tool but write_cells and update_record is a read", func(t *testing.T) {
 		list, err := reed.cs.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
@@ -172,16 +172,16 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 		slices.Sort(names)
 		want := []string{"compare_grid", "describe_dashboard", "describe_source", "describe_workflow", "get_connection_access",
 			"list_dashboards", "list_members", "list_models", "list_sources", "list_tables", "list_workflows", "query_grid",
-			"query_records", "render_chart", "render_report", "write_cells"}
+			"query_records", "render_chart", "render_report", "update_record", "write_cells"}
 		if !slices.Equal(names, want) {
 			t.Errorf("tools = %v, want the connector's tools %v", names, want)
 		}
 		for _, tool := range list.Tools {
 			a := tool.Annotations
-			if tool.Name == "write_cells" {
+			if tool.Name == "write_cells" || tool.Name == "update_record" {
 				// A host asks the person before a call that changes data.
 				if a == nil || a.ReadOnlyHint || a.DestructiveHint == nil || !*a.DestructiveHint {
-					t.Errorf("write_cells is not annotated as a write that overwrites")
+					t.Errorf("%s is not annotated as a write that overwrites", tool.Name)
 				}
 				continue
 			}

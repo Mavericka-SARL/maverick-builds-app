@@ -4,10 +4,11 @@ import { api } from "../../api/client";
 import { Card, Checkbox, InlineAlert, LoadingState } from "../../ui";
 
 /**
- * Admin › Chat connector: whether this tenant's people may change grid data
- * from ChatGPT or Claude. A connection writes only the input cells its person
- * may write in the console, and only once they allowed it to change values
- * when connecting; this switch stops every such write for the whole tenant.
+ * Admin › Chat connector: whether this tenant's people may change data from
+ * ChatGPT or Claude. A connection writes only the input cells its person may
+ * write, and changes only the records they may change, in the console, and
+ * only once they allowed it to change data when connecting; this switch stops
+ * every such change for the whole tenant.
  * Reads through a connection, and the console itself, are not affected.
  */
 export function ChatConnectorSettingsTab() {
@@ -31,8 +32,9 @@ export function ChatConnectorSettingsTab() {
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Changes from ChatGPT and Claude</div>
         <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
           People who connect ChatGPT or Claude to their account can ask it to enter values into the grids they can edit
-          here — numbers, texts, dates and choices, in the active revision. Each change is made as that person, under
-          their own access rules and workflow locks, and is kept in the cell history and the audit log. Turn this off to
+          here — numbers, texts, dates and choices, in the active revision — and to update the records they can change,
+          such as a deal's stage or amount. Each change is made as that person, under their own access rules, workflow
+          locks and record permissions, and is kept in the cell or record history and the audit log. Turn this off to
           let connections read only.
         </p>
         <Checkbox
@@ -42,7 +44,7 @@ export function ChatConnectorSettingsTab() {
             setPending(e.target.checked);
             save.mutate(e.target.checked);
           }}
-          label="Allow changing grid values from a chat"
+          label="Allow changing grid values and records from a chat"
         />
         {save.error && <InlineAlert tone="danger">{(save.error as Error).message}</InlineAlert>}
       </Card>

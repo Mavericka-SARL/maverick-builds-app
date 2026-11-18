@@ -288,15 +288,25 @@ func (s *Session) Pin(ctx context.Context, appID, modelID, revisionID string) (P
 
 // ── access summary ──────────────────────────────────────────────────────────
 
-// Access describes what this connection can read for the person: their
-// roles, and each resource family with how its reads are decided. It names
-// no one — not even the person, whom the host already knows — and lists
-// nothing about anyone else or any object they may not read.
+// Access describes what this connection can read for the person: the
+// account it is signed in as, their roles, and each resource family with how
+// its reads are decided. The account is the person's own, told back to them:
+// a host connected with another account than the person meant shows models
+// that are not theirs and misses the ones that are, and only the account's
+// address makes that plain. It lists nothing about anyone else or any object
+// they may not read.
 type Access struct {
-	Roles    []string       `json:"roles"`
-	ReadOnly bool           `json:"read_only"`
-	Families []AccessFamily `json:"families"`
-	Note     string         `json:"note"`
+	SignedInAs SignedInAs     `json:"signed_in_as"`
+	Roles      []string       `json:"roles"`
+	ReadOnly   bool           `json:"read_only"`
+	Families   []AccessFamily `json:"families"`
+	Note       string         `json:"note"`
+}
+
+// SignedInAs is the account this connection reads and writes as.
+type SignedInAs struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // AccessFamily is one kind of resource this connection reads.
@@ -314,22 +324,26 @@ type AccessFamily struct {
 func (s *Session) Access(ctx context.Context, writes bool) (Access, error) {
 	var a Access
 	var me struct {
+		Email string   `json:"email"`
+		Name  string   `json:"display_name"`
 		Roles []string `json:"roles"`
 	}
 	if _, err := s.get(ctx, "account", Request{Path: "/api/me"}, &me); err != nil {
 		return a, err
 	}
+	a.SignedInAs = SignedInAs{Email: me.Email, DisplayName: me.Name}
 	a.Roles = me.Roles
 	if a.Roles == nil {
 		a.Roles = []string{}
 	}
 	a.ReadOnly = !writes || s.s.writer == nil
-	a.Note = "Every read and write is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data, tables of records, dashboards and workflows of each model's active revision; charts and reports made from it are not saved in maverickbuilds.app."
+	a.Note = "Every read and write is made as you, the account in signed_in_as, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data, tables of records, dashboards and workflows of each model's active revision; charts and reports made from it are not saved in maverickbuilds.app."
 	if a.ReadOnly {
-		a.Note += " It cannot change data: to write cells from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values."
+		a.Note += " It cannot change data: to write cells or change records from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values and records."
 	} else {
-		a.Note += " It can write the input cells you may write in the console, and nothing else; each write is all or nothing."
+		a.Note += " It can write the input cells and change the records you may change in the console, and nothing else; each change is all or nothing."
 	}
+	a.Note += " If a model you expect is missing, this connection may be signed in to another account than the one that opens it: disconnect maverickbuilds.app in the chat app and connect it again, signing in with that account."
 	a.Families = []AccessFamily{
 		{Family: "models", Tools: []string{"list_models"}, Available: true,
 			DecidedBy: "your application and model grants"},
@@ -341,6 +355,8 @@ func (s *Session) Access(ctx context.Context, writes bool) (Access, error) {
 			DecidedBy: "the dashboards your business roles give you and the model's published workflows; widgets name only the metrics and members you can see, and show no data"},
 		{Family: "cells", Tools: []string{"write_cells"}, Available: !a.ReadOnly,
 			DecidedBy: "the write permission you granted this connection, your tenant's chat-writes setting, and per cell: input metrics only, your access rules, workflow locks and the workspace's plan"},
+		{Family: "record changes", Tools: []string{"update_record"}, Available: !a.ReadOnly,
+			DecidedBy: "the write permission you granted this connection, your tenant's chat-writes setting, and per record: what you may change in the console — your permissions on it, its status moves, a decided parent record, and each field's rules"},
 	}
 	return a, nil
 }

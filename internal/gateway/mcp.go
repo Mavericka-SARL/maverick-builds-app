@@ -179,12 +179,16 @@ var delegatedReadRoutes = []struct{ method, pattern string }{
 	// its body: it changes nothing).
 	{http.MethodGet, "/api/forms"},
 	{http.MethodPost, "/api/forms/{}/records/query"},
+	// One record, read before it is changed: its table.
+	{http.MethodGet, "/api/records/{}"},
 }
 
 // delegatedWriteRoutes are the routes a chat connection's write may reach:
-// a batch of grid cells, all or nothing, under the console's own checks.
+// a batch of grid cells, all or nothing, and one record's change, each
+// under the console's own checks.
 var delegatedWriteRoutes = []struct{ method, pattern string }{
 	{http.MethodPost, "/api/cells/batch"},
+	{http.MethodPut, "/api/records/{}"},
 }
 
 func delegatedReadAllowed(method, path string) bool {

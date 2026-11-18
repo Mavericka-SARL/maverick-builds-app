@@ -68,7 +68,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
     { id: t("model-links"), label: TAB_LABELS["model-links"], icon: <Link2 size={16} /> },
     // Outbound delivery is per tenant, so both scopes get it.
     { id: t("notifications"), label: TAB_LABELS.notifications, icon: <Bell size={16} /> },
-    // Whether people may change grid data from ChatGPT or Claude: one
+    // Whether people may change grid data and records from ChatGPT or Claude: one
     // tenant's call, with no deployment row.
     { id: t("chat-connector"), label: TAB_LABELS["chat-connector"], icon: <MessageSquare size={16} /> },
     // So is the AI key. The tab always shows: on a non-enterprise edition it

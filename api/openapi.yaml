@@ -2716,11 +2716,18 @@ components:
         data:
           type: object
           additionalProperties: {}
-          description: The record's new fields; omitted, the record keeps its fields.
+          description: The record's new fields, every one (a field left out is emptied); omitted, the record keeps its fields. Not with fields.
+        fields:
+          type: object
+          additionalProperties: {}
+          description: Only the fields to change, by name; the record's other fields keep their values. A name that is not a field of the table is refused (400). Not with data.
         status:
           type: string
           enum: [draft, submitted, approved, rejected]
           description: The record's new status; omitted, the record keeps its status.
+        dry_run:
+          type: boolean
+          description: Check the change as a save would (access, status, field values, a decided parent) and write nothing; 200 answers status "valid" with the record as it would be saved.
 
     RecordsQuery:
       type: object
@@ -10969,7 +10976,8 @@ paths:
         A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
         change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
         403 for anything else. The write applies only while the record is still in the status the check
-        was made against: 409 when it changed in the meantime.
+        was made against: 409 when it changed in the meantime. A chat connection's change is also
+        refused (403) when the tenant has turned changes from chat connections off.
       parameters:
         - name: id
           in: path

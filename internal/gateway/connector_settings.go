@@ -14,7 +14,7 @@ import (
 )
 
 // Chat connector settings (GET/PUT /api/admin/connector-settings): whether
-// a tenant's people may change grid data from a chat connection (ChatGPT,
+// a tenant's people may change grid data and records from a chat connection (ChatGPT,
 // Claude — mcp.go). On by default (migration 128); a tenant administrator,
 // or the platform administrator for a tenant they pick, turns it off for the
 // whole tenant. Reads through a connection are not affected, and nothing is
@@ -76,7 +76,7 @@ func (h *handler) connectorSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// chatWritesOn reports whether tenant cid lets its people change grid data
+// chatWritesOn reports whether tenant cid lets its people change grid data and records
 // from a chat connection. A tenant with no row (none on this database)
 // keeps the default, on.
 func (h *handler) chatWritesOn(ctx context.Context, cid string) (bool, error) {

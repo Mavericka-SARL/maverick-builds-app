@@ -12122,6 +12122,12 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 // anything else is a 403. The write is conditional on the status the check
 // was made against, so a record decided in the meantime is not overwritten
 // (409).
+//
+// PUT takes either data (every field: one left out is emptied) or fields
+// (only the fields named change; the others keep their values, including
+// ones the caller's access withholds), and dry_run checks the change as a
+// save would and writes nothing. A chat connection's PUT is also refused
+// when the tenant has turned chat writes off.
 func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	recordID := strings.TrimPrefix(r.URL.Path, "/api/records/")
@@ -12146,17 +12152,45 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			// Omitted, the record keeps its fields.
 			Data map[string]any `json:"data"`
+			// Fields changes only the fields it names. Not with data.
+			Fields map[string]any `json:"fields"`
 			// Omitted, the record keeps its status.
 			Status string `json:"status"`
+			// DryRun checks the change and writes nothing.
+			DryRun bool `json:"dry_run"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		if body.Data != nil && body.Fields != nil {
+			jsonErr(w, fmt.Errorf("give data (every field) or fields (only those to change), not both"), http.StatusBadRequest)
 			return
 		}
 		rec, scope, access, err := h.reachRecord(ctx, act, store, recordID)
 		if err != nil {
 			jsonRecordErr(w, err, "record")
 			return
+		}
+		via, chat := delegatedWrite(ctx)
+		if chat {
+			if ref := h.chatWritesAllowed(ctx, scope.modelID); ref != nil {
+				ref.respond(w)
+				return
+			}
+		}
+		// sent is what the caller gave for the record's fields: data whole,
+		// or fields over the record's current values.
+		sent, changed := body.Data, body.Data
+		if body.Fields != nil {
+			if msg := unknownRecordFields(scope.form, body.Fields); msg != "" {
+				jsonErr(w, errors.New(msg), http.StatusBadRequest)
+				return
+			}
+			sent = make(map[string]any, len(rec.Data)+len(body.Fields))
+			maps.Copy(sent, rec.Data)
+			maps.Copy(sent, body.Fields)
+			changed = body.Fields
 		}
 		formID, oldStatus := rec.FormID, rec.Status
 		newStatus := body.Status
@@ -12188,16 +12222,16 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if msg := crudapp.StatusInDataProblem(scope.form, body.Data, newStatus); msg != "" {
+		if msg := crudapp.StatusInDataProblem(scope.form, changed, newStatus); msg != "" {
 			jsonErr(w, errors.New(msg), http.StatusBadRequest)
 			return
 		}
 		data := rec.Data
-		if body.Data != nil {
+		if sent != nil {
 			// A code the server gave and the status are not the person's to change.
-			data = crudapp.KeepServerValues(scope.form, rec.Data, body.Data)
+			data = crudapp.KeepServerValues(scope.form, rec.Data, sent)
 		}
-		if code, msg, problems, err := h.checkRecordSave(ctx, scope, rec, &recordState{Status: newStatus, Data: data}, body.Data != nil); err != nil {
+		if code, msg, problems, err := h.checkRecordSave(ctx, scope, rec, &recordState{Status: newStatus, Data: data}, sent != nil); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		} else if len(problems) > 0 {
@@ -12214,6 +12248,13 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if parentMsg != "" {
 			jsonErr(w, errors.New(parentMsg), http.StatusForbidden)
+			return
+		}
+		if body.DryRun {
+			preview := *rec
+			preview.Data, preview.Status = data, newStatus
+			scope.permit(&preview)
+			jsonOK(w, map[string]any{"status": "valid", "record": preview})
 			return
 		}
 		keptChanged := false
@@ -12243,9 +12284,12 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if statusChanged && newStatus == crudapp.StatusApproved {
 			go h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
 		}
-		meta := map[string]string{"form_id": formID, "status": newStatus, "fields_changed": strconv.FormatBool(body.Data != nil)}
+		meta := map[string]string{"form_id": formID, "status": newStatus, "fields_changed": strconv.FormatBool(sent != nil)}
 		if statusChanged {
 			meta["previous_status"] = oldStatus
+		}
+		if chat {
+			meta["via"] = via
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordUpdated,
@@ -12279,6 +12323,31 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
+}
+
+// unknownRecordFields says which of fields' names are not fields of form,
+// with the names it has ("" when all are).
+func unknownRecordFields(form *crudapp.FormDef, fields map[string]any) string {
+	if form == nil {
+		return ""
+	}
+	names := make([]string, 0, len(form.Fields))
+	known := make(map[string]bool, len(form.Fields))
+	for _, f := range form.Fields {
+		names = append(names, f.Name)
+		known[f.Name] = true
+	}
+	var unknown []string
+	for k := range fields {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return ""
+	}
+	slices.Sort(unknown)
+	return fmt.Sprintf("%s: not a field of %s (its fields: %s)", strings.Join(unknown, ", "), form.Label, strings.Join(names, ", "))
 }
 
 // resolveUserID extracts the acting user UUID from the request.

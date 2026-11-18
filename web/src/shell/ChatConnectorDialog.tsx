@@ -54,10 +54,10 @@ export function ChatConnectorDialog({ open, onClose }: { open: boolean; onClose:
       {data?.enabled && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <p style={{ fontSize: 12, margin: 0, color: "var(--color-text-muted)" }}>
-            Ask ChatGPT or Claude about your grids and get tables, charts and reports in the conversation, or ask it to
-            enter values for you. You sign in with your own maverickbuilds.app account and the connection works on grid
-            data of each model&apos;s active revision, reading and changing only what your access allows. The chat asks
-            you before it changes a value, unless you told it not to. If you connected before changes were possible,
+            Ask ChatGPT or Claude about your grids and records and get tables, charts and reports in the conversation, or
+            ask it to enter values or update records for you. You sign in with your own maverickbuilds.app account and the
+            connection works on each model&apos;s active revision, reading and changing only what your access allows. The
+            chat asks you before it changes anything, unless you told it not to. If you connected before changes were possible,
             connect again to allow them.
           </p>
           <CopyField label="Connector URL" value={data.url ?? ""} />

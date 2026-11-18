@@ -4,7 +4,8 @@ package keycloak
 // registered, confidential client per chat host — never dynamic client
 // registration — and two client scopes: models:read, whose tokens name the
 // connector as their audience, and grids:write, which lets the connector
-// write the grid cells the person may write. The gateway's /mcp accepts
+// write the grid cells and change the records the person may change (its
+// name predates records; renaming it would end every write grant). The gateway's /mcp accepts
 // exactly these tokens; its REST API refuses them.
 
 import (
@@ -22,7 +23,7 @@ import (
 const ConnectorScope = "models:read"
 
 // ConnectorWriteScope is the connector's write scope: the grid cells the
-// person may write in the console. A default scope of every connector
+// person may write and the records they may change in the console. A default scope of every connector
 // client, so each new connection asks for it on the consent screen; one
 // granted before it existed keeps the read scope only.
 const ConnectorWriteScope = "grids:write"
@@ -139,7 +140,7 @@ func (c *Client) EnsureConnectorClients(ctx context.Context, setup ConnectorSetu
 		Attributes: map[string]string{
 			"include.in.token.scope":    "true",
 			"display.on.consent.screen": "true",
-			"consent.screen.text":       "Change the grid values you can change in maverickbuilds.app, with your access.",
+			"consent.screen.text":       "Change the grid values and records you can change in maverickbuilds.app, with your access.",
 		},
 	}, nil)
 	if err != nil {
@@ -154,7 +155,7 @@ func (c *Client) EnsureConnectorClients(ctx context.Context, setup ConnectorSetu
 	for _, host := range hosts {
 		rep := clientRep{
 			ClientID: host.ClientID, Name: "maverickbuilds.app in " + host.Name,
-			Description: "Chat connector (/mcp) for " + host.Name + ": reads grids, and writes cells with grids:write. Managed by cmd/connector-clients.",
+			Description: "Chat connector (/mcp) for " + host.Name + ": reads grids, and writes cells and records with grids:write. Managed by cmd/connector-clients.",
 			Enabled:     true, Protocol: "openid-connect",
 			PublicClient: false, ClientAuthenticatorType: "client-secret",
 			StandardFlowEnabled: true,

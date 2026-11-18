@@ -3075,7 +3075,8 @@ func (UnimplementedHandler) UpdateFormMapping(ctx context.Context, req *UpdateFo
 // A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
 // change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
 // 403 for anything else. The write applies only while the record is still in the status the check
-// was made against: 409 when it changed in the meantime.
+// was made against: 409 when it changed in the meantime. A chat connection's change is also refused
+// (403) when the tenant has turned changes from chat connections off.
 //
 // PUT /api/records/{id}
 func (UnimplementedHandler) UpdateFormRecord(ctx context.Context, req *UpdateRecordRequest, params UpdateFormRecordParams) (r UpdateFormRecordRes, _ error) {

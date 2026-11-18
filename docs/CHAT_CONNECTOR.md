@@ -1,6 +1,7 @@
 # Chat connector (ChatGPT, Claude)
 
-> **Last verified:** 2026-10-14 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorReachesTheRecordsQueryOnly|TestRecordTables'`
+> **Last verified:** 2026-11-18 — `go test ./internal/gateway -run 'TestChatUpdatesRecords|TestMCPConnector|TestConnectorTokens|TestChatWritesCells'`
+> (record updates, the signed-in account); 2026-10-14 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorReachesTheRecordsQueryOnly|TestRecordTables'`
 > (tables of records); 2026-10-10 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate|TestChatWritesCells|TestCellsBatchRoute|TestChatPluginReviewCases'`
 > (cell writes); 2026-10-02 for the rest (shared and dedicated
 > tenant databases);
@@ -13,7 +14,8 @@
 A person connects ChatGPT or Claude to maverickbuilds.app once. The assistant
 can then read the grids of the models they open, as them, and make tables,
 charts, comparisons and reports in the conversation — and enter values into
-the input cells they may edit, when they ask it to. On the hosted service it
+the input cells they may edit, or update the records they may change, when
+they ask it to. On the hosted service it
 is available to every workspace, the Playground (the hosted Community
 edition) included, and to
 every person in it: the account menu (top right) → **Connect ChatGPT or
@@ -23,7 +25,7 @@ Claude** shows the connector URL and each host's client ID and secret.
 
 | Tool | What it does |
 |---|---|
-| `get_connection_access` | your roles and what decides what you read (no name or address) |
+| `get_connection_access` | the account the connection is signed in as, your roles and what decides what you read and change |
 | `list_models` | models you can open, across your workspaces |
 | `list_sources` | a model's grids you can read |
 | `describe_source` | a grid's metrics (input or calculated, aggregation, time summary, format) and dimensions |
@@ -39,6 +41,7 @@ Claude** shows the connector URL and each host's client ID and secret.
 | `list_tables` | a model's tables of records (requests, expenses, deals) with their fields, and whether their records have a status |
 | `query_records` | a table's records, read-only: a page matching filters (by field, status or date), a search and a sort, with how many match; or totals over every matching record — count, count_distinct, sum, avg, min, max — grouped by up to 4 fields or a date's day, week, month, quarter or year |
 | `write_cells` | enters up to 500 input cells of the active revision as you — numbers, texts, dates, pick-list choices, or clears — all or nothing; `dry_run` checks without writing |
+| `update_record` | changes one record of a table as you — the fields named (the others keep their values) and/or its status — under the record form's checks; `dry_run` checks without saving |
 
 Charts and reports take **grid queries, never numbers**: each call reads the
 grids as the person, now, so a chart can only show values the engine resolved
@@ -49,8 +52,9 @@ PNG of each chart.
 
 Not read through the connector: a widget's data, running workflow instances
 and tasks, triggers, notifications, integrations, audit. Nothing but input
-cells can be changed: not the model, its members, tables or records,
-workflows or anyone's access.
+cells and the fields and status of existing records can be changed: not the
+model, its members or tables, no record is added or deleted, and not workflows
+or anyone's access.
 
 ### Reading records
 
@@ -110,6 +114,29 @@ The tool is annotated as a write (`readOnlyHint: false`,
 ask the person before a call unless they chose to allow it always; the
 server's instructions also tell the assistant to confirm the values first.
 
+### Updating records
+
+`update_record` changes one record of a table in the model's active revision:
+the fields it names, by field name from `list_tables` — the record's other
+fields keep their values, including ones the person's access withholds — and,
+for a table with a status, its status. It reads the record first
+(`GET /api/records/{id}`) and refuses one that is not in the table named, then
+saves through the console's own record route, `PUT /api/records/{id}` with
+`fields`: the person's permissions on the record (its creator, or an
+administrator of its table), the status moves they may make (a creator moves
+between draft and submitted; approving is an administrator's), a parent record
+already approved or rejected, and each field's rules (a select's options, a
+dimension field's members the person may use, required fields). A field name
+the table does not have is refused. A refusal saves nothing and says why. The
+save is conditional on the status the check was made against (a record decided
+in the meantime is refused), status moves fire the table's `form_submit` and
+`form_approval` automation rules as in the console, and the grids the table
+feeds are posted again from the record — so a pipeline grid fed by a deals
+table changes by updating the deal, not the grid. The record's history keeps
+the earlier values, and the audit log records a `form_record.updated` event
+with the host's client as `via`. Annotated like `write_cells`
+(`readOnlyHint: false`, `destructiveHint: true`).
+
 ## Security model
 
 - **Separate tokens.** `/mcp` accepts a token only when it was issued to one
@@ -118,12 +145,15 @@ server's instructions also tell the assistant to confirm the values first.
   `models:read`. The REST API accepts only console tokens
   (`GATEWAY_TOKEN_CLIENTS`, default `mavericks-web`), so a host's token opens
   nothing but the connector.
-- **Writing is a separate grant.** `write_cells` writes only for a token that
-  also carries `grids:write`, which the person grants on the consent screen. A
+- **Writing is a separate grant.** `write_cells` and `update_record` change
+  data only for a token that also carries `grids:write`, which the person
+  grants on the consent screen ("Change the grid values and records you can
+  change…"). A
   connection made before that scope existed holds `models:read` only and
   writes nothing until the person disconnects and connects again.
 - **The tenant decides.** A tenant administrator (or the platform
-  administrator, for a tenant they pick) turns chat writes off under
+  administrator, for a tenant they pick) turns chat changes — cells and
+  records alike — off under
   **Tenant admin › Chat connector** (`PUT /api/admin/connector-settings`); on
   by default. Reads through a connection, and writes in the console, are not
   affected.
@@ -136,8 +166,8 @@ server's instructions also tell the assistant to confirm the values first.
   anything but `/api/me`, `/api/apps`, `/api/demo`, `/api/grid`, `/api/grids`,
   `/api/grid/series` and the five dashboard and workflow reads above before a
   handler runs — and `POST /api/cells/batch` for
-  `write_cells` alone: a model link's reads, which run through the same
-  delegated path, cannot reach it.
+  `write_cells` and `PUT /api/records/{id}` for `update_record` alone: a model
+  link's reads, which run through the same delegated path, cannot reach them.
 - **Active revision only.** Reads and writes use each model's active
   revision, as every user does (the REST API enforces the same: other
   revisions are their builders').
@@ -166,7 +196,7 @@ stops later reads only.
 | `MCP_CLIENT_SECRETS` | those clients' secrets as `client-id=secret` pairs, comma-separated, from the optional secret `mavericks-connector`; shown to every signed-in person in the account menu (`GET /api/connector`) |
 | `MCP_AUTHORIZATION_SERVER` | issuer named in the metadata, default this deployment's Keycloak realm |
 | `MCP_SCOPE` | required scope, default `models:read` |
-| `MCP_WRITE_SCOPE` | scope a token also needs for `write_cells`, default `grids:write` |
+| `MCP_WRITE_SCOPE` | scope a token also needs for `write_cells` and `update_record`, default `grids:write` |
 | `GATEWAY_TOKEN_CLIENTS` | clients whose tokens the REST API accepts, default `mavericks-web` |
 | `MCP_OPENAI_APPS_CHALLENGE` | the ChatGPT plugin submission's domain-verification token, served at `/.well-known/openai-apps-challenge` when listing the connector in ChatGPT's app directory |
 
@@ -191,7 +221,7 @@ deliberately cannot change clients) and, idempotently, creates or updates:
 - the client scope `models:read`, shown on the consent screen, whose tokens
   carry `MCP_RESOURCE_URL` as audience;
 - the client scope `grids:write`, shown on the consent screen ("Change the
-  grid values you can change…"); both scopes are default scopes of each
+  grid values and records you can change…"); both scopes are default scopes of each
   client, so every new connection asks for both;
 - `chatgpt-connector` — callbacks `https://chatgpt.com/connector_platform_oauth_redirect`
   and `https://chatgpt.com/connector/oauth/*`;
@@ -210,6 +240,9 @@ one (Keycloak → the client → Credentials) means updating the secret and
 reconnecting every chat that uses it. Run the command again after changing the
 connector's URL, and once after upgrading to a release with `write_cells`: it
 adds `grids:write` to both clients, and until then every connection reads only.
+Run it again after upgrading to a release with `update_record`, which rewords
+the `grids:write` consent text to name records; connections keep working
+without it.
 
 Offline access needs the realm's default role `offline_access`, which every
 account created through the console, sign-up, SSO or SCIM has; accounts

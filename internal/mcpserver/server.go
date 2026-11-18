@@ -11,10 +11,10 @@
 // from grid reads, never from dashboard widgets, and are not saved in
 // maverickbuilds.app. Dashboards and workflows are read for the process
 // around the grids — their text, links and steps — never for data.
-// One tool changes data, write_cells, and only for a token that also
-// carries the write scope; no tool publishes, runs or schedules anything,
-// and the gateway refuses any route outside its grid allowlists to a
-// connector's requests besides.
+// Two tools change data, write_cells and update_record, and only for a
+// token that also carries the write scope; no tool publishes, runs or
+// schedules anything, and the gateway refuses any route outside its
+// allowlists to a connector's requests besides.
 package mcpserver
 
 import (
@@ -35,7 +35,7 @@ type Observer func(ctx context.Context, subject, tool string, took time.Duration
 // Instructions is what the server tells a host about itself.
 const Instructions = `Analysis of maverickbuilds.app grid data and records, the process around them, and entry of grid values, as the signed-in person.
 
-Start with list_models, then pass its application_id and model_id to every other tool. Discover before querying: list_sources lists the grids, describe_source their metrics and dimensions, list_members the members you can filter or group by. Never guess an id.
+Start with list_models, then pass its application_id and model_id to every other tool. Discover before querying: list_sources lists the grids, describe_source their metrics and dimensions, list_members the members you can filter or group by. Never guess an id. list_models lists only the models the signed-in account opens; when one the person names is missing, call get_connection_access and tell them which account this connection is signed in as.
 
 A model's tables hold the records people save — requests, expenses, deals. list_tables lists them with their fields; query_records reads a page of records (filter by a field, status or date; search; sort) or totals over them: count, sum, average, minimum and maximum, grouped by a field or a date's month or another period. Ask query_records for totals instead of adding up a page of records.
 
@@ -45,7 +45,7 @@ query_grid reads the engine's own values: one total per metric for a filtered sl
 
 Every read is made under the access the person's administrators configured; hidden members and metrics are absent, and values that depend on them are withheld. A value whose state is not "ok" is not zero. Ratios, averages and balances are not additive: ask query_grid for the total you need instead of adding rows.
 
-write_cells is the only tool that changes data: it writes input cells of the active revision as the person, all or nothing. Before calling it, show the person the cells and values you will write and get their confirmation; use dry_run to check them first. Name each cell by an input metric (describe_source) and one leaf member of every dimension of that metric (list_members). Read the cells back with query_grid afterwards. A connection granted read access only refuses writes: the person must disconnect and connect again, allowing changes.`
+Two tools change data, as the person, in the active revision. write_cells writes input cells, all or nothing: name each cell by an input metric (describe_source) and one leaf member of every dimension of that metric (list_members), and read the cells back with query_grid afterwards. update_record changes one record of a table — the fields named and/or its status — under the same checks as the console's record form. A grid that a table feeds (a pipeline of deals, a list of requests) is changed by updating its records, not its cells. Before either, show the person what you will change and get their confirmation; use dry_run to check it first. A connection granted read access only refuses both: the person must disconnect and connect again, allowing changes.`
 
 // ClientKey is the TokenInfo.Extra key under which the gateway gives the
 // host's client id (the token's azp), recorded with each write.
@@ -198,7 +198,7 @@ type gridQueryIn struct {
 
 func (t *tools) register(s *sdk.Server) {
 	sdk.AddTool(s, &sdk.Tool{Name: "get_connection_access", Annotations: readOnly("What this connection can do"),
-		Description: "Your roles, what this connection reads for you and whether it may write cells, with what decides each. Names no one and lists nothing about anyone else."},
+		Description: "The account this connection is signed in as (your own address and name), your roles, what this connection reads for you and whether it may write cells, with what decides each. Lists nothing about anyone else."},
 		called(t, "get_connection_access", func(ctx context.Context, s *reporting.Session, c call, _ accessIn) (any, error) {
 			return s.Access(ctx, c.writes)
 		}))
