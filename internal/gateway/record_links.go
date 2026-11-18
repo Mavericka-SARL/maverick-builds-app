@@ -9,21 +9,17 @@ package gateway
 //	GET /api/records/{id}/delete-plan  what deleting it would do
 //	GET /api/records/{id}/history      its history fields' changes
 //
-// and DELETE /api/records/{id} of such a record (deleteKeptRecord) follows
-// each naming field's delete rule.
+// and DELETE /api/records/{id} of such a record (deleteRecord,
+// record_delete.go) follows each naming field's delete rule.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/recordpost"
-	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
@@ -81,114 +77,6 @@ func (h *handler) restrictDeletePlan(ctx context.Context, act *actor, plan *reco
 		}
 		return res.Total, nil
 	})
-}
-
-// deleteKeptRecord deletes rec, a record of a table keeping a dimension,
-// after recordAction has checked act may: refused (409, with the plan) while
-// a "block" rule's records name it; otherwise it, the records deleted with
-// it and the member it was go in one transaction, and the fields cleared are
-// emptied.
-func (h *handler) deleteKeptRecord(w http.ResponseWriter, r *http.Request, act *actor, scope formRecordScope, rec *crudapp.FormRecord) {
-	ctx := r.Context()
-	ps := h.records()
-	plan, err := ps.PlanDelete(ctx, scope.form, rec)
-	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	if err := h.restrictDeletePlan(ctx, act, plan); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	label := scope.form.MemberLabel(rec.Data)
-	if !plan.CanDelete() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": plan.Refusal(label), "plan": plan})
-		return
-	}
-	// As for any record: its creator withdraws what it posted only from
-	// cells they may write.
-	if rec.CreatedBy != nil && *rec.CreatedBy == act.UserID {
-		if code, msg, err := h.postingRefusal(ctx, act.UserID, true, scope.form, rec.ID, nil); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		} else if code != 0 {
-			jsonErr(w, errors.New(msg), code)
-			return
-		}
-	}
-	var postings []recordPosting
-	for _, id := range plan.DeletedRecords() {
-		ps, err := h.recordPostings(ctx, id)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		postings = append(postings, ps...)
-	}
-	// Input values filed against a member that goes with its record leave
-	// with it; the revision is recalculated only when there were any.
-	membersHeldValues := false
-	for _, m := range plan.DroppedMembers() {
-		var held bool
-		if err := h.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM runtime.fact_input WHERE dim_members @> jsonb_build_object($1::text, $2::text))`,
-			m.DimID, m.Code).Scan(&held); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		membersHeldValues = membersHeldValues || held
-	}
-	if err := ps.ExecuteDelete(ctx, plan, rec.Status, act.UserID); errors.Is(err, crudapp.ErrRecordChanged) {
-		jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
-		return
-	} else if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	bgCtx, userID := context.WithoutCancel(ctx), act.UserID
-	if len(postings) > 0 {
-		go h.retractPostings(bgCtx, postings, userID)
-	}
-	// A cleared record posts what it holds now.
-	store := crudapp.NewStore(h.db.For(ctx))
-	for _, c := range plan.ClearedRecords() {
-		if cur, err := store.GetRecord(ctx, c.RecordID); err == nil {
-			formID, status, data := cur.FormID, cur.Status, cur.Data
-			go func() { _ = h.applyFormMappings(bgCtx, c.RecordID, formID, status, data, userID) }()
-		}
-	}
-	dims := map[string]bool{}
-	for _, m := range plan.DroppedMembers() {
-		dims[m.DimID] = true
-	}
-	h.recalcInBackground(ctx, scope.revisionID, "recalculation after a record and its member were deleted", func(bg context.Context) {
-		if membersHeldValues {
-			if err := h.recalcRevisionFromInputs(bg, scope.modelID, scope.revisionID); err != nil {
-				h.log.Warn().Err(err).Str("revision", scope.revisionID).Msg("recalc after a kept member was removed")
-			}
-		}
-		for d := range dims {
-			h.recalcDimensionDependents(bg, d)
-		}
-	})
-	deleted := plan.DeletedRecords()
-	for i, id := range deleted {
-		meta := map[string]string{"form_id": rec.FormID, "status": rec.Status}
-		if i == 0 {
-			meta["deleted_with_it"] = strconv.Itoa(len(deleted) - 1)
-			meta["cleared"] = strconv.Itoa(len(plan.ClearedRecords()))
-		} else {
-			meta = map[string]string{"deleted_with": rec.ID}
-		}
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordDeleted,
-			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ApplicationID: scope.appID, ResourceType: "form_record", ResourceID: id,
-			Metadata: meta,
-		})
-	}
-	jsonOK(w, map[string]any{"status": "deleted", "deleted": len(deleted), "cleared": len(plan.ClearedRecords())})
 }
 
 // recordDeletePlan serves GET /api/records/{id}/delete-plan: whether the

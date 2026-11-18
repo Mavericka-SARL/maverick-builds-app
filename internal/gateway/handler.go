@@ -9971,9 +9971,11 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 			jsonErr(w, fmt.Errorf("config required"), http.StatusBadRequest)
 			return
 		}
-		// A table loader's replace_by must be a field it may replace by.
+		// A table loader's replace_by must be a field it may replace by,
+		// and its match_by one it may match by.
 		var rb struct {
 			ReplaceBy replaceBySpec `json:"replace_by"`
+			MatchBy   string        `json:"match_by"`
 		}
 		if err := json.Unmarshal(body.Config, &rb); err != nil && strings.Contains(err.Error(), "replace_by") {
 			jsonErr(w, err, http.StatusBadRequest)
@@ -9987,6 +9989,22 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if err := h.checkReplaceBy(ctx, targetID, string(rb.ReplaceBy)); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
+		if strings.TrimSpace(rb.MatchBy) != "" {
+			var targetType, targetID string
+			_ = h.db.QueryRow(ctx, `SELECT target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&targetType, &targetID)
+			if targetType != "form" {
+				jsonErr(w, fmt.Errorf("match_by applies to a table's loader"), http.StatusBadRequest)
+				return
+			}
+			if strings.TrimSpace(string(rb.ReplaceBy)) != "" {
+				jsonErr(w, fmt.Errorf("match_by: a load either replaces records (replace_by) or updates them by a field (match_by), not both"), http.StatusBadRequest)
+				return
+			}
+			if err := h.checkMatchBy(ctx, targetID, rb.MatchBy); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -10269,6 +10287,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		// replaces: loading July again replaces July's records. Several
 		// fields replace by their combination (an entity's month).
 		ReplaceBy replaceBySpec `json:"replace_by"`
+		// MatchBy (a table's loader) names the field a row is matched to the
+		// record it updates by: a source system's id, loaded again each
+		// month, refreshes its records instead of adding them again.
+		MatchBy string `json:"match_by"`
 		// Parameters are values the person gives at each run, stamped on
 		// every row as a column ("Period end"): what the file means but
 		// does not say, and changes from one run to the next.
@@ -10411,7 +10433,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, dryRun, string(cfg.ReplaceBy), recordJob)
+		res, iErr := h.importFormRows(ctx, act, scope, form, header, rows, tableLoad{dryRun: dryRun, replaceBy: string(cfg.ReplaceBy), matchBy: cfg.MatchBy, beforeCommit: recordJob})
 		imported, rowErrs := res.Written(), res.Errors
 		if dryRun && iErr == nil {
 			jsonOK(w, map[string]any{"dry_run": true, "rows": imported, "rows_added": res.Created, "rows_updated": res.Updated, "rows_unchanged": res.Unchanged,
@@ -12244,66 +12266,15 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			jsonRecordErr(w, err, "record")
 			return
 		}
-		if access.ParentDecided && !access.Admin {
-			msg, _, err := h.parentRefusal(ctx, &scope, rec.Data)
-			if err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
-			jsonErr(w, errors.New(msg), http.StatusForbidden)
-			return
+		res, err := h.deleteRecord(ctx, act, store, rec, scope, access, false)
+		switch {
+		case err != nil:
+			jsonRecordDeleteErr(w, err)
+		case res.kept:
+			jsonOK(w, map[string]any{"status": "deleted", "deleted": res.deleted, "cleared": res.cleared})
+		default:
+			jsonOK(w, map[string]string{"status": "deleted"})
 		}
-		if !access.CanDelete(rec.Status) {
-			jsonErr(w, fmt.Errorf("forbidden: you may not delete this record"), http.StatusForbidden)
-			return
-		}
-		// A record that is a kept dimension's member goes by the delete
-		// rules of the fields naming it (deleteKeptRecord).
-		if scope.form.KeepsDimension() {
-			h.deleteKeptRecord(w, r, act, scope, rec)
-			return
-		}
-		// A creator deleting their record withdraws what it posted: only
-		// from cells they may write. An administrator removing someone's
-		// record needs no write access there (a record posts within its
-		// creator's access).
-		if rec.CreatedBy != nil && *rec.CreatedBy == act.UserID {
-			if code, msg, err := h.postingRefusal(ctx, act.UserID, true, scope.form, recordID, nil); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			} else if code != 0 {
-				jsonErr(w, errors.New(msg), code)
-				return
-			}
-		}
-		// What the record posted into metrics, taken back out once it is
-		// gone (retractPostings).
-		postings, err := h.recordPostings(ctx, recordID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if err := store.DeleteRecordFrom(ctx, recordID, rec.Status); errors.Is(err, crudapp.ErrRecordChanged) {
-			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
-			return
-		} else if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if len(postings) > 0 {
-			bgCtx, userID := context.WithoutCancel(ctx), act.UserID
-			go h.retractPostings(bgCtx, postings, userID)
-		}
-		if access.ParentDecided {
-			h.reopenParents(ctx, &scope, act, rec.Data)
-		}
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordDeleted,
-			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ApplicationID: scope.appID, ResourceType: "form_record", ResourceID: recordID,
-			Metadata: map[string]string{"form_id": rec.FormID, "status": rec.Status},
-		})
-		jsonOK(w, map[string]string{"status": "deleted"})
 
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)

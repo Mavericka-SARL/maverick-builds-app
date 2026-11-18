@@ -62,6 +62,10 @@ type FileImportRequest struct {
 	// ReplaceBy (a table) names the field whose values the file replaces:
 	// the table's records holding one are deleted as the file's are added.
 	ReplaceBy string
+	// MatchBy (a table) names the field a row is matched to a record by: a
+	// row whose value of it a record holds updates that record, the others
+	// are added (recordpost.ImportRequest.MatchBy).
+	MatchBy string
 }
 
 // ReadHooks are the gateway operations behind the read tools that look at a
@@ -127,6 +131,7 @@ func integrationToolDefs() []toolDef {
 				"target_id":{"type":"string","description":"The grid, dimension or table of records: id or exact name"},
 				"reshape":` + reshapeSchema + `,
 				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"},
+				"match_by":{"type":"string","description":"A table only: the field (name or label; text, number or auto-code) that identifies a record, e.g. the source system's id. A row whose value one record holds updates that record, the other rows are added; the preview counts both"},
 				"after_steps":{"type":"array","description":"Write steps of the proposal you are preparing, in propose_actions' step shape ({tool, description, params}), run first in a dry run (nothing is kept) so the file previews into a grid or dimension they create; target_id may then be \"<created in step N>\" or the new name","items":{"type":"object"}}
 			},"required":["file","target_id"]}`,
 		},
@@ -364,6 +369,7 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		ColumnMap        map[string]string  `json:"column_map"`
 		AfterSteps       []ProposalStep     `json:"after_steps"`
 		PercentFractions bool               `json:"percent_fractions"`
+		MatchBy          string             `json:"match_by"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
@@ -397,6 +403,9 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		return "", err
 	}
 	req.TargetType, req.TargetID = kind, targetID
+	if req.MatchBy = strings.TrimSpace(p.MatchBy); req.MatchBy != "" && kind != "form" {
+		return "", fmt.Errorf("match_by applies to a table import: a grid's or dimension's rows already update the cells and members they name")
+	}
 	return e.hooks.PreviewFileImport(ctx, req)
 }
 
@@ -661,6 +670,20 @@ func (e *WriteExecutor) tableReplaceBy(ctx context.Context, tableID, spec string
 		}
 	}
 	return strings.Join(names, ","), nil
+}
+
+// tableMatchBy is the field of table tableID a load may match its records
+// by, as name names it.
+func (e *WriteExecutor) tableMatchBy(ctx context.Context, tableID, name string) (string, error) {
+	form, err := crudapp.NewStoreOn(e.pool).GetForm(ctx, tableID)
+	if err != nil {
+		return "", fmt.Errorf("match_by: read the table: %w", err)
+	}
+	f, err := recordpost.MatchField(form, name)
+	if err != nil {
+		return "", err
+	}
+	return f.Name, nil
 }
 
 // create_file_integration saves a re-runnable Excel/CSV import: the Import
@@ -1078,6 +1101,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		ColumnMap     map[string]string  `json:"column_map"`
 		ImportMode    string             `json:"import_mode"`
 		ReplaceBy     replaceByParam     `json:"replace_by"`
+		MatchBy       string             `json:"match_by"`
 		// Parameters: a saved loader's values asked at each run, by column.
 		Parameters map[string]string `json:"parameters"`
 		// See FileImportRequest.ValuesArePercentUnits.
@@ -1185,6 +1209,17 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 			return "", "", fmt.Errorf("replace_by applies to a table import; a grid's import_mode says what a file replaces")
 		}
 		if req.ReplaceBy, err = e.tableReplaceBy(ctx, req.TargetID, req.ReplaceBy); err != nil {
+			return "", "", err
+		}
+	}
+	if mb := strings.TrimSpace(p.MatchBy); mb != "" {
+		if req.TargetType != "form" {
+			return "", "", fmt.Errorf("match_by applies to a table import: a grid's or dimension's rows already update the cells and members they name")
+		}
+		if req.ReplaceBy != "" {
+			return "", "", fmt.Errorf("match_by: an import either replaces records (replace_by) or updates them by a field (match_by), not both")
+		}
+		if req.MatchBy, err = e.tableMatchBy(ctx, req.TargetID, mb); err != nil {
 			return "", "", err
 		}
 	}

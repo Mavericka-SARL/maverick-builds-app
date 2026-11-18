@@ -842,7 +842,9 @@ file replaces — the table's records holding a value the file holds (a date fie
 file's records are added, so loading a month's corrected file again does not double it. Give a period-by-period
 loader (monthly actuals, balances) replace_by its period field; leave it out for a register that only grows. Each
 team loading its own slice (an entity's trial balance for a month) takes a list, "replace_by": ["entity", "period"]:
-a file then replaces only the records holding its combination, and the other entities' stay. "parameters":
+a file then replaces only the records holding its combination, and the other entities' stay. A file refreshing
+records the table already holds (a CRM extract loaded again) is imported with "match_by" instead (see Saving records).
+"parameters":
 [{"column", "label", "type": "date" | "text", "required"}] are values the loader asks for at each upload and stamps
 on every row as a column of that name — the period end a trial balance file does not hold; map that column in
 column_map like any other. import_file_data with that "integration_id" takes them as "parameters":
@@ -913,10 +915,18 @@ fields, choices, members of dimension fields by code or label, accepted values, 
 the developer may set with a "status" key) and posted through the table's integrations, and the rules a new record
 fires run; one refused record refuses the step (all or nothing). Leave an auto-code field out (the server numbers
 the record). In a table whose records have a typed code (a text field marked "code"), a record whose code one
-already holds updates that record: the fields given replace its values, the others keep theirs. At most 200 per
-step; more records come from a file (import_file_data). They go into the working revision's table — the AI draft's
-copy while the session has one, as an import_file_data into a table does — so the records a later import of the
-same plan names are there, and they go live with the draft.
+already holds updates that record: the fields given replace its values, the others keep theirs. Any other table
+updates its records with "match_by": "<field>" — the auto-code field (a record giving "code": "D-0042") or a
+source system's id field (text or number): a record whose value one record holds updates that record the same way,
+the others are added. At most 200 per step; more records come from a file (import_file_data, which takes the same
+match_by — preview_file_import with it counts the rows that update and those that add). They go into the working
+revision's table — the AI draft's copy while the session has one, as an import_file_data into a table does — so the
+records a later import of the same plan names are there, and they go live with the draft.
+Records are deleted with delete_records {"table": "<table id or name>", "records": ["<code>", ...]} (or "match_by":
+"<field>" with each record's value of it), at most 200 per step: each as the developer deletes one on a records
+widget — their access, a linked record's delete rules, what it posted taken back out — and one refused refuses the
+step. Read the records first (query_records) and name exactly the ones meant. Correct a record in place (match_by)
+rather than delete and add it again, which gives it a new code and drops its history; delete duplicates by their code.
 
 ## Data export
 A data export (create_export_integration) is a saved, re-downloadable file of one grid's values in a format

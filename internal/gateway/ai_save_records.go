@@ -31,7 +31,10 @@ func (h *handler) aiSaveRecords(ctx context.Context, userID string, req aiassist
 	if !scope.reach {
 		return "", fmt.Errorf("you cannot add records to table '%s'", table)
 	}
-	res, err := h.importFormRows(ctx, act, scope, scope.form, req.Header, req.Rows, dryRun, "", nil)
+	res, err := h.importFormRows(ctx, act, scope, scope.form, req.Header, req.Rows,
+		// A record leaving a field out keeps the value the record it updates
+		// holds; the step's columns are every field any of its records gives.
+		tableLoad{dryRun: dryRun, matchBy: req.MatchBy, missingKeeps: true})
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +50,13 @@ func (h *handler) aiSaveRecords(ctx context.Context, userID string, req aiassist
 		return "", fmt.Errorf("the records hold no field of table '%s': name each field by its name or label", table)
 	}
 	var parts []string
-	verb := map[bool][3]string{false: {"added", "updated by their code", "unchanged"}, true: {"would be added", "would be updated by their code", "would stay unchanged"}}[dryRun]
+	by := "their code"
+	if req.MatchBy != "" {
+		if f := scope.form.Field(req.MatchBy); f != nil {
+			by = "their " + firstNonEmpty(f.Label, f.Name)
+		}
+	}
+	verb := map[bool][3]string{false: {"added", "updated by " + by, "unchanged"}, true: {"would be added", "would be updated by " + by, "would stay unchanged"}}[dryRun]
 	if res.Created > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", res.Created, verb[0]))
 	}

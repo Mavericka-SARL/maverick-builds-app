@@ -20,6 +20,9 @@ type RecordsSave struct {
 	TableID    string
 	Header     []string
 	Rows       []importpkg.RawRow
+	// MatchBy names the field a record is matched to the one it updates by
+	// (recordpost.ImportRequest.MatchBy); "" matches by a typed code.
+	MatchBy string
 }
 
 // maxRecordsPerStep bounds one step: more records belong in a file
@@ -37,6 +40,7 @@ func (e *WriteExecutor) saveRecords(ctx context.Context, raw json.RawMessage) (s
 		TableID string                       `json:"table_id"`
 		FormID  string                       `json:"form_id"`
 		Records []map[string]json.RawMessage `json:"records"`
+		MatchBy string                       `json:"match_by"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -54,6 +58,12 @@ func (e *WriteExecutor) saveRecords(ctx context.Context, raw json.RawMessage) (s
 	tableID, err := e.requireInModel(ctx, "form", ref)
 	if err != nil {
 		return "", "", err
+	}
+	matchBy := ""
+	if mb := strings.TrimSpace(p.MatchBy); mb != "" {
+		if matchBy, err = e.tableMatchBy(ctx, tableID, mb); err != nil {
+			return "", "", err
+		}
 	}
 	var header []string
 	seen := map[string]bool{}
@@ -82,7 +92,7 @@ func (e *WriteExecutor) saveRecords(ctx context.Context, raw json.RawMessage) (s
 		}
 		rows = append(rows, importpkg.RawRow{RowNumber: i + 1, Cells: cells})
 	}
-	result, err := e.hooks.SaveRecords(ctx, RecordsSave{RevisionID: e.revID, TableID: tableID, Header: header, Rows: rows})
+	result, err := e.hooks.SaveRecords(ctx, RecordsSave{RevisionID: e.revID, TableID: tableID, Header: header, Rows: rows, MatchBy: matchBy})
 	if err != nil {
 		return "", "", err
 	}
@@ -120,4 +130,72 @@ func lookupFoldRaw(m map[string]json.RawMessage, key string) (json.RawMessage, b
 		}
 	}
 	return nil, false
+}
+
+// RecordsDelete is a delete_records step: the records of a table to delete,
+// each named by its value of MatchBy (the table's code field when "") or by
+// its record id.
+type RecordsDelete struct {
+	RevisionID string
+	TableID    string
+	MatchBy    string
+	Values     []string
+}
+
+// deleteRecords deletes records of a table the developer names — the
+// duplicates a load made, deals the source system dropped — as the
+// developer would one by one on a records widget. The assistant could
+// neither delete nor update a table's auto-coded records and asked the
+// developer to do it by hand (2026-11-17).
+func (e *WriteExecutor) deleteRecords(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		Table   string            `json:"table"`
+		TableID string            `json:"table_id"`
+		FormID  string            `json:"form_id"`
+		MatchBy string            `json:"match_by"`
+		Records []json.RawMessage `json:"records"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	ref := strings.TrimSpace(firstNonEmpty(p.TableID, p.FormID, p.Table))
+	if ref == "" || len(p.Records) == 0 {
+		return "", "", fmt.Errorf(`table and records are required: {"table": "<table id or name>", "records": ["<code>", ...]} — or "match_by": "<field>" with each record's value of it`)
+	}
+	if len(p.Records) > maxRecordsPerStep {
+		return "", "", fmt.Errorf("%d records in one step; at most %d — split them over several steps", len(p.Records), maxRecordsPerStep)
+	}
+	if e.hooks.DeleteRecords == nil {
+		return "", "", fmt.Errorf("deleting records is not available here")
+	}
+	tableID, err := e.requireInModel(ctx, "form", ref)
+	if err != nil {
+		return "", "", err
+	}
+	matchBy := ""
+	if mb := strings.TrimSpace(p.MatchBy); mb != "" {
+		if matchBy, err = e.tableMatchBy(ctx, tableID, mb); err != nil {
+			return "", "", err
+		}
+	}
+	values := make([]string, 0, len(p.Records))
+	seen := map[string]bool{}
+	for i, v := range p.Records {
+		s, err := recordCellText(v)
+		if err != nil {
+			return "", "", fmt.Errorf("records[%d]: %w", i, err)
+		}
+		if s = strings.TrimSpace(s); s == "" {
+			return "", "", fmt.Errorf("records[%d] is empty: name each record by its code (or its match_by value)", i)
+		}
+		if !seen[s] {
+			seen[s] = true
+			values = append(values, s)
+		}
+	}
+	result, err := e.hooks.DeleteRecords(ctx, RecordsDelete{RevisionID: e.revID, TableID: tableID, MatchBy: matchBy, Values: values})
+	if err != nil {
+		return "", "", err
+	}
+	return result, "", nil
 }

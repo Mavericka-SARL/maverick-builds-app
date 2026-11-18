@@ -181,6 +181,9 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		// ReplaceBy names a field: the table's records holding a value of
 		// it the file holds are replaced (recordpost.ImportRequest).
 		ReplaceBy replaceBySpec `json:"replace_by"`
+		// MatchBy names a field: a row whose value of it a record holds
+		// updates that record (recordpost.ImportRequest.MatchBy).
+		MatchBy string `json:"match_by"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.CSV == "" && body.XLSXBase64 == "") {
 		jsonErr(w, fmt.Errorf("the file is empty (send its rows as csv, or the workbook as xlsx_base64)"), http.StatusBadRequest)
@@ -236,7 +239,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 			return err
 		}
 	}
-	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, body.DryRun, string(body.ReplaceBy), recordJob)
+	res, err := h.importFormRows(ctx, act, scope, form, header, rawRows, tableLoad{dryRun: body.DryRun, replaceBy: string(body.ReplaceBy), matchBy: body.MatchBy, beforeCommit: recordJob})
 	created, errs := res.Created, res.Errors
 	if body.DryRun && err == nil {
 		jsonOK(w, map[string]any{"dry_run": true, "rows": res.Written(), "rows_added": created, "rows_updated": res.Updated, "rows_unchanged": res.Unchanged,

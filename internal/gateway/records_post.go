@@ -98,17 +98,34 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 	return recordpost.RetryTransient(ctx, attempts, op)
 }
 
+// tableLoad is how importFormRows loads rows into a table.
+type tableLoad struct {
+	// dryRun checks every row and creates nothing.
+	dryRun bool
+	// replaceBy names the field a load replaces by (recordpost.ImportRequest):
+	// the records it deletes are ones act may delete, as by hand.
+	replaceBy string
+	// matchBy names the field a row is matched to the record it updates by
+	// (a source system's id, or the auto-code); "" matches by the table's
+	// typed code.
+	matchBy string
+	// missingKeeps: a row with no cell for a column keeps the value the
+	// record it updates holds (recordpost.ImportRequest.MissingKeeps).
+	missingKeeps bool
+	// beforeCommit (recordpost.ImportRequest.BeforeCommit) runs in the
+	// records' transaction: the records import writes its Recent Imports
+	// line, with its Idempotency-Key, there.
+	beforeCommit func(context.Context, pgx.Tx, recordpost.ImportResult) error
+}
+
 // importFormRows creates a record of form for each row as act, in the
 // statuses scope lets them create (recordpost.ImportRows): POST
 // /api/forms/{id}/import, a saved csv_import or google_sheets integration
 // whose target is a table, and the AI Developer's import of an attached
 // file. dryRun checks every row and creates nothing.
-// replaceBy names the field a load replaces by (recordpost.ImportRequest):
-// the records it deletes are ones act may delete, as by hand. beforeCommit
-// (recordpost.ImportRequest.BeforeCommit) runs in the records' transaction:
-// the records import writes its Recent Imports line, with its
-// Idempotency-Key, there.
-func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool, replaceBy string, beforeCommit func(context.Context, pgx.Tx, recordpost.ImportResult) error) (recordpost.ImportResult, error) {
+// load says how (tableLoad).
+func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, load tableLoad) (recordpost.ImportResult, error) {
+	dryRun, replaceBy, beforeCommit := load.dryRun, load.replaceBy, load.beforeCommit
 	// Each record a file adds to a table keeping a dimension is a new
 	// member: within the edition's members per dimension, as a record saved
 	// by hand is. A row updating the record holding its code adds none.
@@ -148,7 +165,7 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			return ""
 		},
 		AppID: scope.appID, RevisionID: scope.revisionID,
-		DryRun: dryRun, ReplaceBy: replaceBy, ByPerson: true, BeforeCommit: beforeCommit,
+		DryRun: dryRun, ReplaceBy: replaceBy, MatchBy: load.matchBy, MissingKeeps: load.missingKeeps, ByPerson: true, BeforeCommit: beforeCommit,
 		DeleteRefusal: func(rec *crudapp.FormRecord) string {
 			if !scope.access(rec).CanDelete(rec.Status) {
 				return "you may not delete it"
@@ -175,6 +192,11 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			return ""
 		},
 		NewMembers: newMembers,
+		// A row updates only a record act may see: one they may not is not
+		// there for them, as on the records widget.
+		VisibleIDs: func(ctx context.Context, ids []string) (map[string]bool, error) {
+			return h.visibleRecordIDs(ctx, act, scope, form, ids)
+		},
 	})
 	if err == nil && parentErr != nil {
 		err = parentErr
@@ -186,13 +208,13 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 }
 
 // jsonImportErr answers an import that failed as a whole: a load whose
-// replace is refused (409) or whose replace_by is not a field it may replace
-// by (400), a plan limit, or a server error.
+// replace is refused (409) or whose replace_by or match_by is not a field it
+// may replace or match by (400), a plan limit, or a server error.
 func (h *handler) jsonImportErr(w http.ResponseWriter, err error) {
 	switch {
 	case recordpost.IsReplaceRefused(err):
 		jsonErr(w, err, http.StatusConflict)
-	case strings.HasPrefix(err.Error(), "replace_by:"):
+	case strings.HasPrefix(err.Error(), "replace_by:"), strings.HasPrefix(err.Error(), "match_by:"):
 		jsonErr(w, err, http.StatusBadRequest)
 	default:
 		h.jsonLimitErr(w, err)
@@ -207,6 +229,55 @@ func (h *handler) checkReplaceBy(ctx context.Context, tableID, name string) erro
 		return fmt.Errorf("replace_by: the loader's table: %w", err)
 	}
 	_, err = recordpost.ReplaceFields(form, name)
+	return err
+}
+
+// visibleRecordIDs keeps the ids, of form's records, of those act may see
+// (recordVisibility, as the records widget decides).
+func (h *handler) visibleRecordIDs(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, ids []string) (map[string]bool, error) {
+	vis, err := h.recordVisibility(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(ids))
+	if vis.Nothing {
+		return out, nil
+	}
+	if vis.OwnerID == "" && len(vis.HiddenCodes) == 0 && len(vis.HiddenNames) == 0 && len(vis.WithheldFields) == 0 {
+		for _, id := range ids {
+			out[id] = true
+		}
+		return out, nil
+	}
+	store := crudapp.NewStore(h.db.For(ctx))
+	for start := 0; start < len(ids); start += crudapp.MaxRecordLimit {
+		chunk := ids[start:min(start+crudapp.MaxRecordLimit, len(ids))]
+		vals := make([]any, len(chunk))
+		for i, id := range chunk {
+			vals[i] = id
+		}
+		res, err := store.QueryRecords(ctx, form, vis, act.UserID, crudapp.Query{
+			Filters: []crudapp.Filter{{Field: "id", Op: "in", Values: vals}},
+			Limit:   len(chunk),
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range res.Records {
+			out[r.ID] = true
+		}
+	}
+	return out, nil
+}
+
+// checkMatchBy says why table tableID's loader may not match records by name
+// (nil when it may).
+func (h *handler) checkMatchBy(ctx context.Context, tableID, name string) error {
+	form, err := crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, tableID)
+	if err != nil {
+		return fmt.Errorf("match_by: the loader's table: %w", err)
+	}
+	_, err = recordpost.MatchField(form, name)
 	return err
 }
 

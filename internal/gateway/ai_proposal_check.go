@@ -205,6 +205,16 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 			}
 			return h.aiSaveRecords(ctx, userID, req, true)
 		},
+		// Deletions likewise: each record is checked as deleting it by hand
+		// is, outside the plan's transaction.
+		DeleteRecords: func(ctx context.Context, req aiassistant.RecordsDelete) (string, error) {
+			var exists bool
+			_ = h.db.For(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.form_def WHERE id=$1::uuid)`, req.TableID).Scan(&exists)
+			if !exists {
+				return "", aiassistant.ErrNotDryRunnable
+			}
+			return h.aiDeleteRecords(ctx, userID, req, true)
+		},
 		PostFormIntegration: func(ctx context.Context, mappingID string) (int, error) {
 			return checkFormPosting(ctx, tx, mappingID)
 		},
@@ -349,7 +359,7 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, u
 		if !exists {
 			return "", aiassistant.ErrNotDryRunnable
 		}
-		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), true)
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), h.aiMatchBy(ctx, req), true)
 		if err == nil && problems != "" {
 			err = fmt.Errorf("import rejected: %s", strings.TrimSpace(problems))
 		}

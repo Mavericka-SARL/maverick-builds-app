@@ -101,6 +101,12 @@ type Hooks struct {
 	// file whole or nothing, a row whose typed code a record holds updating
 	// it. A proposal check runs it as a dry run.
 	SaveRecords func(ctx context.Context, req RecordsSave) (string, error)
+	// DeleteRecords deletes a delete_records step's records as the
+	// developer would one by one on a records widget (access, a kept
+	// record's delete rules, what each posted taken back out); every record
+	// is checked before any is deleted. A proposal check runs it as a dry
+	// run.
+	DeleteRecords func(ctx context.Context, req RecordsDelete) (string, error)
 	// WriteValues writes a write_input_values step's values through the same
 	// pipeline, as typed cells (write guard, plan limits, recalculation,
 	// audit), and returns a summary.
@@ -566,6 +572,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.fillSampleValues(ctx, params)
 	case "save_records":
 		return e.saveRecords(ctx, params)
+	case "delete_records":
+		return e.deleteRecords(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)

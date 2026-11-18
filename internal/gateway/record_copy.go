@@ -97,7 +97,7 @@ func (h *handler) recordsCopy(w http.ResponseWriter, r *http.Request, formID str
 		cells[f.Name] = strings.TrimSpace(body.Value)
 		rows = append(rows, importpkg.RawRow{RowNumber: i + 1, Cells: cells})
 	}
-	res, err := h.importFormRows(ctx, act, scope, form, header, rows, false, "", nil)
+	res, err := h.importFormRows(ctx, act, scope, form, header, rows, tableLoad{})
 	if err != nil {
 		h.jsonImportErr(w, err)
 		return

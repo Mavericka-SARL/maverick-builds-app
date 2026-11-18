@@ -340,7 +340,7 @@ func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessio
 	sb.WriteString(f.layout(req))
 
 	if req.TargetType == "form" {
-		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), true)
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, h.aiReplaceBy(ctx, req), h.aiMatchBy(ctx, req), true)
 		switch {
 		case err != nil:
 			sb.WriteString("Cannot import: " + err.Error() + "\n")
@@ -460,7 +460,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	}
 
 	if req.TargetType == "form" {
-		n, problems, table, err := h.aiTableImport(ctx, act.UserID, f, req.TargetID, h.aiReplaceBy(ctx, req), false)
+		n, problems, table, err := h.aiTableImport(ctx, act.UserID, f, req.TargetID, h.aiReplaceBy(ctx, req), h.aiMatchBy(ctx, req), false)
 		if err == nil && problems != "" {
 			err = fmt.Errorf("%s", strings.TrimSpace(problems))
 		}
@@ -882,7 +882,7 @@ var afterStepRef = regexp.MustCompile(`^\s*<created in step (\d+)>\s*$`)
 // create, each record posted through the table's mappings, nothing created
 // when any row fails. problems lists the failing rows; the table's name
 // comes back for the message.
-func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedFile, tableID, replaceBy string, dryRun bool) (n int, problems, table string, err error) {
+func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedFile, tableID, replaceBy, matchBy string, dryRun bool) (n int, problems, table string, err error) {
 	act, err := h.actorByUserID(ctx, userID)
 	if err != nil {
 		return 0, "", "", err
@@ -898,7 +898,7 @@ func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedF
 	if !scope.reach {
 		return 0, "", table, fmt.Errorf("you cannot add records to table '%s'", table)
 	}
-	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun, replaceBy, nil)
+	res, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, tableLoad{dryRun: dryRun, replaceBy: replaceBy, matchBy: matchBy})
 	n, rowErrs := res.Written(), res.Errors
 	if err != nil {
 		return 0, "", table, err
@@ -931,6 +931,17 @@ func (h *handler) aiReplaceBy(ctx context.Context, req aiassistant.FileImportReq
 	}
 	var v string
 	_ = h.db.For(ctx).QueryRow(ctx, `SELECT COALESCE(config->>'replace_by', '') FROM model.integration_def WHERE id = $1::uuid`, req.IntegrationID).Scan(&v)
+	return v
+}
+
+// aiMatchBy is the field an AI import into a table matches records by: the
+// one it names, or the one its integration's loader names.
+func (h *handler) aiMatchBy(ctx context.Context, req aiassistant.FileImportRequest) string {
+	if req.MatchBy != "" || req.IntegrationID == "" {
+		return req.MatchBy
+	}
+	var v string
+	_ = h.db.For(ctx).QueryRow(ctx, `SELECT COALESCE(config->>'match_by', '') FROM model.integration_def WHERE id = $1::uuid`, req.IntegrationID).Scan(&v)
 	return v
 }
 

@@ -12,7 +12,6 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
-	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 // RowError is one row an import refuses.
@@ -80,6 +79,23 @@ type ImportRequest struct {
 	// status ("" when they may): the row then updates that record instead
 	// of adding one. Nil refuses every such row (the code is taken).
 	UpdateRefusal func(rec *crudapp.FormRecord, status string) string
+	// MatchBy names a field (MatchField) a row is matched to a record by: a
+	// row whose value of it one record holds updates that record, as a row
+	// holding a typed code does (UpdateRefusal decides who may); a row
+	// whose value no record holds adds a record — refused for an auto-code,
+	// which only the server gives. "" matches by the table's typed code,
+	// if it has one. A load does not both match and replace (ReplaceBy).
+	MatchBy string
+	// MissingKeeps: a row with no cell for a column keeps the value the
+	// record it updates holds — an AI save_records record leaving a field
+	// out, in a step whose columns are every field any record gives. Off, a
+	// missing cell is an empty one: a spreadsheet row drops its trailing
+	// blank cells.
+	MissingKeeps bool
+	// VisibleIDs, when set, keeps the ids of the records CreatorID may see:
+	// a row is matched only to one of those, as if the others were not
+	// there. Nil: every record (a connector's principal).
+	VisibleIDs func(ctx context.Context, ids []string) (map[string]bool, error)
 	// NewMembers, when set, is told how many records the file adds before
 	// anything is written (a table keeping a dimension: each is a new
 	// member); its error refuses the file.
@@ -130,6 +146,17 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	}
 	replaceKeys := map[string]bool{}
 	partial := req.Partial && replaceBy == nil
+	// The field a row is matched to a record by: the one the load names,
+	// else the table's typed code.
+	matchField := form.TypedCodeField()
+	if strings.TrimSpace(req.MatchBy) != "" {
+		if replaceBy != nil {
+			return res, fmt.Errorf("match_by: a load either replaces records (replace_by) or updates them by a field (match_by), not both")
+		}
+		if matchField, err = MatchField(form, req.MatchBy); err != nil {
+			return res, err
+		}
+	}
 
 	// Match each column header to a field by name, then by label
 	// (case-insensitive) — how an exported file names its columns. Columns
@@ -154,6 +181,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			case crudapp.FieldStatus:
 				statusCol = col
 			case crudapp.FieldAutoCode:
+				headerOf[f.Name] = col // read only to match a row to its record
 			default:
 				fieldByHeader[col] = f
 				headerOf[f.Name] = col
@@ -187,24 +215,46 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	var staged []stagedRecord
 	memberLeaves := NewMemberCache()
 	today := time.Now().UTC().Format("2006-01-02")
-	codeRows := map[string]int{} // typed code → the row that first gives it
-	// A table whose records have a typed code: a row giving a code a record
-	// holds updates that record — a CRM extract or an HRIS roster loaded
-	// again refreshes its accounts and sellers. Each such load used to be
-	// refused whole ("is taken") although a kept dimension's records are
-	// documented as added and updated by their code (2026-11-16).
-	codeField := form.TypedCodeField()
-	var byCode map[string]*crudapp.FormRecord
-	if codeField != nil {
-		if byCode, err = recordsByCode(ctx, ps.db(ctx), form.ID, codeField.Name); err != nil {
+	matchRows := map[string]int{} // match value → the row that first gives it
+	// A row giving the value a record holds of the match field updates
+	// that record — a CRM extract or an HRIS roster loaded again refreshes
+	// its accounts and sellers. Each such load used to be refused whole
+	// ("is taken") although a kept dimension's records are documented as
+	// added and updated by their code (2026-11-16).
+	var matches *recordMatches
+	if matchField != nil {
+		if matches, err = recordsByMatch(ctx, ps.db(ctx), form.ID, matchField); err != nil {
+			return res, err
+		}
+		keys := make([]string, 0, len(req.Rows))
+		for _, row := range req.Rows {
+			keys = append(keys, matchKey(matchField, row.Cells[headerOf[matchField.Name]]))
+		}
+		if err := matches.keepVisible(ctx, keys, req.VisibleIDs); err != nil {
 			return res, err
 		}
 	}
 
 	for _, row := range req.Rows {
 		var target *crudapp.FormRecord
-		if codeField != nil {
-			target = byCode[strings.TrimSpace(row.Cells[headerOf[codeField.Name]])]
+		matchVal := ""
+		if matchField != nil {
+			matchCol := firstNonEmpty(headerOf[matchField.Name], firstNonEmpty(matchField.Label, matchField.Name))
+			matchVal = matchKey(matchField, row.Cells[headerOf[matchField.Name]])
+			t, n := matches.lookup(matchVal)
+			switch {
+			case n > 1:
+				errs = append(errs, RowError{Row: row.RowNumber, Column: matchCol,
+					Message: fmt.Sprintf("%d records of %s hold %s %q, so the row cannot say which one it updates: delete the extra records first",
+						n, form.Label, firstNonEmpty(matchField.Label, matchField.Name), matchVal)})
+				continue
+			case t == nil && matchVal != "" && matchField.Type == crudapp.FieldAutoCode:
+				errs = append(errs, RowError{Row: row.RowNumber, Column: matchCol,
+					Message: fmt.Sprintf("no record of %s has %s %q: the server numbers a new record, so leave its %s empty to add one",
+						form.Label, firstNonEmpty(matchField.Label, matchField.Name), matchVal, firstNonEmpty(matchField.Label, matchField.Name))})
+				continue
+			}
+			target = t
 		}
 		data := map[string]any{}
 		if target != nil {
@@ -216,7 +266,11 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				data[k] = v
 			}
 			for col, field := range fieldByHeader {
-				raw := strings.TrimSpace(row.Cells[col])
+				cell, given := row.Cells[col]
+				if !given && req.MissingKeeps {
+					continue
+				}
+				raw := strings.TrimSpace(cell)
 				old, had := data[field.Name]
 				switch {
 				case raw == "":
@@ -278,14 +332,14 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			}
 		}
 		if target != nil && rowValid {
-			msg, label, code := "", firstNonEmpty(codeField.Label, codeField.Name), fmt.Sprint(target.Data[codeField.Name])
+			msg, label, code := "", firstNonEmpty(matchField.Label, matchField.Name), matchVal
 			if req.UpdateRefusal == nil {
 				msg = fmt.Sprintf("%s %q is taken: another record of %s has it", label, code, form.Label)
 			} else if m := req.UpdateRefusal(target, status); m != "" {
 				msg = fmt.Sprintf("%s %q is a record this file would update: %s", label, code, m)
 			}
 			if msg != "" {
-				errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[codeField.Name], Message: msg})
+				errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[matchField.Name], Message: msg})
 				rowValid = false
 			}
 		}
@@ -295,15 +349,13 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				rowValid = false
 			}
 		}
-		if cf := form.TypedCodeField(); cf != nil && rowValid {
-			if code, _ := data[cf.Name].(string); code != "" {
-				if first, dup := codeRows[code]; dup {
-					errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[cf.Name],
-						Message: fmt.Sprintf("%s %q is also on row %d: a code is one record's", firstNonEmpty(cf.Label, cf.Name), code, first)})
-					rowValid = false
-				} else {
-					codeRows[code] = row.RowNumber
-				}
+		if matchField != nil && matchVal != "" && rowValid {
+			if first, dup := matchRows[matchVal]; dup {
+				errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[matchField.Name],
+					Message: fmt.Sprintf("%s %q is also on row %d: a load names each record once", firstNonEmpty(matchField.Label, matchField.Name), matchVal, first)})
+				rowValid = false
+			} else {
+				matchRows[matchVal] = row.RowNumber
 			}
 		}
 		if replaceBy != nil && rowValid {
@@ -533,32 +585,6 @@ func (ps *Poster) postBatch(ctx context.Context, form *crudapp.FormDef, recs []*
 		}
 	}
 	ps.totals(ctx, tp, touched, userID)
-}
-
-// recordsByCode reads formID's records by the typed code their field holds:
-// the records a file's rows update.
-func recordsByCode(ctx context.Context, db dbx.DB, formID, field string) (map[string]*crudapp.FormRecord, error) {
-	rows, err := db.Query(ctx, `
-		SELECT id::text, COALESCE(status::text, ''), data, created_by::text, created_at, updated_at
-		FROM runtime.form_record
-		WHERE form_id = $1::uuid AND COALESCE(data->>$2, '') <> ''`, formID, field)
-	if err != nil {
-		return nil, fmt.Errorf("read the table's records by code: %w", err)
-	}
-	defer rows.Close()
-	out := map[string]*crudapp.FormRecord{}
-	for rows.Next() {
-		r := &crudapp.FormRecord{FormID: formID}
-		var raw []byte
-		if err := rows.Scan(&r.ID, &r.Status, &raw, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &r.Data); err != nil {
-			return nil, err
-		}
-		out[strings.TrimSpace(fmt.Sprint(r.Data[field]))] = r
-	}
-	return out, rows.Err()
 }
 
 // sameData reports whether a and b hold the same value in every field.
