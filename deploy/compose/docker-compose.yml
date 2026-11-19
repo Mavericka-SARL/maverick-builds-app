@@ -74,13 +74,13 @@ services:
       # A bare host name on Keycloak 24, never a URL. It must equal AUTH_HOST
       # exactly, or sign-in redirects fail in a way that looks like a realm
       # misconfiguration.
-      KC_HOSTNAME: ${AUTH_HOST:?set AUTH_HOST in .env}
+      KC_HOSTNAME: ${AUTH_HOST:?set CONSOLE_HOST and AUTH_HOST in .env first (docs/SELF_HOSTING.md, Step 3)}
       KC_HOSTNAME_STRICT: "true"
       KC_HOSTNAME_STRICT_HTTPS: "true"
       KC_PROXY: edge
       KC_HEALTH_ENABLED: "true"
       # Read by the realm import below, for the console's redirect URIs.
-      CONSOLE_HOST: ${CONSOLE_HOST:?set CONSOLE_HOST in .env}
+      CONSOLE_HOST: ${CONSOLE_HOST:?set CONSOLE_HOST and AUTH_HOST in .env first (docs/SELF_HOSTING.md, Step 3)}
     volumes:
       # Imported once, when the realm does not exist yet; later edits to the
       # file change nothing (docs/SELF_HOSTING.md, "Changing host names").

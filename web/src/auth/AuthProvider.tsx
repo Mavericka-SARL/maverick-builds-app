@@ -159,12 +159,20 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [googleOffered, setGoogleOffered] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  // Sign-in could not even start. Left alone this was a blank page: a
+  // sign-in service that is down, or one that does not accept this console's
+  // address (a self-hosted CONSOLE_HOST changed after Keycloak's first start).
+  const [unavailable, setUnavailable] = useState<{ answers: boolean } | null>(null);
 
   useEffect(() => {
     // check-sso instead of login-required: a deployment with single sign-on
     // needs a page BEFORE the realm login to route people to their own
     // provider. Without any provider registered the behaviour is unchanged —
     // straight to the realm login.
+    // keycloak-js starts once per page, and React's StrictMode runs this
+    // effect twice in development: the second start would reject, and the
+    // catch below would take that for a sign-in service that refused us.
+    if (keycloak.didInitialize) return;
     keycloak
       .init({ onLoad: "check-sso", pkceMethod: "S256" })
       .then(async (auth) => {
@@ -220,9 +228,36 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
               if (!keycloak.token || keycloak.isTokenExpired(5)) void keycloak.login();
             });
         }, 30_000);
+      })
+      .catch(async () => {
+        // Keycloak answers its discovery document to any origin (CORS
+        // included), so a 200 means the service is up and it refused this
+        // console. A proxy's 502 while Keycloak is down carries no CORS
+        // header and fails like a network error: not answering.
+        const answers = await fetch(`${config.keycloakUrl}/realms/${config.keycloakRealm}/.well-known/openid-configuration`,
+          { cache: "no-store" }).then((r) => r.ok, () => false);
+        setUnavailable({ answers });
       });
   }, []);
 
+  if (unavailable) {
+    let service = config.keycloakUrl;
+    try { service = new URL(config.keycloakUrl).origin; } catch { /* shown as configured */ }
+    return (
+      <PublicPage testId="sign-in-unavailable">
+        <h1>Sign-in is not available</h1>
+        {unavailable.answers ? (
+          <>
+            <p>The sign-in service at {service} does not accept this console's address, {window.location.origin}.</p>
+            <p>An administrator puts it right: on a self-hosted Docker Compose deployment, run <code>./setup.sh keycloak</code> after changing <code>CONSOLE_HOST</code> (self-hosting guide, <em>Changing a host name</em>).</p>
+          </>
+        ) : (
+          <p>The sign-in service at {service} does not answer. It may be starting: try again in a minute.</p>
+        )}
+        <button className="mvx-public__button" type="button" onClick={() => window.location.reload()}>Try again</button>
+      </PublicPage>
+    );
+  }
   if (needsSignIn && !authenticated) return <SignIn onPassword={() => void keycloak.login()} google={googleOffered} />;
   if (!authenticated) return null;
   if (refused) {

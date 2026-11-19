@@ -3,8 +3,9 @@
 #
 #   ./setup.sh env                          create .env; generate every secret
 #   ./setup.sh keycloak                     after `docker compose up -d`: the
-#                                           provisioning account, sign-in
-#                                           hardening and Keycloak's e-mail
+#                                           provisioning account, the console's
+#                                           address, sign-in hardening and
+#                                           Keycloak's e-mail
 #   ./setup.sh admin EMAIL "First Last"     the first platform administrator
 #                                           (asks for a password, or reads
 #                                           ADMIN_PASSWORD)
@@ -56,6 +57,22 @@ need_env() {
   [ -f "$ENV_FILE" ] || die ".env not found — run ./setup.sh env first"
 }
 
+# Both host names set, bare, and not the documentation's examples: a stack
+# started with mavericks.example.com gets no certificate, and its sign-in
+# service keeps that name until ./setup.sh keycloak is run again.
+need_hosts() {
+  local key host
+  for key in CONSOLE_HOST AUTH_HOST; do
+    host="$(env_get "$key")"
+    [ -n "$host" ] || die "$key is empty — set CONSOLE_HOST and AUTH_HOST in .env (docs/SELF_HOSTING.md, Step 3)"
+    case "$host" in
+      *://*|*/*) die "$key is a host name, without https:// or a path: $host" ;;
+      example.com|*.example.com|example.org|*.example.org|example.net|*.example.net)
+        die "$key is still the example ($host) — set your own host names in .env, then docker compose up -d" ;;
+    esac
+  done
+}
+
 # curl through the local proxy, with the real host name in the URL, the SNI
 # and the Host header. A certificate from Caddy's local CA is not trusted
 # here, so it is not verified in that mode.
@@ -93,7 +110,9 @@ cmd_env() {
   cat >&2 <<EOF
 
 Next:
-  1. Edit $ENV_FILE: CONSOLE_HOST, AUTH_HOST and the SMTP_* lines at least.
+  1. Edit $ENV_FILE: CONSOLE_HOST, AUTH_HOST and the SMTP_* lines at least,
+     before the first start. To try it on this computer alone:
+     mavericks.localhost, auth.mavericks.localhost and CADDY_CERTS=local_certs.
   2. Save a copy of it in a password manager — backups are useless without it.
   3. docker compose up -d --build
   4. ./setup.sh keycloak
@@ -102,6 +121,7 @@ EOF
 
 cmd_keycloak() {
   need_env
+  need_hosts
   local auth_host console_host curl_opts url secret
   auth_host="$(env_get AUTH_HOST)"
   console_host="$(env_get CONSOLE_HOST)"
@@ -109,15 +129,25 @@ cmd_keycloak() {
   url="https://${auth_host}"
 
   log "waiting for Keycloak at ${url}"
-  local i
+  local i rc tls=0
   for i in $(seq 1 60); do
+    rc=0
     # shellcheck disable=SC2086
-    if curl -sf $curl_opts -o /dev/null "${url}/realms/mavericks/.well-known/openid-configuration"; then
-      break
+    curl -sf $curl_opts -o /dev/null "${url}/realms/mavericks/.well-known/openid-configuration" || rc=$?
+    [ "$rc" = 0 ] && break
+    # 35 and 60: the proxy answers but has no certificate for the name. Once
+    # Keycloak itself is up, waiting longer rarely helps: say why now.
+    if [ "$rc" = 35 ] || [ "$rc" = 60 ]; then tls=$((tls + 1)); else tls=0; fi
+    if [ "$tls" -ge 24 ] && docker compose ps keycloak 2>/dev/null | grep -q '(healthy)'; then
+      die "the proxy has no certificate for ${auth_host} after 2 minutes. With Let's Encrypt (CADDY_CERTS empty) both names must resolve to this server and ports 80 and 443 be open — 'docker compose logs proxy' says what failed. On a private network or for a trial, set CADDY_CERTS=local_certs in .env and run docker compose up -d"
     fi
     [ "$i" = 60 ] && die "Keycloak did not answer at ${url} within 5 minutes — see 'docker compose logs keycloak proxy'"
     sleep 5
   done
+
+  log "the console's address (${console_host}) on its sign-in client"
+  KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \
+    CURL_OPTS="$curl_opts" CONSOLE_HOST="$console_host" bash "$ROOT/scripts/keycloak-console-client.sh"
 
   log "provisioning service account"
   secret="$(KEYCLOAK_URL="$url" KEYCLOAK_ADMIN_PASSWORD="$(env_get KEYCLOAK_ADMIN_PASSWORD)" \
@@ -165,6 +195,7 @@ cmd_keycloak() {
 
 cmd_admin() {
   need_env
+  need_hosts
   local email="${1:-}" name="${2:-Platform Administrator}" password="${ADMIN_PASSWORD:-}"
   [ -n "$email" ] || die "usage: ./setup.sh admin EMAIL \"First Last\""
   if [ -z "$password" ]; then
@@ -187,6 +218,7 @@ cmd_admin() {
 
 cmd_check() {
   need_env
+  need_hosts
   local curl_opts console auth failed=0
   curl_opts="$(proxy_curl_opts)"
   console="https://$(env_get CONSOLE_HOST)"
@@ -289,5 +321,5 @@ case "${1:-}" in
   admin)    shift; cmd_admin "$@" ;;
   check)    cmd_check ;;
   restore)  shift; cmd_restore "$@" ;;
-  *)        sed -n '2,20p' "$HERE/setup.sh" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)        sed -n '2,21p' "$HERE/setup.sh" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

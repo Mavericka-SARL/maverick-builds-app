@@ -6,6 +6,7 @@ import { Plus, Pencil, Trash2, Download, Upload, Braces } from "lucide-react";
 import { api, withTenant, CONTROL_PLANE, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
 import { accessRemovalNotice } from "../admin/accessRemoval";
+import { forgetOpenTab } from "../../router/sections";
 import { DetailsEditor } from "../DetailsEditor";
 import {
   Button,
@@ -678,7 +679,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
     onSuccess: (res) => {
       // Roles are read once, at sign-in: start the console again so it is
       // composed from every role just taken, and opens on the tour.
-      if (join) { window.location.assign("/"); return; }
+      if (join) { forgetOpenTab(); window.location.assign("/"); return; }
       setFirstAdminNote(res.adminError
         ? `The tenant was created, but ${res.email} could not be made its administrator: ${res.adminError}. Add them under Users.`
         : res.admin?.temporary_password

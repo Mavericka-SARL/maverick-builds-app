@@ -197,9 +197,7 @@ TEMPORARY_PASSWORDS=true     # unless you have an SMTP relay to set
 ```
 
 Chrome, Edge and Safari send every name ending in `.localhost` to the
-computer itself, so these names need nothing more. Set them **before** the
-first `docker compose up`: the sign-in service records the console's name
-when it first starts (see [Changing a host name](#changing-settings)). Other
+computer itself, so these names need nothing more. Other
 names, such as `mavericks.test`, need a line in the hosts file (`/etc/hosts`,
 or on Windows `C:\Windows\System32\drivers\etc\hosts` edited as
 administrator): `127.0.0.1  mavericks.test auth.mavericks.test`.
@@ -243,7 +241,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.11.18.3          # a release: the newest is on the Releases page
+git checkout 2026.11.19          # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -287,10 +285,10 @@ Two choices are easier to make now than later:
   its own authority, which browsers warn about until its root certificate is
   installed on them ([how](#trying-it-on-your-own-computer)).
 
-Set the host names before the first `docker compose up` (Step 4): the
-sign-in service records the console's name when it first starts, and a
-stack started with the example names has to be told the new one by hand
-([Changing a host name](#changing-settings)).
+`docker compose up` refuses to start until both host names are set, and
+`setup.sh` refuses the documentation's examples (`*.example.com`).
+Changing a name later is an edit and two commands ([Changing a host
+name](#changing-settings)).
 
 No SMTP relay? Leave the `SMTP_*` lines empty and set
 `TEMPORARY_PASSWORDS=true` ([Adding users without an SMTP
@@ -334,7 +332,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.11.18.3     # the release you checked out
+MAVERICKS_RELEASE=2026.11.19     # the release you checked out
 ```
 
 ```bash
@@ -364,13 +362,20 @@ waits for Keycloak and may take a minute longer.
 
 This, in order:
 
-1. gives the gateway the Keycloak service account it creates users with, and
+1. makes the console's address, `CONSOLE_HOST`, the one Keycloak sends
+   people back to after sign-in;
+2. gives the gateway the Keycloak service account it creates users with, and
    stores that account's secret in `.env`;
-2. turns on brute-force protection for Keycloak's administrator realm (the
+3. turns on brute-force protection for Keycloak's administrator realm (the
    platform's own realm has it from the start);
-3. configures Keycloak's e-mail from your `SMTP_*` settings, for invitations
+4. configures Keycloak's e-mail from your `SMTP_*` settings, for invitations
    and password resets;
-4. restarts the gateway with the new secret.
+5. restarts the gateway with the new secret.
+
+When the proxy has no certificate for `AUTH_HOST` after two minutes, it stops
+and says so: with Let's Encrypt, a DNS record or an open port is missing
+(`docker compose logs proxy` says which); on a private network, set
+`CADDY_CERTS=local_certs`.
 
 Add `SMTP_TEST_TO=you@example.com` in front of the command to have Keycloak
 send a real test message. Do: a wrong relay password or a sender the relay
@@ -579,7 +584,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.11.18.3
+git fetch --tags && git checkout <new release>       # e.g. 2026.11.19
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -652,12 +657,15 @@ containers whose settings changed.
 
 **Changing a host name** takes one more step. Keycloak reads its realm file
 only on first start, so it keeps the old console address as the only place it
-may send people back to. After changing `CONSOLE_HOST` and running
-`docker compose up -d`, open Keycloak's admin console (next section), choose
-the `mavericks` realm › **Clients** › `mavericks-web`, and change the
-addresses under **Valid redirect URIs**, **Valid post logout redirect URIs**
-and **Web origins**. A changed `AUTH_HOST` needs nothing more than
-`docker compose up -d`.
+may send people back to, and until it is told the new one the console says
+*Sign-in is not available*. After changing `CONSOLE_HOST`:
+
+```bash
+docker compose up -d
+./setup.sh keycloak    # the console's new address replaces the old one
+```
+
+A changed `AUTH_HOST` needs nothing more than `docker compose up -d`.
 
 ### Keycloak's admin console
 
@@ -695,8 +703,8 @@ Each container keeps five log files of 20 MB.
 |---|---|
 | The browser says the certificate is invalid; `docker compose logs proxy` shows ACME errors | Let's Encrypt cannot reach the server: a DNS record is missing or wrong, or port 80 is closed. Fix it and restart the proxy: `docker compose restart proxy`. |
 | `docker compose up` says port 80 or 443 is already in use (`address already in use`, `ports are not available`) | Another web server on the computer holds it. Find it with `sudo lsof -i :80` (Linux, macOS); on Windows it is often IIS: stop the **World Wide Web Publishing Service**. |
-| Sign-in says **Invalid parameter: redirect_uri** | The console's address is not one Keycloak allows — usually `CONSOLE_HOST` changed after the first start. See *Changing a host name*. |
-| The console stays a blank page; the browser's developer tools show a 403 for `login-status-iframe.html` and "Error while checking login iframe" | The same cause: Keycloak still allows only the console's first name — often the stack was started once with the example names. See *Changing a host name*. On a new install with nothing in it yet, starting over is quicker: `docker compose down -v` **deletes all data**, then `docker compose up -d` and steps 5 and 6 again. |
+| The console says **Sign-in is not available** and that the sign-in service does not accept its address, or sign-in says **Invalid parameter: redirect_uri** | The console's address is not one Keycloak allows: `CONSOLE_HOST` changed after the first start. Run `./setup.sh keycloak` (*Changing a host name*). |
+| The console says **Sign-in is not available** and that the sign-in service does not answer | Keycloak is not running or still starting: `docker compose ps keycloak`, `docker compose logs keycloak`. |
 | The gateway restarts over and over; its log says `failed to initialize JWKS validator` | It cannot reach Keycloak's realm. Check `docker compose logs keycloak`; it may still be starting. |
 | Every API call answers 401 after signing in | The token's issuer is not `https://AUTH_HOST`: `AUTH_HOST` was edited without `docker compose up -d`, or Keycloak is reached through another name. |
 | **Invite user** answers 503 | The provisioning account is not configured: run `./setup.sh keycloak`. |
@@ -798,7 +806,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.11.18.3`; set the release you deploy, or, if you built your
+   release `2026.11.19`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -876,7 +884,7 @@ within a few minutes, and nothing in `CrashLoopBackOff`. A pod in
 
 ### Step 6 — Finish setting up sign-in
 
-The same four scripts `./setup.sh keycloak` runs for Compose, run by hand
+The scripts `./setup.sh keycloak` runs for Compose, run by hand
 from the repository's root:
 
 ```bash
@@ -914,6 +922,11 @@ bash scripts/keycloak-invitation-mail.sh
 #    Accounts with the same address sign in with Google; with
 #    SIGNUP_ENABLED=true a new Google account signs up.
 GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... bash scripts/keycloak-google-setup.sh
+
+# 6. Only after changing the console's host name later: make the new one
+#    the address Keycloak sends people back to (the realm file is read only
+#    on first start). It replaces the old address.
+CONSOLE_HOST=mavericks.example.com bash scripts/keycloak-console-client.sh
 ```
 
 While the certificates are still from `letsencrypt-staging`, or come from your
@@ -992,7 +1005,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.18.3     # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.19     # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

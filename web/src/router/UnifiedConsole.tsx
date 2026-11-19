@@ -11,7 +11,7 @@ import { useModelSwitches } from "../consoles/business/modelSelection";
 import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
-import { enabledSections, pageTab, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
+import { OPEN_TAB_KEY, enabledSections, pageTab, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
 import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
 import { useDemo } from "../api/useDemo";
 import { DateFormatContext } from "../consoles/dateFormat";
@@ -25,7 +25,6 @@ import { momentDateTime } from "../consoles/dateSerial";
  * a stable hook order — and each returns null, having fetched nothing, when
  * the user's roles do not grant it.
  */
-const OPEN_TAB_KEY = "console_open_tab";
 
 export default function UnifiedConsole() {
   const { userRoles, persona } = useAuth();

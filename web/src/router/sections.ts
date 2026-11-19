@@ -134,3 +134,15 @@ export interface ConsoleSection {
   /** Renders the active tab (a namespaced id owned by this section). */
   render: (tab: string) => ReactNode;
 }
+
+/** Where the console remembers its open tab for this browser tab, so a
+ *  reload comes back to it. */
+export const OPEN_TAB_KEY = "console_open_tab";
+
+/** Forget the remembered tab: the next load opens on the landing tab. For a
+ *  reload that changes what the console is (a platform administrator who
+ *  just took a tenant with every role lands on its tour, not on the
+ *  Applications screen the reload started from). */
+export function forgetOpenTab(): void {
+  try { sessionStorage.removeItem(OPEN_TAB_KEY); } catch { /* storage unavailable: nothing was remembered */ }
+}
