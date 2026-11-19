@@ -24,6 +24,14 @@ on:
         description: "Roll the cluster onto the freshly published images"
         type: boolean
         default: true
+      arm64_trial:
+        description: "Try the release's arm64 path without a release: build the arm64 images as trial-<sha> and merge them with arm64_trial_amd64_from's amd64 images"
+        type: boolean
+        default: false
+      arm64_trial_amd64_from:
+        description: "With arm64_trial: an existing release whose amd64 images the trial merges with, e.g. 2026.11.19"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -656,6 +664,7 @@ jobs:
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:latest
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, matrix.service, github.ref_name) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}-amd64', steps.image.outputs.prefix, matrix.service, github.ref_name) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=${{ matrix.service }}
@@ -723,6 +732,7 @@ jobs:
             ${{ steps.image.outputs.prefix }}/postgres-backup:latest
             ${{ steps.image.outputs.prefix }}/postgres-backup:${{ github.sha }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'postgres-backup', github.ref_name) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}-amd64', steps.image.outputs.prefix, 'postgres-backup', github.ref_name) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=postgres-backup
@@ -789,6 +799,7 @@ jobs:
             ${{ steps.image.outputs.prefix }}/postgres-walg:latest
             ${{ steps.image.outputs.prefix }}/postgres-walg:${{ github.sha }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'postgres-walg', github.ref_name) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}-amd64', steps.image.outputs.prefix, 'postgres-walg', github.ref_name) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=postgres-walg
@@ -864,6 +875,7 @@ jobs:
             ${{ steps.image.outputs.prefix }}/web:latest
             ${{ steps.image.outputs.prefix }}/web:${{ github.sha }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'web', github.ref_name) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}-amd64', steps.image.outputs.prefix, 'web', github.ref_name) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=web
@@ -918,17 +930,146 @@ jobs:
           tags: |
             ${{ steps.image.outputs.prefix }}/minio:latest
             ${{ steps.image.outputs.prefix }}/minio:${{ github.ref_name }}
+            ${{ steps.image.outputs.prefix }}/minio:${{ github.ref_name }}-amd64
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=minio
           cache-to: type=gha,mode=max,scope=minio
+
+  # ── arm64 images ──────────────────────────────────────────────────────────────
+  # A release runs on ARM too (Apple-silicon Macs, ARM servers): each image is
+  # built again natively on GitHub's arm64 runners (under emulation the Go and
+  # Node builds would take most of an hour) and pushed as <tag>-arm64; the
+  # amd64 jobs above push <tag>-amd64 beside their usual tags, and
+  # docker-publish-merge puts each pair under the release's own tags, so
+  # `docker pull` picks the machine's architecture. Only date tags take this
+  # path, and only the public repository has them (its arm64 runners are
+  # free); the Playground's own images stay amd64. A dispatched arm64_trial
+  # builds the arm64 images of any ref as trial-<sha>-arm64 and merges them
+  # with an existing release's amd64 images as trial-<sha>, to try the whole
+  # path without making a release.
+  docker-publish-arm64:
+    name: Publish arm64 image (${{ matrix.image }})
+    needs: [go-lint, go-test, go-build, web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.arm64_trial)
+    runs-on: ${{ vars.ARM64_RUNNER_LABEL || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: gateway
+            context: .
+            file: deploy/docker/Dockerfile
+            args: SERVICE=gateway
+          - image: integration
+            context: .
+            file: deploy/docker/Dockerfile
+            args: SERVICE=integration
+          - image: web
+            context: web
+            file: web/Dockerfile
+            contexts: |
+              docs=docs
+              legal=.
+          - image: postgres-backup
+            context: deploy/docker/pg-backup
+            file: deploy/docker/pg-backup/Dockerfile
+          - image: postgres-walg
+            context: deploy/docker/postgres-walg
+            file: deploy/docker/postgres-walg/Dockerfile
+          - image: minio
+            context: deploy/docker/minio
+            file: deploy/docker/minio/Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image name and tag
+        id: image
+        run: |
+          echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+          if [ '${{ startsWith(github.ref, 'refs/tags/') }}' = true ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=trial-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.args }}
+          build-contexts: ${{ matrix.contexts }}
+          platforms: linux/arm64
+          push: true
+          sbom: true
+          tags: ${{ steps.image.outputs.prefix }}/${{ matrix.image }}:${{ steps.image.outputs.tag }}-arm64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.image }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-arm64
+
+  docker-publish-merge:
+    name: Publish multi-arch tags
+    needs: [docker-publish, docker-publish-backup, docker-publish-postgres-walg, docker-publish-web, docker-publish-minio, docker-publish-arm64]
+    # In a trial the amd64 jobs are skipped (publish_images=false); on a date
+    # tag every one of them must have succeeded.
+    if: always() && needs.docker-publish-arm64.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Put each image's amd64 and arm64 builds under one tag
+        env:
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+          TAG: ${{ github.ref_name }}
+          TRIAL_FROM: ${{ inputs.arm64_trial_amd64_from }}
+        run: |
+          set -euo pipefail
+          prefix="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks"
+          for n in gateway integration web postgres-backup postgres-walg minio; do
+            img="$prefix/$n"
+            if [ "$IS_TAG" = true ]; then
+              amd="$img:$TAG-amd64"; arm="$img:$TAG-arm64"
+              # The same tags the amd64 job pushed (minio has no commit tag).
+              targets=(-t "$img:$TAG" -t "$img:latest")
+              [ "$n" = minio ] || targets+=(-t "$img:$GITHUB_SHA")
+            else
+              [ -n "$TRIAL_FROM" ] || { echo "::error::arm64_trial needs arm64_trial_amd64_from (an existing release)"; exit 1; }
+              trial="trial-${GITHUB_SHA::12}"
+              amd="$img:$TRIAL_FROM"; arm="$img:$trial-arm64"
+              targets=(-t "$img:$trial")
+            fi
+            docker buildx imagetools create "${targets[@]}" "$amd" "$arm"
+            # Both architectures, or the release must not go out.
+            platforms="$(docker buildx imagetools inspect "${targets[1]}" --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}')"
+            echo "$n: $platforms"
+            for want in linux/amd64 linux/arm64; do
+              case " $platforms " in *" $want "*) ;; *) echo "::error::$n lacks $want"; exit 1 ;; esac
+            done
+          done
 
   # ── Release ───────────────────────────────────────────────────────────────────
   # Once every image of a date tag is published, the tag becomes a GitHub
   # release listing them. Re-running a finished release changes nothing.
   release:
     name: GitHub release
-    needs: [docker-publish, docker-publish-backup, docker-publish-postgres-walg, docker-publish-web, docker-publish-minio]
+    needs: [docker-publish, docker-publish-backup, docker-publish-postgres-walg, docker-publish-web, docker-publish-minio, docker-publish-merge]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 10
@@ -972,7 +1113,7 @@ jobs:
             if [ -n "$fixed" ]; then printf '## Fixed\n\n%s\n\n' "$fixed"; fi
             echo "## Images"
             echo
-            echo "Container images of this release (linux/amd64), each tagged \`$TAG\`:"
+            echo "Container images of this release, each tagged \`$TAG\` for linux/amd64 and linux/arm64 (\`docker pull\` picks the machine's):"
             echo
             for n in gateway integration web postgres-backup postgres-walg minio; do
               echo "- \`$prefix/$n:$TAG\`"
