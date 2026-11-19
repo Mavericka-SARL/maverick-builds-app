@@ -22,15 +22,17 @@ key, as its [Enterprise Features License](../ee/LICENSE) permits.
 
 | | [Docker Compose, one server](#install-on-one-server-with-docker-compose) | [Kubernetes](#install-on-kubernetes) |
 |---|---|---|
-| What runs | 8 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, and Caddy for HTTPS | The gateway (two replicas), the web console and the integration worker, plus PostgreSQL with continuous WAL archiving, PgBouncer, Keycloak and MinIO |
+| What runs | 9 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, a disk-space watchdog, and Caddy for HTTPS | The gateway (two replicas), the web console and the integration worker, plus PostgreSQL with continuous WAL archiving, PgBouncer, Keycloak and MinIO |
 | Good for | One organisation, a team to a few hundred users; the simplest thing to keep running | Several nodes, rolling upgrades, point-in-time recovery |
-| You need | One Linux server and Docker, or a Windows computer with [WSL 2](#on-windows) | A cluster with Traefik and cert-manager, and a container registry |
-| Time to first sign-in | About an hour, most of it building | Half a day |
+| You need | One Linux server and Docker, or a Windows computer with [WSL 2](#on-windows); to try it out, a [Mac](#on-macos) or any of these [on its own](#trying-it-on-your-own-computer) | A cluster with Traefik and cert-manager, and a container registry for images you build |
+| Time to first sign-in | Under an hour, most of it DNS and e-mail; the containers start in minutes from the published images, or build in 5–15 | Half a day |
 
-Both paths build the containers **from this repository's source**; there is
-no public image registry to pull them from. Both run the same code, the same
-database schema and the same sign-in service, so moving from one to the other
-later is a backup and a restore.
+Every release publishes its images for x86-64 (amd64), and both paths run
+them. On another architecture (an ARM server, an Apple-silicon Mac), or with
+changes of your own, the same containers are built from this repository's
+source. Both paths run the same code, the same database schema and the same
+sign-in service, so moving from one to the other later is a backup and a
+restore.
 
 ---
 
@@ -122,6 +124,7 @@ The stack lives in [`deploy/compose/`](../deploy/compose/):
 | `postgres` | PostgreSQL 16: the platform's database, Keycloak's database, and one database per tenant if you choose that |
 | `minio` | Object storage for the backups, by default |
 | `backup` | Dumps every database once a day |
+| `disk-watchdog` | Warns by e-mail before the database's disk fills up (with `ALERT_EMAIL` set) |
 
 ### On Windows
 
@@ -158,25 +161,68 @@ Docker Desktop gives Linux half of the computer's memory; on an 8 GB computer
 that is too little to build from source.
 
 To serve other people, the computer needs the DNS records and open ports of
-Step 1. For a trial on the computer itself, set `CADDY_CERTS=local_certs`
-(Step 3) and point both names at it in
-`C:\Windows\System32\drivers\etc\hosts`, edited as administrator — for example:
+Step 1. To try it on the computer itself, see [Trying it on your own
+computer](#trying-it-on-your-own-computer).
 
-```text
-127.0.0.1  mavericks.test auth.mavericks.test
+### On macOS
+
+A Mac runs the stack in Docker Desktop: right for trying the platform out
+and for building models on your own, not for serving a team (the platform
+stops whenever the Mac sleeps). Do this first, then follow steps 2 to 8 in
+**Terminal**:
+
+1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/).
+   In **Settings › Resources**, give it at least 4 GB of memory: building
+   from source needs it. Docker Desktop needs a paid Docker subscription in
+   larger companies.
+2. Check that `docker compose version` and `python3 --version` both answer.
+   If macOS offers to install the **command line developer tools** instead,
+   accept: they bring `git` and `python3`.
+3. On a Mac with Apple silicon, Step 4 builds from source: the published
+   images are for x86-64.
+
+Then see [Trying it on your own computer](#trying-it-on-your-own-computer)
+for the host names.
+
+### Trying it on your own computer
+
+Without DNS names or open ports, the platform runs on the computer you
+install it on, for you alone. Skip Step 1, and in Step 3 set:
+
+```bash
+CONSOLE_HOST=mavericks.localhost
+AUTH_HOST=auth.mavericks.localhost
+CADDY_CERTS=local_certs
+TEMPORARY_PASSWORDS=true     # unless you have an SMTP relay to set
 ```
 
+Chrome, Edge and Safari send every name ending in `.localhost` to the
+computer itself, so these names need nothing more. Set them **before** the
+first `docker compose up`: the sign-in service records the console's name
+when it first starts (see [Changing a host name](#changing-settings)). Other
+names, such as `mavericks.test`, need a line in the hosts file (`/etc/hosts`,
+or on Windows `C:\Windows\System32\drivers\etc\hosts` edited as
+administrator): `127.0.0.1  mavericks.test auth.mavericks.test`.
+
 Browsers warn about the certificates until Caddy's root certificate is
-trusted. After Step 4, from `deploy/compose` in the Ubuntu terminal:
+trusted. After Step 4, from `deploy/compose`:
 
 ```bash
 docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .
-explorer.exe .
 ```
 
-In the folder that opens, double-click `root.crt`, choose **Install
-Certificate › Local Machine**, and place it in **Trusted Root Certification
-Authorities**. Edge and Chrome use it at once.
+- **Windows:** run `explorer.exe .` in the Ubuntu terminal. In the folder that
+  opens, double-click `root.crt`, choose **Install Certificate › Local
+  Machine**, and place it in **Trusted Root Certification Authorities**. Edge
+  and Chrome use it at once.
+- **macOS:** `sudo security add-trusted-cert -d -r trustRoot -k
+  /Library/Keychains/System.keychain root.crt`. Safari and Chrome use it at
+  once.
+- **Linux:** add it the way your distribution trusts a certificate authority
+  (on Ubuntu and Debian, copy it into `/usr/local/share/ca-certificates/` as
+  `caddy-local.crt` and run `sudo update-ca-certificates`). Chrome and Firefox
+  on Linux keep their own list: import it under their certificate settings
+  too.
 
 ### Step 1 — Prepare the server
 
@@ -239,7 +285,12 @@ Two choices are easier to make now than later:
   names publicly resolvable and ports 80/443 reachable from the internet. On a
   private network, set it to `local_certs`: Caddy then issues certificates from
   its own authority, which browsers warn about until its root certificate is
-  installed on them (`docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .`).
+  installed on them ([how](#trying-it-on-your-own-computer)).
+
+Set the host names before the first `docker compose up` (Step 4): the
+sign-in service records the console's name when it first starts, and a
+stack started with the example names has to be told the new one by hand
+([Changing a host name](#changing-settings)).
 
 No SMTP relay? Leave the `SMTP_*` lines empty and set
 `TEMPORARY_PASSWORDS=true` ([Adding users without an SMTP
@@ -301,7 +352,7 @@ docker compose up -d --build
 The first build takes 5–15 minutes, depending on the machine. Later builds
 reuse most of the work.
 
-**Check:** `docker compose ps` lists eight containers, all `running`, and
+**Check:** `docker compose ps` lists nine containers, all `running`, and
 `keycloak`, `postgres`, `web` and `minio` report `(healthy)`. The gateway
 waits for Keycloak and may take a minute longer.
 
@@ -391,8 +442,10 @@ no separate **Tenant admin** group beside it.
 A self-hosted deployment starts where a sign-up on the hosted Playground
 does, without the Playground's 100 MB limit. As the platform administrator:
 
-1. **Applications › New tenant** — name your organisation. Leave both boxes
-   ticked:
+1. **Applications › New tenant** — name your organisation. The list beside
+   the name is the tenant's edition, which decides only how much the tenant
+   may use, not what your deployment is licensed for; any choice works (see
+   the limits below). Leave both boxes ticked:
    - **Getting started application** — the *Learn the platform* tour and a
      guide for each role (developer, business administrator, tenant
      administrator), the same as every Playground workspace gets. New
@@ -641,7 +694,9 @@ Each container keeps five log files of 20 MB.
 | Symptom | Cause and fix |
 |---|---|
 | The browser says the certificate is invalid; `docker compose logs proxy` shows ACME errors | Let's Encrypt cannot reach the server: a DNS record is missing or wrong, or port 80 is closed. Fix it and restart the proxy: `docker compose restart proxy`. |
+| `docker compose up` says port 80 or 443 is already in use (`address already in use`, `ports are not available`) | Another web server on the computer holds it. Find it with `sudo lsof -i :80` (Linux, macOS); on Windows it is often IIS: stop the **World Wide Web Publishing Service**. |
 | Sign-in says **Invalid parameter: redirect_uri** | The console's address is not one Keycloak allows — usually `CONSOLE_HOST` changed after the first start. See *Changing a host name*. |
+| The console stays a blank page; the browser's developer tools show a 403 for `login-status-iframe.html` and "Error while checking login iframe" | The same cause: Keycloak still allows only the console's first name — often the stack was started once with the example names. See *Changing a host name*. On a new install with nothing in it yet, starting over is quicker: `docker compose down -v` **deletes all data**, then `docker compose up -d` and steps 5 and 6 again. |
 | The gateway restarts over and over; its log says `failed to initialize JWKS validator` | It cannot reach Keycloak's realm. Check `docker compose logs keycloak`; it may still be starting. |
 | Every API call answers 401 after signing in | The token's issuer is not `https://AUTH_HOST`: `AUTH_HOST` was edited without `docker compose up -d`, or Keycloak is reached through another name. |
 | **Invite user** answers 503 | The provisioning account is not configured: run `./setup.sh keycloak`. |
