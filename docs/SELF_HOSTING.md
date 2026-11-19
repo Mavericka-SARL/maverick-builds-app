@@ -25,12 +25,11 @@ key, as its [Enterprise Features License](../ee/LICENSE) permits.
 | What runs | 9 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, a disk-space watchdog, and Caddy for HTTPS | The gateway (two replicas), the web console and the integration worker, plus PostgreSQL with continuous WAL archiving, PgBouncer, Keycloak and MinIO |
 | Good for | One organisation, a team to a few hundred users; the simplest thing to keep running | Several nodes, rolling upgrades, point-in-time recovery |
 | You need | One Linux server and Docker, or a Windows computer with [WSL 2](#on-windows); to try it out, a [Mac](#on-macos) or any of these [on its own](#trying-it-on-your-own-computer) | A cluster with Traefik and cert-manager, and a container registry for images you build |
-| Time to first sign-in | Under an hour, most of it DNS and e-mail; the containers start in minutes from the published images, or build in 5–15 | Half a day |
+| Time to first sign-in | Under an hour, most of it DNS and e-mail; the containers start in minutes from the published images | Half a day |
 
-Every release publishes its images for x86-64 (amd64), and both paths run
-them. On another architecture (an ARM server, an Apple-silicon Mac), or with
-changes of your own, the same containers are built from this repository's
-source. Both paths run the same code, the same database schema and the same
+Every release publishes its images for x86-64 (amd64) and ARM (arm64), so
+no machine has to build anything; both paths run them. With changes of your
+own, the same containers are built from this repository's source. Both paths run the same code, the same database schema and the same
 sign-in service, so moving from one to the other later is a backup and a
 restore.
 
@@ -76,8 +75,9 @@ restore.
 | Software | Docker Engine with the Compose v2 plugin, 2.24 or later (`docker compose version`) | |
 
 The running platform idles at about 1 GB of memory, three quarters of it
-Keycloak. Building needs more: the Go and Node.js compilers want 3–4 GB free
-while they run, which is the reason for the 4 GB minimum.
+Keycloak, and grows with large models and recalculations. Building the
+images from source instead of pulling them needs more: the Go and Node.js
+compilers want 3–4 GB free while they run.
 
 Ports **80 and 443** must be free on the server and, for certificates from
 Let's Encrypt, reachable from the internet. Nothing else is published.
@@ -156,9 +156,9 @@ needs `python3`, and the containers are Linux containers either way.
    system. A clone under `/mnt/c` builds many times slower and ignores the
    file permissions `setup.sh` puts on `.env`.
 
-On a typical Windows PC (x86-64), Step 4's published images save the build.
-Docker Desktop gives Linux half of the computer's memory; on an 8 GB computer
-that is too little to build from source.
+Docker Desktop gives Linux half of the computer's memory: 8 GB of memory
+runs the platform from the published images, but is too little to build it
+from source.
 
 To serve other people, the computer needs the DNS records and open ports of
 Step 1. To try it on the computer itself, see [Trying it on your own
@@ -172,14 +172,14 @@ stops whenever the Mac sleeps). Do this first, then follow steps 2 to 8 in
 **Terminal**:
 
 1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/).
-   In **Settings › Resources**, give it at least 4 GB of memory: building
-   from source needs it. Docker Desktop needs a paid Docker subscription in
+   In **Settings › Resources**, give it at least 4 GB of memory. Docker
+   Desktop needs a paid Docker subscription in
    larger companies.
 2. Check that `docker compose version` and `python3 --version` both answer.
    If macOS offers to install the **command line developer tools** instead,
    accept: they bring `git` and `python3`.
-3. On a Mac with Apple silicon, Step 4 builds from source: the published
-   images are for x86-64.
+
+The published images run natively on Apple silicon and on Intel Macs.
 
 Then see [Trying it on your own computer](#trying-it-on-your-own-computer)
 for the host names.
@@ -241,7 +241,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.11.19          # a release: the newest is on the Releases page
+git checkout 2026.11.19.1          # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -327,27 +327,23 @@ unreadable.
 
 ### Step 4 — Start
 
-On an x86-64 (amd64) server, run the release's published images. Add two
-lines to `.env`:
-
-```bash
-COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.11.19     # the release you checked out
-```
-
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-On any other architecture (an ARM server, an Apple-silicon Mac), leave those
-two lines out and build from source instead:
+`.env` runs the release's published images, for x86-64 and ARM alike: it
+names them with two lines that `.env.example` sets for the release you
+checked out:
 
 ```bash
-docker compose up -d --build
+COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+MAVERICKS_RELEASE=2026.11.19.1
 ```
 
-The first build takes 5–15 minutes, depending on the machine. Later builds
+To run changes of your own instead, remove both lines and build from
+source with `docker compose up -d --build`. The first build takes 5–15
+minutes, depending on the machine, and 3–4 GB of free memory. Later builds
 reuse most of the work.
 
 **Check:** `docker compose ps` lists nine containers, all `running`, and
@@ -584,7 +580,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.11.19
+git fetch --tags && git checkout <new release>       # e.g. 2026.11.19.1
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -766,12 +762,12 @@ as `READY`.
 
 ### Step 2 — Choose the images
 
-Every release publishes its images, built for x86-64 (amd64), at
-`ghcr.io/mavericka-sarl/mavericks/<name>:<release>`, and the example overlay
-already points at them. On amd64 nodes, skip to step 3.
+Every release publishes its images, for x86-64 (amd64) and ARM (arm64)
+nodes alike, at `ghcr.io/mavericka-sarl/mavericks/<name>:<release>`, and the
+example overlay already points at them: skip to step 3.
 
-To run images you build yourself — ARM nodes, your own changes, or a
-registry you control — use a machine with Docker, of the same CPU
+To run images you build yourself — your own changes, or a registry you
+control — use a machine with Docker, of the same CPU
 architecture as the cluster's nodes, logged in to your registry
 (`docker login registry.example.com`):
 
@@ -806,7 +802,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.11.19`; set the release you deploy, or, if you built your
+   release `2026.11.19.1`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -1005,7 +1001,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.19     # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.19.1     # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

@@ -8,16 +8,16 @@ repository's source.
 ```bash
 ./setup.sh env                           # .env with generated secrets
 $EDITOR .env                             # host names, e-mail relay, release
-docker compose pull && docker compose up -d   # published images (amd64), or:
-#   docker compose up -d --build              # build from source
+docker compose pull && docker compose up -d   # published images (x86-64, ARM)
 ./setup.sh keycloak                      # sign-in service, user provisioning
 ./setup.sh admin you@example.com "Your Name"
 ./setup.sh check
 ```
 
-The published images are used when `.env` sets
+The published images are used because `.env` sets
 `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml` and
-`MAVERICKS_RELEASE` (see `docker-compose.release.yml`).
+`MAVERICKS_RELEASE`, as `.env.example` does (see `docker-compose.release.yml`);
+remove both to build from source with `docker compose up -d --build`.
 
 Requirements, every setting, backups and restores, upgrades and
 troubleshooting: [docs/SELF_HOSTING.md](../../docs/SELF_HOSTING.md).

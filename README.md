@@ -52,7 +52,7 @@ To run maverickbuilds.app on your own infrastructure — one server with Docker
 Compose, or Kubernetes — follow [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md):
 requirements, installation, backups, upgrades. Each release on the Releases
 page comes with ready-built images (`ghcr.io/mavericka-sarl/mavericks/*`,
-x86-64), so neither path needs a build. The rest of this page is about
+x86-64 and ARM), so neither path needs a build. The rest of this page is about
 developing the platform: the quick start below runs it in development mode,
 where anyone can act as any user, and must never face a network you do not
 trust.
