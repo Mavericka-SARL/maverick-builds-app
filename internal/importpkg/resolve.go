@@ -76,7 +76,10 @@ func classifyColumns(ctx context.Context, pool Querier, modelID, revisionID stri
 	hasMetricIDCol, hasValueCol := false, false
 	for _, raw := range header {
 		name := strings.TrimSpace(raw)
-		if name == "" {
+		// A column without a header — or one the shape named by its letter
+		// and the column map left alone — maps to nothing, as before such
+		// columns were named (nameUnheadedColumns).
+		if name == "" || IsUnheadedColumnName(name) {
 			continue
 		}
 		lower := strings.ToLower(name)

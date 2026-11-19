@@ -60,6 +60,8 @@ export interface DevMetric {
   closed_when?: ClosedRule[];
   // "total": its row is drawn as a total in every grid (bold, a rule above).
   row_style?: RowStyle;
+  // false: approved runs do not keep its figures (a view moving with the calendar).
+  approval_watch?: boolean;
   // The values its cells accept; {} for any.
   input_rules?: InputRules;
   // Its own total rules by dimension id; {} for none (the dimensions' apply).
@@ -132,6 +134,8 @@ export interface DimInfo {
   source_property?: string | null;
   // Business users add, rename and remove its members (from the grid).
   business_maintained?: boolean;
+  /** The property whose value at a member (percentage, number, currency) is the number format of its cells (migration 190). */
+  format_property?: string;
   members: DimMember[];
   /** How its members total (migration 174): "first", "last" or "none";
    *  absent, they add up. metric_rules: the metrics' own rules over it, by
@@ -580,6 +584,8 @@ export interface Metric {
   closed_when?: ClosedRule[];
   // "total": the grid draws its row as a total (bold label, a rule above).
   row_style?: RowStyle;
+  // false: approved runs do not keep its figures nor report their changes.
+  approval_watch?: boolean;
   // The values its cells accept (absent: any); every write refuses others.
   input_rules?: InputRules;
   value: number | null;
@@ -735,6 +741,8 @@ export interface DevDimension {
   source_property?: string;
   // Business users add, rename and remove its members.
   business_maintained?: boolean;
+  /** The property whose value at a member (percentage, number, currency) is the number format of its cells (migration 190). */
+  format_property?: string;
   // The business roles that may change its members ([]: anyone who may).
   editor_roles?: string[];
   members: DevDimensionMember[];       // time members in chronological order
@@ -2366,6 +2374,9 @@ export interface ApprovalChangeRun {
   changed: number;
   examples: { metric_id: string; metric: string; members: Record<string, string>; approved?: number; now?: number;
     approved_text?: string; now_text?: string }[];
+  /** The reader may reopen the run; otherwise reopen_roles (or the application's administrators) can. */
+  can_reopen?: boolean;
+  reopen_roles?: string[];
 }
 
 /** A metric's row style (metric.row_style): "total" draws its row as a total; "" as any row. */
@@ -3209,7 +3220,7 @@ export const api = {
   deleteMetric: (id: string, withIds: string[] = []) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}${withIds.length ? `?with=${encodeURIComponent(withIds.join(","))}` : ""}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
-    closed_when?: ClosedRule[]; input_rules?: InputRules; dimension_rules?: Record<string, TotalRule>; row_style?: RowStyle; is_input?: boolean; drop_values?: boolean }) =>
+    closed_when?: ClosedRule[]; input_rules?: InputRules; dimension_rules?: Record<string, TotalRule>; row_style?: RowStyle; approval_watch?: boolean; is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -3219,7 +3230,7 @@ export const api = {
   // A partial update: a field left out keeps its value; parent_dimension_id: null detaches,
   // source_dimension_id: null clears a property grouping.
   updateDimension: (id: string, body: { name?: string; label?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
-    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean; editor_roles?: string[] }) =>
+    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean; editor_roles?: string[]; format_property?: string }) =>
     apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
@@ -3354,7 +3365,7 @@ export const api = {
   listExecutions: () => apiFetch<Execution[]>("/api/automation/executions"),
   // Stops a running instance: its open steps are withdrawn, it and its
   // execution read "cancelled", and its assignees and starter are told.
-  copyBAValues: (body: { dimension_id: string; from: string; to: string; metric_ids?: string[]; dry_run?: boolean }) =>
+  copyBAValues: (body: { dimension_id: string; from: string; to: string; metric_ids?: string[]; only?: Record<string, string[]>; dry_run?: boolean }) =>
     apiFetch<{ cells: number; dry_run: boolean }>("/api/business-admin/copy-values", { method: "POST", body: JSON.stringify(body) }),
   reopenWorkflowInstance: (instanceId: string, reason: string) =>
     apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/reopen`, {

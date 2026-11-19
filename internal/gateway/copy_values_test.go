@@ -55,3 +55,38 @@ func TestBusinessAdminCopiesValues(t *testing.T) {
 		t.Errorf("the copy changed its source: UK = %v", got)
 	}
 }
+
+// "only" narrows a copy to members of another dimension (a parent standing
+// for its leaves): next year's months of the plan into the budget, not the
+// approved year (2026-11-19). A value without that dimension is outside it.
+func TestCopyValuesOnlyWhere(t *testing.T) {
+	d := setupSalesDemo(t)
+	d.seedFacts()
+	path := "/api/business-admin/copy-values"
+	ctx := context.Background()
+	var prod string
+	var want float64
+	if err := d.pool.QueryRow(ctx, `
+		SELECT dim_members->>$3, count(DISTINCT (metric_id, dim_members))::float8 FROM runtime.fact_input
+		WHERE revision_id = $1::uuid AND dim_members->>$2 = 'UK' AND dim_members ? $3 AND source_ref IS NULL
+		GROUP BY 1 ORDER BY 2 DESC LIMIT 1`, d.revID, d.geoDim, d.prodDim).Scan(&prod, &want); err != nil {
+		t.Fatal(err)
+	}
+	dry := d.call("POST", path, d.admin, map[string]any{"dimension_id": d.geoDim, "from": "UK", "to": "US", "dry_run": true,
+		"only": map[string][]string{d.prodDim: {prod}}})
+	if dry["cells"] != want {
+		t.Errorf("only %s: %v cells, want the UK's %v values of it", prod, dry["cells"], want)
+	}
+	all := d.call("POST", path, d.admin, map[string]any{"dimension_id": d.geoDim, "from": "UK", "to": "US", "dry_run": true})
+	if n, _ := all["cells"].(float64); n < want {
+		t.Errorf("unnarrowed copy %v < narrowed %v", n, want)
+	}
+	if status, raw := d.req("POST", path, d.admin, map[string]any{"dimension_id": d.geoDim, "from": "UK", "to": "US",
+		"only": map[string][]string{d.geoDim: {"UK"}}}); status != http.StatusBadRequest {
+		t.Errorf("narrowing by the dimension copied along: %d %s, want 400", status, raw)
+	}
+	if status, raw := d.req("POST", path, d.admin, map[string]any{"dimension_id": d.geoDim, "from": "UK", "to": "US",
+		"only": map[string][]string{d.prodDim: {"NO_SUCH"}}}); status != http.StatusBadRequest {
+		t.Errorf("an unknown member: %d %s, want 400", status, raw)
+	}
+}

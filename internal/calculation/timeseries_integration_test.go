@@ -495,3 +495,68 @@ func TestTimeHierarchyAggregatePeriods(t *testing.T) {
 		t.Errorf("cum total: %v", got)
 	}
 }
+
+// A metric with a time function stores its totals by the member rules, as
+// any metric does (migration 174): a scenario dimension totalling as its
+// first member has Base's figures at the grand total and in every period
+// slice, not the scenarios' sum; agg_rule none has no total above the
+// leaves of the scenario dimension, only Base's months by its time summary.
+// Integrated FP&A build, 2026-11-19: closing cash 300 in Base read 1,200 at
+// the total (four cases added up), and a 0/1 flag read 3 for one month.
+func TestTimeSeriesTotalsFollowTheMemberRule(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	modelID := "00000000-0000-0000-0000-0000000000a7"
+	revID := "00000000-0000-0000-0001-0000000000a7"
+
+	monthID := insertTimeDim(t, store, ctx, modelID, revID, "month")
+	months := insertMonths(t, store, ctx, monthID, 3)
+	scenID := insertDimRev(t, store, ctx, modelID, revID, "scenario")
+	insertMember(t, store, ctx, scenID, "BASE", "Base")
+	insertMember(t, store, ctx, scenID, "UP", "Upside")
+	if _, err := store.Pool().Exec(ctx, `UPDATE model.dimension_def SET agg_rule='first' WHERE id=$1::uuid`, scenID); err != nil {
+		t.Fatal(err)
+	}
+	flowID := insertMetric(t, store, ctx, modelID, revID, "flow", "", true)
+	cumID := insertCalc(t, store, ctx, modelID, revID, "cum", "CUMULATE(flow)")
+	flagID := insertCalc(t, store, ctx, modelID, revID, "flag", "IF(END() > 0, 1, 0)")
+	closingID := insertMetric(t, store, ctx, modelID, revID, "closing", "opening + flow", false)
+	openingID := insertCalc(t, store, ctx, modelID, revID, "opening", "LAG(closing, 1, 100)")
+	res, err := metricformula.Validate(ctx, store.Pool(), metricformula.Request{
+		ModelID: modelID, RevisionID: revID, MetricID: closingID, Name: "closing", Formula: "opening + flow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := metricformula.WriteDependencies(ctx, store.Pool(), closingID, res.Edges); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE model.metric_def SET agg_rule='none', time_summary='max' WHERE id=$1::uuid`, flagID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE model.metric_def SET time_summary='last' WHERE id=$1::uuid`, closingID); err != nil {
+		t.Fatal(err)
+	}
+	insertGridSetup(t, store, ctx, modelID, []string{monthID, scenID}, []string{flowID, cumID, flagID, closingID, openingID})
+	base := []float64{10, 20, 30}
+	up := []float64{1000, 2000, 3000}
+	for i := range months {
+		insertFact(t, store, ctx, modelID, revID, flowID, fmt.Sprintf(`{"%s":"%s","%s":"BASE"}`, monthID, months[i], scenID), base[i])
+		insertFact(t, store, ctx, modelID, revID, flowID, fmt.Sprintf(`{"%s":"%s","%s":"UP"}`, monthID, months[i], scenID), up[i])
+	}
+	runRecalc(t, store, ctx, modelID, revID, []string{flowID})
+
+	check := func(what, metricID string, dims map[string]string, want float64) {
+		t.Helper()
+		if got, ok := calcRow(t, store, ctx, modelID, revID, metricID, dims); !ok || math.Abs(got-want) > 1e-6 {
+			t.Errorf("%s: got %v (row %v), want %v", what, got, ok, want)
+		}
+	}
+	check("cum at the grand total: Base's months (10+30+60)", cumID, nil, 100)
+	check("cum in March across scenarios: Base's", cumID, map[string]string{monthID: months[2]}, 60)
+	check("cum of Upside: its own months", cumID, map[string]string{scenID: "UP"}, 1000+3000+6000)
+	check("closing at the grand total: Base's last (100+60)", closingID, nil, 160)
+	check("closing in February across scenarios: Base's", closingID, map[string]string{monthID: months[1]}, 130)
+	check("flag in a month across scenarios: Base's", flagID, map[string]string{monthID: months[0]}, 1)
+	check("flag at the grand total: Base's months by max", flagID, nil, 1)
+}

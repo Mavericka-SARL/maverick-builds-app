@@ -37,7 +37,29 @@ func (h *handler) approvalChanges(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	for i := range runs {
+		runs[i].CanReopen, runs[i].ReopenRoles = h.mayReopen(ctx, act, runs[i].InstanceID)
+	}
 	jsonOK(w, map[string]any{"runs": runs})
+}
+
+// mayReopen says whether act may reopen the approved run instanceID — the
+// checks POST /api/workflow/instances/{id}/reopen applies — and the roles the
+// workflow names as its reopeners (none: the application's business admins
+// and developers). A dashboard tells someone who may not whom to ask instead
+// of asking them to reopen it (2026-11-19: Sales saw "reopen the run" above
+// their drivers after a month-end).
+func (h *handler) mayReopen(ctx context.Context, act *actor, instanceID string) (bool, []string) {
+	roles, _ := h.workflowStore(ctx).ReopenRoles(ctx, instanceID)
+	ok, err := h.workflowInstanceReopenable(ctx, act, instanceID)
+	if err != nil || !ok {
+		return false, roles
+	}
+	if len(roles) > 0 {
+		holds, err := h.workflowStore(ctx).HoldsReopenRole(ctx, instanceID, act.UserID)
+		return err == nil && holds, roles
+	}
+	return true, roles
 }
 
 // visibleApprovalChanges is approvalsnap.Changes with each run's examples

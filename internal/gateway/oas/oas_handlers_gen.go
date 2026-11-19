@@ -4681,7 +4681,7 @@ func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool
 // In the live revision of the model the admin has open, every value typed into a cell of `from` is
 // written to the same cell of `to` (values a table of records posts stay with their records). Each
 // is checked as a typed value is (access rules, workflow locks, closed and posted cells), all or
-// nothing. At most 20,000 values; `metric_ids` narrows the copy.
+// nothing. At most 20,000 values; `metric_ids` and `only` narrow the copy.
 //
 // POST /api/business-admin/copy-values
 func (s *Server) handleCopyBAValuesRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -20504,7 +20504,8 @@ func (s *Server) handleGetAiWorkbookMapRequest(args [1]string, argsEscaped bool,
 //	a setting) can still move them; this lists, for the selected model's application, each approved
 //
 // run whose figures differ now: how many, and up to five examples (a metric or member hidden from
-// the caller is left out of the examples). For anyone who opens the model.
+// the caller is left out of the examples). For anyone who opens the model. A metric whose
+// approval_watch is false (a view that moves with the calendar) is neither kept nor listed.
 //
 // GET /api/workflow/approval-changes
 func (s *Server) handleGetApprovalChangesRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

@@ -107,7 +107,7 @@ func scopeSQL(sc scope, args *[]any) string {
 
 // Take keeps the figures instanceID approved: the inputs and calculated
 // values of its scope in the active revision of each of its application's
-// models. A run that is no approved real run, or names no member, keeps
+// models, except metrics whose approval_watch is off. A run that is no approved real run, or names no member, keeps
 // nothing. It answers how many values it kept.
 func Take(ctx context.Context, db dbx.DB, instanceID string) (int64, error) {
 	sc, ok, err := runScope(ctx, db, instanceID)
@@ -115,7 +115,11 @@ func Take(ctx context.Context, db dbx.DB, instanceID string) (int64, error) {
 		return 0, err
 	}
 	args := []any{instanceID, sc.appID}
-	cond := scopeSQL(sc, &args)
+	// A metric a developer marked as no approved figure — a view that moves
+	// with the calendar (year to date at the last closed month, a rolling
+	// window) — is not kept (migration 189).
+	cond := scopeSQL(sc, &args) + `
+		AND EXISTS (SELECT 1 FROM model.metric_def w WHERE w.id = t.metric_id AND w.approval_watch)`
 	var kept int64
 	for _, src := range []struct{ table, kind string }{{"runtime.fact_input", "input"}, {"runtime.calc_result", "calc"}} {
 		tag, err := db.Exec(ctx, `
@@ -158,6 +162,11 @@ type RunChanges struct {
 	ApprovedAt time.Time `json:"approved_at"`
 	Changed    int       `json:"changed"`
 	Examples   []Change  `json:"examples"`
+	// CanReopen: the reader may reopen the run (set by the caller); a reader
+	// who may not is told who can — ReopenRoles, or the application's
+	// business admins and developers when it names none.
+	CanReopen   bool     `json:"can_reopen"`
+	ReopenRoles []string `json:"reopen_roles,omitempty"`
 }
 
 // Changes are the approved runs of appID (instanceID: that one only) whose
@@ -216,8 +225,12 @@ func Changes(ctx context.Context, db dbx.DB, appID, instanceID string, examples 
 func runChanges(ctx context.Context, db dbx.DB, instanceID string, limit int) ([]Change, int, error) {
 	rows, err := db.Query(ctx, `
 		WITH snap AS (
-			SELECT revision_id, kind, metric_id, dim_members, value, text_value
-			FROM workflow.approval_snapshot WHERE instance_id = $1::uuid
+			-- A metric no longer watched (approval_watch false: a view that
+			-- moves with the calendar) is not reported, kept or not.
+			SELECT a.revision_id, a.kind, a.metric_id, a.dim_members, a.value, a.text_value
+			FROM workflow.approval_snapshot a
+			JOIN model.metric_def w ON w.id = a.metric_id AND w.approval_watch
+			WHERE a.instance_id = $1::uuid
 		), cur AS (
 			SELECT 'input' AS kind, t.revision_id, t.metric_id, t.dim_members, sum(t.value) AS value, max(t.text_value) AS text_value
 			FROM runtime.fact_input t

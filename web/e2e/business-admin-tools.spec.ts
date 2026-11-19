@@ -60,6 +60,38 @@ test("a business admin checks, then copies one member's values into another", as
   expect(calls.map((c) => !!c.dry_run)).toEqual([true, false]);
 });
 
+test("a copy can be narrowed to members of another dimension and to some metrics", async ({ page }) => {
+  await mockApi(page);
+  const calls: { only?: Record<string, string[]>; metric_ids?: string[]; dry_run?: boolean }[] = [];
+  await page.route("**/api/business-admin/copy-values", async (r) => {
+    const body = r.request().postDataJSON() as { dry_run?: boolean };
+    calls.push(body);
+    await r.fulfill(json({ cells: 2, dry_run: !!body.dry_run }));
+  });
+  await open(page, "Copy values");
+  await page.getByLabel("Dimension").selectOption({ index: 1 });
+  await page.getByLabel("Copy from").selectOption({ index: 1 });
+  await page.getByLabel("Copy to").selectOption({ index: 1 });
+  const onlyDim = page.getByLabel("Only where dimension");
+  await onlyDim.selectOption({ index: 1 });
+  const members = page.getByRole("group", { name: /^Only these members of / });
+  await members.getByRole("button").first().click();
+  await expect(members.getByRole("button").first()).toHaveAttribute("aria-pressed", "true");
+  const metrics = page.getByRole("group", { name: "Only these metrics" });
+  if (await metrics.count()) await metrics.getByRole("button").first().click();
+  await page.getByRole("button", { name: "Check" }).click();
+  await expect(page.getByRole("status")).toContainText("2 values will be written");
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Copied 2 values");
+  expect(calls).toHaveLength(2);
+  for (const c of calls) {
+    const dims = Object.keys(c.only ?? {});
+    expect(dims).toHaveLength(1);
+    expect(c.only![dims[0]]).toHaveLength(1);
+  }
+  expect(calls[0].metric_ids).toEqual(calls[1].metric_ids);
+});
+
 test("a role's access rules are edited like a person's", async ({ page }) => {
   await mockApi(page);
   let saved = "";

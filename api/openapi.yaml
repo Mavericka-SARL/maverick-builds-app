@@ -810,6 +810,7 @@ components:
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
         business_maintained: { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members)" }
+        format_property:      { type: string, description: "The dimension's text property whose value at a member — percentage, number or currency — is the number format of every cell at that member, and what a calculated member's METRICFORMAT() reads there; \"\" for none" }
         editor_roles: { type: array, items: { type: string }, description: "Business roles that may add, change and delete its members and properties (with the application's administrators); empty: every user who may" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
 
@@ -1014,6 +1015,7 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        approval_watch:  { type: boolean, description: "Whether approved runs keep the metric's figures and report when they change (default true). false for a view that moves with the calendar — year to date at the last closed month, a rolling window. Omitted keeps it on PATCH." }
         input_rules:
           $ref: "#/components/schemas/InputRules"
         dimension_rules:
@@ -1059,6 +1061,7 @@ components:
         source_dimension_id:  { type: string, format: uuid, description: "A property grouping: this dimension's members group this dimension's members by their source_property value (developer endpoint; omitted when none)" }
         source_property:      { type: string, description: "The declared property of source_dimension_id whose value names the group (a member's code)" }
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        format_property:      { type: string, description: "The dimension's text property whose value at a member — percentage, number or currency — is the number format of every cell at that member, and what a calculated member's METRICFORMAT() reads there; \"\" for none" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
     InputRules:
@@ -1159,6 +1162,7 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        approval_watch:  { type: boolean, description: "Whether approved runs keep the metric's figures and report when they change (default true). false for a view that moves with the calendar — year to date at the last closed month, a rolling window. Omitted keeps it on PATCH." }
         input_rules:
           $ref: "#/components/schemas/InputRules"
         dimension_rules:
@@ -1206,6 +1210,7 @@ components:
           items: { $ref: "#/components/schemas/ClosedRule" }
           description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         row_style:       { type: string, enum: ["", total], description: "\"total\" draws the metric's row as a total in every grid (bold label, a rule above); \"\" as any row. Omitted keeps it on PATCH." }
+        approval_watch:  { type: boolean, description: "Whether approved runs keep the metric's figures and report when they change (default true). false for a view that moves with the calendar — year to date at the last closed month, a rolling window. Omitted keeps it on PATCH." }
         input_rules:
           $ref: "#/components/schemas/InputRules"
         dimension_rules:
@@ -1252,6 +1257,7 @@ components:
         source_property:      { type: string, description: "A property DECLARED on source_dimension_id (any case; stored as declared)" }
         derive_members:       { type: boolean, default: false, description: "Also add one member (code = label = the value) per distinct non-blank value of the property" }
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        format_property:      { type: string, description: "The dimension's text property whose value at a member — percentage, number or currency — is the number format of every cell at that member, and what a calculated member's METRICFORMAT() reads there; \"\" for none" }
         dimension_type:
           type: string
           enum: [standard, time]
@@ -1288,6 +1294,7 @@ components:
         source_property:      { type: string, description: "Change the grouping's property; recalculates the metrics reading through it" }
         derive_members:       { type: boolean, description: "Add a member for every value of the property that has none yet (e.g. after a new value appears)" }
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        format_property:      { type: string, description: "The dimension's text property whose value at a member — percentage, number or currency — is the number format of every cell at that member, and what a calculated member's METRICFORMAT() reads there; \"\" for none" }
         editor_roles:         { type: array, items: { type: string }, description: "Business roles that may change its members and properties; [] lifts the rule. Each must be a business role of the customer" }
 
     MemberRequest:
@@ -4597,7 +4604,8 @@ paths:
         calculated values of that scope are kept. An input outside the lock (a tax rate, a posting
         account, a setting) can still move them; this lists, for the selected model's application, each
         approved run whose figures differ now: how many, and up to five examples (a metric or member
-        hidden from the caller is left out of the examples). For anyone who opens the model.
+        hidden from the caller is left out of the examples). For anyone who opens the model. A metric
+        whose approval_watch is false (a view that moves with the calendar) is neither kept nor listed.
       parameters:
         - name: instance_id
           in: query
@@ -4623,6 +4631,11 @@ paths:
                         scope:       { type: string, description: "The run's members, e.g. Period: Sep 2026" }
                         approved_at: { type: string, format: date-time }
                         changed:     { type: integer }
+                        can_reopen:  { type: boolean, description: "The caller may reopen the run" }
+                        reopen_roles:
+                          type: array
+                          items: { type: string }
+                          description: "The roles that reopen it; absent: the application's business admins and developers"
                         examples:
                           type: array
                           items:
@@ -9303,7 +9316,7 @@ paths:
         In the live revision of the model the admin has open, every value typed into a cell of
         `from` is written to the same cell of `to` (values a table of records posts stay with their
         records). Each is checked as a typed value is (access rules, workflow locks, closed and
-        posted cells), all or nothing. At most 20,000 values; `metric_ids` narrows the copy.
+        posted cells), all or nothing. At most 20,000 values; `metric_ids` and `only` narrow the copy.
       requestBody:
         required: true
         content:
@@ -9316,6 +9329,10 @@ paths:
                 from:         { type: string, description: A member code holding values }
                 to:           { type: string, description: A member code holding values }
                 metric_ids:   { type: array, items: { type: string, format: uuid } }
+                only:
+                  type: object
+                  additionalProperties: { type: array, items: { type: string } }
+                  description: "Narrows the copy to members of other dimensions: dimension id → member codes (a member with members under it stands for its leaves). A value without such a dimension is not copied."
                 dry_run:      { type: boolean }
       responses:
         "200":

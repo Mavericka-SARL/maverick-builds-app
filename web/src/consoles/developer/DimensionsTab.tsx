@@ -351,9 +351,15 @@ function DimHeaderEditor({ dim, onClose, revisionId }: { dim: DevDimension; onCl
   const isTime = dim.dimension_type === "time";
   // A time dimension's periods and a grouping's derived members are not typed.
   const canOpen = !isTime && !dim.source_dimension_id;
+  // Members that carry their own number format (migration 190): a text
+  // property holding percentage, number or currency per member.
+  const [formatProp, setFormatProp] = useState(dim.format_property ?? "");
+  const { data: props = [] } = useQuery({ queryKey: ["dim-props", dim.id], queryFn: () => api.listDimProperties(dim.id), enabled: !isTime });
+  const textProps = props.filter(p => p.data_type === "text");
   const save = useMutation({
     mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}), ...(rolesChanged ? { editor_roles: editorRoles } : {}),
-      ...(!isTime && totalRule !== (dim.agg_rule || "sum") ? { agg_rule: totalRule } : {}) }),
+      ...(!isTime && totalRule !== (dim.agg_rule || "sum") ? { agg_rule: totalRule } : {}),
+      ...(!isTime && formatProp !== (dim.format_property ?? "") ? { format_property: formatProp } : {}) }),
     // A new total rule moves every total over the dimension.
     onSuccess: () => { void refreshMembers(qc); invalidateModelData(qc); onClose(); },
   });
@@ -385,6 +391,16 @@ function DimHeaderEditor({ dim, onClose, revisionId }: { dim: DevDimension; onCl
             <option value="none">No total (the members are alternatives)</option>
           </Select>
           <span className="mvx-admin-muted">scenarios and plan cases are never added up; a metric can set its own</span>
+        </div>
+      )}
+      {!isTime && (textProps.length > 0 || formatProp) && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="mvx-admin-muted">Members' number format:</span>
+          <Select value={formatProp} onChange={(e) => setFormatProp(e.target.value)} aria-label="Members' number format" style={{ width: 300 }}>
+            <option value="">Each metric's own format</option>
+            {textProps.map(p => <option key={p.id} value={p.name}>From the property {p.name}</option>)}
+          </Select>
+          <span className="mvx-admin-muted">its value at a member — percentage, number or currency — formats every cell there (a margin line among amounts)</span>
         </div>
       )}
       {canOpen && (

@@ -398,7 +398,7 @@ func ShapeGridStats(grid [][]string, r *Reshape) (header []string, rows []RawRow
 	if h > len(grid) {
 		return nil, nil, st, fmt.Errorf("the sheet has %d row(s); reshape.header_row is %d", len(grid), h)
 	}
-	header = append([]string(nil), grid[h-1]...)
+	header = nameUnheadedColumns(grid[h-1], grid[h:])
 	rowNum := 0
 	for _, record := range grid[h:] {
 		rowNum++
@@ -786,4 +786,63 @@ func (v *ValueMaps) UnmarshalJSON(b []byte) error {
 	}
 	*v = out
 	return nil
+}
+
+// nameUnheadedColumns is the header row with each column that has no header
+// but holds data below it named by its letter, "Column C" — a workbook's
+// row labels often stand under an empty cell (the Integrated FP&A Actuals
+// sheet: labels in C, month-ends from I5), and an unnamed column could be
+// neither mapped nor shaped (2026-11-19). A column that is empty below an
+// empty header stays unnamed, as before, so it maps to nothing; so does one
+// past the header row's last cell (a title read as the header), as before.
+func nameUnheadedColumns(headerRow []string, data [][]string) []string {
+	header := append([]string(nil), headerRow...)
+	taken := map[string]bool{}
+	for _, h := range header {
+		taken[strings.ToLower(strings.TrimSpace(h))] = true
+	}
+	for i := range header {
+		if strings.TrimSpace(header[i]) != "" {
+			continue
+		}
+		holds := false
+		for _, rec := range data {
+			if i < len(rec) && strings.TrimSpace(rec[i]) != "" {
+				holds = true
+				break
+			}
+		}
+		name := "Column " + columnLetters(i)
+		if holds && !taken[strings.ToLower(name)] {
+			header[i] = name
+			taken[strings.ToLower(name)] = true
+		}
+	}
+	return header
+}
+
+// columnLetters is a 0-based column index as a spreadsheet names it: 0 → A,
+// 25 → Z, 26 → AA.
+func columnLetters(i int) string {
+	s := ""
+	for i++; i > 0; i = (i - 1) / 26 {
+		s = string(rune('A'+(i-1)%26)) + s
+	}
+	return s
+}
+
+// IsUnheadedColumnName reports whether name is how nameUnheadedColumns names
+// a column the file gives no header ("Column C"): mapped, it is a column like
+// any other; left unmapped, it is read past, as an unnamed column always was.
+func IsUnheadedColumnName(name string) bool {
+	rest, ok := strings.CutPrefix(name, "Column ")
+	if !ok || len(rest) == 0 || len(rest) > 3 {
+		return false
+	}
+	for _, r := range rest {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }

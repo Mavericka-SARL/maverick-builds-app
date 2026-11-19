@@ -1018,6 +1018,34 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     return codes ? withSelection(dim, codes) : dim;
   });
   const selectorMembers = (dimId: string) => dimsBase.find(d => d.id === dimId)?.members ?? [];
+  // A dimension whose members carry their own number format (its
+  // format_property, migration 190): a cell at such a member is shown, and
+  // its calculated members evaluated, in that format — the margin row of a
+  // line dimension that mixes amounts, percentages and headcount.
+  const memberFormatOf = dims.map(d => {
+    if (!d.format_property) return null;
+    const prop = d.format_property.toLowerCase();
+    const byCode = new Map<string, Metric["format"]>();
+    for (const mm of d.members) {
+      const props = mm.properties ?? {};
+      const k = Object.keys(props).find(x => x.toLowerCase() === prop);
+      const v = k ? String(props[k]).trim().toLowerCase() : "";
+      if (v === "percentage" || v === "number" || v === "currency") byCode.set(mm.code, v);
+    }
+    return byCode;
+  });
+  // A calculated member's own format wins (a Variance % column is a
+  // percentage on every line); then the first other member that has one.
+  const cellMetric = (m: Metric, fc: DimMember[]): Metric => {
+    for (const calcFirst of [true, false]) {
+      for (let i = 0; i < fc.length; i++) {
+        if (!!fc[i]?.formula !== calcFirst) continue;
+        const f = memberFormatOf[i]?.get(fc[i]?.code ?? "");
+        if (f) return f === m.format ? m : { ...m, format: f };
+      }
+    }
+    return m;
+  };
   const visibleMetrics = pickMetrics(g.metrics ?? [], metricIds);
   const metricsInRows    = pivotRows.includes(METRICS_ID);
   const metricsInContext = pivotContext.includes(METRICS_ID);
@@ -1225,7 +1253,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const calcAt = fc.findIndex(m => !!m?.formula);
     if (calcAt >= 0 && depth < 8) {
       const metric = fullMetric(metricId) ?? g.metrics.find(m => m.id === metricId);
-      return evalMemberFormula(fc[calcAt].formula!, metric?.format ?? "number", (code) => {
+      const cellFormat = metric ? cellMetric(metric, fc.map((x, i) => (i === calcAt ? ({ code: "" } as DimMember) : x))).format : undefined;
+      return evalMemberFormula(fc[calcAt].formula!, cellFormat ?? "number", (code) => {
         const sibling = dims[calcAt].members.find(m => m.code.toUpperCase() === code.toUpperCase());
         if (!sibling) return undefined;
         const sfc = [...fc];
@@ -1329,6 +1358,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const own = () => new Map([[key, timeDimIdx >= 0 ? fc[timeDimIdx]?.code : undefined]]);
     if (g.cells[key] !== undefined || withheld.has(key)) return { sources: own(), mirrored: false };
     const full = fullMetric(metricId);
+    // A metric shown on its own dimensions mirrors nothing: its cell is its
+    // only source, and no cell is no value. Read as mirrored, a never-entered
+    // input added up nothing and showed 0 — "0.0%" beside an entered 0, where
+    // blank and 0 differ (2026-11-19).
+    const own_dims = full?.dimension_ids ?? [];
+    if (own_dims.length === dims.length && dims.every(d => own_dims.includes(d.id))) return { sources: own(), mirrored: false };
     const mirrored = full ? crossDimensionSources(g, full, dims, fc) : undefined;
     return mirrored ? { sources: mirrored, mirrored: true } : { sources: own(), mirrored: false };
   }
@@ -1805,7 +1840,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
           title={val === null ? WITHHELD_TITLE : isParent ? undefined : lockReason ? `${lockReason}. Right-click for history` : closed ? "Closed: this cell takes no input. Right-click for history" : postedFrom ? `From the records of ${postedFrom}: change them there. Right-click for history` : m.readonly || fc.some(member => member.readonly) ? `Read-only for you (an access rule).${note ? `\n\n${note}` : ""} Right-click for history` : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
-          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtCell(m, fc, val, gridScale, dateFormat)}
+          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtCell(cellMetric(m, fc), fc, val, gridScale, dateFormat)}
         </td>
       );
     }
@@ -1892,7 +1927,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const isActive = editing[key] !== undefined;
     const dispVal = editing[key] !== undefined
       ? editing[key]
-      : (val != null ? fmtMetric(m, val, gridScale) : "");
+      : (val != null ? fmtMetric(cellMetric(m, fc), val, gridScale) : "");
     return (
       <td className={tone || undefined} style={{ ...td, whiteSpace: "nowrap", textAlign: "right", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
         <input
@@ -1954,7 +1989,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         title={recalcPending ? "Recalculating — this value is about to change" : undefined}
         style={{ ...td, whiteSpace: "nowrap", textAlign: "right", borderLeft }}
       >
-        {fmtCell(m, fc, v, gridScale, dateFormat)}
+        {fmtCell(cellMetric(m, fc), fc, v, gridScale, dateFormat)}
       </td>
     );
   }
@@ -2042,7 +2077,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
                       {li === 0 && (
                         <th style={{ ...th, ...labelCol(180) }} rowSpan={colHeaderLevels.length}>
-                          {rowDims.length > 0 ? rowDims.map(d => d.name).join(" / ") + " / Metric" : "Metric"}
+                          {rowDims.length > 0 ? rowDims.map(dimLabel).join(" / ") + " / Metric" : "Metric"}
                         </th>
                       )}
                       {level.map((cell, ci) => (
@@ -2064,7 +2099,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 ) : (
                   <tr style={{ background: colDims.length > 0 ? "var(--color-grid-col-header-bg)" : "var(--color-surface-faint)", borderBottom: "2px solid var(--color-border)" }}>
                     <th style={{ ...th, ...labelCol(180) }}>
-                      {rowDims.length > 0 ? rowDims.map(d => d.name).join(" / ") + " / Metric" : "Metric"}
+                      {rowDims.length > 0 ? rowDims.map(dimLabel).join(" / ") + " / Metric" : "Metric"}
                     </th>
                     {colDims.length > 0
                       ? colCombos.map(cc => (

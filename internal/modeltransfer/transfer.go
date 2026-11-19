@@ -114,6 +114,9 @@ type Dimension struct {
 	Tags            []string `json:"tags,omitempty"`
 	// BusinessMaintained: business users keep its members (migration 111).
 	BusinessMaintained bool `json:"business_maintained,omitempty"`
+	// FormatProperty: the property its members take their number format
+	// from (migration 190); absent for none, and in packages made before it.
+	FormatProperty string `json:"format_property,omitempty"`
 	// EditorRoles: the business roles, by name, that may change its members
 	// (migration 161). A tenant without a role of that name: only its
 	// administrators may.
@@ -161,6 +164,9 @@ type Metric struct {
 	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
 	// RowStyle "total" draws its row as a total (migration 159).
 	RowStyle string `json:"row_style,omitempty"`
+	// ApprovalWatch false: approvals do not keep its figures (migration
+	// 189); absent when they do, and in packages made before it existed.
+	ApprovalWatch *bool `json:"approval_watch,omitempty"`
 	// InputRules: the values its cells accept (migration 173); absent when
 	// none, and in packages made before it existed.
 	InputRules json.RawMessage `json:"input_rules,omitempty"`
@@ -518,7 +524,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
 		SELECT id::text, name, NULLIF(label, ''), agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
-		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained, editor_roles
+		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained, editor_roles, format_property
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -527,7 +533,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dimension
 		if err := rows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
-			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained, &d.EditorRoles); err != nil {
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained, &d.EditorRoles, &d.FormatProperty); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -585,7 +591,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
 		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
 		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb), row_style,
-		       NULLIF(input_rules, '{}'::jsonb)
+		       NULLIF(input_rules, '{}'::jsonb), approval_watch
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -593,10 +599,14 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var m Metric
+		watch := true
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen, &m.RowStyle, &m.InputRules); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen, &m.RowStyle, &m.InputRules, &watch); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if !watch {
+			m.ApprovalWatch = &watch
 		}
 		pkg.Metrics = append(pkg.Metrics, m)
 	}
@@ -2041,13 +2051,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles,
+			                                 format_property)
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'sum'), COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9,
-			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12, NULLIF(btrim($13), ''), COALESCE($14::text[],'{}'))
+			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12, NULLIF(btrim($13), ''), COALESCE($14::text[],'{}'),
+			        btrim($15))
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, jsonArg(d.Properties), d.SourceProperty,
 			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID),
-			d.BusinessMaintained && dimType != timedim.TypeTime, d.Label, d.EditorRoles).Scan(&newID); err != nil {
+			d.BusinessMaintained && dimType != timedim.TypeTime, d.Label, d.EditorRoles, d.FormatProperty).Scan(&newID); err != nil {
 			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
@@ -2253,6 +2265,11 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, metricMap[m.ID], style); err != nil {
 				return "", fmt.Errorf("metric %q row style: %w", m.Name, err)
+			}
+		}
+		if m.ApprovalWatch != nil && !*m.ApprovalWatch {
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET approval_watch=false WHERE id=$1::uuid`, metricMap[m.ID]); err != nil {
+				return "", fmt.Errorf("metric %q approval watch: %w", m.Name, err)
 			}
 		}
 		if picklistDim != "" {

@@ -64,6 +64,7 @@ export function ProcessCanvas({ steps, selectedId, onSelect }: {
   onSelect: (id: string) => void;
 }) {
   const rows = computeCanvasRows(steps);
+  const names = new Map(steps.map(s => [s.id, s.name?.trim() || s.id]));
 
   return (
     <div style={{ padding: "32px 0", display: "flex", flexDirection: "column", alignItems: "center", minHeight: "100%" }}>
@@ -93,8 +94,8 @@ export function ProcessCanvas({ steps, selectedId, onSelect }: {
                       <ProcessStepCard step={step} selected={selectedId === step.id} onClick={() => onSelect(step.id)} />
                       {step.type === "approval" && (
                         <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
-                          <div style={{ fontSize: 10, color: "var(--color-success)" }}>✓ {step.routes?.approve ? routeLabel(step.routes.approve) : "?"}</div>
-                          <div style={{ fontSize: 10, color: "var(--color-danger)" }}>✕ {step.routes?.reject ? routeLabel(step.routes.reject) : "?"}</div>
+                          <div style={{ fontSize: 10, color: "var(--color-success)" }}>✓ {step.routes?.approve ? routeLabel(step.routes.approve, names) : "?"}</div>
+                          <div style={{ fontSize: 10, color: "var(--color-danger)" }}>✕ {step.routes?.reject ? routeLabel(step.routes.reject, names) : "?"}</div>
                         </div>
                       )}
                       <div style={{ width: 2, height: 20, background: "var(--color-border-muted)" }} />
@@ -117,14 +118,14 @@ export function ProcessCanvas({ steps, selectedId, onSelect }: {
                 />
                 {row[0].type === "condition" && (
                   <div style={{ display: "flex", gap: 40, marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: "var(--color-success)" }}>True → {row[0].routes?.true ? routeLabel(row[0].routes.true) : "?"}</div>
-                    <div style={{ fontSize: 11, color: "var(--color-danger)" }}>False → {row[0].routes?.false ? routeLabel(row[0].routes.false) : "?"}</div>
+                    <div style={{ fontSize: 11, color: "var(--color-success)" }}>True → {row[0].routes?.true ? routeLabel(row[0].routes.true, names) : "?"}</div>
+                    <div style={{ fontSize: 11, color: "var(--color-danger)" }}>False → {row[0].routes?.false ? routeLabel(row[0].routes.false, names) : "?"}</div>
                   </div>
                 )}
                 {row[0].type === "approval" && (
                   <div style={{ display: "flex", gap: 40, marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: "var(--color-success)" }}>Approve → {row[0].routes?.approve ? routeLabel(row[0].routes.approve) : "?"}</div>
-                    <div style={{ fontSize: 11, color: "var(--color-danger)" }}>Reject → {row[0].routes?.reject ? routeLabel(row[0].routes.reject) : "?"}</div>
+                    <div style={{ fontSize: 11, color: "var(--color-success)" }}>Approve → {row[0].routes?.approve ? routeLabel(row[0].routes.approve, names) : "?"}</div>
+                    <div style={{ fontSize: 11, color: "var(--color-danger)" }}>Reject → {row[0].routes?.reject ? routeLabel(row[0].routes.reject, names) : "?"}</div>
                   </div>
                 )}
               </>
@@ -139,9 +140,15 @@ export function ProcessCanvas({ steps, selectedId, onSelect }: {
   );
 }
 
-function routeLabel(target: string): string {
+/**
+ * A route's target as people read it: an end state in words, a step by its
+ * name. Steps are routed by their internal id ("step-nxr65fs"), which the
+ * diagram used to print — "Approve → step-nxr65fs" where the editor's list
+ * says "CFO approval" (2026-11-19). An id no step has is shown as it is.
+ */
+function routeLabel(target: string, names: Map<string, string>): string {
   if (target.startsWith("end-")) return endStateLabel(target);
-  return target;
+  return names.get(target) || target;
 }
 
 function endStateLabel(s: string): string {

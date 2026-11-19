@@ -248,6 +248,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [dimensionRules, setDimensionRules] = useState<Record<string, TotalRule>>(m.dimension_rules ?? {});
   const dimensionRulesChanged = JSON.stringify(dimensionRules) !== JSON.stringify(m.dimension_rules ?? {});
   const [rowStyle, setRowStyle] = useState<RowStyle>(m.row_style ?? "");
+  const [approvalWatch, setApprovalWatch] = useState(m.approval_watch !== false);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
   // while a banner is showing, for this metric's own model.
@@ -283,6 +284,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       picklist_allow_parents: isPicklist ? allowParents : false,
       highlight_rules: highlightRules,
       row_style: rowStyle,
+      approval_watch: approvalWatch,
       ...(isInput ? { closed_when: closedRules } : {}),
       // Left out for any other metric: the server drops rules that no
       // longer apply.
@@ -439,6 +441,15 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 <option value="total">A total (bold, a rule above)</option>
               </Select>
             </div>
+            <label style={{ display: "flex", gap: 6, alignItems: "flex-start", marginTop: 8 }}>
+              <input type="checkbox" aria-label="Kept by approvals" checked={approvalWatch} onChange={e => setApprovalWatch(e.target.checked)} style={{ marginTop: 3 }} />
+              <span>
+                <Txt>Kept by approvals</Txt>
+                <span className="mvx-admin-muted">
+                  {" — an approved run keeps its figures and warns when one changes. Untick for a view that moves with the calendar (year to date at the last closed month, a rolling window), so a month-end is not reported as a change."}
+                </span>
+              </span>
+            </label>
             <div style={{ marginTop: 8 }}>
               <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>Highlight cells (the first rule that holds tints the cell):</div>
               <HighlightRulesEditor rules={highlightRules} onChange={setHighlightRules}
@@ -505,6 +516,11 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               </span>
             )}
             <StatusBadge tone="warning">{fmtBadge(m.format ?? "number", m.format_decimals ?? 0, m.format_currency ?? "$")}</StatusBadge>
+            {m.approval_watch === false && (
+              <span title="Approvals do not keep this metric's figures: a view that moves with the calendar.">
+                <StatusBadge>not kept by approvals</StatusBadge>
+              </span>
+            )}
             {(m.highlight_rules ?? []).length > 0 && (
               <StatusBadge tone="danger">{m.highlight_rules!.length === 1 ? "1 highlight" : `${m.highlight_rules!.length} highlights`}</StatusBadge>
             )}

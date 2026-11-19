@@ -8,6 +8,12 @@ import { momentDate } from "../dateSerial";
 const num = (v: number | undefined, text?: string) =>
   text ? text : v === undefined || v === null ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
+/** Who reopens a run, for a reader who may not: its reopen roles, or the application's administrators. */
+function whoReopens(roles?: string[]): string {
+  if (!roles || roles.length === 0) return "the application's business admins and developers";
+  return roles.length === 1 ? roles[0] : `${roles.slice(0, -1).join(", ")} or ${roles[roles.length - 1]}`;
+}
+
 /**
  * Says, above a dashboard, which approved figures changed since their approval
  * (owner decision 2026-11-13): a released period stays locked, but an input
@@ -31,7 +37,10 @@ export function ApprovalChangesBanner({ modelId }: { modelId: string }) {
           <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
             <span>
               <strong>Changed since approval:</strong> {r.workflow}<Txt>{r.scope ? ` (${r.scope})` : ""}</Txt><Txt>, approved </Txt>{momentDate(r.approved_at, dateFormat)} —{" "}
-              {r.changed} figure<Txt>{r.changed === 1 ? "" : "s"}</Txt> <Txt>no longer what was approved. Something outside the lock moved </Txt>{r.changed === 1 ? "it" : "them"} — an input without the period (a rate, a setting) or a change to the model; reopen the run to change the period on purpose, or undo that change.
+              {r.changed} figure<Txt>{r.changed === 1 ? "" : "s"}</Txt> <Txt>no longer what was approved. Something outside the lock moved </Txt>{r.changed === 1 ? "it" : "them"} — an input without the period (a rate, a setting) or a change to the model;{" "}
+              {r.can_reopen === false
+                ? <Txt>{`only ${whoReopens(r.reopen_roles)} can reopen the run: tell them if this was not intended.`}</Txt>
+                : <Txt>reopen the run to change the period on purpose, or undo that change.</Txt>}
             </span>
             {r.examples.length > 0 && (
               <Button size="sm" variant="ghost" onClick={() => setOpen(open === r.instance_id ? null : r.instance_id)}>

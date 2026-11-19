@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
@@ -39,6 +40,7 @@ func addCalculatedMemberCells(cells map[string]float64, withheld []string, metri
 	for _, k := range withheld {
 		hidden[k] = true
 	}
+	formats := memberFormats(dims)
 	seen := map[string]bool{}
 	for _, m := range metrics {
 		if seen[m.ID] {
@@ -73,6 +75,7 @@ func addCalculatedMemberCells(cells map[string]float64, withheld []string, metri
 				groups[g][strings.ToUpper(code)] = k
 			}
 			for g, byCode := range groups {
+				format := cellFormat(m.Format, formats, own, strings.Split(g, ":"), pos)
 				keyAt := func(code string) string {
 					codes := strings.Split(g, ":")
 					codes[pos] = code
@@ -102,7 +105,7 @@ func addCalculatedMemberCells(cells map[string]float64, withheld []string, metri
 						}
 						state[up] = 1
 						own := false
-						v, ok, _ := rollup.EvalCalculated(c.Formula, m.Format, func(ref string) (float64, bool, error) {
+						v, ok, _ := rollup.EvalCalculated(c.Formula, format, func(ref string) (float64, bool, error) {
 							v, ok := valueOf(ref, &own)
 							return v, ok, nil
 						})
@@ -268,6 +271,7 @@ func (h *handler) gridPinned(w http.ResponseWriter, r *http.Request, depth int) 
 	cells := map[string]float64{}
 	var withheld []string
 	seen := map[string]bool{}
+	formats := memberFormats(append(append([]gridDimension{}, out.Dimensions...), out.AllDimensions...))
 	for _, m := range append(append([]metricRow{}, out.Metrics...), out.AllMetrics...) {
 		if seen[m.ID] {
 			continue
@@ -310,7 +314,7 @@ func (h *handler) gridPinned(w http.ResponseWriter, r *http.Request, depth int) 
 			}
 		}
 		for t, parts := range targets {
-			v, ok, wh := eval(m.Format, func(code string) string {
+			v, ok, wh := eval(cellFormat(m.Format, formats, m.DimensionIDs, parts, pos), func(code string) string {
 				p := append([]string{}, parts...)
 				p[pos] = code
 				return prefix + strings.Join(p, ":")
@@ -328,4 +332,47 @@ func (h *handler) gridPinned(w http.ResponseWriter, r *http.Request, depth int) 
 	}
 	out.Totals, out.Cells, out.Withheld = totals, cells, withheld
 	jsonOK(w, out)
+}
+
+// memberFormats indexes the dimensions that give their members a number
+// format (migration 190): dimension id → member code → format.
+func memberFormats(dims []gridDimension) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, d := range dims {
+		if d.FormatProperty == "" || out[d.ID] != nil {
+			continue
+		}
+		byCode := map[string]string{}
+		for _, m := range d.Members {
+			var props map[string]any
+			if len(m.Properties) == 0 || json.Unmarshal(m.Properties, &props) != nil {
+				continue
+			}
+			for k, v := range props {
+				if !strings.EqualFold(k, d.FormatProperty) {
+					continue
+				}
+				if f := strings.ToLower(strings.TrimSpace(fmt.Sprint(v))); metricformula.MemberFormats[f] {
+					byCode[m.Code] = f
+				}
+			}
+		}
+		out[d.ID] = byCode
+	}
+	return out
+}
+
+// cellFormat is the format a cell at codes (one per dimIDs) is read in: the
+// metric's own, unless a member there carries one (the first that does);
+// position skip (the calculated member's dimension) is passed over.
+func cellFormat(base string, formats map[string]map[string]string, dimIDs, codes []string, skip int) string {
+	for i, dimID := range dimIDs {
+		if i == skip || i >= len(codes) {
+			continue
+		}
+		if f := formats[dimID][codes[i]]; f != "" {
+			return f
+		}
+	}
+	return base
 }

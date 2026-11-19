@@ -27,7 +27,12 @@ import (
 const maxCopyCells = 20000
 
 // baCopyValues handles POST /api/business-admin/copy-values, body
-// {"dimension_id", "from", "to", "metric_ids" (optional), "dry_run"}.
+// {"dimension_id", "from", "to", "metric_ids" (optional), "only" (optional),
+// "dry_run"}. only narrows the copy to members of other dimensions —
+// {"<dimension id>": ["2027-01", "FY2028"]}, a member with members under it
+// standing for its leaves — so next year's budget is seeded from the plan's
+// 2027 months without touching the approved 2026 ones (2026-11-19). A value
+// without such a dimension is outside the slice and is not copied.
 func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
@@ -41,11 +46,12 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DimensionID string   `json:"dimension_id"`
-		From        string   `json:"from"`
-		To          string   `json:"to"`
-		MetricIDs   []string `json:"metric_ids"`
-		DryRun      bool     `json:"dry_run"`
+		DimensionID string              `json:"dimension_id"`
+		From        string              `json:"from"`
+		To          string              `json:"to"`
+		MetricIDs   []string            `json:"metric_ids"`
+		Only        map[string][]string `json:"only"`
+		DryRun      bool                `json:"dry_run"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -82,6 +88,12 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("%q is no member of %s that holds values (a member without members under it)", code, dimName), http.StatusBadRequest)
 			return
 		}
+	}
+
+	only, err := h.copyValuesSlice(ctx, revisionID, body.DimensionID, body.Only)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
 	}
 
 	// The latest value typed into each cell of from: a value a table of
@@ -127,6 +139,9 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if json.Unmarshal([]byte(dm), &s.codes) != nil {
+			continue
+		}
+		if !inSlice(only, s.codes) {
 			continue
 		}
 		s.codes[body.DimensionID] = body.To
@@ -209,7 +224,7 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 		ResourceType: "revision", ResourceID: revisionID, RevisionID: revisionID,
 		Metadata: map[string]string{"model_id": modelID, "cells": strconv.Itoa(len(cells)), "via": "copy_values",
-			"dimension": dimName, "from": body.From, "to": body.To},
+			"dimension": dimName, "from": body.From, "to": body.To, "only": onlyText(body.Only)},
 	})
 	go func() { //nolint:contextcheck
 		calcLog := h.log.With().Str("op", "copy_values").Logger()
@@ -219,4 +234,82 @@ func (h *handler) baCopyValues(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	jsonOK(w, map[string]any{"cells": len(cells), "dry_run": false})
+}
+
+// copyValuesSlice resolves a copy's "only": each dimension of the revision
+// (not the one copied along) to the leaf codes under the members named.
+func (h *handler) copyValuesSlice(ctx context.Context, revisionID, alongID string, only map[string][]string) (map[string]map[string]bool, error) {
+	out := map[string]map[string]bool{}
+	for dimID, codes := range only {
+		if len(codes) == 0 {
+			continue
+		}
+		if dimID == alongID {
+			return nil, fmt.Errorf("the copy runs along that dimension: narrow it by another one")
+		}
+		var name string
+		if err := h.db.QueryRow(ctx, `SELECT name FROM model.dimension_def WHERE id::text = $1 AND revision_id = $2::uuid`,
+			dimID, revisionID).Scan(&name); err != nil {
+			return nil, fmt.Errorf("only: no dimension %s in the live revision", dimID)
+		}
+		rows, err := h.db.Query(ctx, `
+			SELECT m.code, COALESCE(p.code, '') FROM model.dimension_member m
+			LEFT JOIN model.dimension_member p ON p.id = m.parent_member_id
+			WHERE m.dimension_id = $1::uuid`, dimID)
+		if err != nil {
+			return nil, err
+		}
+		children, known := map[string][]string{}, map[string]bool{}
+		for rows.Next() {
+			var code, parent string
+			if err := rows.Scan(&code, &parent); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			known[code] = true
+			if parent != "" {
+				children[parent] = append(children[parent], code)
+			}
+		}
+		rows.Close()
+		leaves := map[string]bool{}
+		var walk func(string)
+		walk = func(c string) {
+			if len(children[c]) == 0 {
+				leaves[c] = true
+				return
+			}
+			for _, k := range children[c] {
+				walk(k)
+			}
+		}
+		for _, c := range codes {
+			c = strings.TrimSpace(c)
+			if !known[c] {
+				return nil, fmt.Errorf("only: %q is no member of %s", c, name)
+			}
+			walk(c)
+		}
+		out[dimID] = leaves
+	}
+	return out, nil
+}
+
+// inSlice reports whether a value's members lie in every dimension of only.
+func inSlice(only map[string]map[string]bool, codes map[string]string) bool {
+	for dimID, leaves := range only {
+		if c, ok := codes[dimID]; !ok || !leaves[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// onlyText is "only" for the audit log: dimension id → codes.
+func onlyText(only map[string][]string) string {
+	if len(only) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(only)
+	return string(b)
 }

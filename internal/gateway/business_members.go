@@ -48,20 +48,23 @@ func (h *handler) markBusinessMaintained(ctx context.Context, dims []gridDimensi
 	for i, d := range dims {
 		ids[i] = d.ID
 	}
-	rows, err := h.db.Query(ctx, `SELECT id::text FROM model.dimension_def WHERE id::text = ANY($1::text[]) AND business_maintained`, ids)
+	rows, err := h.db.Query(ctx, `SELECT id::text, business_maintained, format_property FROM model.dimension_def WHERE id::text = ANY($1::text[])`, ids)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-	open := map[string]bool{}
+	open, format := map[string]bool{}, map[string]string{}
 	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			open[id] = true
+		var id, prop string
+		var maintained bool
+		if rows.Scan(&id, &maintained, &prop) == nil {
+			open[id], format[id] = maintained, prop
 		}
 	}
 	for i := range dims {
 		dims[i].BusinessMaintained = open[dims[i].ID]
+		// The member format travels with the dimension (migration 190).
+		dims[i].FormatProperty = format[dims[i].ID]
 	}
 }
 

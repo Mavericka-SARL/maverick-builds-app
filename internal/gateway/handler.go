@@ -2880,12 +2880,12 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up instance ID, revision_id, and verify the user has an eligible role for this step.
-	var instanceID, taskRevisionID string
+	var instanceID, taskRevisionID, taskStepDefID string
 	var instCtxJSON []byte
 	if err := h.db.QueryRow(ctx,
-		`SELECT ws.instance_id::text, wi.context FROM workflow.workflow_step ws JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id WHERE ws.id=$1::uuid`,
+		`SELECT ws.instance_id::text, ws.step_def_id, wi.context FROM workflow.workflow_step ws JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id WHERE ws.id=$1::uuid`,
 		stepID,
-	).Scan(&instanceID, &instCtxJSON); err != nil {
+	).Scan(&instanceID, &taskStepDefID, &instCtxJSON); err != nil {
 		jsonErr(w, fmt.Errorf("step not found"), http.StatusNotFound)
 		return
 	}
@@ -2991,7 +2991,11 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventTaskCompleted,
 		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 		ResourceType: "workflow_step", ResourceID: stepID, RevisionID: taskRevisionID,
-		Metadata: map[string]string{"instance_id": instanceID, "decision": req.Decision},
+		// The step and the comment too: the step row is reused when a run
+		// goes round again, so the audit event is each pass's lasting record
+		// of who decided what and why.
+		Metadata: map[string]string{"instance_id": instanceID, "step": taskStepDefID, "decision": req.Decision,
+			"comment": req.Comment},
 	})
 
 	jsonOK(w, map[string]string{"status": "ok"})
@@ -3200,8 +3204,11 @@ type gridDimension struct {
 	SourceProperty    *string `json:"source_property,omitempty"`
 	// BusinessMaintained: users add, rename and remove this
 	// dimension's members (business_members.go).
-	BusinessMaintained bool            `json:"business_maintained,omitempty"`
-	Members            []gridDimMember `json:"members"`
+	BusinessMaintained bool `json:"business_maintained,omitempty"`
+	// FormatProperty: the property whose value at a member — percentage,
+	// number, currency — is the format of the cells there (migration 190).
+	FormatProperty string          `json:"format_property,omitempty"`
+	Members        []gridDimMember `json:"members"`
 	// TotalRule is how its members total (migration 174): "first", "last"
 	// or "none"; absent, they add up. MetricRules are the metrics' own
 	// rules over it, by metric id, which win (rollup.RuleCombo).
@@ -5014,8 +5021,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules, approval_watch)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules, approval_watch
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5039,9 +5046,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_dims AS (
 			INSERT INTO model.dimension_def
 			  (model_id, name, agg_rule, properties, revision_id, source_property,
-			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
+			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles, format_property)
 			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles
+			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles, format_property
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5995,6 +6002,9 @@ type devMetric struct {
 	ClosedWhen json.RawMessage `json:"closed_when"`
 	// RowStyle: "total" draws the metric's row as a total; "" as any row.
 	RowStyle string `json:"row_style"`
+	// ApprovalWatch: approved runs keep its figures and report when they
+	// change (migration 189); false for a view that moves with the calendar.
+	ApprovalWatch bool `json:"approval_watch"`
 	// InputRules: the values its cells accept (metricformula.InputRules),
 	// {} for any.
 	InputRules json.RawMessage `json:"input_rules"`
@@ -6060,7 +6070,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when, m.row_style, m.input_rules,
+		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when, m.row_style, m.approval_watch, m.input_rules,
 		       COALESCE((SELECT jsonb_object_agg(r.dimension_id::text, r.rule) FROM model.metric_dimension_rule r WHERE r.metric_id = m.id), '{}'::jsonb),
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
@@ -6093,7 +6103,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dm.RowStyle, &dm.InputRules, &dm.DimensionRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dm.RowStyle, &dm.ApprovalWatch, &dm.InputRules, &dm.DimensionRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -6182,6 +6192,9 @@ type addMetricReq struct {
 	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
 	RowStyle string `json:"row_style"`
+	// ApprovalWatch false: approvals do not keep its figures (migration
+	// 189); omitted or true: they do.
+	ApprovalWatch *bool `json:"approval_watch"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -6378,6 +6391,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if metricInsertErr == nil && rowStyle != "" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, newID, rowStyle)
+	}
+	if metricInsertErr == nil && req.ApprovalWatch != nil && !*req.ApprovalWatch {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET approval_watch=false WHERE id=$1::uuid`, newID)
 	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
@@ -7174,6 +7190,9 @@ type devDimension struct {
 	SourceProperty    *string `json:"source_property,omitempty"`
 	// BusinessMaintained: users add, rename and remove members.
 	BusinessMaintained bool `json:"business_maintained"`
+	// FormatProperty: the property its members take their number format
+	// from (migration 190); "" for none.
+	FormatProperty string `json:"format_property"`
 	// EditorRoles: the business roles that may change its members ([] for
 	// any user who may; dimension_editors.go).
 	EditorRoles []string    `json:"editor_roles"`
@@ -7377,7 +7396,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	}
 	dimRows, err := h.db.Query(ctx,
 		`SELECT id::text, name, COALESCE(label, ''), agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags,
-		        source_dimension_id::text, source_property, business_maintained, editor_roles
+		        source_dimension_id::text, source_property, business_maintained, editor_roles, format_property
 		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
 	if err != nil {
@@ -7390,7 +7409,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	for dimRows.Next() {
 		var d devDimension
 		if err := dimRows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags,
-			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained, &d.EditorRoles); err != nil {
+			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained, &d.EditorRoles, &d.FormatProperty); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -12697,6 +12716,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			// RowStyle "total" draws the metric's row as a total; ""
 			// as any row; omitted leaves it.
 			RowStyle *string `json:"row_style"`
+			// ApprovalWatch: whether approvals keep its figures
+			// (migration 189); omitted leaves it.
+			ApprovalWatch *bool `json:"approval_watch"`
 			// IsInput switches the metric between input and calculated
 			// (modeledit.SwitchMetricKind); omitted keeps it. Becoming
 			// calculated takes a formula, and DropValues for an input that
@@ -12986,6 +13008,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, metricID, style); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if patch.ApprovalWatch != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET approval_watch=$2 WHERE id=$1::uuid`, metricID, *patch.ApprovalWatch); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -13444,6 +13472,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				BusinessMaintained *bool `json:"business_maintained"`
 				// Who of them may (dimension_editors.go); [] lifts it.
 				EditorRoles *[]string `json:"editor_roles"`
+				// FormatProperty: the property its members take their number
+				// format from (migration 190); "" for none.
+				FormatProperty *string `json:"format_property"`
 			}
 			var sent map[string]json.RawMessage
 			raw, err := io.ReadAll(r.Body)
@@ -13506,6 +13537,17 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					}
 				}
 				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET business_maintained=$2 WHERE id=$1::uuid`, dimID, *body.BusinessMaintained); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
+			if body.FormatProperty != nil {
+				prop, err := metricformula.CheckFormatProperty(ctx, h.db.For(ctx), dimID, *body.FormatProperty)
+				if err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET format_property=$2 WHERE id=$1::uuid`, dimID, prop); err != nil {
 					jsonErr(w, err, http.StatusInternalServerError)
 					return
 				}

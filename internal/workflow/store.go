@@ -876,10 +876,11 @@ const maxReworks = 20
 func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from *stepDefRouted, stepDefs []*stepDefRouted) bool {
 	var status string
 	var count int
+	var targetDone *time.Time
 	if err := s.db.QueryRow(ctx, `
-		SELECT status::text, rework_count FROM workflow.workflow_step
+		SELECT status::text, rework_count, completed_at FROM workflow.workflow_step
 		WHERE instance_id = $1::uuid AND step_def_id = $2
-	`, instanceID, target.ID).Scan(&status, &count); err != nil || status == "in_progress" || status == "pending" {
+	`, instanceID, target.ID).Scan(&status, &count, &targetDone); err != nil || status == "in_progress" || status == "pending" {
 		return false
 	}
 	if count >= maxReworks {
@@ -893,7 +894,11 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 
 	// Everything downstream of the target (following every route, not just
 	// the decided one) starts over; steps mid-flight on parallel branches
-	// are left alone.
+	// are left alone. A step that ran BEFORE the target in this run keeps its
+	// decision and comment: the graph reaches it only through a route back
+	// (an approval's reject to the first step), and resetting it erased what
+	// was done — a close's completed load and its required comment came out
+	// as "Branch not taken" after a later step was sent back (2026-11-19).
 	defsByID := make(map[string]*stepDefRouted, len(stepDefs))
 	for _, d := range stepDefs {
 		defsByID[d.ID] = d
@@ -915,7 +920,8 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 		UPDATE workflow.workflow_step
 		SET status = 'pending', decision = NULL, comment = NULL, completed_at = NULL, due_at = NULL
 		WHERE instance_id = $1::uuid AND step_def_id = ANY($2) AND status <> 'in_progress'
-	`, instanceID, keysOf(downstream))
+		  AND ($3::timestamptz IS NULL OR completed_at IS NULL OR completed_at >= $3::timestamptz)
+	`, instanceID, keysOf(downstream), targetDone)
 	fromName := from.Name
 	if fromName == "" {
 		fromName = from.ID

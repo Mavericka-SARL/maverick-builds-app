@@ -6928,7 +6928,10 @@ type CopyBAValuesReq struct {
 	// A member code holding values.
 	To        string      `json:"to"`
 	MetricIds []uuid.UUID `json:"metric_ids"`
-	DryRun    OptBool     `json:"dry_run"`
+	// Narrows the copy to members of other dimensions: dimension id → member codes (a member with
+	// members under it stands for its leaves). A value without such a dimension is not copied.
+	Only   OptCopyBAValuesReqOnly `json:"only"`
+	DryRun OptBool                `json:"dry_run"`
 }
 
 // GetDimensionID returns the value of DimensionID.
@@ -6949,6 +6952,11 @@ func (s *CopyBAValuesReq) GetTo() string {
 // GetMetricIds returns the value of MetricIds.
 func (s *CopyBAValuesReq) GetMetricIds() []uuid.UUID {
 	return s.MetricIds
+}
+
+// GetOnly returns the value of Only.
+func (s *CopyBAValuesReq) GetOnly() OptCopyBAValuesReqOnly {
+	return s.Only
 }
 
 // GetDryRun returns the value of DryRun.
@@ -6976,9 +6984,27 @@ func (s *CopyBAValuesReq) SetMetricIds(val []uuid.UUID) {
 	s.MetricIds = val
 }
 
+// SetOnly sets the value of Only.
+func (s *CopyBAValuesReq) SetOnly(val OptCopyBAValuesReqOnly) {
+	s.Only = val
+}
+
 // SetDryRun sets the value of DryRun.
 func (s *CopyBAValuesReq) SetDryRun(val OptBool) {
 	s.DryRun = val
+}
+
+// Narrows the copy to members of other dimensions: dimension id → member codes (a member with
+// members under it stands for its leaves). A value without such a dimension is not copied.
+type CopyBAValuesReqOnly map[string][]string
+
+func (s *CopyBAValuesReqOnly) init() CopyBAValuesReqOnly {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
 }
 
 type CopyBAValuesUnprocessableEntity map[string]jx.Raw
@@ -7826,6 +7852,10 @@ type CreateDimensionRequest struct {
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
+	// The dimension's text property whose value at a member — percentage, number or currency — is
+	// the number format of every cell at that member, and what a calculated member's METRICFORMAT()
+	// reads there; "" for none.
+	FormatProperty OptString `json:"format_property"`
 	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
 	// name never implies it. Immutable after creation.
 	DimensionType OptCreateDimensionRequestDimensionType `json:"dimension_type"`
@@ -7878,6 +7908,11 @@ func (s *CreateDimensionRequest) GetDeriveMembers() OptBool {
 // GetBusinessMaintained returns the value of BusinessMaintained.
 func (s *CreateDimensionRequest) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
+}
+
+// GetFormatProperty returns the value of FormatProperty.
+func (s *CreateDimensionRequest) GetFormatProperty() OptString {
+	return s.FormatProperty
 }
 
 // GetDimensionType returns the value of DimensionType.
@@ -7938,6 +7973,11 @@ func (s *CreateDimensionRequest) SetDeriveMembers(val OptBool) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *CreateDimensionRequest) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetFormatProperty sets the value of FormatProperty.
+func (s *CreateDimensionRequest) SetFormatProperty(val OptString) {
+	s.FormatProperty = val
 }
 
 // SetDimensionType sets the value of DimensionType.
@@ -8823,8 +8863,12 @@ type CreateMetricRequest struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle   OptCreateMetricRequestRowStyle `json:"row_style"`
-	InputRules OptInputRules                  `json:"input_rules"`
+	RowStyle OptCreateMetricRequestRowStyle `json:"row_style"`
+	// Whether approved runs keep the metric's figures and report when they change (default true). false
+	// for a view that moves with the calendar — year to date at the last closed month, a rolling
+	// window. Omitted keeps it on PATCH.
+	ApprovalWatch OptBool       `json:"approval_watch"`
+	InputRules    OptInputRules `json:"input_rules"`
 	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
 	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
 	// dimension takes none: its totals are the metric's time_summary.
@@ -8908,6 +8952,11 @@ func (s *CreateMetricRequest) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *CreateMetricRequest) GetRowStyle() OptCreateMetricRequestRowStyle {
 	return s.RowStyle
+}
+
+// GetApprovalWatch returns the value of ApprovalWatch.
+func (s *CreateMetricRequest) GetApprovalWatch() OptBool {
+	return s.ApprovalWatch
 }
 
 // GetInputRules returns the value of InputRules.
@@ -8998,6 +9047,11 @@ func (s *CreateMetricRequest) SetClosedWhen(val []ClosedRule) {
 // SetRowStyle sets the value of RowStyle.
 func (s *CreateMetricRequest) SetRowStyle(val OptCreateMetricRequestRowStyle) {
 	s.RowStyle = val
+}
+
+// SetApprovalWatch sets the value of ApprovalWatch.
+func (s *CreateMetricRequest) SetApprovalWatch(val OptBool) {
+	s.ApprovalWatch = val
 }
 
 // SetInputRules sets the value of InputRules.
@@ -11026,6 +11080,10 @@ type Dimension struct {
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
+	// The dimension's text property whose value at a member — percentage, number or currency — is
+	// the number format of every cell at that member, and what a calculated member's METRICFORMAT()
+	// reads there; "" for none.
+	FormatProperty OptString `json:"format_property"`
 	// Time members in chronological order.
 	Members []DimensionMember `json:"members"`
 }
@@ -11088,6 +11146,11 @@ func (s *Dimension) GetSourceProperty() OptString {
 // GetBusinessMaintained returns the value of BusinessMaintained.
 func (s *Dimension) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
+}
+
+// GetFormatProperty returns the value of FormatProperty.
+func (s *Dimension) GetFormatProperty() OptString {
+	return s.FormatProperty
 }
 
 // GetMembers returns the value of Members.
@@ -11153,6 +11216,11 @@ func (s *Dimension) SetSourceProperty(val OptString) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *Dimension) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetFormatProperty sets the value of FormatProperty.
+func (s *Dimension) SetFormatProperty(val OptString) {
+	s.FormatProperty = val
 }
 
 // SetMembers sets the value of Members.
@@ -15032,10 +15100,14 @@ type GetApprovalChangesOKRunsItem struct {
 	InstanceID uuid.UUID `json:"instance_id"`
 	Workflow   string    `json:"workflow"`
 	// The run's members, e.g. Period: Sep 2026.
-	Scope      string                                     `json:"scope"`
-	ApprovedAt time.Time                                  `json:"approved_at"`
-	Changed    int                                        `json:"changed"`
-	Examples   []GetApprovalChangesOKRunsItemExamplesItem `json:"examples"`
+	Scope      string    `json:"scope"`
+	ApprovedAt time.Time `json:"approved_at"`
+	Changed    int       `json:"changed"`
+	// The caller may reopen the run.
+	CanReopen OptBool `json:"can_reopen"`
+	// The roles that reopen it; absent: the application's business admins and developers.
+	ReopenRoles []string                                   `json:"reopen_roles"`
+	Examples    []GetApprovalChangesOKRunsItemExamplesItem `json:"examples"`
 }
 
 // GetInstanceID returns the value of InstanceID.
@@ -15061,6 +15133,16 @@ func (s *GetApprovalChangesOKRunsItem) GetApprovedAt() time.Time {
 // GetChanged returns the value of Changed.
 func (s *GetApprovalChangesOKRunsItem) GetChanged() int {
 	return s.Changed
+}
+
+// GetCanReopen returns the value of CanReopen.
+func (s *GetApprovalChangesOKRunsItem) GetCanReopen() OptBool {
+	return s.CanReopen
+}
+
+// GetReopenRoles returns the value of ReopenRoles.
+func (s *GetApprovalChangesOKRunsItem) GetReopenRoles() []string {
+	return s.ReopenRoles
 }
 
 // GetExamples returns the value of Examples.
@@ -15091,6 +15173,16 @@ func (s *GetApprovalChangesOKRunsItem) SetApprovedAt(val time.Time) {
 // SetChanged sets the value of Changed.
 func (s *GetApprovalChangesOKRunsItem) SetChanged(val int) {
 	s.Changed = val
+}
+
+// SetCanReopen sets the value of CanReopen.
+func (s *GetApprovalChangesOKRunsItem) SetCanReopen(val OptBool) {
+	s.CanReopen = val
+}
+
+// SetReopenRoles sets the value of ReopenRoles.
+func (s *GetApprovalChangesOKRunsItem) SetReopenRoles(val []string) {
+	s.ReopenRoles = val
 }
 
 // SetExamples sets the value of Examples.
@@ -17565,6 +17657,10 @@ type GridDimension struct {
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members).
 	BusinessMaintained OptBool `json:"business_maintained"`
+	// The dimension's text property whose value at a member — percentage, number or currency — is
+	// the number format of every cell at that member, and what a calculated member's METRICFORMAT()
+	// reads there; "" for none.
+	FormatProperty OptString `json:"format_property"`
 	// Business roles that may add, change and delete its members and properties (with the application's
 	// administrators); empty: every user who may.
 	EditorRoles []string     `json:"editor_roles"`
@@ -17604,6 +17700,11 @@ func (s *GridDimension) GetFiscalYearStartMonth() OptInt {
 // GetBusinessMaintained returns the value of BusinessMaintained.
 func (s *GridDimension) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
+}
+
+// GetFormatProperty returns the value of FormatProperty.
+func (s *GridDimension) GetFormatProperty() OptString {
+	return s.FormatProperty
 }
 
 // GetEditorRoles returns the value of EditorRoles.
@@ -17649,6 +17750,11 @@ func (s *GridDimension) SetFiscalYearStartMonth(val OptInt) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *GridDimension) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetFormatProperty sets the value of FormatProperty.
+func (s *GridDimension) SetFormatProperty(val OptString) {
+	s.FormatProperty = val
 }
 
 // SetEditorRoles sets the value of EditorRoles.
@@ -22300,8 +22406,12 @@ type MetricDef struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle   OptMetricDefRowStyle `json:"row_style"`
-	InputRules OptInputRules        `json:"input_rules"`
+	RowStyle OptMetricDefRowStyle `json:"row_style"`
+	// Whether approved runs keep the metric's figures and report when they change (default true). false
+	// for a view that moves with the calendar — year to date at the last closed month, a rolling
+	// window. Omitted keeps it on PATCH.
+	ApprovalWatch OptBool       `json:"approval_watch"`
+	InputRules    OptInputRules `json:"input_rules"`
 	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
 	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
 	// dimension takes none: its totals are the metric's time_summary.
@@ -22387,6 +22497,11 @@ func (s *MetricDef) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *MetricDef) GetRowStyle() OptMetricDefRowStyle {
 	return s.RowStyle
+}
+
+// GetApprovalWatch returns the value of ApprovalWatch.
+func (s *MetricDef) GetApprovalWatch() OptBool {
+	return s.ApprovalWatch
 }
 
 // GetInputRules returns the value of InputRules.
@@ -22487,6 +22602,11 @@ func (s *MetricDef) SetClosedWhen(val []ClosedRule) {
 // SetRowStyle sets the value of RowStyle.
 func (s *MetricDef) SetRowStyle(val OptMetricDefRowStyle) {
 	s.RowStyle = val
+}
+
+// SetApprovalWatch sets the value of ApprovalWatch.
+func (s *MetricDef) SetApprovalWatch(val OptBool) {
+	s.ApprovalWatch = val
 }
 
 // SetInputRules sets the value of InputRules.
@@ -25530,6 +25650,52 @@ func (o OptConnectorSettingsScope) Get() (v ConnectorSettingsScope, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptConnectorSettingsScope) Or(d ConnectorSettingsScope) ConnectorSettingsScope {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCopyBAValuesReqOnly returns new OptCopyBAValuesReqOnly with value set to v.
+func NewOptCopyBAValuesReqOnly(v CopyBAValuesReqOnly) OptCopyBAValuesReqOnly {
+	return OptCopyBAValuesReqOnly{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCopyBAValuesReqOnly is optional CopyBAValuesReqOnly.
+type OptCopyBAValuesReqOnly struct {
+	Value CopyBAValuesReqOnly
+	Set   bool
+}
+
+// IsSet returns true if OptCopyBAValuesReqOnly was set.
+func (o OptCopyBAValuesReqOnly) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCopyBAValuesReqOnly) Reset() {
+	var v CopyBAValuesReqOnly
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCopyBAValuesReqOnly) SetTo(v CopyBAValuesReqOnly) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCopyBAValuesReqOnly) Get() (v CopyBAValuesReqOnly, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCopyBAValuesReqOnly) Or(d CopyBAValuesReqOnly) CopyBAValuesReqOnly {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -39333,6 +39499,10 @@ type UpdateDimensionRequest struct {
 	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
+	// The dimension's text property whose value at a member — percentage, number or currency — is
+	// the number format of every cell at that member, and what a calculated member's METRICFORMAT()
+	// reads there; "" for none.
+	FormatProperty OptString `json:"format_property"`
 	// Business roles that may change its members and properties; [] lifts the rule. Each must be a
 	// business role of the customer.
 	EditorRoles []string `json:"editor_roles"`
@@ -39383,6 +39553,11 @@ func (s *UpdateDimensionRequest) GetBusinessMaintained() OptBool {
 	return s.BusinessMaintained
 }
 
+// GetFormatProperty returns the value of FormatProperty.
+func (s *UpdateDimensionRequest) GetFormatProperty() OptString {
+	return s.FormatProperty
+}
+
 // GetEditorRoles returns the value of EditorRoles.
 func (s *UpdateDimensionRequest) GetEditorRoles() []string {
 	return s.EditorRoles
@@ -39431,6 +39606,11 @@ func (s *UpdateDimensionRequest) SetDeriveMembers(val OptBool) {
 // SetBusinessMaintained sets the value of BusinessMaintained.
 func (s *UpdateDimensionRequest) SetBusinessMaintained(val OptBool) {
 	s.BusinessMaintained = val
+}
+
+// SetFormatProperty sets the value of FormatProperty.
+func (s *UpdateDimensionRequest) SetFormatProperty(val OptString) {
+	s.FormatProperty = val
 }
 
 // SetEditorRoles sets the value of EditorRoles.
@@ -40083,8 +40263,12 @@ type UpdateMetricRequest struct {
 	ClosedWhen []ClosedRule `json:"closed_when"`
 	// "total" draws the metric's row as a total in every grid (bold label, a rule above); "" as any row.
 	// Omitted keeps it on PATCH.
-	RowStyle   OptUpdateMetricRequestRowStyle `json:"row_style"`
-	InputRules OptInputRules                  `json:"input_rules"`
+	RowStyle OptUpdateMetricRequestRowStyle `json:"row_style"`
+	// Whether approved runs keep the metric's figures and report when they change (default true). false
+	// for a view that moves with the calendar — year to date at the last closed month, a rolling
+	// window. Omitted keeps it on PATCH.
+	ApprovalWatch OptBool       `json:"approval_watch"`
+	InputRules    OptInputRules `json:"input_rules"`
 	// The metric's own total rule over a dimension, overriding the dimension's agg_rule: keyed by
 	// dimension id (by id or name on writes). {} removes them; omitted keeps them on PATCH. A time
 	// dimension takes none: its totals are the metric's time_summary.
@@ -40168,6 +40352,11 @@ func (s *UpdateMetricRequest) GetClosedWhen() []ClosedRule {
 // GetRowStyle returns the value of RowStyle.
 func (s *UpdateMetricRequest) GetRowStyle() OptUpdateMetricRequestRowStyle {
 	return s.RowStyle
+}
+
+// GetApprovalWatch returns the value of ApprovalWatch.
+func (s *UpdateMetricRequest) GetApprovalWatch() OptBool {
+	return s.ApprovalWatch
 }
 
 // GetInputRules returns the value of InputRules.
@@ -40258,6 +40447,11 @@ func (s *UpdateMetricRequest) SetClosedWhen(val []ClosedRule) {
 // SetRowStyle sets the value of RowStyle.
 func (s *UpdateMetricRequest) SetRowStyle(val OptUpdateMetricRequestRowStyle) {
 	s.RowStyle = val
+}
+
+// SetApprovalWatch sets the value of ApprovalWatch.
+func (s *UpdateMetricRequest) SetApprovalWatch(val OptBool) {
+	s.ApprovalWatch = val
 }
 
 // SetInputRules sets the value of InputRules.

@@ -16228,6 +16228,12 @@ func (s *CopyBAValuesReq) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Only.Set {
+			e.FieldStart("only")
+			s.Only.Encode(e)
+		}
+	}
+	{
 		if s.DryRun.Set {
 			e.FieldStart("dry_run")
 			s.DryRun.Encode(e)
@@ -16235,12 +16241,13 @@ func (s *CopyBAValuesReq) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCopyBAValuesReq = [5]string{
+var jsonFieldsNameOfCopyBAValuesReq = [6]string{
 	0: "dimension_id",
 	1: "from",
 	2: "to",
 	3: "metric_ids",
-	4: "dry_run",
+	4: "only",
+	5: "dry_run",
 }
 
 // Decode decodes CopyBAValuesReq from json.
@@ -16307,6 +16314,16 @@ func (s *CopyBAValuesReq) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"metric_ids\"")
 			}
+		case "only":
+			if err := func() error {
+				s.Only.Reset()
+				if err := s.Only.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"only\"")
+			}
 		case "dry_run":
 			if err := func() error {
 				s.DryRun.Reset()
@@ -16369,6 +16386,74 @@ func (s *CopyBAValuesReq) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *CopyBAValuesReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s CopyBAValuesReqOnly) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s CopyBAValuesReqOnly) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.ArrStart()
+		for _, elem := range elem {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+}
+
+// Decode decodes CopyBAValuesReqOnly from json.
+func (s *CopyBAValuesReqOnly) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CopyBAValuesReqOnly to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem []string
+		if err := func() error {
+			elem = make([]string, 0)
+			if err := d.Arr(func(d *jx.Decoder) error {
+				var elemElem string
+				v, err := d.Str()
+				elemElem = string(v)
+				if err != nil {
+					return err
+				}
+				elem = append(elem, elemElem)
+				return nil
+			}); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode CopyBAValuesReqOnly")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CopyBAValuesReqOnly) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CopyBAValuesReqOnly) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -19299,6 +19384,12 @@ func (s *CreateDimensionRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.FormatProperty.Set {
+			e.FieldStart("format_property")
+			s.FormatProperty.Encode(e)
+		}
+	}
+	{
 		if s.DimensionType.Set {
 			e.FieldStart("dimension_type")
 			s.DimensionType.Encode(e)
@@ -19318,7 +19409,7 @@ func (s *CreateDimensionRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateDimensionRequest = [12]string{
+var jsonFieldsNameOfCreateDimensionRequest = [13]string{
 	0:  "name",
 	1:  "agg_rule",
 	2:  "revision_id",
@@ -19328,9 +19419,10 @@ var jsonFieldsNameOfCreateDimensionRequest = [12]string{
 	6:  "source_property",
 	7:  "derive_members",
 	8:  "business_maintained",
-	9:  "dimension_type",
-	10: "time_granularity",
-	11: "fiscal_year_start_month",
+	9:  "format_property",
+	10: "dimension_type",
+	11: "time_granularity",
+	12: "fiscal_year_start_month",
 }
 
 // Decode decodes CreateDimensionRequest from json.
@@ -19443,6 +19535,16 @@ func (s *CreateDimensionRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"business_maintained\"")
+			}
+		case "format_property":
+			if err := func() error {
+				s.FormatProperty.Reset()
+				if err := s.FormatProperty.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"format_property\"")
 			}
 		case "dimension_type":
 			if err := func() error {
@@ -21962,6 +22064,12 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.ApprovalWatch.Set {
+			e.FieldStart("approval_watch")
+			s.ApprovalWatch.Encode(e)
+		}
+	}
+	{
 		if s.InputRules.Set {
 			e.FieldStart("input_rules")
 			s.InputRules.Encode(e)
@@ -21981,7 +22089,7 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateMetricRequest = [18]string{
+var jsonFieldsNameOfCreateMetricRequest = [19]string{
 	0:  "name",
 	1:  "label",
 	2:  "is_input",
@@ -21997,9 +22105,10 @@ var jsonFieldsNameOfCreateMetricRequest = [18]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "input_rules",
-	16: "dimension_rules",
-	17: "time_summary",
+	15: "approval_watch",
+	16: "input_rules",
+	17: "dimension_rules",
+	18: "time_summary",
 }
 
 // Decode decodes CreateMetricRequest from json.
@@ -22188,6 +22297,16 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
+			}
+		case "approval_watch":
+			if err := func() error {
+				s.ApprovalWatch.Reset()
+				if err := s.ApprovalWatch.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"approval_watch\"")
 			}
 		case "input_rules":
 			if err := func() error {
@@ -28562,6 +28681,12 @@ func (s *Dimension) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.FormatProperty.Set {
+			e.FieldStart("format_property")
+			s.FormatProperty.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("members")
 		e.ArrStart()
 		for _, elem := range s.Members {
@@ -28571,7 +28696,7 @@ func (s *Dimension) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfDimension = [13]string{
+var jsonFieldsNameOfDimension = [14]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -28584,7 +28709,8 @@ var jsonFieldsNameOfDimension = [13]string{
 	9:  "source_dimension_id",
 	10: "source_property",
 	11: "business_maintained",
-	12: "members",
+	12: "format_property",
+	13: "members",
 }
 
 // Decode decodes Dimension from json.
@@ -28729,8 +28855,18 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"business_maintained\"")
 			}
+		case "format_property":
+			if err := func() error {
+				s.FormatProperty.Reset()
+				if err := s.FormatProperty.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"format_property\"")
+			}
 		case "members":
-			requiredBitSet[1] |= 1 << 4
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				s.Members = make([]DimensionMember, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -28758,7 +28894,7 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b00101011,
-		0b00010000,
+		0b00100000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -36798,6 +36934,22 @@ func (s *GetApprovalChangesOKRunsItem) encodeFields(e *jx.Encoder) {
 		e.Int(s.Changed)
 	}
 	{
+		if s.CanReopen.Set {
+			e.FieldStart("can_reopen")
+			s.CanReopen.Encode(e)
+		}
+	}
+	{
+		if s.ReopenRoles != nil {
+			e.FieldStart("reopen_roles")
+			e.ArrStart()
+			for _, elem := range s.ReopenRoles {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		e.FieldStart("examples")
 		e.ArrStart()
 		for _, elem := range s.Examples {
@@ -36807,13 +36959,15 @@ func (s *GetApprovalChangesOKRunsItem) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGetApprovalChangesOKRunsItem = [6]string{
+var jsonFieldsNameOfGetApprovalChangesOKRunsItem = [8]string{
 	0: "instance_id",
 	1: "workflow",
 	2: "scope",
 	3: "approved_at",
 	4: "changed",
-	5: "examples",
+	5: "can_reopen",
+	6: "reopen_roles",
+	7: "examples",
 }
 
 // Decode decodes GetApprovalChangesOKRunsItem from json.
@@ -36885,8 +37039,37 @@ func (s *GetApprovalChangesOKRunsItem) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"changed\"")
 			}
+		case "can_reopen":
+			if err := func() error {
+				s.CanReopen.Reset()
+				if err := s.CanReopen.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"can_reopen\"")
+			}
+		case "reopen_roles":
+			if err := func() error {
+				s.ReopenRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.ReopenRoles = append(s.ReopenRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reopen_roles\"")
+			}
 		case "examples":
-			requiredBitSet[0] |= 1 << 5
+			requiredBitSet[0] |= 1 << 7
 			if err := func() error {
 				s.Examples = make([]GetApprovalChangesOKRunsItemExamplesItem, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -36913,7 +37096,7 @@ func (s *GetApprovalChangesOKRunsItem) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00111111,
+		0b10011111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -43333,6 +43516,12 @@ func (s *GridDimension) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.FormatProperty.Set {
+			e.FieldStart("format_property")
+			s.FormatProperty.Encode(e)
+		}
+	}
+	{
 		if s.EditorRoles != nil {
 			e.FieldStart("editor_roles")
 			e.ArrStart()
@@ -43352,7 +43541,7 @@ func (s *GridDimension) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGridDimension = [9]string{
+var jsonFieldsNameOfGridDimension = [10]string{
 	0: "id",
 	1: "name",
 	2: "label",
@@ -43360,8 +43549,9 @@ var jsonFieldsNameOfGridDimension = [9]string{
 	4: "time_granularity",
 	5: "fiscal_year_start_month",
 	6: "business_maintained",
-	7: "editor_roles",
-	8: "members",
+	7: "format_property",
+	8: "editor_roles",
+	9: "members",
 }
 
 // Decode decodes GridDimension from json.
@@ -43447,6 +43637,16 @@ func (s *GridDimension) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"business_maintained\"")
 			}
+		case "format_property":
+			if err := func() error {
+				s.FormatProperty.Reset()
+				if err := s.FormatProperty.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"format_property\"")
+			}
 		case "editor_roles":
 			if err := func() error {
 				s.EditorRoles = make([]string, 0)
@@ -43467,7 +43667,7 @@ func (s *GridDimension) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"editor_roles\"")
 			}
 		case "members":
-			requiredBitSet[1] |= 1 << 0
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				s.Members = make([]Department, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -43495,7 +43695,7 @@ func (s *GridDimension) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b00001011,
-		0b00000001,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -55335,6 +55535,12 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.ApprovalWatch.Set {
+			e.FieldStart("approval_watch")
+			s.ApprovalWatch.Encode(e)
+		}
+	}
+	{
 		if s.InputRules.Set {
 			e.FieldStart("input_rules")
 			s.InputRules.Encode(e)
@@ -55374,7 +55580,7 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfMetricDef = [20]string{
+var jsonFieldsNameOfMetricDef = [21]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -55390,11 +55596,12 @@ var jsonFieldsNameOfMetricDef = [20]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "input_rules",
-	16: "dimension_rules",
-	17: "depends_on",
-	18: "depended_by",
-	19: "tags",
+	15: "approval_watch",
+	16: "input_rules",
+	17: "dimension_rules",
+	18: "depends_on",
+	19: "depended_by",
+	20: "tags",
 }
 
 // Decode decodes MetricDef from json.
@@ -55587,6 +55794,16 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
 			}
+		case "approval_watch":
+			if err := func() error {
+				s.ApprovalWatch.Reset()
+				if err := s.ApprovalWatch.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"approval_watch\"")
+			}
 		case "input_rules":
 			if err := func() error {
 				s.InputRules.Reset()
@@ -55608,7 +55825,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"dimension_rules\"")
 			}
 		case "depends_on":
-			requiredBitSet[2] |= 1 << 1
+			requiredBitSet[2] |= 1 << 2
 			if err := func() error {
 				s.DependsOn = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -55628,7 +55845,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"depends_on\"")
 			}
 		case "depended_by":
-			requiredBitSet[2] |= 1 << 2
+			requiredBitSet[2] |= 1 << 3
 			if err := func() error {
 				s.DependedBy = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -55678,7 +55895,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 	for i, mask := range [3]uint8{
 		0b11110111,
 		0b00000001,
-		0b00000110,
+		0b00001100,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -59865,6 +60082,40 @@ func (s OptConnectorSettingsScope) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptConnectorSettingsScope) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CopyBAValuesReqOnly as json.
+func (o OptCopyBAValuesReqOnly) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes CopyBAValuesReqOnly from json.
+func (o *OptCopyBAValuesReqOnly) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCopyBAValuesReqOnly to nil")
+	}
+	o.Set = true
+	o.Value = make(CopyBAValuesReqOnly)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCopyBAValuesReqOnly) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCopyBAValuesReqOnly) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -84318,6 +84569,12 @@ func (s *UpdateDimensionRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.FormatProperty.Set {
+			e.FieldStart("format_property")
+			s.FormatProperty.Encode(e)
+		}
+	}
+	{
 		if s.EditorRoles != nil {
 			e.FieldStart("editor_roles")
 			e.ArrStart()
@@ -84329,17 +84586,18 @@ func (s *UpdateDimensionRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateDimensionRequest = [10]string{
-	0: "name",
-	1: "label",
-	2: "agg_rule",
-	3: "parent_dimension_id",
-	4: "tags",
-	5: "source_dimension_id",
-	6: "source_property",
-	7: "derive_members",
-	8: "business_maintained",
-	9: "editor_roles",
+var jsonFieldsNameOfUpdateDimensionRequest = [11]string{
+	0:  "name",
+	1:  "label",
+	2:  "agg_rule",
+	3:  "parent_dimension_id",
+	4:  "tags",
+	5:  "source_dimension_id",
+	6:  "source_property",
+	7:  "derive_members",
+	8:  "business_maintained",
+	9:  "format_property",
+	10: "editor_roles",
 }
 
 // Decode decodes UpdateDimensionRequest from json.
@@ -84448,6 +84706,16 @@ func (s *UpdateDimensionRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"business_maintained\"")
+			}
+		case "format_property":
+			if err := func() error {
+				s.FormatProperty.Reset()
+				if err := s.FormatProperty.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"format_property\"")
 			}
 		case "editor_roles":
 			if err := func() error {
@@ -86826,6 +87094,12 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.ApprovalWatch.Set {
+			e.FieldStart("approval_watch")
+			s.ApprovalWatch.Encode(e)
+		}
+	}
+	{
 		if s.InputRules.Set {
 			e.FieldStart("input_rules")
 			s.InputRules.Encode(e)
@@ -86845,7 +87119,7 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateMetricRequest = [18]string{
+var jsonFieldsNameOfUpdateMetricRequest = [19]string{
 	0:  "name",
 	1:  "label",
 	2:  "tags",
@@ -86861,9 +87135,10 @@ var jsonFieldsNameOfUpdateMetricRequest = [18]string{
 	12: "highlight_rules",
 	13: "closed_when",
 	14: "row_style",
-	15: "input_rules",
-	16: "dimension_rules",
-	17: "time_summary",
+	15: "approval_watch",
+	16: "input_rules",
+	17: "dimension_rules",
+	18: "time_summary",
 }
 
 // Decode decodes UpdateMetricRequest from json.
@@ -87047,6 +87322,16 @@ func (s *UpdateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"row_style\"")
+			}
+		case "approval_watch":
+			if err := func() error {
+				s.ApprovalWatch.Reset()
+				if err := s.ApprovalWatch.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"approval_watch\"")
 			}
 		case "input_rules":
 			if err := func() error {

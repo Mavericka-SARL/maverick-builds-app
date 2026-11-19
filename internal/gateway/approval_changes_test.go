@@ -48,6 +48,11 @@ func TestApprovedFiguresChangedSinceApproval(t *testing.T) {
 	}
 	calc("SEP", 1946.75)
 	calc("OCT", 2000)
+	// A view that moves with the calendar (year to date at the last closed
+	// month): not an approved figure, so the approval does not keep it.
+	view := q(`INSERT INTO model.metric_def (model_id, revision_id, name, label, is_input, format, approval_watch) VALUES ($1::uuid, $2::uuid, 'ytd_view', 'YTD view', false, 'currency', false) RETURNING id::text`, model, rev)
+	exec(`INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value, partition_key)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, jsonb_build_object($4::text, 'SEP'), 100, 'p')`, model, rev, view, period)
 	exec(`INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, '{}'::jsonb, 30, $4::uuid)`, model, rev, rate, f.devID)
 
@@ -77,7 +82,7 @@ func TestApprovedFiguresChangedSinceApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := q(`SELECT count(*)::text FROM workflow.approval_snapshot WHERE instance_id = $1::uuid`, ex.InstanceID); n != "1" {
-		t.Fatalf("kept %s value(s); want 1: September's total assets, not October's, not the undated rate", n)
+		t.Fatalf("kept %s value(s); want 1: September's total assets, not October's, not the undated rate, not the view", n)
 	}
 
 	changes := func() []map[string]any {
@@ -115,9 +120,21 @@ func TestApprovedFiguresChangedSinceApproval(t *testing.T) {
 	if inst, _ := body["instance"].(map[string]any); status != http.StatusOK || inst["changed_since_approval"] != float64(1) {
 		t.Fatalf("status widget: %d %v; want changed_since_approval 1", status, body)
 	}
+	if got[0]["can_reopen"] != true {
+		t.Errorf("the developer may reopen the run: can_reopen %v", got[0]["can_reopen"])
+	}
 	// Set back, it is what was approved again.
 	calc("SEP", 1946.75)
 	if got := changes(); len(got) != 0 {
 		t.Fatalf("set back, still reported: %v", got)
+	}
+	// A metric un-ticked after the approval is no longer reported either.
+	calc("SEP", 1900)
+	if got := changes(); len(got) != 1 {
+		t.Fatalf("moved again: %v", got)
+	}
+	exec(`UPDATE model.metric_def SET approval_watch = false WHERE id = $1::uuid`, assets)
+	if got := changes(); len(got) != 0 {
+		t.Fatalf("a metric approvals no longer keep is still reported: %v", got)
 	}
 }

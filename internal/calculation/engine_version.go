@@ -21,7 +21,10 @@ import (
 //	   a dimensionless rule-none metric keeps its value.
 //	2  2026-10-07: a time summary of average counts every period of the
 //	   reduction, an empty one as 0 (FY = the months' sum / 12).
-const EngineVersion = 2
+//	3  2026-11-19: a metric with a time function stores its totals and
+//	   one-dimension slices by the dimensions' total rules (a case dimension
+//	   totalling as its first member no longer stores the cases' sum).
+const EngineVersion = 3
 
 // engineUpgradeLease is how long a replica's claim on the sweep holds
 // without being renewed; the claim is renewed after every revision.

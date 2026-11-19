@@ -3,6 +3,7 @@ package metricformula
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -121,12 +122,16 @@ const resolvesToDimension = `($2 <> '' OR NOT EXISTS (
 // formulas (RenamePropertyInFormulas) — and retyping keeps the name and
 // recalculates.
 func CheckPropertyNotInUse(ctx context.Context, q Querier, dimensionID, prop string) error {
-	var modelID, revisionID, dimName string
+	var modelID, revisionID, dimName, formatProp string
 	if err := q.QueryRow(ctx, `
-		SELECT model_id::text, COALESCE(revision_id::text, ''), name
+		SELECT model_id::text, COALESCE(revision_id::text, ''), name, format_property
 		FROM model.dimension_def WHERE id=$1::uuid
-	`, dimensionID).Scan(&modelID, &revisionID, &dimName); err != nil {
+	`, dimensionID).Scan(&modelID, &revisionID, &dimName, &formatProp); err != nil {
 		return err
+	}
+	if formatProp != "" && strings.EqualFold(formatProp, prop) {
+		return &ValidationError{Code: "PROPERTY_IN_USE", Message: fmt.Sprintf(
+			"property %q gives %s's members their number format: choose another property for it, or none, first", prop, dimName)}
 	}
 	rows, err := q.Query(ctx, `
 		SELECT name, formula FROM model.metric_def m
@@ -360,9 +365,42 @@ func RenamePropertyValues(ctx context.Context, tx Execer, dimensionID, oldName, 
 	`, dimensionID, oldName, newName); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE model.dimension_def SET source_property = $3
 		WHERE source_dimension_id = $1::uuid AND lower(source_property) = lower($2)
+	`, dimensionID, oldName, newName); err != nil {
+		return err
+	}
+	// The dimension's number format reads the property by name (migration 190).
+	_, err := tx.Exec(ctx, `
+		UPDATE model.dimension_def SET format_property = $3
+		WHERE id = $1::uuid AND lower(format_property) = lower($2)
 	`, dimensionID, oldName, newName)
 	return err
+}
+
+// MemberFormats are the values a dimension's format property may hold: the
+// format of every cell at that member (migration 190).
+var MemberFormats = map[string]bool{"percentage": true, "number": true, "currency": true}
+
+// CheckFormatProperty resolves the property a dimension's members take their
+// number format from: "" for none, else one of the dimension's own text
+// properties (its declared spelling is returned).
+func CheckFormatProperty(ctx context.Context, q Querier, dimensionID, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
+	}
+	var declared, dataType string
+	err := q.QueryRow(ctx, `SELECT name, data_type FROM model.dimension_property
+		WHERE dimension_id = $1::uuid AND lower(name) = lower($2)`, dimensionID, name).Scan(&declared, &dataType)
+	if err != nil {
+		return "", &ValidationError{Code: "UNKNOWN_PROPERTY", Message: fmt.Sprintf(
+			"the dimension has no property %q to take its members' number format from: declare it first", name)}
+	}
+	if dataType != "text" {
+		return "", &ValidationError{Code: "INVALID_FORMAT_PROPERTY", Message: fmt.Sprintf(
+			"property %q is %s: a member's number format is text (percentage, number or currency)", declared, dataType)}
+	}
+	return declared, nil
 }

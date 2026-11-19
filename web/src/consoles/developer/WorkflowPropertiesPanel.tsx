@@ -19,9 +19,12 @@ const CONTEXT_DATA_TYPES = [
 ];
 
 const SUBJECT_TYPE_OPTIONS: { value: WorkflowSubjectType; label: string; description: string }[] = [
-  { value: "",            label: "Not specified",                  description: "General workflow, no linked entity" },
-  { value: "grid",        label: "Specific planning grid",         description: "Approve changes in a planning grid" },
-  { value: "grid_metric", label: "Metric in a planning grid",      description: "Approve a specific metric value in a grid" },
+  // What a run locks is never the object: its Dimension member fields (the
+  // crossing of their members), narrowed to metrics by its Metric fields
+  // (owner decision 2026-11-19: the wording follows the behaviour).
+  { value: "",            label: "Not specified",                  description: "General workflow. Its approval locks the crossing of its Dimension member fields (Metric fields narrow it to those metrics); with no member field, its whole revision while the approval waits" },
+  { value: "grid",        label: "Specific planning grid",         description: "Names the grid the run is about. It does not narrow the lock: Dimension member fields set it, Metric fields narrow it to those metrics; with no member field nothing is locked" },
+  { value: "grid_metric", label: "Metric in a planning grid",      description: "Names the metric the run is about. It does not narrow the lock: add a Metric field for that; Dimension member fields set the members locked; with none nothing is locked" },
   { value: "form_records",label: "Selected records in a table",    description: "Approve a set of selected records; the workflow sets their status" },
   { value: "form_record", label: "Single saved record in a table", description: "Approve one record; the workflow sets its status" },
 ];

@@ -622,6 +622,8 @@ type createMetricParams struct {
 	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle "total" draws its row as a total (metricformula.RowStyle).
 	RowStyle string `json:"row_style"`
+	// ApprovalWatch false: approvals do not keep its figures (migration 189).
+	ApprovalWatch *bool `json:"approval_watch"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -775,6 +777,11 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set row style: %w", err)
 		}
 	}
+	if p.ApprovalWatch != nil && !*p.ApprovalWatch {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET approval_watch=false WHERE id=$1::uuid`, newID); err != nil {
+			return "", "", fmt.Errorf("set approval watch: %w", err)
+		}
+	}
 	if string(closedRules) != "[]" {
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules)); err != nil {
 			return "", "", fmt.Errorf("set closed rules: %w", err)
@@ -851,6 +858,8 @@ type updateMetricParams struct {
 	DimensionRules json.RawMessage `json:"dimension_rules"`
 	// RowStyle: "total" or ""; left out keeps it.
 	RowStyle *string `json:"row_style"`
+	// ApprovalWatch: whether approvals keep its figures; left out keeps it.
+	ApprovalWatch *bool `json:"approval_watch"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -1114,6 +1123,11 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET row_style=$2 WHERE id=$1::uuid`, p.MetricID, style); err != nil {
 			return "", "", fmt.Errorf("set row style: %w", err)
+		}
+	}
+	if p.ApprovalWatch != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET approval_watch=$2 WHERE id=$1::uuid`, p.MetricID, *p.ApprovalWatch); err != nil {
+			return "", "", fmt.Errorf("set approval watch: %w", err)
 		}
 	}
 	if has("closed_when") {
@@ -2961,8 +2975,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules, approval_watch)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when, row_style, input_rules, approval_watch
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -3036,9 +3050,11 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles,
+				                                 format_property)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles
+				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label, editor_roles,
+				       format_property
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),

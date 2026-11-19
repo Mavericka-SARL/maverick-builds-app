@@ -273,7 +273,7 @@ test("Business Console grid: a parent two levels up averages and counts its leav
   // Hierarchy rows are labelled "└Europe"; a parent's cells are read-only
   // text, a leaf's are inputs (an empty input is a leaf with no value).
   // A parent row's name starts with its collapse toggle ("Collapse Europe").
-  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^(?:(?:Collapse|Expand) ${label} )?└?${label} `) });
+  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^(?:(?:Collapse|Expand) ${label} )?└?${label}(?: |$)`) });
   const expectRow = async (label: string, avg: string, cnt: string, amt: string) => {
     const cells = row(label).getByRole("cell");
     await expect(cells.nth(1), `${label} average`).toHaveText(avg);
@@ -290,9 +290,10 @@ test("Business Console grid: a parent two levels up averages and counts its leav
   await expectRow("World", "3.00", "3", "9");
   await expectRow("Global", "4.75", "4", "19");
   await expectRow("Asia Pacific", "10.00", "1", "10");
-  // A leaf with no value: no average, a count and a sum of 0 (as before);
-  // a leaf's own value is untouched.
-  await expectLeaf("France", "", "0", "0");
+  // A leaf with no value is blank — no average, no count, no sum — not 0
+  // (2026-11-19: a never-entered input read 0, like an entered zero); a
+  // leaf's own value is untouched.
+  await expectLeaf("France", "", "", "");
   await expectLeaf("Germany", "3.00", "3", "3");
 });
 

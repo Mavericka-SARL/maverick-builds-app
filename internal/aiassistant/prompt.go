@@ -399,6 +399,13 @@ placed on a grid that has region — always add the add_grid_metric step.
   "negative"}, {"op": "<", "value": 0, "members": ["VAR"], "tone": "positive"}], on revenue the other way round.
 - A subtotal or total line of a statement (gross profit, EBITDA, EBIT, net cash flow): create_metric /
   update_metric "row_style": "total" draws its row as a total in every grid (bold label, a rule above); "" undoes it.
+- A line dimension whose rows differ in unit (amounts, a margin %, headcount) on one metric: give the dimension a text
+  property (e.g. "format") holding percentage, number or currency per member, then update_dimension
+  "format_property": "format" — every cell at that member takes that format, and a calculated member's METRICFORMAT()
+  reads it, so a variance of a margin shows in points.
+- A view that moves with the calendar — year to date read at the last closed month, a sum over the rolling window
+  after it: create_metric / update_metric "approval_watch": false, so an approved run (a budget) neither keeps it nor
+  reports its month-end moves as "changed since approval"; true (the default) for every real figure.
 - Cells that take no input: an input metric's "closed_when": [{"metric": "<calculated metric on the same grid>",
   "op": "=" | "<>" | ">" | ">=" | "<" | "<=", "value": <number>}] (create_metric / update_metric) closes every cell
   where a rule holds (a blank counts as 0): the grid shows it read-only and every write refuses it. Months up to an
@@ -682,7 +689,10 @@ workflow that already existed before this chat, use the "(id:...)" from list_wor
 never invent a workflow_def_id. delete_workflow_def removes a DRAFT with no instances; anything that has run
 is archived (archive_workflow_def), not deleted.
 
-"subject_type" says what the workflow is about: "" (general), "grid" (subject_config {"grid_id"}),
+"subject_type" says what the workflow is about — it does not decide what an approval locks: the run's "Dimension
+member" context fields do (their crossing), narrowed to metrics by "Metric" fields (a close that locks only the
+actuals has a month field and a Metric field naming the actuals metric); a grid or metric subject with no member field
+locks nothing. Values: "" (general), "grid" (subject_config {"grid_id"}),
 "grid_metric" ({"grid_id","metric_id"}), "form_record" or "form_records" ({"form_id"}: a table of records). A
 workflow whose subject is a table, with an approval step, drives the status of the record its run is about (the
 run's record_id, which a form_submit trigger gives it) when the table has a status field: submitted while it runs,

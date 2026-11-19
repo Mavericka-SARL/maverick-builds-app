@@ -353,3 +353,106 @@ func TestScopedReadResolvesADeepChain(t *testing.T) {
 	}
 	t.Error("chain_a has no total under a pin: its chain resolved one pass too late")
 }
+
+// A line dimension whose members carry their own number format (migration
+// 190): a margin line among amounts is a percentage for every metric, so a
+// calculated member's METRICFORMAT() reads "percentage" there — its variance
+// % is in points, as on a percentage metric — and the grid is told which
+// property holds the format. The setting follows its property's rename and
+// keeps the property from being deleted (Integrated FP&A, 2026-11-19).
+func TestMemberFormatsReachCalculatedMembers(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	dev := "rollup-test-approver"
+	call := func(method, path string, body any) (int, string) {
+		t.Helper()
+		return doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+	}
+	must := func(method, path string, body any) string {
+		t.Helper()
+		status, raw := call(method, path, body)
+		if status != http.StatusOK && status != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, status, raw)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out.ID
+	}
+	const varPct = `IF(METRICFORMAT() = "percentage", {RF} - {LY}, IF({LY} = 0, 0, ({RF} - {LY}) / ABS({LY}) * 100))`
+	scen := must("POST", "/api/developer/dimensions", map[string]any{"name": "scenario", "revision_id": f.workingRevID})
+	must("POST", "/api/developer/dimensions/"+scen+"/members", map[string]any{"code": "RF", "label": "RF"})
+	must("POST", "/api/developer/dimensions/"+scen+"/members", map[string]any{"code": "LY", "label": "LY"})
+	must("POST", "/api/developer/dimensions/"+scen+"/members", map[string]any{"code": "VARPCT", "label": "Variance %", "formula": varPct})
+	line := must("POST", "/api/developer/dimensions", map[string]any{"name": "line", "revision_id": f.workingRevID})
+	prop := must("POST", "/api/developer/dimensions/"+line+"/properties", map[string]any{"name": "format", "data_type": "text"})
+	must("POST", "/api/developer/dimensions/"+line+"/members", map[string]any{"code": "REV", "label": "Revenue", "properties": map[string]string{"format": "currency"}})
+	must("POST", "/api/developer/dimensions/"+line+"/members", map[string]any{"code": "GM", "label": "Gross margin", "properties": map[string]string{"format": "percentage"}})
+	amount := must("POST", "/api/developer/metrics", map[string]any{"name": "line_amount", "is_input": true, "format": "number", "revision_id": f.workingRevID})
+	grid := must("POST", "/api/developer/grids", map[string]any{"name": "Lines", "revision_id": f.workingRevID})
+	for _, p := range []string{"/metrics/" + amount, "/dimensions/" + scen, "/dimensions/" + line} {
+		must("POST", "/api/developer/grids/"+grid+p, nil)
+	}
+	for _, w := range []struct {
+		s, l string
+		v    float64
+	}{{"RF", "REV", 120}, {"LY", "REV", 100}, {"RF", "GM", 35}, {"LY", "GM", 30}} {
+		if status, raw := call("POST", "/api/cells", map[string]any{"model_id": f.modelID, "revision_id": f.workingRevID, "metric_id": amount,
+			"dim_codes": map[string]string{scen: w.s, line: w.l}, "value": w.v}); status != http.StatusOK {
+			t.Fatalf("write: %d %s", status, raw)
+		}
+	}
+	type gridResp struct {
+		Cells      map[string]float64 `json:"cells"`
+		Dimensions []struct {
+			ID             string `json:"id"`
+			FormatProperty string `json:"format_property"`
+		} `json:"dimensions"`
+	}
+	read := func() gridResp {
+		t.Helper()
+		_, raw := call("GET", "/api/grid?grid_id="+grid, nil)
+		var g gridResp
+		_ = json.Unmarshal([]byte(raw), &g)
+		return g
+	}
+	at := func(g gridResp, scenario, l string) float64 {
+		for _, k := range []string{amount + ":" + scenario + ":" + l, amount + ":" + l + ":" + scenario} {
+			if v, ok := g.Cells[k]; ok {
+				return v
+			}
+		}
+		return math.NaN()
+	}
+	if v := at(read(), "VARPCT", "GM"); math.Abs(v-100.0*5/30) > 1e-6 {
+		t.Fatalf("before the setting, the margin's variance %% is relative: %v", v)
+	}
+	if status, raw := call("PATCH", "/api/developer/dimensions/"+line, map[string]any{"format_property": "nope"}); status != http.StatusBadRequest {
+		t.Errorf("an undeclared property: %d %s, want 400", status, raw)
+	}
+	must("PATCH", "/api/developer/dimensions/"+line, map[string]any{"format_property": "FORMAT"})
+	g := read()
+	if v := at(g, "VARPCT", "GM"); math.Abs(v-5) > 1e-6 {
+		t.Errorf("the margin line's variance %% = %v, want 5 points (its member format is percentage)", v)
+	}
+	if v := at(g, "VARPCT", "REV"); math.Abs(v-20) > 1e-6 {
+		t.Errorf("the revenue line's variance %% = %v, want 20 %%", v)
+	}
+	found := false
+	for _, d := range g.Dimensions {
+		if d.ID == line {
+			found = d.FormatProperty == "format"
+		}
+	}
+	if !found {
+		t.Errorf("the grid does not say which property formats the line's members: %+v", g.Dimensions)
+	}
+	must("PATCH", "/api/developer/dimensions/"+line+"/properties/"+prop, map[string]any{"name": "fmt", "data_type": "text"})
+	var after string
+	if err := f.pool.QueryRow(context.Background(), `SELECT format_property FROM model.dimension_def WHERE id = $1::uuid`, line).Scan(&after); err != nil || after != "fmt" {
+		t.Errorf("after renaming the property the setting reads %q (%v), want fmt", after, err)
+	}
+	if status, raw := call("DELETE", "/api/developer/dimensions/"+line+"/properties/"+prop, nil); status != http.StatusConflict {
+		t.Errorf("deleting the property the members' format reads: %d %s, want 409", status, raw)
+	}
+}

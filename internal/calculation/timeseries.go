@@ -735,12 +735,47 @@ func (e *tsEvaluator) finish(res *tsResults) {
 	for i := range allPositions {
 		allPositions[i] = i
 	}
+	// ruled is where the stored row at slice reads the metric under its
+	// total rules (migration 174), as the scalar path's rows read it
+	// (ruledAt): a dimension totalling as one member narrows the leaves to
+	// it (a formula is evaluated there); ok false where a rule is none, or
+	// agg_rule none above the leaves, and no row is written. This path
+	// reduced every leaf, so a case dimension totalling as its first member
+	// stored the sum of the cases for a metric with a time function —
+	// closing cash 300 in Base read 1,200 at the total (2026-11-19). The
+	// time dimension is left to the positions.
+	ruled := func(slice map[string]string) (map[string]string, bool) {
+		at, chosen, ok := ruledAt(e.allDims, e.def.ID, dimIDs, slice)
+		if !ok {
+			return nil, false
+		}
+		if !rollup.Aggregates(rollup.AggRule(rule)) && !rollup.LeafCombo(e.allDims, dimIDs, at) {
+			return nil, false
+		}
+		pins := map[string]string{}
+		if useEval {
+			for d, c := range at {
+				pins[d] = c
+			}
+		} else {
+			for d, c := range slice {
+				pins[d] = c
+			}
+			for d, c := range chosen {
+				pins[d] = c
+			}
+		}
+		delete(pins, timeID)
+		return pins, true
+	}
 
 	res.rows = append(res.rows, res.leaf...)
 
 	// Aggregate '{}' row.
-	if v, ok := overTime(map[string]string{}, allPositions); ok {
-		res.aggregate = &v
+	if pins, ok := ruled(map[string]string{}); ok {
+		if v, ok := overTime(pins, allPositions); ok {
+			res.aggregate = &v
+		}
 	}
 
 	// Rollup combos (formula/rate): at least one non-leaf member pinned.
@@ -752,7 +787,11 @@ func (e *tsEvaluator) finish(res *tsResults) {
 	if useEval {
 		const rollupComboCap = 20000
 		for _, combo := range rollup.RollupCombos(e.allDims, dimIDs, rollupComboCap) {
-			if v, _, err := e.evalCombo(combo); err == nil {
+			at, _, ok := ruledAt(e.allDims, e.def.ID, dimIDs, combo)
+			if !ok {
+				continue
+			}
+			if v, _, err := e.evalCombo(at); err == nil {
 				res.rows = append(res.rows, CalcResultRow{DimMembers: combo, Value: v})
 			}
 		}
@@ -780,14 +819,18 @@ func (e *tsEvaluator) finish(res *tsResults) {
 		}
 		for _, m := range d.Members {
 			slice := map[string]string{dimID: m.Code}
+			pins, ruledOK := ruled(slice)
+			if !ruledOK {
+				continue
+			}
 			var v float64
 			var ok bool
 			if dimID == timeID {
 				// A leaf period is one position; an aggregate period is its
 				// leaves reduced by the time summary.
-				v, ok = overTime(map[string]string{}, e.axis.leafPositions(m.Code))
+				v, ok = overTime(pins, e.axis.leafPositions(m.Code))
 			} else {
-				v, ok = overTime(slice, allPositions)
+				v, ok = overTime(pins, allPositions)
 			}
 			if ok {
 				res.rows = append(res.rows, CalcResultRow{DimMembers: slice, Value: v})

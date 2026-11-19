@@ -96,6 +96,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		Label *string `json:"label"`
 		// AggRule: how its members total (migration 174); omitted keeps it.
 		AggRule *string `json:"agg_rule"`
+		// FormatProperty: the property its members take their number format
+		// from (migration 190); "" for none, omitted keeps it.
+		FormatProperty *string `json:"format_property"`
 	}
 	var sent map[string]json.RawMessage
 	if err := decodeParams(raw, &p); err != nil {
@@ -182,9 +185,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
 		return "", "", err
 	}
-	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil && p.EditorRoles == nil && p.AggRule == nil {
+	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil && p.EditorRoles == nil && p.AggRule == nil && p.FormatProperty == nil {
 		return "", "", fmt.Errorf("nothing to change: provide name, label, tags, parent_dimension_id, " +
-			"source_dimension_id, source_property, business_maintained, editor_roles, agg_rule or derive_members")
+			"source_dimension_id, source_property, business_maintained, editor_roles, agg_rule, format_property or derive_members")
 	}
 	if p.Label != nil && len(strings.TrimSpace(*p.Label)) > 80 {
 		return "", "", fmt.Errorf("label: at most 80 characters")
@@ -246,6 +249,15 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 			}
 		}
 		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET business_maintained=$2 WHERE id=$1::uuid`, dimID, *p.BusinessMaintained); err != nil {
+			return "", "", fmt.Errorf("update dimension: %w", err)
+		}
+	}
+	if p.FormatProperty != nil {
+		prop, err := metricformula.CheckFormatProperty(ctx, e.pool, dimID, *p.FormatProperty)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET format_property=$2 WHERE id=$1::uuid`, dimID, prop); err != nil {
 			return "", "", fmt.Errorf("update dimension: %w", err)
 		}
 	}
