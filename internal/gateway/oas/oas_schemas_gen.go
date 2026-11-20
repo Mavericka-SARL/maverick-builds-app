@@ -12227,6 +12227,40 @@ func (s *ExportGridFormat) UnmarshalText(data []byte) error {
 	}
 }
 
+type ExportGridMode string
+
+const (
+	ExportGridModeValues ExportGridMode = "values"
+)
+
+// AllValues returns all ExportGridMode values.
+func (ExportGridMode) AllValues() []ExportGridMode {
+	return []ExportGridMode{
+		ExportGridModeValues,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportGridMode) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportGridModeValues:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportGridMode) UnmarshalText(data []byte) error {
+	switch ExportGridMode(data) {
+	case ExportGridModeValues:
+		*s = ExportGridModeValues
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type ExportGridNotFound Error
 
 func (*ExportGridNotFound) exportGridRes() {}
@@ -26616,6 +26650,52 @@ func (o OptExportGridFormat) Get() (v ExportGridFormat, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptExportGridFormat) Or(d ExportGridFormat) ExportGridFormat {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportGridMode returns new OptExportGridMode with value set to v.
+func NewOptExportGridMode(v ExportGridMode) OptExportGridMode {
+	return OptExportGridMode{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportGridMode is optional ExportGridMode.
+type OptExportGridMode struct {
+	Value ExportGridMode
+	Set   bool
+}
+
+// IsSet returns true if OptExportGridMode was set.
+func (o OptExportGridMode) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportGridMode) Reset() {
+	var v ExportGridMode
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportGridMode) SetTo(v ExportGridMode) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportGridMode) Get() (v ExportGridMode, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportGridMode) Or(d ExportGridMode) ExportGridMode {
 	if v, ok := o.Get(); ok {
 		return v
 	}

@@ -453,7 +453,7 @@ func main() {
 				}
 				return branding.EmailNameForUser(ctx, dbPool, recipientUserID)
 			},
-			Gate: gate}
+			Gate: gate, ConsoleURL: c.ConsoleURL}
 		go dispatcher.Run(bgCtx, notificationDispatchInterval)
 		reminder := &notification.Reminder{Store: store, Log: blog, Gate: gate}
 		go reminder.Run(bgCtx, reminderInterval)

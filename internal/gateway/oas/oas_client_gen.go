@@ -728,7 +728,8 @@ type Invoker interface {
 	// ExportGrid invokes exportGrid operation.
 	//
 	// Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination;
-	// round-trips through POST /api/import/upload).
+	// round-trips through POST /api/import/upload), or with mode=values every metric's values as the
+	// caller's grid shows them.
 	//
 	// GET /api/grid/export
 	ExportGrid(ctx context.Context, params ExportGridParams) (ExportGridRes, error)
@@ -14684,7 +14685,8 @@ func (c *Client) sendExportFormRecords(ctx context.Context, params ExportFormRec
 // ExportGrid invokes exportGrid operation.
 //
 // Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination;
-// round-trips through POST /api/import/upload).
+// round-trips through POST /api/import/upload), or with mode=values every metric's values as the
+// caller's grid shows them.
 //
 // GET /api/grid/export
 func (c *Client) ExportGrid(ctx context.Context, params ExportGridParams) (ExportGridRes, error) {
@@ -14745,6 +14747,23 @@ func (c *Client) sendExportGrid(ctx context.Context, params ExportGridParams) (r
 
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			return e.EncodeValue(conv.UUIDToString(params.GridDefID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "mode" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "mode",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Mode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
 		}); err != nil {
 			return res, errors.Wrap(err, "encode query")
 		}

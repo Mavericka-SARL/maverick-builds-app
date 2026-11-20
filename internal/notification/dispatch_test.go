@@ -420,3 +420,23 @@ func TestDisabledRecipientsAreNotNotified(t *testing.T) {
 		t.Errorf("%d notification rows, want 2 (the in-app and e-mail of the one queued before)", total)
 	}
 }
+
+// A notification e-mail ends with a link to the console, opened on the page
+// the news is about; until 2026-11-20 it held the message alone.
+func TestEmailBodyLinksToTheConsole(t *testing.T) {
+	run := Message{Vars: map[string]string{"message": "Approve the figures."}, ResourceType: "workflow_instance", ResourceID: "r1"}
+	if got, want := run.EmailBody("https://app.example.com/", ""), "Approve the figures.\n\nOpen maverickbuilds.app: https://app.example.com/?open=workflow"; got != want {
+		t.Errorf("run body = %q, want %q", got, want)
+	}
+	over := Message{Vars: map[string]string{"message": "Cancelled.", "open": "workflow/history"}, ResourceType: "workflow_instance"}
+	if got, want := over.EmailBody("https://app.example.com", "Acme"), "Cancelled.\n\nOpen Acme: https://app.example.com/?open=workflow%2Fhistory"; got != want {
+		t.Errorf("history body = %q, want %q", got, want)
+	}
+	other := Message{Vars: map[string]string{"message": "Access granted.", "open": "elsewhere"}, ResourceType: "workspace"}
+	if got, want := other.ConsoleLink("https://app.example.com"), "https://app.example.com/"; got != want {
+		t.Errorf("a page the console does not open gives %q, want the console itself %q", got, want)
+	}
+	if got := run.EmailBody("", ""); got != "Approve the figures." {
+		t.Errorf("no CONSOLE_URL: body = %q, want the message alone", got)
+	}
+}

@@ -2832,8 +2832,10 @@ export const api = {
   // Exports this grid's raw input-metric values (one row per dimension-member
   // combination, dimension/metric names as columns) — the same shape
   // uploadImport/uploadImportXlsx expect back, so the file round-trips.
-  exportGrid: (gridDefId: string, revisionId: string, format: "csv" | "xlsx" = "xlsx") =>
-    apiFetchBlob(`/api/grid/export?grid_def_id=${encodeURIComponent(gridDefId)}&revision_id=${encodeURIComponent(revisionId)}&format=${format}`),
+  // mode "values" exports what the grid shows instead: every metric, calculated
+  // ones too, by label — a file to read, not to load back.
+  exportGrid: (gridDefId: string, revisionId: string, format: "csv" | "xlsx" = "xlsx", mode: "" | "values" = "") =>
+    apiFetchBlob(`/api/grid/export?grid_def_id=${encodeURIComponent(gridDefId)}&revision_id=${encodeURIComponent(revisionId)}&format=${format}${mode ? `&mode=${mode}` : ""}`),
 
   getTasks: () => apiFetch<Task[]>("/api/tasks"),
   // Published workflow definitions with their context schemas — the

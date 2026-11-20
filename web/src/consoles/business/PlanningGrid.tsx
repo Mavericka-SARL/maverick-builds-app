@@ -25,16 +25,22 @@ import { cellAt, cellsBetween, copyText, editableIn, parseClipboard, pastedDate,
 // buttons per grid widget ate dashboard space). Fixed-position dropdown from
 // the trigger rect — the same pattern as WorkflowsTab's row menu — so the
 // widget's own overflow container can't clip it.
+// Two exports (2026-11-20: one Export gave a report of what is shown on one
+// grid and a load file on the next): "Export values" writes every metric as
+// shown, by label; "Export for re-import" the input metrics only, by name, in
+// the shape the import reads back — offered where the grid has any.
 function GridActionsMenu({
   canExport,
+  canExportForImport,
   exporting,
   onExport,
   pivotActive,
   onTogglePivot,
 }: {
   canExport: boolean;
+  canExportForImport: boolean;
   exporting: boolean;
-  onExport: () => void;
+  onExport: (mode: "" | "values") => void;
   pivotActive: boolean;
   onTogglePivot: () => void;
 }) {
@@ -82,10 +88,21 @@ function GridActionsMenu({
           {canExport && (
             <button
               type="button" role="menuitem" style={itemStyle} disabled={exporting}
-              onClick={() => { onExport(); setMenuPos(null); }}
+              title="Every metric as this grid shows it, calculated ones too"
+              onClick={() => { onExport("values"); setMenuPos(null); }}
             >
               <Download size={14} />
-              {exporting ? "Exporting…" : "Export"}
+              {exporting ? "Exporting…" : "Export values"}
+            </button>
+          )}
+          {canExport && canExportForImport && (
+            <button
+              type="button" role="menuitem" style={itemStyle} disabled={exporting}
+              title="The input metrics only, in the layout the import reads back"
+              onClick={() => { onExport(""); setMenuPos(null); }}
+            >
+              <Download size={14} />
+              Export for re-import
             </button>
           )}
           <button
@@ -635,7 +652,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // resolved per-grid, see gridExport in internal/gateway) — unavailable
   // when this panel is rendered for the whole-model "all dimensions" view.
   const exportGrid = useMutation({
-    mutationFn: () => api.exportGrid(gridDefId!, ctx.revision_id, "xlsx"),
+    mutationFn: (mode: "" | "values") => api.exportGrid(gridDefId!, ctx.revision_id, "xlsx", mode),
     onSuccess: ({ blob, filename }) => downloadBlob(blob, filename),
   });
 
@@ -2053,8 +2070,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             {findMisses && <span className="mvx-admin-muted" style={{ fontSize: 12 }}>No match</span>}
             <GridActionsMenu
               canExport={!!gridDefId}
+              canExportForImport={gridMetrics.some(m => m.is_input)}
               exporting={exportGrid.isPending}
-              onExport={() => exportGrid.mutate()}
+              onExport={(mode) => exportGrid.mutate(mode)}
               pivotActive={showPivot}
               onTogglePivot={() => setShowPivot(p => !p)}
             />
@@ -2388,8 +2406,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             <span style={{ marginLeft: "auto" }}>
               <GridActionsMenu
                 canExport={!!gridDefId}
+                canExportForImport={gridMetrics.some(m => m.is_input)}
                 exporting={exportGrid.isPending}
-                onExport={() => exportGrid.mutate()}
+                onExport={(mode) => exportGrid.mutate(mode)}
                 pivotActive={showPivot}
                 onTogglePivot={() => setShowPivot(p => !p)}
               />
@@ -2408,6 +2427,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         )}
         {!writeback.isPending && recalcPending && <p className="mvx-grid-status mvx-grid-status--saving" role="status">Recalculating…</p>}
         {writeback.isError && <p className="mvx-grid-status mvx-grid-status--error">Save failed: {(writeback.error as Error).message}</p>}
+        {/* Until 2026-11-20 a refused export said nothing: the menu closed and no file came. */}
+        {exportGrid.isError && <p className="mvx-grid-status mvx-grid-status--error" role="alert">Export failed: {(exportGrid.error as Error).message}</p>}
         {badInput && editing[badInput.key] !== undefined && (
           <p className="mvx-grid-status mvx-grid-status--error" role="alert">
             “{badInput.raw}” is not a number, so it was not saved. Type a number such as 14.8, 1,250 or (2) for a reduction.

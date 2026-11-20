@@ -124,7 +124,9 @@ func TestReopenApprovedWorkflowRun(t *testing.T) {
 		FROM workflow.workflow_instance WHERE id = $1::uuid`, inst); !strings.HasPrefix(got, "March was locked with a wrong figure|true|") || strings.HasSuffix(got, "|") {
 		t.Errorf("reopen record %q, want the reason, a time and who", got)
 	}
-	if got := q(`SELECT template_id FROM notification.notification WHERE resource_id = $1 AND channel = 'in_app' LIMIT 1`, inst); got != workflow.ReopenedTemplate {
+	// The newest: the business admin was told of the approval step earlier
+	// in the run (workflow_task_assigned).
+	if got := q(`SELECT template_id FROM notification.notification WHERE resource_id = $1 AND channel = 'in_app' ORDER BY created_at DESC LIMIT 1`, inst); got != workflow.ReopenedTemplate {
 		t.Errorf("notification template %q, want %s", got, workflow.ReopenedTemplate)
 	}
 	// One run, read by its id: the developer who started it, as reopened.

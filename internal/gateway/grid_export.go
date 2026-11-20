@@ -8,9 +8,13 @@ package gateway
 //
 // Only is_input metrics are exported: calculated metrics have no raw
 // fact_input rows of their own (see runtime.calc_result) and re-importing a
-// calculated value would be meaningless.
+// calculated value would be meaningless. ?mode=values exports what the grid
+// shows instead, every metric (gridExportValues), as does a grid with no
+// input metric the caller may see — a report such as a P&L; until 2026-11-20
+// that answered 400 and the grid's Export did nothing.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -42,6 +47,13 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 	}
 	if format != "csv" && format != "xlsx" {
 		jsonErr(w, fmt.Errorf("format must be csv or xlsx"), http.StatusBadRequest)
+		return
+	}
+	// mode: "" (re-import: input metrics, by name) or "values" (what the grid
+	// shows, every metric, by label — the menu's "Export values").
+	mode := strings.TrimSpace(r.URL.Query().Get("mode"))
+	if mode != "" && mode != "values" {
+		jsonErr(w, fmt.Errorf("mode must be values or empty"), http.StatusBadRequest)
 		return
 	}
 
@@ -74,6 +86,11 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		jsonErr(w, fmt.Errorf("no revision: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	if mode == "values" {
+		h.gridExportValues(w, r, gridDefID, revisionID, gridName, format)
 		return
 	}
 
@@ -152,7 +169,7 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(metricCols) == 0 {
-		jsonErr(w, fmt.Errorf("grid has no input metrics to export"), http.StatusBadRequest)
+		h.gridExportValues(w, r, gridDefID, revisionID, gridName, format)
 		return
 	}
 
@@ -172,7 +189,7 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		metricCols = kept
 	}
 	if len(metricCols) == 0 {
-		jsonErr(w, fmt.Errorf("grid has no input metrics to export"), http.StatusBadRequest)
+		h.gridExportValues(w, r, gridDefID, revisionID, gridName, format)
 		return
 	}
 
@@ -378,4 +395,43 @@ func (h *handler) hiddenMemberFilter(ctx context.Context, act *actor, modelID, r
 		hidden[mr.dimID][mr.code] = true
 	}
 	return hidden, metricRules, nil
+}
+
+// gridExportValues answers the export of a grid that has no input metrics
+// the caller may see (a report: a P&L, a balance sheet) with the values the
+// grid shows them, calculated ones included — read from their own /api/grid
+// view, as a data export is (renderExport), so hidden members and metrics
+// never reach the file. Nothing in it loads back, so members and metrics
+// are written by label, for reading.
+func (h *handler) gridExportValues(w http.ResponseWriter, r *http.Request, gridID, revisionID, gridName, format string) {
+	ctx := r.Context()
+	// Built during a recalculation, the file would hold the values that
+	// pass is about to replace.
+	if !h.waitRecalculated(ctx, revisionID, exportRecalcWait) {
+		jsonErr(w, fmt.Errorf("this revision's values are being recalculated — export again in a moment"), http.StatusConflict)
+		return
+	}
+	spec := dataexport.Spec{
+		Format:        format,
+		MemberDisplay: dataexport.DisplayLabel,
+		MetricDisplay: dataexport.DisplayLabel,
+		FileName:      slugify(gridName),
+	}
+	if name := strings.TrimSpace(gridName); len(name) <= 31 && !strings.ContainsAny(name, `[]:*?/\`) {
+		spec.SheetName = name
+	}
+	t, err := h.renderExport(ctx, r, gridID, revisionID, spec)
+	if err != nil {
+		jsonErr(w, err, errStatus(err, http.StatusInternalServerError))
+		return
+	}
+	var buf bytes.Buffer
+	if err := dataexport.Write(&buf, t); err != nil {
+		jsonErr(w, fmt.Errorf("write export: %w", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", dataexport.ContentType(t.Spec().Format))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", dataexport.FileName(spec, gridName)))
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	_, _ = w.Write(buf.Bytes())
 }

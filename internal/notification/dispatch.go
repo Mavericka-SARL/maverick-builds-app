@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"strings"
 	"time"
 
@@ -90,6 +91,45 @@ func (m Message) Body() string {
 		return b
 	}
 	return m.Subject()
+}
+
+// ConsoleViews are the console pages a notification may open
+// (?open=…), each a view of the Workflow page; the console reads the same
+// list (web/src/router/sections.ts, OPEN_VIEWS).
+var ConsoleViews = map[string]bool{"workflow": true, "workflow/history": true}
+
+// ConsoleLink is where the notification's e-mail sends its reader: the
+// console at consoleURL, opened on the page its "open" var names — a run's
+// news opens the Workflow page when the producer named none. "" when the
+// deployment has no console address (CONSOLE_URL).
+func (m Message) ConsoleLink(consoleURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(consoleURL), "/")
+	if base == "" {
+		return ""
+	}
+	view := m.Vars["open"]
+	if view == "" && m.ResourceType == "workflow_instance" {
+		view = "workflow"
+	}
+	if !ConsoleViews[view] {
+		return base + "/"
+	}
+	return base + "/?open=" + url.QueryEscape(view)
+}
+
+// EmailBody is Body, ending with a link to the console (ConsoleLink) under
+// the name the mail is sent as. Until 2026-11-20 a mail held the message
+// alone: its reader had to find the workspace and the run themselves.
+func (m Message) EmailBody(consoleURL, brand string) string {
+	link := m.ConsoleLink(consoleURL)
+	if link == "" {
+		return m.Body()
+	}
+	name := brand
+	if name == "" {
+		name = PlatformName
+	}
+	return m.Body() + "\n\nOpen " + name + ": " + link
 }
 
 // Mailer sends one e-mail. The interface exists so the dispatcher can be
@@ -272,6 +312,9 @@ type Dispatcher struct {
 	BrandName func(ctx context.Context, recipientUserID string) string
 	// Gate paces Run: nil is a plain timer (see pkg/wake).
 	Gate wake.Gate
+	// ConsoleURL is the console's address (CONSOLE_URL); a mail ends with a
+	// link to it (Message.EmailBody). Empty: no link.
+	ConsoleURL string
 }
 
 // BrandedMailer is a Mailer that can send under a display name.
@@ -380,10 +423,11 @@ func (d *Dispatcher) deliver(ctx context.Context, settings Settings, m Message) 
 		if d.BrandName != nil && !m.OtherTenant {
 			brand = d.BrandName(ctx, m.RecipientID)
 		}
+		body := m.EmailBody(d.ConsoleURL, brand)
 		if bm, ok := d.Mailer.(BrandedMailer); ok && brand != "" {
-			return bm.SendAs(ctx, brand, m.Email, m.DisplayName, m.SubjectFor(brand), m.Body())
+			return bm.SendAs(ctx, brand, m.Email, m.DisplayName, m.SubjectFor(brand), body)
 		}
-		return d.Mailer.Send(ctx, m.Email, m.DisplayName, m.SubjectFor(brand), m.Body())
+		return d.Mailer.Send(ctx, m.Email, m.DisplayName, m.SubjectFor(brand), body)
 	case "webhook":
 		if !settings.WebhookEnabled || settings.WebhookURL == "" {
 			return fmt.Errorf("webhook notifications are turned off")

@@ -1,6 +1,6 @@
 # Notifications: in-app, e-mail, webhooks and reminders
 
-> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
+> **Last verified:** 2026-11-20 (every path, variable, route and identifier it names checked against the code)
 
 Every notification the platform produces is written to the recipient's
 notification centre, the bell in each console. A tenant can additionally have
@@ -14,7 +14,21 @@ and can have overdue workflow tasks remind the people who can act on them.
 | A workflow **notification step** | `workflow_step_notification` | the workflow instance |
 | A step **sent back for rework** | `workflow_step_notification` | the workflow instance |
 | An automation rule that **could not start** its workflow | `workflow_step_notification` | the automation rule |
+| A task or approval that **becomes someone's** | `workflow_task_assigned` | the workflow instance |
 | A workflow task that **came due** | `workflow_task_reminder` | the workflow instance |
+| A run **cancelled** | `workflow_instance_cancelled` | the workflow instance |
+| An approved run **reopened** | `workflow_instance_reopened` | the workflow instance |
+| Access **granted** to a workspace | `access_granted` | the workspace |
+
+A task or approval becomes someone's when a run starts, when the step before
+it is decided, when a rejection sends the work back, when a held condition
+step resumes, and when an administrator sets a finished run running again.
+It tells the step's named assignee, else everyone its roles assign it to (the
+people the task inbox shows it to), once each time it becomes active
+(`workflow_step.task_notified_at`, migration 191). The person who acted is
+left out; a test run, and a step naming no role — open to everyone who
+reaches the application — tell no one. A step sent back goes to whoever did
+it, so only they are told again.
 
 Producers call `Store.Notify`, which writes the in-app row and then one row
 per outbound channel the tenant has turned on. A notification therefore
@@ -61,6 +75,12 @@ mail. The gateway reads them from its environment:
 
 The console shows a warning on the settings screen when no relay is
 configured, so e-mail is never switched on into a void.
+
+Each e-mail ends with a link to the console, under the name the mail is sent
+as: `Open maverickbuilds.app: <CONSOLE_URL>/?open=workflow`. A run's news
+opens the Workflow page, a cancelled or reopened run its History
+(`?open=workflow/history`); the console opens that page and clears the
+address. Without `CONSOLE_URL` the mail carries no link.
 
 On Kubernetes (`deploy/k8s`), the host, port and sender are keys of the
 `mavericks-config` ConfigMap and the credentials are the `mavericks-smtp`

@@ -137,6 +137,25 @@ export interface ConsoleSection {
 
 /** Where the console remembers its open tab for this browser tab, so a
  *  reload comes back to it. */
+/**
+ * The pages a link may open (?open=…): the Workflow page and its History,
+ * where a notification e-mail sends its reader ("Open …: …/?open=workflow").
+ * The gateway draws the same list (internal/notification ConsoleViews).
+ */
+export const OPEN_VIEWS = ["workflow", "workflow/history"];
+
+/**
+ * The tab a link's ?open= names, in the first of the reader's sections that
+ * has a Workflow page (User, else Business Admin); null when it names none
+ * of OPEN_VIEWS or the reader has neither section.
+ */
+export function linkedTab(search: string, sections: SectionId[]): string | null {
+  const view = new URLSearchParams(search).get("open") ?? "";
+  if (!OPEN_VIEWS.includes(view)) return null;
+  const section = (["business", "business-admin"] as SectionId[]).find((id) => sections.includes(id));
+  return section ? tabId(section, view) : null;
+}
+
 export const OPEN_TAB_KEY = "console_open_tab";
 
 /** Forget the remembered tab: the next load opens on the landing tab. For a

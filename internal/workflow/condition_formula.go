@@ -295,6 +295,8 @@ func (s *Store) ResumeHeldConditions(ctx context.Context) int {
 		s.processAutoStep(ctx, h.instance, def, defs)
 		s.reconcileInstance(ctx, h.instance, defs)
 		s.closeInstanceIfIdle(ctx, h.instance, "completed")
+		// No one acted here: everyone the released steps are assigned to is told.
+		s.NotifyNewTasks(ctx, h.instance, "")
 		n++
 	}
 	return n

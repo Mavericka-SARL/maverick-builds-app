@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/xuri/excelize/v2"
@@ -579,5 +580,163 @@ func TestGridReadHidesFormulasAndHiddenRulesFromBusinessUsers(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	if strings.Contains(string(b), "amount * 2") {
 		t.Errorf("a business user's /api/metrics carries formula text: %.300s", b)
+	}
+}
+
+// A grid of calculated metrics alone (a report: a P&L) has no input values
+// to load back. Its Export used to answer 400 "grid has no input metrics to
+// export", and the console said nothing (2026-11-20); it now writes the
+// values the grid shows the caller, by label, hidden members left out.
+func TestGridExport_CalculatedOnlyGridExportsShownValues(t *testing.T) {
+	f := setupTransferFixture(t)
+	ctx := context.Background()
+	// The report is built as a developer builds one: a calculated metric
+	// on a grid of its own.
+	var custID, wsID string
+	if err := f.pool.QueryRow(ctx, `SELECT customer_id::text, id::text FROM core.workspace LIMIT 1`).Scan(&custID, &wsID); err != nil {
+		t.Fatal(err)
+	}
+	var devID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('test-dev', 'dev@t.com', 'Dev', $1::uuid) RETURNING id::text`, custID).Scan(&devID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'developer', $2::uuid)`, devID, wsID); err != nil {
+		t.Fatal(err)
+	}
+	dev := func(method, path string, body any) string {
+		t.Helper()
+		status, out := f.jsonRequest(t, method, path, "test-dev", body)
+		if status < 200 || status >= 300 {
+			t.Fatalf("%s %s: %d %v", method, path, status, out)
+		}
+		id, _ := out["id"].(string)
+		return id
+	}
+	calcID := dev("POST", "/api/developer/metrics", map[string]any{"name": "amount_x2", "is_input": false, "formula": "amount * 2",
+		"revision_id": f.revID, "agg_rule": "sum", "format": "number"})
+	var reportID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.grid_def (model_id, name, revision_id) VALUES ($1::uuid, 'Report', $2::uuid) RETURNING id::text`, f.modelID, f.revID).Scan(&reportID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid, $2::uuid)`, reportID, f.deptsDimID); err != nil {
+		t.Fatal(err)
+	}
+	dev("POST", "/api/developer/grids/"+reportID+"/metrics/"+calcID, nil)
+	// A cell write recalculates the revision, so amount_x2 has its values.
+	dev("POST", "/api/cells", map[string]any{"model_id": f.modelID, "metric_id": f.amountMetricID,
+		"revision_id": f.revID, "dim_codes": map[string]string{f.deptsDimID: "DEPT_A"}, "value": 100})
+	path := fmt.Sprintf("/api/grid/export?grid_def_id=%s&revision_id=%s", reportID, f.revID)
+	// The recalculation runs after the write answers: wait for its values.
+	for i := 0; ; i++ {
+		_, g := f.jsonRequest(t, "GET", fmt.Sprintf("/api/grid?grid_def_id=%s&revision_id=%s", reportID, f.revID), f.exporterSub, nil)
+		if cells, _ := g["cells"].(map[string]any); len(cells) > 0 {
+			break
+		}
+		if i == 100 {
+			t.Fatalf("amount_x2 never calculated: %v", g)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	resp := f.request(t, "GET", path, f.exporterSub, nil)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("export of a calculated-only grid: %d %s", resp.StatusCode, b)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, `report.csv`) {
+		t.Errorf("Content-Disposition = %q, want the grid's name", cd)
+	}
+	rows := readCSV(t, resp)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %v, want header + one row per department", rows)
+	}
+	got := map[string]string{}
+	for _, r := range rows[1:] {
+		got[r[0]] = r[1]
+	}
+	if got["Dept A"] != "200" || got["Dept B"] != "400" {
+		t.Errorf("values = %v, want Dept A 200 and Dept B 400 (amount * 2, by member label)", got)
+	}
+
+	resp2 := f.request(t, "GET", path, f.restrictedSub, nil)
+	defer resp2.Body.Close() //nolint:errcheck
+	rows2 := readCSV(t, resp2)
+	if len(rows2) != 2 || rows2[1][0] != "Dept A" {
+		t.Errorf("restricted rows = %v, want header + Dept A only (Dept B is hidden from them)", rows2)
+	}
+}
+
+// A grid of input and calculated metrics offers two exports (2026-11-20):
+// ?mode=values writes every metric as shown, by label; without it the input
+// metrics only, by name, for re-import.
+func TestGridExport_ValuesModeWritesEveryMetric(t *testing.T) {
+	f := setupTransferFixture(t)
+	ctx := context.Background()
+	var custID, wsID string
+	if err := f.pool.QueryRow(ctx, `SELECT customer_id::text, id::text FROM core.workspace LIMIT 1`).Scan(&custID, &wsID); err != nil {
+		t.Fatal(err)
+	}
+	var devID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('test-dev', 'dev@t.com', 'Dev', $1::uuid) RETURNING id::text`, custID).Scan(&devID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'developer', $2::uuid)`, devID, wsID); err != nil {
+		t.Fatal(err)
+	}
+	dev := func(method, path string, body any) string {
+		t.Helper()
+		status, out := f.jsonRequest(t, method, path, "test-dev", body)
+		if status < 200 || status >= 300 {
+			t.Fatalf("%s %s: %d %v", method, path, status, out)
+		}
+		id, _ := out["id"].(string)
+		return id
+	}
+	calcID := dev("POST", "/api/developer/metrics", map[string]any{"name": "amount_x2", "is_input": false, "formula": "amount * 2",
+		"revision_id": f.revID, "agg_rule": "sum", "format": "number"})
+	dev("POST", "/api/developer/grids/"+f.gridID+"/metrics/"+calcID, nil)
+	dev("POST", "/api/cells", map[string]any{"model_id": f.modelID, "metric_id": f.amountMetricID,
+		"revision_id": f.revID, "dim_codes": map[string]string{f.deptsDimID: "DEPT_A"}, "value": 100})
+	for i := 0; ; i++ {
+		_, g := f.jsonRequest(t, "GET", fmt.Sprintf("/api/grid?grid_def_id=%s&revision_id=%s", f.gridID, f.revID), f.exporterSub, nil)
+		if cells, _ := g["cells"].(map[string]any); len(cells) >= 4 {
+			break
+		}
+		if i == 100 {
+			t.Fatalf("amount_x2 never calculated: %v", g["cells"])
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	base := fmt.Sprintf("/api/grid/export?grid_def_id=%s&revision_id=%s", f.gridID, f.revID)
+
+	resp := f.request(t, "GET", base+"&mode=values", f.exporterSub, nil)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("values export: %d %s", resp.StatusCode, b)
+	}
+	rows := readCSV(t, resp)
+	if len(rows) != 3 || len(rows[0]) != 3 {
+		t.Fatalf("values rows = %v, want a header of departments + both metrics and one row per department", rows)
+	}
+	got := map[string][]string{}
+	for _, r := range rows[1:] {
+		got[r[0]] = r[1:]
+	}
+	if a := got["Dept A"]; len(a) != 2 || a[0] != "100" || a[1] != "200" {
+		t.Errorf("Dept A = %v, want [100 200] (amount, amount * 2)", a)
+	}
+
+	resp2 := f.request(t, "GET", base, f.exporterSub, nil)
+	defer resp2.Body.Close() //nolint:errcheck
+	if rows2 := readCSV(t, resp2); len(rows2) == 0 || len(rows2[0]) != 2 || rows2[0][1] != "amount" {
+		t.Errorf("re-import export header = %v, want [departments amount]: input metrics only, by name", rows2)
+	}
+
+	resp3 := f.request(t, "GET", base+"&mode=nonsense", f.exporterSub, nil)
+	defer resp3.Body.Close() //nolint:errcheck
+	if resp3.StatusCode != http.StatusBadRequest {
+		t.Errorf("an unknown mode answered %d, want 400", resp3.StatusCode)
 	}
 }

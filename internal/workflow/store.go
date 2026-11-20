@@ -230,6 +230,8 @@ func (s *Store) startWorkflow(ctx context.Context, defID, startedByUserID string
 		s.reconcileInstance(ctx, instanceID, stepDefs)
 		s.closeInstanceIfIdle(ctx, instanceID, "completed")
 	}
+	// The people the run's first tasks are assigned to are told they have them.
+	s.NotifyNewTasks(ctx, instanceID, startedByUserID)
 
 	return &workflowv1.WorkflowInstance{
 		Id:            instanceID,
@@ -396,7 +398,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 		// Fallback to sequential activation for legacy / unparseable defs.
 		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
-			SET status = 'in_progress'
+			SET status = 'in_progress', task_notified_at = NULL
 			WHERE id = (
 				SELECT id FROM workflow.workflow_step
 				WHERE instance_id = $1::uuid AND status = 'pending'
@@ -414,6 +416,8 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// WorkflowLockReason ignores the terminal status and reads the last
 	// decision.
 	s.closeInstanceIfIdle(ctx, instanceID, "completed")
+	// The people the steps it activated are assigned to are told they have them.
+	s.NotifyNewTasks(ctx, instanceID, userID)
 
 	// The actual claim-and-execute recalculation pass stays post-commit and
 	// pool-based, exactly as before this fix — only the cheap "mark dirty"
@@ -801,7 +805,7 @@ func (s *Store) activateNextSteps(ctx context.Context, instanceID, completedDefI
 	if completedDef == nil || (len(completedDef.Routes) == 0 && len(completedDef.NextStepIDs) == 0) {
 		// No routes configured — fall back to sequential.
 		_, _ = s.db.Exec(ctx, `
-			UPDATE workflow.workflow_step SET status = 'in_progress'
+			UPDATE workflow.workflow_step SET status = 'in_progress', task_notified_at = NULL
 			WHERE id = (
 				SELECT id FROM workflow.workflow_step
 				WHERE instance_id = $1::uuid AND status = 'pending'
@@ -841,7 +845,7 @@ func (s *Store) activateNextSteps(ctx context.Context, instanceID, completedDefI
 			}
 			ct, _ := s.db.Exec(ctx, `
 				UPDATE workflow.workflow_step
-				SET status = 'in_progress',
+				SET status = 'in_progress', task_notified_at = NULL,
 				    due_at = CASE WHEN $3::int > 0 THEN now() + make_interval(hours => $3::int) ELSE due_at END
 				WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'pending'
 			`, instanceID, nextDefID, sla)
@@ -936,7 +940,7 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 	}
 	if _, err := s.db.Exec(ctx, `
 		UPDATE workflow.workflow_step
-		SET status = 'in_progress', decision = NULL, comment = $3, completed_at = NULL,
+		SET status = 'in_progress', decision = NULL, comment = $3, completed_at = NULL, task_notified_at = NULL,
 		    rework_count = rework_count + 1,
 		    due_at = CASE WHEN $4::int > 0 THEN now() + make_interval(hours => $4::int) ELSE NULL END
 		WHERE instance_id = $1::uuid AND step_def_id = $2

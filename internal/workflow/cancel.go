@@ -191,10 +191,15 @@ func (s *Store) Reopenable(ctx context.Context, instanceID string) (bool, error)
 	return ok, err
 }
 
+// querier is what stepRecipients reads through: a transaction or the store's db.
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // stepRecipients resolves who a run's steps matching where were assigned to:
 // the named assignee, else everyone the step's roles assign it to (as the
 // inbox and the reminders resolve them).
-func stepRecipients(ctx context.Context, tx pgx.Tx, instanceID, where string) (map[string]bool, error) {
+func stepRecipients(ctx context.Context, tx querier, instanceID, where string, args ...any) (map[string]bool, error) {
 	recipients := map[string]bool{}
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT u.id::text
@@ -208,7 +213,7 @@ func stepRecipients(ctx context.Context, tx pgx.Tx, instanceID, where string) (m
 		JOIN identity.user u ON u.id = ws.assignee_user_id
 		    OR (ws.assignee_user_id IS NULL
 		        AND `+assignee.SQL("wd.application_id", "COALESCE(step_def.elem->'assignee_roles', '[]'::jsonb)", "u.id")+`)
-		WHERE ws.instance_id = $1::uuid AND `+where, instanceID)
+		WHERE ws.instance_id = $1::uuid AND `+where, append([]any{instanceID}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve assignees: %w", err)
 	}
@@ -249,6 +254,8 @@ func (s *Store) notifyRunWith(ctx context.Context, template, instanceID, userID 
 		"message":       message,
 		"workflow_name": workflowName,
 		"reason":        strings.TrimSpace(reason),
+		// The run is over: its mail opens the Workflow page's History.
+		"open": "workflow/history",
 	}
 	notified := 0
 	notifStore := notification.NewStoreOn(s.db)

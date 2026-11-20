@@ -15646,7 +15646,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 								switch method {
 								case "GET":
 									r.name = ExportGridOperation
-									r.summary = "Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination; round-trips through POST /api/import/upload)"
+									r.summary = "Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination; round-trips through POST /api/import/upload), or with mode=values every metric's values as the caller's grid shows them"
 									r.operationID = "exportGrid"
 									r.operationGroup = ""
 									r.pathPattern = "/api/grid/export"

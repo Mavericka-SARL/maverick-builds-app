@@ -6080,7 +6080,11 @@ func decodeExportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Req
 
 // ExportGridParams is parameters of exportGrid operation.
 type ExportGridParams struct {
-	GridDefID  uuid.UUID
+	GridDefID uuid.UUID
+	// Values: every metric as the grid shows it, calculated ones too, by label (not for re-import).
+	// Empty: the input metrics, by name, for re-import; a grid with no input metric the caller may see
+	// is exported as values.
+	Mode       OptExportGridMode   `json:",omitempty,omitzero"`
 	Format     OptExportGridFormat `json:",omitempty,omitzero"`
 	RevisionID OptUUID             `json:",omitempty,omitzero"`
 }
@@ -6092,6 +6096,15 @@ func unpackExportGridParams(packed middleware.Parameters) (params ExportGridPara
 			In:   "query",
 		}
 		params.GridDefID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "mode",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Mode = v.(OptExportGridMode)
+		}
 	}
 	{
 		key := middleware.ParameterKey{
@@ -6148,6 +6161,62 @@ func decodeExportGridParams(args [0]string, argsEscaped bool, r *http.Request) (
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "grid_def_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: mode.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "mode",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotModeVal ExportGridMode
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotModeVal = ExportGridMode(c)
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Mode.SetTo(paramsDotModeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.Mode.Get(); ok {
+					if err := func() error {
+						if err := value.Validate(); err != nil {
+							return err
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "mode",
 			In:   "query",
 			Err:  err,
 		}

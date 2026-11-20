@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { useBrandRefresh } from "../branding/brand";
 import { BrandMark } from "../branding/BrandMark";
@@ -11,7 +11,7 @@ import { useModelSwitches } from "../consoles/business/modelSelection";
 import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
-import { OPEN_TAB_KEY, enabledSections, pageTab, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
+import { OPEN_TAB_KEY, enabledSections, linkedTab, pageTab, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
 import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
 import { useDemo } from "../api/useDemo";
 import { DateFormatContext } from "../consoles/dateFormat";
@@ -44,6 +44,18 @@ export default function UnifiedConsole() {
     setChosen(t);
     try { sessionStorage.setItem(OPEN_TAB_KEY, t); } catch { /* storage unavailable: the tab is not remembered */ }
   }, []);
+  // A link that names a page — a notification e-mail's "Open …: …/?open=workflow"
+  // — opens it once the reader's sections are known, then leaves the address.
+  useEffect(() => {
+    if (ids.length === 0) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("open")) return;
+    const linked = linkedTab(url.search, ids);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the browser address (external), once the roles that decide the tab are known
+    if (linked) setTab(linked);
+    url.searchParams.delete("open");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  }, [ids, setTab]);
   const switches = useModelSwitches();
   // A remembered choice from a section the user (no longer) holds falls
   // back to the landing tab of their first section.

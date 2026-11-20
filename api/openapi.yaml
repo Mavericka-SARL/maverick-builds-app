@@ -4210,12 +4210,16 @@ paths:
   /api/grid/export:
     get:
       operationId: exportGrid
-      summary: Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination; round-trips through POST /api/import/upload)
+      summary: Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination; round-trips through POST /api/import/upload), or with mode=values every metric's values as the caller's grid shows them
       parameters:
         - name: grid_def_id
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: mode
+          in: query
+          description: "values: every metric as the grid shows it, calculated ones too, by label (not for re-import). Empty: the input metrics, by name, for re-import; a grid with no input metric the caller may see is exported as values."
+          schema: { type: string, enum: [values] }
         - name: format
           in: query
           schema: { type: string, enum: [csv, xlsx], default: csv }

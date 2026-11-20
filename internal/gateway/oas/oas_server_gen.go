@@ -708,7 +708,8 @@ type Handler interface {
 	// ExportGrid implements exportGrid operation.
 	//
 	// Export a grid's raw input-metric values as CSV or XLSX (one row per dimension-member combination;
-	// round-trips through POST /api/import/upload).
+	// round-trips through POST /api/import/upload), or with mode=values every metric's values as the
+	// caller's grid shows them.
 	//
 	// GET /api/grid/export
 	ExportGrid(ctx context.Context, params ExportGridParams) (ExportGridRes, error)

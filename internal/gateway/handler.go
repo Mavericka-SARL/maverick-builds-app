@@ -7105,7 +7105,7 @@ func (h *handler) workflowInstanceAction(w http.ResponseWriter, r *http.Request)
 		// Reactivate the most recent non-completed step so it appears in Inbox
 		_, _ = tx.Exec(ctx, `
 			UPDATE workflow.workflow_step
-			SET status = 'in_progress', completed_at = NULL
+			SET status = 'in_progress', completed_at = NULL, task_notified_at = NULL
 			WHERE id = (
 				SELECT id FROM workflow.workflow_step
 				WHERE instance_id = $1::uuid AND status != 'in_progress'
@@ -7148,6 +7148,14 @@ func (h *handler) workflowInstanceAction(w http.ResponseWriter, r *http.Request)
 	if err := tx.Commit(ctx); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
+	}
+	if body.Status == "running" {
+		// The step it put back in progress is announced to its people.
+		actorID := ""
+		if a, e := h.resolveActor(ctx, r); e == nil {
+			actorID = a.UserID
+		}
+		h.workflowStore(ctx).NotifyNewTasks(ctx, instanceID, actorID)
 	}
 	if a, e := h.resolveActor(ctx, r); e == nil {
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{

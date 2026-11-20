@@ -3349,6 +3349,15 @@ func (s ExportGridFormat) Validate() error {
 	}
 }
 
+func (s ExportGridMode) Validate() error {
+	switch s {
+	case "values":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s *ExportSpec) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
