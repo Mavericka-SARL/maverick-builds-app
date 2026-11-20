@@ -163,7 +163,8 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
   const tickFmt = ticks.length > 1 ? axisTickFormatter(ticks, config.value_format, currencySymbol) : fmt;
   return (
     <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
-      <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+      {/* The last bar's label is centred on a slot narrower than it once there are many bars (36 months). */}
+      <BarChart data={chartData} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
@@ -234,7 +235,9 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
   });
   return (
     <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
-      <LineChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+      {/* A line chart plots its last category ON the right edge (a bar sits inside its slot), so its label, centred
+          there, needs half its width beyond the plot: "Dec 2028" was cut to "Dec 202" with 16. */}
+      <LineChart data={chartData} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />

@@ -6787,8 +6787,18 @@ var myHistoryReachSQL = "(" + assignee.SQL("wd.application_id", "NULL::jsonb", "
 	assignee.SQL("wd.application_id", `(SELECT jsonb_agg(mh_br.name) FROM identity.business_role_member mh_brm
 		JOIN identity.business_role mh_br ON mh_br.id = mh_brm.role_id WHERE mh_brm.user_id = $1::uuid)`, "$1::uuid") + ")"
 
-// workflowMyHistory is the person's own runs — started, worked, or notified
-// of — in the selected application (X-App-Id), as the business admin's
+// myHistoryReopensSQL is true for an approved run (not a developer's test run)
+// whose workflow names reopen roles the caller holds: the CFO who reopens
+// closes. Such a run is listed in their My history with Reopen even when they
+// took no part in it — one a previous CFO approved, or an approval a model
+// import carried — since nobody else may reopen it (2026-11-19).
+var myHistoryReopensSQL = "(" + writeguard.ReopenableSQL + ` AND NOT COALESCE(wi.test_run, false)
+		AND jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) > 0
+		AND ` + assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid") + ")"
+
+// workflowMyHistory is the person's own runs — started, worked, notified of,
+// theirs to reopen (myHistoryReopensSQL) or reopened by them — in the selected
+// application (X-App-Id), as the business admin's
 // history is the application's: with one model chosen both pages answer for
 // it. The person's list used to span every application they reach, and showed
 // another application's closes beside an admin list of none (owner, 2026-11-09).
@@ -6816,8 +6826,7 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		       -- Reopen is offered here to whoever holds a role the definition
 		       -- names as reopening it (a CFO who released a close); the
 		       -- administrators' Reopen is in Business Admin › History.
-		       (`+writeguard.ReopenableSQL+` AND jsonb_array_length(COALESCE(wd.reopen_roles, '[]'::jsonb)) > 0
-		        AND `+assignee.SQL("wd.application_id", "wd.reopen_roles", "$1::uuid")+`),
+		       `+myHistoryReopensSQL+`,
 		       `+historyRunColumnsSQL+`
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -6828,6 +6837,8 @@ func (h *handler) workflowMyHistory(w http.ResponseWriter, r *http.Request) {
 		  AND ($3 = '' OR wi.id::text = $3)
 		  AND `+historyBeforeSQL(4)+`
 		  AND (wi.started_by = $1::uuid
+		   OR `+myHistoryReopensSQL+`
+		   OR wi.reopened_by = $1::uuid -- and stays listed once they reopened it
 		   OR EXISTS (
 		       SELECT 1 FROM workflow.workflow_step ws
 		       WHERE ws.instance_id = wi.id AND ws.assignee_user_id = $1::uuid

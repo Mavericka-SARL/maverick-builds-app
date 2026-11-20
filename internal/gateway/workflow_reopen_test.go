@@ -173,7 +173,29 @@ func TestReopenApprovedWorkflowRun(t *testing.T) {
 	if got := q(`SELECT reopen_roles::text FROM workflow.workflow_def WHERE id = $1::uuid`, def.ID); got != `["business_user"]` {
 		t.Errorf("stored reopen roles %s, want cleaned [\"business_user\"]", got)
 	}
+	// The role holder's Workflow page lists a run they took no part in (one a
+	// previous CFO approved, or an approval an import carried), with Reopen:
+	// nobody else may reopen it (2026-11-19).
+	myHistory := func(sub string) map[string]bool {
+		t.Helper()
+		_, raw := f.doRaw(t, "GET", "/api/workflow/my-history", sub, nil)
+		var list []struct {
+			ID         string `json:"id"`
+			Reopenable bool   `json:"reopenable"`
+		}
+		if err := json.Unmarshal(raw, &list); err != nil {
+			t.Fatalf("my-history: %v %s", err, raw)
+		}
+		out := map[string]bool{}
+		for _, r := range list {
+			out[r.ID] = r.Reopenable
+		}
+		return out
+	}
 	inst = run("approve")
+	if got, listed := myHistory("wfreopen-user")[inst]; !listed || !got {
+		t.Errorf("the reopen role's holder, who took no part in the run: listed %v, reopenable %v; want listed with Reopen", listed, got)
+	}
 	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", f.baSub, map[string]string{"reason": "x"}); status != http.StatusForbidden ||
 		!strings.Contains(body["error"].(string), "business_user") {
 		t.Errorf("business admin without the reopen role: %d %v, want 403 naming the role", status, body)
@@ -181,10 +203,16 @@ func TestReopenApprovedWorkflowRun(t *testing.T) {
 	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", "wfreopen-user", map[string]string{"reason": "the CFO takes it back"}); status != http.StatusOK {
 		t.Errorf("holder of the reopen role: %d %v, want 200", status, body)
 	}
+	if got, listed := myHistory("wfreopen-user")[inst]; !listed || got {
+		t.Errorf("after the role holder reopened it: listed %v, reopenable %v; want still listed, no longer reopenable", listed, got)
+	}
 	if err := ws.SetWorkflowDefReopenRoles(ctx, def.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	inst = run("approve")
+	if _, listed := myHistory("wfreopen-user")[inst]; listed {
+		t.Error("no reopen roles named: a business user who took no part in the run sees it in their Workflow page")
+	}
 	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/reopen", "wfreopen-user", map[string]string{"reason": "x"}); status != http.StatusForbidden && status != http.StatusNotFound {
 		t.Errorf("no reopen roles named, a business user: %d %v, want refused", status, body)
 	}

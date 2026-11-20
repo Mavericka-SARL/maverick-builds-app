@@ -441,8 +441,17 @@ func (p *Package) LockNotes(carried []bool) []string {
 	for i, l := range p.ApprovedLocks {
 		scope := strings.Join(l.Scope, ", ")
 		if i < len(carried) && carried[i] {
-			out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from: the approval came with the model, so those values are locked here too. A business admin can reopen it in Business Admin › Workflow, with a reason.",
-				l.Workflow, scope))
+			// Who reopens it: the workflow's reopen roles when it names some
+			// (nobody else may, an administrator included), else a business admin.
+			who := "A business admin can reopen it in Business Admin › Workflow, with a reason."
+			for _, wf := range p.Workflows {
+				if wf.Name == l.Workflow && len(wf.ReopenRoles) > 0 {
+					who = fmt.Sprintf("Only %s can reopen it: on their Workflow page, with a reason.", strings.Join(wf.ReopenRoles, " or "))
+					break
+				}
+			}
+			out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from: the approval came with the model, so those values are locked here too. %s",
+				l.Workflow, scope, who))
 			continue
 		}
 		out = append(out, fmt.Sprintf("%q had approved and locked %s in the workspace this file comes from, but the import could not carry the approval: those values are open here until %q is run for them again.",
