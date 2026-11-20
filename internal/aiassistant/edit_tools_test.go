@@ -739,4 +739,14 @@ func TestAIWidgetPropsAreChecked(t *testing.T) {
 	if got := h.scalar(`SELECT widget_props->'show_members'->>$2::text FROM model.dashboard_widget WHERE id=$1::uuid`, gw, dim); got != `["LY", "RF"]` {
 		t.Errorf("stored show_members for the dimension's id = %q, want [LY, RF] in order", got)
 	}
+
+	// decimals: a whole number from 0 to 6, kept as given (owner 2026-11-20).
+	h.refused("decimals 2.5", kpi(map[string]any{"decimals": 2.5}), "decimals is a whole number from 0 to 6")
+	h.refused("decimals 7", kpi(map[string]any{"decimals": 7}), "decimals is a whole number from 0 to 6")
+	h.refused("decimals as text", kpi(map[string]any{"decimals": "2"}), "decimals is a whole number from 0 to 6")
+	_, w = h.must("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": rev, "pos_x": 900, "pos_y": 200,
+		"widget_props": map[string]any{"decimals": 2}})
+	if got := h.scalar(`SELECT widget_props->>'decimals' FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "2" {
+		t.Errorf("stored decimals = %q, want 2", got)
+	}
 }

@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TimeWindow } from "../../api/client";
 import { useTimeWindowCodes, windowedShowMembers } from "../dashboard/timeWindow";
-import { shownDecimals } from "../shownDecimals";
+import { amountDecimals, widgetDecimals } from "../shownDecimals";
 import { serialToLocal } from "../dateSerial";
 import { DateFormatContext, useDateFormat } from "../dateFormat";
 import { scaleFor, scales } from "../numberScale";
@@ -313,7 +313,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <WindowedGrid ctx={ctx} gridDefId={widget.ref_id} timeWindow={widget.widget_props?.time_window} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} hideTotalRow={widget.widget_props?.hide_total_row} hideEmptyRows={widget.widget_props?.hide_empty_rows} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} followRows={!!widget.widget_props?.follow_rows} followColumns={!!widget.widget_props?.follow_columns} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <WindowedGrid ctx={ctx} gridDefId={widget.ref_id} timeWindow={widget.widget_props?.time_window} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} decimals={widget.widget_props?.decimals} hideTotalRow={widget.widget_props?.hide_total_row} hideEmptyRows={widget.widget_props?.hide_empty_rows} labelWidth={widget.widget_props?.label_width} hideLegend={widget.widget_props?.hide_legend} hideBadges={widget.widget_props?.hide_badges} footer={widget.widget_props?.footer} followRows={!!widget.widget_props?.follow_rows} followColumns={!!widget.widget_props?.follow_columns} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -519,8 +519,10 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
     const sc = scales(fmt) ? scaleFor(scaleMode, scaleBy) : scaleFor("none");
     const n = v / sc.div;
     const dec0 = sc.decimals ?? metric?.format_decimals ?? (fmt === "percentage" ? 1 : 0);
-    // A large amount is written whole: €20,418,650 (shownDecimals).
-    const dec = fmt === "percentage" ? dec0 : shownDecimals(n, dec0);
+    // A large amount is written whole: €20,418,650 (shownDecimals), unless
+    // the tile's own Decimals setting asks for more (€20,418,650.00, €20.42M).
+    const fixed = scales(fmt) ? widgetDecimals(widgetProps?.decimals) : undefined;
+    const dec = fmt === "percentage" ? dec0 : amountDecimals(n, dec0, fixed);
     const digits = { minimumFractionDigits: dec, maximumFractionDigits: dec };
     return fmt === "picklist"
       ? (v === 0 ? "—" : metric?.picklist_options?.find(o => o.key === v)?.label ?? "—")

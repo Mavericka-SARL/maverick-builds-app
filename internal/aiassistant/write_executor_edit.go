@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -1626,6 +1627,11 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 	}
 	if v, ok := props["number_scale"]; ok && v != nil && v != "auto" && v != "none" && v != "k" && v != "m" {
 		return nil, fmt.Errorf(`number_scale is "auto" (20.1M), "k" (thousands), "m" (millions) or "none" (every digit)`)
+	}
+	if v, ok := props["decimals"]; ok && v != nil {
+		if n, isNum := v.(float64); !isNum || n != math.Trunc(n) || n < 0 || n > modeledit.MaxWidgetDecimals {
+			return nil, fmt.Errorf("decimals is a whole number from 0 to %d (every amount the widget shows has that many), or left out for automatic", modeledit.MaxWidgetDecimals)
+		}
 	}
 	if chart, ok := props["chart"].(map[string]any); ok {
 		if v, ok := chart["stacked"]; ok && v != nil {

@@ -978,6 +978,12 @@ export interface WidgetProps {
   // metric_kpi and grid: how amounts are written — "auto" (a tile's default:
   // €20.1M), "k" thousands, "m" millions, "none" every digit (a grid's default).
   number_scale?: NumberScale;
+  // metric_kpi, grid and chart: the decimals every number and currency amount
+  // is written with, whatever its size and its metric's own decimals (a
+  // reconciliation's cents on €20,418,650.00). Absent: automatic — the
+  // metric's decimals, an amount of 1,000 or more whole, a scaled one with 1.
+  // Percentages keep their own.
+  decimals?: number;
   // automation_button: when set, clicking asks for confirmation with this
   // message before firing the rule. Empty/absent fires immediately.
   confirm_text?: string;

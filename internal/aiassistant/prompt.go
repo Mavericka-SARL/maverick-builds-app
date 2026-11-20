@@ -1309,7 +1309,10 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   the rest as forecast (hatched bars, a dashed line). A KPI tile compares its value with another member —
   widget_props "kpi_compare": {"dimension_id": "<dimension>", "member_code": "BUDGET"} and "kpi_good": "up" (revenue)
   or "down" (costs) to colour the difference; "number_scale" is "auto" (a tile's default: 20.1M), "k", "m" or "none",
-  and on a grid widget "k" or "m" writes every amount in thousands or millions.
+  and on a grid widget "k" or "m" writes every amount in thousands or millions. Amounts of 1,000 or more are shown
+  whole by default; widget_props "decimals": 0–6 on a grid, KPI tile or chart writes every amount of that widget with
+  exactly that many decimals (cents on a reconciliation: 2) — only when the user asks for decimals; percentages keep
+  their own.
   A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
   picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.
   A grid widget's layout is widget_props "default_view": {"rows": [...], "cols": [...], "context": [...],

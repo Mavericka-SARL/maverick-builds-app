@@ -1,4 +1,4 @@
-import { shownDecimals } from "../shownDecimals";
+import { amountDecimals, widgetDecimals } from "../shownDecimals";
 import type { GridChartConfig, GridChartType } from "../../api/client";
 
 // Series colours are design tokens so they follow the light/dark theme.
@@ -11,22 +11,29 @@ export const CHART_COLORS = Array.from({ length: 10 }, (_, i) => `var(--color-ch
 // codes. Defaults to "$" to match every other currency-formatting call
 // site in the app (MetricKpiWidget, the import template builder) when no
 // metric-specific symbol is available.
-export function formatValue(value: number | null | undefined, format: string | undefined, currencySymbol = "$"): string {
+// decimals is the widget's Decimals setting (widget_props.decimals): every
+// amount — a currency or compact one too — is written with exactly that
+// many; a percentage keeps its own.
+export function formatValue(value: number | null | undefined, format: string | undefined, currencySymbol = "$", decimals?: number): string {
   if (value === null || value === undefined) return "—";
+  const fixed = widgetDecimals(decimals);
+  const exactly = fixed === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: fixed, maximumFractionDigits: fixed };
   switch (format) {
     case "currency":
       // The sign before the symbol (-$360K), as the KPI tile and the grid
       // write it — not $-360K.
-      return `${value < 0 ? "-" : ""}${currencySymbol}${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(Math.abs(value))}`;
+      return `${value < 0 ? "-" : ""}${currencySymbol}${new Intl.NumberFormat(undefined, { notation: "compact", ...exactly }).format(Math.abs(value))}`;
     case "percent":
       // Percent units, as Percentage metrics are stored (5.6 = 5.6%) and the
       // grid and KPI tiles show them — not a fraction to multiply by 100.
       return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}%`;
     case "compact":
-      return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value);
-    default:
-      // A large amount is written whole (shownDecimals).
-      return new Intl.NumberFormat(undefined, { maximumFractionDigits: shownDecimals(value, 2) }).format(value);
+      return new Intl.NumberFormat(undefined, { notation: "compact", ...exactly }).format(value);
+    default: {
+      // A large amount is written whole (shownDecimals), unless the widget says.
+      const d = amountDecimals(value, 2, fixed);
+      return new Intl.NumberFormat(undefined, fixed === undefined ? { maximumFractionDigits: d } : { minimumFractionDigits: d, maximumFractionDigits: d }).format(value);
+    }
   }
 }
 

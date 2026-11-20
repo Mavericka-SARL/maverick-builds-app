@@ -16,6 +16,8 @@ export interface Scale {
   unit: string;
   /** Decimal places at this scale, else the metric's own. */
   decimals?: number;
+  /** The widget's own decimals (widget_props.decimals): every amount, any size. */
+  fixed?: number;
 }
 
 const NONE: Scale = { div: 1, suffix: "", unit: "" };

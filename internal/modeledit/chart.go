@@ -271,7 +271,7 @@ var (
 		"sync_context": true, "show_members": true, "time_window": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
 		"record_selects": true, "record_follows": true, "follow_rows": true, "follow_columns": true,
-		"kpi_compare": true, "kpi_good": true, "number_scale": true,
+		"kpi_compare": true, "kpi_good": true, "number_scale": true, "decimals": true,
 		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true,
 		"hide_empty_rows": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
@@ -279,6 +279,10 @@ var (
 		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true, "y_axis_from_zero": true,
 		"stacked": true, "actual_metric_id": true, "series_names": true, "plotted_members": true}
 )
+
+// MaxWidgetDecimals is the most a widget's "decimals" setting takes
+// (MAX_WIDGET_DECIMALS in web/src/consoles/shownDecimals.ts).
+const MaxWidgetDecimals = 6
 
 // CheckWidgetPropKeys refuses a widget_props key — at the top or under
 // "chart" — the console does not read. A key already in stored (a widget

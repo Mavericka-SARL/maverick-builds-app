@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useContext, useId } from "react";
-import { shownDecimals } from "../shownDecimals";
+import { amountDecimals, widgetDecimals } from "../shownDecimals";
 import { serialToISO, serialToLocal, isoToSerial, parseDateText } from "../dateSerial";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
@@ -557,9 +557,11 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, hideTotalRow, hideEmptyRows, labelWidth, hideLegend, hideBadges, footer, followRows, followColumns }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale, decimals, hideTotalRow, hideEmptyRows, labelWidth, hideLegend, hideBadges, footer, followRows, followColumns }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Amounts in thousands or millions (widget_props.number_scale "k"/"m"); "auto" is a tile's, a grid keeps every digit. */
   numberScale?: NumberScale;
+  /** The widget's Decimals setting (widget_props.decimals): every amount is written with exactly these. */
+  decimals?: number;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
   rowsCollapsed?: boolean;
   /** Context selectors take several members (widget_props.multi_select): the grid shows their aggregate. */
@@ -585,7 +587,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   const qc = useQueryClient();
   // A grid divides by one unit throughout ("k", "m"); "auto" sizes a tile's
   // single number, and a table keeps its every digit then.
-  const gridScale = scaleFor(numberScale === "auto" ? undefined : numberScale);
+  const gridScale: Scale = { ...scaleFor(numberScale === "auto" ? undefined : numberScale), fixed: widgetDecimals(decimals) };
   // Parent rows the viewer flipped from the developer's default.
   const [rowsFlipped, setRowsFlipped] = useState<Set<string>>(() => new Set());
   const rowCollapsed = (code: string) => !!rowsCollapsed !== rowsFlipped.has(code);
@@ -2557,6 +2559,9 @@ function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale, dateF
     n = n / scale.div;
     d = scale.decimals ?? d;
   }
+  // The widget's own Decimals setting wins for amounts, whatever their size.
+  const fixed = scales(m.format) ? scale?.fixed : undefined;
+  if (fixed !== undefined) d = fixed;
   // Float noise below the shown precision (a variance of -1e-16) is 0, not "-$0.00".
   if (m.format !== "picklist" && Math.abs(n) < 0.5 * Math.pow(10, -d)) n = 0;
   switch (m.format) {
@@ -2576,11 +2581,11 @@ function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale, dateF
     case "currency": {
       // The sign before the symbol, as the KPI tile writes it: -$40.47, not $-40.47.
       const sym = m.format_currency || "$";
-      const cd = shownDecimals(n, d); // a large amount is written whole
+      const cd = amountDecimals(n, d, fixed); // a large amount is written whole, unless the widget says
       return (n < 0 ? "-" : "") + sym + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: cd, maximumFractionDigits: cd });
     }
     default: {
-      const nd = shownDecimals(n, d);
+      const nd = amountDecimals(n, d, fixed);
       return n.toLocaleString("en-US", { minimumFractionDigits: nd, maximumFractionDigits: nd });
     }
   }

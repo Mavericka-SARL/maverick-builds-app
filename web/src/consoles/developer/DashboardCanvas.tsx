@@ -11,6 +11,7 @@ import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { SelectorBarEditor } from "./SelectorBarEditor";
 import { BoardSettingsEditor, RecordPresetsEditor, RecordSelectionEditor } from "./RecordWidgetSettings";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
+import { MAX_WIDGET_DECIMALS, widgetDecimals } from "../shownDecimals";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText, Txt } from "../../ui";
 
 // ── Dashboard widget palette / sizing ───────────────────────────────────────
@@ -1294,6 +1295,28 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       <option value="right">Right column</option>
                     </Select>
                   </Field>
+                  <div className="mvx-prop-section" style={{ marginTop: 12 }}>Decimals</div>
+                  <Select
+                    aria-label="Widget decimals"
+                    value={widgetDecimals(wp.decimals) === undefined ? "auto" : String(wp.decimals)}
+                    onChange={e => {
+                      const wid = selectedWidget!.id;
+                      const v = e.target.value === "auto" ? undefined : Number(e.target.value);
+                      setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, decimals: v } } }));
+                    }}
+                    style={{ width: "100%" }}
+                  >
+                    <option value="auto">Automatic (whole from 1,000)</option>
+                    {Array.from({ length: MAX_WIDGET_DECIMALS + 1 }, (_, n) => (
+                      <option key={n} value={n}>{n === 0 ? "None (whole numbers)" : `${n} decimal${n === 1 ? "" : "s"}`}</option>
+                    ))}
+                  </Select>
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                    Every number and amount this widget shows, of any size and
+                    in thousands or millions too. Automatic: the metric's own
+                    decimals, and amounts of 1,000 or more whole. Percentages
+                    keep their own.
+                  </p>
                   {selectedWidget.widget_type === "grid" && (
                     <>
                       <Checkbox

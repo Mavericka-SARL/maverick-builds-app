@@ -58,8 +58,8 @@ function CategoryTick(props: { x?: number; y?: number; payload?: { value: string
 
 // ── Value formatter for axes ──────────────────────────────────────────────────
 
-function makeAxisFormatter(format: string | undefined, currencySymbol: string) {
-  return (v: number) => formatValue(v, format, currencySymbol);
+function makeAxisFormatter(format: string | undefined, currencySymbol: string, decimals?: number) {
+  return (v: number) => formatValue(v, format, currencySymbol, decimals);
 }
 
 // ── Empty / error states ──────────────────────────────────────────────────────
@@ -145,9 +145,9 @@ function hatchId(uid: string, i: number) {
   return `mvx-hatch-${uid.replace(/[^a-zA-Z0-9_-]/g, "")}-${i}`;
 }
 
-function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
+function BarChartRenderer({ data, config, currencySymbol, decimals, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; decimals?: number; onCategoryClick?: CategoryClick }) {
   const uid = useId();
-  const fmt = makeAxisFormatter(config.value_format, currencySymbol);
+  const fmt = makeAxisFormatter(config.value_format, currencySymbol, decimals);
   const showLegend = config.show_legend ?? data.series.length > 1;
   const actual = data.actual && data.actual.length === data.categories.length && data.actual.some(a => !a) ? data.actual : undefined;
   const chartData = data.categories.map((cat, i) => {
@@ -175,7 +175,7 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
         {ticks.length > 1
           ? <YAxis tickFormatter={tickFmt} tick={{ fontSize: 11 }} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
           : <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />}
-        <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
+        <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol, decimals)} />
         {(showLegend || actual) && <Legend content={() => <SeriesLegend series={showLegend ? data.series : []} forecast={actual ? "bar" : undefined} />} />}
         {actual && (
           <defs>
@@ -205,8 +205,8 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
   );
 }
 
-function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
-  const fmt = makeAxisFormatter(config.value_format, currencySymbol);
+function LineChartRenderer({ data, config, currencySymbol, decimals, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; decimals?: number; onCategoryClick?: CategoryClick }) {
+  const fmt = makeAxisFormatter(config.value_format, currencySymbol, decimals);
   const showDots = data.categories.length <= 24;
   const showLegend = config.show_legend ?? data.series.length > 1;
   // With actual periods marked, each series is two lines: solid over the
@@ -246,7 +246,7 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
           ? <YAxis tickFormatter={tickFmt} tick={{ fontSize: 11 }} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
           : <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }}
               domain={config.y_axis_from_zero === false ? ["auto", "auto"] : [0, "auto"]} />}
-        <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
+        <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol, decimals)} />
         {(showLegend || actual) && <Legend content={() => <SeriesLegend series={showLegend ? data.series : []} forecast={actual ? "line" : undefined} />} />}
         {data.series.map((s, i) => (
           <Line
@@ -276,7 +276,7 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
   );
 }
 
-function PieChartRenderer({ data, config, currencySymbol, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
+function PieChartRenderer({ data, config, currencySymbol, decimals, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; decimals?: number; onCategoryClick?: CategoryClick }) {
   const series = data.series[0];
   if (!series) return <EmptyState message="No data for the selected context." />;
 
@@ -322,7 +322,7 @@ function PieChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
           formatter={((v: unknown, name: unknown) => {
             const val = v as number;
             return [
-              `${formatValue(val, config.value_format, currencySymbol)} (${total > 0 ? ((val / total) * 100).toFixed(1) : 0}%)`,
+              `${formatValue(val, config.value_format, currencySymbol, decimals)} (${total > 0 ? ((val / total) * 100).toFixed(1) : 0}%)`,
               name,
             ];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -334,8 +334,8 @@ function PieChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
   );
 }
 
-function ScatterChartRenderer({ data, config, currencySymbol }: { data: ScatterChartData; config: GridChartConfig; currencySymbol: string }) {
-  const fmt = makeAxisFormatter(config.value_format, currencySymbol);
+function ScatterChartRenderer({ data, config, currencySymbol, decimals }: { data: ScatterChartData; config: GridChartConfig; currencySymbol: string; decimals?: number }) {
+  const fmt = makeAxisFormatter(config.value_format, currencySymbol, decimals);
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 24 }}>
@@ -363,8 +363,8 @@ function ScatterChartRenderer({ data, config, currencySymbol }: { data: ScatterC
             return (
               <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
-                <div>{data.x_metric.label}: {formatValue(p.x, config.value_format, currencySymbol)}</div>
-                <div>{data.y_metric.label}: {formatValue(p.y, config.value_format, currencySymbol)}</div>
+                <div>{data.x_metric.label}: {formatValue(p.x, config.value_format, currencySymbol, decimals)}</div>
+                <div>{data.y_metric.label}: {formatValue(p.y, config.value_format, currencySymbol, decimals)}</div>
               </div>
             );
           }}
@@ -375,9 +375,9 @@ function ScatterChartRenderer({ data, config, currencySymbol }: { data: ScatterC
   );
 }
 
-function HistogramRenderer({ data, config, currencySymbol }: { data: HistogramChartData; config: GridChartConfig; currencySymbol: string }) {
+function HistogramRenderer({ data, config, currencySymbol, decimals }: { data: HistogramChartData; config: GridChartConfig; currencySymbol: string; decimals?: number }) {
   const chartData = data.bins.map(b => ({
-    range: `${formatValue(b.min, config.value_format, currencySymbol)}–${formatValue(b.max, config.value_format, currencySymbol)}`,
+    range: `${formatValue(b.min, config.value_format, currencySymbol, decimals)}–${formatValue(b.max, config.value_format, currencySymbol, decimals)}`,
     count: b.count,
   }));
   return (
@@ -404,7 +404,7 @@ function HistogramRenderer({ data, config, currencySymbol }: { data: HistogramCh
   );
 }
 
-function ChartBody({ data, config, currencySymbol, onCategoryClick }: { data: ChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
+function ChartBody({ data, config, currencySymbol, decimals, onCategoryClick }: { data: ChartData; config: GridChartConfig; currencySymbol: string; decimals?: number; onCategoryClick?: CategoryClick }) {
   // A series named in the chart's settings carries that name in the legend
   // and tooltip; the metric's label otherwise.
   const names = config.series_names;
@@ -414,15 +414,15 @@ function ChartBody({ data, config, currencySymbol, onCategoryClick }: { data: Ch
   }
   switch (data.chart_type) {
     case "bar":
-      return <BarChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} onCategoryClick={onCategoryClick} />;
+      return <BarChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} decimals={decimals} onCategoryClick={onCategoryClick} />;
     case "line":
-      return <LineChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} onCategoryClick={onCategoryClick} />;
+      return <LineChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} decimals={decimals} onCategoryClick={onCategoryClick} />;
     case "pie":
-      return <PieChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} onCategoryClick={onCategoryClick} />;
+      return <PieChartRenderer data={data as CategoryChartData} config={config} currencySymbol={currencySymbol} decimals={decimals} onCategoryClick={onCategoryClick} />;
     case "scatter":
-      return <ScatterChartRenderer data={data as ScatterChartData} config={config} currencySymbol={currencySymbol} />;
+      return <ScatterChartRenderer data={data as ScatterChartData} config={config} currencySymbol={currencySymbol} decimals={decimals} />;
     case "histogram":
-      return <HistogramRenderer data={data as HistogramChartData} config={config} currencySymbol={currencySymbol} />;
+      return <HistogramRenderer data={data as HistogramChartData} config={config} currencySymbol={currencySymbol} decimals={decimals} />;
     default:
       return <EmptyState message="Unknown chart type." />;
   }
@@ -594,7 +594,7 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
         )}
         {!isError && isEmpty && <EmptyState message="No data for the selected context." />}
         {hasData && !isEmpty && !isError && (
-          <ChartBody data={chartData} config={chartConfig} currencySymbol={currencySymbol} onCategoryClick={onCategoryClick} />
+          <ChartBody data={chartData} config={chartConfig} currencySymbol={currencySymbol} decimals={widget.widget_props?.decimals ?? undefined} onCategoryClick={onCategoryClick} />
         )}
       </div>
 

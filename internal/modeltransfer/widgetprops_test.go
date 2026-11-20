@@ -176,7 +176,7 @@ var widgetPropRefs = map[string]string{
 	"board": "data", "record_filters": "data", "record_columns": "data", "record_sort": "data",
 	"record_selects": "data", "record_follows": "data", // a flag and field names: no ids
 	"follow_rows": "data", "follow_columns": "data",
-	"kpi_compare": "names a dimension", "kpi_good": "data", "number_scale": "data",
+	"kpi_compare": "names a dimension", "kpi_good": "data", "number_scale": "data", "decimals": "data",
 	"hide_total_row": "data", "label_width": "data", "hide_legend": "data", "hide_badges": "data", "footer": "data",
 
 	"chart.chart_type": "data", "chart.dimension_id": "dimension", "chart.metric_ids": "metric list",
