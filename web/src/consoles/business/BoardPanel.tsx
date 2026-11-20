@@ -1,4 +1,5 @@
 import { useDateFormat } from "../dateFormat";
+import { shownDecimals } from "../shownDecimals";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Filter, Link2, Lock, Plus as PlusIcon } from "lucide-react";
@@ -142,7 +143,10 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
   // A column's total reads at a glance — whole (1,050), large ones short
   // (15.8M); its title has the figure in full.
   const fmtSum = (n: number) => n.toLocaleString(undefined, Math.abs(n) >= 100_000 ? { notation: "compact", maximumFractionDigits: 1 } : { maximumFractionDigits: 0 });
-  const fullSum = (n: number) => n.toLocaleString(undefined, money ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 2 });
+  const fullSum = (n: number) => {
+    const d = shownDecimals(n, 2); // a large amount is written whole
+    return n.toLocaleString(undefined, money ? { minimumFractionDigits: d, maximumFractionDigits: d } : { maximumFractionDigits: d });
+  };
   const canCreate = newRecordButton && canCreateRecords(form);
 
   if (!colField) {

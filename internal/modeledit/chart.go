@@ -268,7 +268,7 @@ var (
 	WidgetPropKeys = map[string]bool{"selectors_position": true, "background": true, "font_size": true, "font_weight": true,
 		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
-		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
+		"sync_context": true, "show_members": true, "time_window": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
 		"record_selects": true, "record_follows": true, "follow_rows": true, "follow_columns": true,
 		"kpi_compare": true, "kpi_good": true, "number_scale": true,

@@ -18,15 +18,21 @@ var builtins = map[string]CustomFunc{}
 func init() {
 	for name, fn := range map[string]CustomFunc{
 		// Logic — lazy
-		"IF":      fnIF,
-		"IFS":     fnIFS,
-		"AND":     fnAND,
-		"OR":      fnOR,
-		"NOT":     fnNOT,
-		"IFERROR": fnIFERROR,
-		"IFNA":    fnIFNA,
-		"SWITCH":  fnSWITCH,
-		"ISBLANK": fnISBLANK,
+		"IF":       fnIF,
+		"IFS":      fnIFS,
+		"AND":      fnAND,
+		"OR":       fnOR,
+		"NOT":      fnNOT,
+		"IFERROR":  fnIFERROR,
+		"IFNA":     fnIFNA,
+		"SWITCH":   fnSWITCH,
+		"ISBLANK":  fnISBLANK,
+		"ISNUMBER": fnISNUMBER,
+		"ISTEXT":   fnISTEXT,
+		"ISERROR":  fnISERROR,
+		"ISNA":     fnISNA,
+		"NA":       fnNA,
+		"CHOOSE":   fnCHOOSE,
 
 		// Math
 		"ABS":       fnABS,
@@ -69,6 +75,9 @@ func init() {
 		"MONTH":       fnMONTH,
 		"DAY":         fnDAY,
 		"DAYS":        fnDAYS,
+		"WEEKDAY":     fnWEEKDAY,
+		"WEEKNUM":     fnWEEKNUM,
+		"ISOWEEKNUM":  fnISOWEEKNUM,
 		"EDATE":       fnEDATE,
 		"EOMONTH":     fnEOMONTH,
 		"DAYSINMONTH": fnDAYSINMONTH,
@@ -1072,4 +1081,170 @@ func fnDAYSINYEAR(ctx *EvalContext, args []Node) Value {
 		return NumberVal(366)
 	}
 	return NumberVal(365)
+}
+
+// ── Excel parity added 2026-11-20 (a 13-week cash workbook: weeks start on
+// Monday, G - WEEKDAY(G, 2) + 1; a missing input shows NA(); a scenario
+// number picks a driver with CHOOSE) ──────────────────────────────────────
+
+// fnISNUMBER is TRUE for a number (a date is one); a blank, a text, a
+// boolean and an error are not — as Excel.
+func fnISNUMBER(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("ISNUMBER", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	v := ctx.evalOperand(args[0])
+	return BoolVal(!v.IsError() && !v.IsBlank() && v.Kind() == KindNumber)
+}
+
+// fnISTEXT is TRUE for a text (an empty text too, as Excel).
+func fnISTEXT(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("ISTEXT", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	v := ctx.evalOperand(args[0])
+	return BoolVal(!v.IsError() && !v.IsBlank() && v.Kind() == KindString)
+}
+
+// fnISERROR is TRUE for any error value.
+func fnISERROR(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("ISERROR", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	return BoolVal(ctx.eval(args[0]).IsError())
+}
+
+// fnISNA is TRUE for #N/A only.
+func fnISNA(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("ISNA", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	v := ctx.eval(args[0])
+	return BoolVal(v.IsError() && v.err.Code == ErrNA.Code)
+}
+
+// fnNA is the #N/A error, as Excel's NA(): it propagates through what reads
+// it and IFNA / ISNA catch it. For a cell that should hold no value, write
+// "" (IF(c, x, "")): a blank, left out of totals.
+func fnNA(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("NA", args, 0, 0); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	return ErrorVal(ErrNA)
+}
+
+// fnCHOOSE implements CHOOSE(index, value1, value2, …): the index-th value
+// (index truncated to a whole number), only that one evaluated; an index
+// below 1 or past the values is #VALUE!, as Excel.
+func fnCHOOSE(ctx *EvalContext, args []Node) Value {
+	if len(args) < 2 {
+		return ErrorVal(errValue("CHOOSE: requires an index and at least one value"))
+	}
+	idx := ctx.eval(args[0])
+	if idx.IsError() {
+		return idx
+	}
+	n, ok := idx.Number()
+	if !ok {
+		return ErrorVal(ErrValue)
+	}
+	i := int(math.Floor(n))
+	if i < 1 || i >= len(args) {
+		return ErrorVal(&FormulaError{Code: ErrValue.Code, Message: fmt.Sprintf("CHOOSE: index %v is outside 1-%d", n, len(args)-1)})
+	}
+	return ctx.eval(args[i])
+}
+
+// weekdayStart maps WEEKDAY's return_type to the day numbered 1 and whether
+// numbering starts at 0 (type 3: Monday = 0). Excel's types: 1 (Sunday = 1,
+// the default), 2 (Monday = 1), 3 (Monday = 0), 11–17 (Monday … Sunday = 1).
+func weekdayStart(t int) (first time.Weekday, zero bool, ok bool) {
+	switch {
+	case t == 1:
+		return time.Sunday, false, true
+	case t == 2:
+		return time.Monday, false, true
+	case t == 3:
+		return time.Monday, true, true
+	case t >= 11 && t <= 17:
+		return time.Weekday((t - 10) % 7), false, true
+	}
+	return 0, false, false
+}
+
+func dateArgs(ctx *EvalContext, name string, args []Node, minN, maxN int, def float64) (serial float64, kind int, errv Value, ok bool) {
+	if ferr := requireArgCount(name, args, minN, maxN); ferr != nil {
+		return 0, 0, ErrorVal(ferr), false
+	}
+	vals, e := ctx.evalArgs(args)
+	if e.IsError() {
+		return 0, 0, e, false
+	}
+	s, ok1 := vals[0].Number()
+	k := def
+	ok2 := true
+	if len(vals) > 1 {
+		k, ok2 = vals[1].Number()
+	}
+	if !ok1 || !ok2 {
+		return 0, 0, ErrorVal(ErrValue), false
+	}
+	return s, int(k), Value{}, true
+}
+
+// fnWEEKDAY implements WEEKDAY(date[, return_type]).
+func fnWEEKDAY(ctx *EvalContext, args []Node) Value {
+	serial, kind, errv, ok := dateArgs(ctx, "WEEKDAY", args, 1, 2, 1)
+	if !ok {
+		return errv
+	}
+	first, zero, ok := weekdayStart(kind)
+	if !ok {
+		return ErrorVal(&FormulaError{Code: ErrNum.Code, Message: fmt.Sprintf("WEEKDAY: return type %d is not 1, 2, 3 or 11-17", kind)})
+	}
+	n := (int(serialToTime(serial).Weekday()) - int(first) + 7) % 7
+	if !zero {
+		n++
+	}
+	return NumberVal(float64(n))
+}
+
+// fnWEEKNUM implements WEEKNUM(date[, return_type]): the week of the year,
+// week 1 holding 1 January and weeks starting on the type's day (1 Sunday,
+// the default; 2 Monday; 11–17 Monday … Sunday); type 21 is the ISO week.
+func fnWEEKNUM(ctx *EvalContext, args []Node) Value {
+	serial, kind, errv, ok := dateArgs(ctx, "WEEKNUM", args, 1, 2, 1)
+	if !ok {
+		return errv
+	}
+	t := serialToTime(serial)
+	if kind == 21 {
+		_, w := t.ISOWeek()
+		return NumberVal(float64(w))
+	}
+	var first time.Weekday
+	switch {
+	case kind == 1:
+		first = time.Sunday
+	case kind == 2:
+		first = time.Monday
+	case kind >= 11 && kind <= 17:
+		first = time.Weekday((kind - 10) % 7)
+	default:
+		return ErrorVal(&FormulaError{Code: ErrNum.Code, Message: fmt.Sprintf("WEEKNUM: return type %d is not 1, 2, 11-17 or 21", kind)})
+	}
+	jan1 := time.Date(t.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	offset := (int(jan1.Weekday()) - int(first) + 7) % 7
+	return NumberVal(float64((t.YearDay()-1+offset)/7 + 1))
+}
+
+// fnISOWEEKNUM implements ISOWEEKNUM(date): the ISO 8601 week (Monday
+// weeks; week 1 holds the year's first Thursday).
+func fnISOWEEKNUM(ctx *EvalContext, args []Node) Value {
+	serial, _, errv, ok := dateArgs(ctx, "ISOWEEKNUM", args, 1, 1, 0)
+	if !ok {
+		return errv
+	}
+	_, w := serialToTime(serial).ISOWeek()
+	return NumberVal(float64(w))
 }

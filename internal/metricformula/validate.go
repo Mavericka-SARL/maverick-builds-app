@@ -180,10 +180,14 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 			LIMIT 1
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID, &textMetric)
 		readsText := req.Text && ref.IsDirect() && !ref.Dimensional && !criteriaRange(an, ref.Name)
-		// A number formula compares a text metric at the cell: only there,
-		// and not across periods (no time function binds its text).
-		if !req.Text && err == nil && textMetric && ref.IsDirect() && !ref.Dimensional && !criteriaRange(an, ref.Name) &&
-			!an.UsesTimeSeries && parsed != nil && textComparedOnly(parsed, ref.Name) {
+		// A number formula reads a text metric at the cell — compared, a
+		// LOOKUP member (LOOKUP(drv, week, week_code)), inside TEXT or
+		// CONCAT — or matches it as a criteria range (COUNTIFS(note,
+		// "Late*")), but not across periods: no time function binds its text
+		// (2026-11-20; owner decision 2026-10-06). Arithmetic on its text is
+		// #VALUE! at the cell, as in Excel.
+		if !req.Text && err == nil && textMetric && !an.UsesTimeSeries && parsed != nil && !textInArithmetic(parsed, ref.Name) &&
+			((ref.IsDirect() && !ref.Dimensional) || criteriaRange(an, ref.Name)) {
 			readsText = true
 		}
 		if err == nil && textMetric && !readsText {
@@ -192,7 +196,7 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 			if req.Text {
 				return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a text calculation reads it only by name at the cell (not through LOOKUP, *IFS or a time offset)", ref.Name)
 			}
-			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell — IF(%s = \"OK\", 1, 0) — not in arithmetic, a function, LOOKUP or with a time function", ref.Name, ref.Name)
+			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a number formula reads it at the cell — compared, joined with &, in a function such as LEN or VALUE, as a LOOKUP member — or as a criteria range (COUNTIFS(%s, \"OK\")); not in arithmetic, as the source of LOOKUP or *IFS, nor beside a time function", ref.Name, ref.Name)
 		}
 		if err == nil {
 			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))

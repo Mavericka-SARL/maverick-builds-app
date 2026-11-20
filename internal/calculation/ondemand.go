@@ -304,6 +304,9 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 			texts[depID] = m
 		}
 	}
+	if len(texts) > 0 {
+		reads.texts = texts // a text metric as a criteria range (formula.DimEvalContext.Text)
+	}
 	noteAt := func(depID string, combo map[string]string) string {
 		own := make(map[string]string, len(metricDimIDs[depID]))
 		for _, dimID := range metricDimIDs[depID] {

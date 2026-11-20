@@ -125,8 +125,9 @@ func TestTextCellsClearsHighlightsAndBusinessMembers(t *testing.T) {
 	refused("a number into a text cell", st, raw, http.StatusBadRequest, "text metric")
 	st, raw = write(dev, amount, "INIT-001", map[string]any{"text": "x"})
 	refused("a text into a number cell", st, raw, http.StatusBadRequest, "is for a text metric")
-	st, raw = call("POST", "/api/developer/metrics", map[string]any{"name": "comment_len", "formula": "LEN(act_comment)", "revision_id": rev})
-	refused("a formula reading a text metric", st, raw, http.StatusBadRequest, "TEXT_METRIC_IN_FORMULA")
+	// A formula reads a note at the cell (LEN, a comparison) but no arithmetic on it (2026-11-20).
+	st, raw = call("POST", "/api/developer/metrics", map[string]any{"name": "comment_twice", "formula": "act_comment * 2", "revision_id": rev})
+	refused("arithmetic on a text metric", st, raw, http.StatusBadRequest, "TEXT_METRIC_IN_FORMULA")
 	st, raw = call("POST", "/api/developer/metrics", map[string]any{"name": "summed_notes", "is_input": true, "format": "text", "agg_rule": "sum", "revision_id": rev})
 	refused("a text metric that sums", st, raw, http.StatusBadRequest, "never added up")
 

@@ -80,8 +80,9 @@ func validateTime(ctx context.Context, q Querier, modelID, revisionID, gridID st
 
 	// Members per time dimension, to reject an empty axis.
 	memberCount := map[string]int{}
+	timeDimName := map[string]string{} // time dimension id → its name, upper case
 	mrows, err := q.Query(ctx, `
-		SELECT d.id::text, COUNT(m.id)
+		SELECT d.id::text, COUNT(m.id), upper(d.name)
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id AND m.period_start IS NOT NULL
 		WHERE d.model_id=$1::uuid AND d.dimension_type='time'
@@ -93,11 +94,13 @@ func validateTime(ctx context.Context, q Querier, modelID, revisionID, gridID st
 	for mrows.Next() {
 		var id string
 		var n int
-		if err := mrows.Scan(&id, &n); err != nil {
+		var name string
+		if err := mrows.Scan(&id, &n, &name); err != nil {
 			mrows.Close()
 			return err
 		}
 		memberCount[id] = n
+		timeDimName[id] = name
 	}
 	mrows.Close()
 
@@ -139,7 +142,12 @@ func validateTime(ctx context.Context, q Querier, modelID, revisionID, gridID st
 			if !ok || len(dep.timeDims) == 0 {
 				continue // a dimension name, or a metric without a time axis (resolved by rollup)
 			}
-			if dep.timeDims[0] != axis {
+			// A LOOKUP that names a member of the source's own calendar
+			// reads one value per cell and needs no mapping between the
+			// calendars: LOOKUP(drv_days, week, TEXT(start, "yyyy-mm-dd"))
+			// beside TIMESUM on a forecast-week axis (2026-11-20; it was
+			// accepted only as its own metric).
+			if dep.timeDims[0] != axis && !pinsOwnCalendar(ref, timeDimName[dep.timeDims[0]]) {
 				return invalidCode(formula.CodeTimeDimensionMismatch,
 					"metric %q reads %q over a different time dimension; Phase 1 does not map one calendar onto another", mi.name, dep.name)
 			}
@@ -371,4 +379,19 @@ func asTemporal(err error, target **TemporalError) bool {
 func IsValidationError(err error) bool {
 	var ve *ValidationError
 	return errors.As(err, &ve)
+}
+
+// pinsOwnCalendar reports whether ref is read only as the source of a LOOKUP
+// (or *IFS) that names a member of the source's time dimension, dimName
+// (upper case).
+func pinsOwnCalendar(ref formula.ReferenceUse, dimName string) bool {
+	if !ref.Dimensional || dimName == "" {
+		return false
+	}
+	for _, d := range ref.OverriddenDims {
+		if strings.EqualFold(d, dimName) {
+			return true
+		}
+	}
+	return false
 }

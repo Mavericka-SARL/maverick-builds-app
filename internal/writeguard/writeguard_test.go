@@ -767,3 +767,57 @@ func TestApprovedLockReachesACopiedRevision(t *testing.T) {
 		t.Errorf("the copy's grid scopes = %+v, want CA on the copied dimension %s", scopes, copyDim)
 	}
 }
+
+// A run whose member field names the item its record posts into locks that
+// item while its approval waits; deciding that run (WithDecidingRun) must not
+// be refused by its own lock, while another run's lock still refuses
+// (2026-11-20: a deferral request naming its payment could never be approved).
+func TestDecidingRunIsNotLockedByItself(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'payment') RETURNING id::text`, f.modelID, f.revisionID)
+	itemID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'AP-010', 'AP-010') RETURNING id::text`, dimID)
+	var appID string
+	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	schema := `[{"key":"payment","data_type":"Dimension member","dimension_id":"` + dimID + `"}]`
+	steps := `[{"id":"approve","type":"approval"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'Deferral approval', 'form.submit', $2::jsonb, $3::jsonb, 'published') RETURNING id::text`, appID, steps, schema)
+	run := func() string {
+		inst := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by, steps_snapshot)
+		           VALUES ($1::uuid, 'running', '{"payment":"AP-010"}'::jsonb, $2::uuid, $3::jsonb) RETURNING id::text`, defID, f.userID, steps)
+		q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'approve', 'in_progress') RETURNING id::text`, inst)
+		return inst
+	}
+	locked := func(ctx context.Context) bool {
+		t.Helper()
+		l, _, err := WorkflowLockReason(ctx, pool, f.modelID, []string{itemID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	mine := run()
+	if !locked(ctx) {
+		t.Fatal("AP-010 is not locked while its run's approval waits")
+	}
+	if locked(WithDecidingRun(ctx, mine)) {
+		t.Error("the run deciding AP-010 is refused by its own lock")
+	}
+	other := run()
+	if !locked(WithDecidingRun(ctx, mine)) {
+		t.Errorf("another run (%s) on AP-010 no longer locks it for the deciding run", other)
+	}
+}

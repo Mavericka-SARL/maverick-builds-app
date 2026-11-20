@@ -87,7 +87,7 @@ export function AddMemberRow({ dim, colSpan }: { dim: DimInfo; colSpan: number }
       <td colSpan={colSpan} style={{ padding: "6px 12px" }}>
         {open ? (
           <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <TextInput value={label} autoFocus placeholder={`New ${dim.name} name`} aria-label={`New ${dim.name} name`} style={{ width: 220 }}
+            <TextInput value={label} autoFocus placeholder={`New ${memberNoun(dim)} name`} aria-label={`New ${memberNoun(dim)} name`} style={{ width: 220 }}
               onChange={e => setLabel(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && label.trim()) add.mutate(); if (e.key === "Escape") setOpen(false); }} />
             {parents.length > 1 && (
@@ -101,10 +101,19 @@ export function AddMemberRow({ dim, colSpan }: { dim: DimInfo; colSpan: number }
           </span>
         ) : (
           <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-            <Plus size={13} /> Add {dim.name.replace(/_/g, " ")}
+            <Plus size={13} /> Add {memberNoun(dim)}
           </Button>
         )}
       </td>
     </tr>
   );
 }
+
+// What a member of dim is called on its add row: the dimension's label
+// ("Add payment category"), else its name ("Add strat activity") — the
+// technical name showed beside labelled headers (2026-11-20).
+function memberNoun(dim: DimInfo): string {
+  const l = dim.label?.trim();
+  return l ? l.charAt(0).toLowerCase() + l.slice(1) : dim.name.replace(/_/g, " ");
+}
+

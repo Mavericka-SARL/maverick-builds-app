@@ -35,6 +35,24 @@
 <tr><td>IF(close_date = "", 1, 0)</td><td>the same, Excel's way</td><td>1 or 0</td></tr>
 <tr><td>ISBLANK(units)</td><td>units entered as 0</td><td>FALSE</td></tr></table></div>
 
+<div class="fn"><h4><span class="sig" id="fn-ISNUMBER">ISNUMBER(value)</span> · ISTEXT(value) · ISERROR(value) · ISNA(value)</h4>
+<p>As in Excel: ISNUMBER is TRUE for a number (a date is one), ISTEXT for a text, ISERROR for any error, ISNA for <code>#N/A</code> only. A blank is none of them.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISNUMBER(expected_date), expected_date, start_date)</td><td>a date when one is entered</td><td>a date</td></tr>
+<tr><td>ISNA(LOOKUP(sales, region, "XX"))</td><td>a missing member</td><td>TRUE</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig" id="fn-NA">NA()</span></h4>
+<p>The <code>#N/A</code> error, as Excel's: it passes through everything that reads it, and IFNA / ISNA catch it. A cell holding it shows as failed. <b>For a cell that should hold no value</b>, return an empty text instead: <code>IF(condition, value, "")</code> leaves the cell blank (stored as nothing, left out of totals and charts, ISBLANK TRUE). <code>IF(condition, value)</code> without an else gives FALSE, stored as 0, as in Excel.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISBLANK(rate), NA(), amount * rate)</td><td>flags a missing input</td><td>#N/A or the amount</td></tr>
+<tr><td>IF(shortfall > 0, week_start, "")</td><td>a date only where there is a shortfall</td><td>a date or blank</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig" id="fn-CHOOSE">CHOOSE(index, value1, value2, …)</span></h4>
+<p>The value at position <i>index</i> (truncated to a whole number); only that value is evaluated. An index below 1 or past the values is <code>#VALUE!</code>. On a grid with a dimension, a member or a property picks more readably (<code>scenario</code>, LOOKUP).</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>CHOOSE(case_no, base_sales, upside_sales, downside_sales)</td><td>the workbook's scenario switch</td><td>one of the three</td></tr>
+<tr><td>CHOOSE(4, 10, 20, 30)</td><td>past the values</td><td>#VALUE!</td></tr></table></div>
+
 <div class="fn"><h4><span class="sig" id="fn-SWITCH">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
 <p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
 <table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
@@ -101,5 +119,7 @@
 <tr><td class="sig" id="fn-EOMONTH">EOMONTH(d, months)</td><td>The last day of the month <i>months</i> away.</td><td><code>EOMONTH(DATE(2026, 1, 31), 0)</code> = 2026-01-31, <code>EOMONTH(DATE(2024, 1, 31), 1)</code> = 2024-02-29</td></tr>
 <tr><td class="sig" id="fn-DAYSINMONTH">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
 <tr><td class="sig" id="fn-DAYSINYEAR">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
+<tr><td class="sig" id="fn-WEEKDAY">WEEKDAY(date [, return_type])</td><td>The day of the week, as Excel: type 1 (default) Sunday = 1 … Saturday = 7; 2 Monday = 1 … Sunday = 7; 3 Monday = 0 … Sunday = 6; 11–17 the week starting Monday … Sunday = 1. Another type is <code>#NUM!</code>.</td><td><code>d - WEEKDAY(d, 2) + 1</code> is the Monday of d's week</td></tr>
+<tr><td class="sig" id="fn-WEEKNUM">WEEKNUM(date [, return_type]) · ISOWEEKNUM(date)</td><td>The week of the year, week 1 holding 1 January, weeks starting Sunday (type 1, default), Monday (2) or the type's day (11–17); type 21 and ISOWEEKNUM are the ISO 8601 week (week 1 holds the year's first Thursday).</td><td><code>ISOWEEKNUM(DATE(2027, 1, 1))</code> = 53</td></tr>
 </table>
 <p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start. A text calculation is evaluated per period too: <code>IF(MONTH(START()) = 1, "Opening", "")</code> labels each January.</p>

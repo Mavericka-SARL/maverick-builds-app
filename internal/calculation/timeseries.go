@@ -664,7 +664,8 @@ func (e *tsEvaluator) evalLeaves(order []int, ov overlay, res *tsResults) {
 				if res.firstErr == nil {
 					res.firstErr = err
 				}
-				e.s.log.Warn().Err(err).Str("metric", e.def.Name).Str("period", e.axis.periods[pos].Code).Msg("per-combo eval failed")
+				// Per cell at debug: the metric's pass logs one summary (failedSummary).
+				e.s.log.Debug().Err(err).Str("metric", e.def.Name).Str("period", e.axis.periods[pos].Code).Msg("per-combo eval failed")
 				continue
 			}
 			res.leaf = append(res.leaf, CalcResultRow{DimMembers: combo, Value: v})

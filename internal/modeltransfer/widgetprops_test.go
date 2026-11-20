@@ -165,6 +165,8 @@ var widgetPropRefs = map[string]string{
 	"selectors_position": "data", "background": "data", "font_size": "data", "font_weight": "data",
 	"color": "data", "font_family": "data", "alt": "data", "image_fit": "data", "button_color": "data",
 	"default_view": "layout", "metric_ids": "metric list", "chart": "chart",
+	// A rolling window: its time dimension and the date metric it starts at.
+	"time_window": "window",
 	// A button's static workflow context: values the workflow reads.
 	"context":   "data",
 	"kpi_scope": "names a dimension", "kpi_context_mode": "data", "confirm_text": "data",
@@ -230,6 +232,8 @@ func TestWidgetPropKeysAreClassified(t *testing.T) {
 			value = map[string]any{"d-old": "N"}
 		case "names a dimension":
 			value = map[string]any{"dimension_id": "d-old", "member_code": "N"}
+		case "window":
+			value = map[string]any{"dimension_id": "d-old", "from_metric_id": "m-old", "periods": 13}
 		case "layout":
 			value = map[string]any{"rows": []any{"d-old"}, "cols": []any{"__metrics__"}, "context": []any{}, "filter_sel": map[string]any{"d-old": "N"}}
 		default:

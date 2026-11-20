@@ -97,16 +97,24 @@ func isDateFormat(numFmt int, custom string) bool {
 // excelEpoch is day 0 of the 1900 date system, as the formula engine counts.
 var excelEpoch = time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC)
 
-// dateSerial reads ISO date text — what isoDates writes for a date cell —
-// as the workbook's serial number: ok false for anything else.
+// dateSerial reads ISO date text — what isoDates writes for a date cell, or
+// what a workbook holds in an ISO date cell (t="d", 2026-10-19T00:00:00.000Z,
+// which excelize returns as written) — as the workbook's serial number: ok
+// false for anything else. A time zone in the text is ignored: the cell's
+// wall-clock date and time are what the workbook shows. The time dimension
+// (timedim.DayOf) and record date fields already read these forms; a date
+// metric's import used to refuse them (2026-11-20).
 func dateSerial(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if len(s) < 10 || s[4] != '-' || s[7] != '-' {
 		return 0, false
 	}
-	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05"} {
+	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05", "2006-01-02 15:04:05", time.RFC3339Nano,
+		"2006-01-02T15:04:05.999999999"} {
 		if t, err := time.Parse(layout, s); err == nil {
-			days := t.Sub(excelEpoch).Hours() / 24
+			y, m, d := t.Date()
+			wall := time.Date(y, m, d, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+			days := wall.Sub(excelEpoch).Hours() / 24
 			return math.Round(days*1e9) / 1e9, true
 		}
 	}

@@ -132,6 +132,11 @@ export interface DimInfo {
   parent_dimension_id?: string | null; // set when this whole dimension is a declared child of another (e.g. Cabinet -> Department)
   source_dimension_id?: string | null; // set when this dimension's members are a grouping of source_dimension_id's members by their properties[source_property] value
   source_property?: string | null;
+  // In a grid read's all_dimensions: a large dimension unrelated to the grid
+  // comes without its members (members is empty); the model-wide read
+  // (metaOnly) carries them all.
+  members_omitted?: boolean;
+  member_count?: number;
   // Business users add, rename and remove its members (from the grid).
   business_maintained?: boolean;
   /** The property whose value at a member (percentage, number, currency) is the number format of its cells (migration 190). */
@@ -983,6 +988,18 @@ export interface WidgetProps {
   // grid: the members a row or column dimension shows, in that order, by
   // dimension id. A dimension not listed shows all of its members.
   show_members?: Record<string, string[]>;
+  // grid and chart: a rolling window on a time dimension — from the period
+  // holding the date from_metric_id holds, `periods` periods (`before`
+  // ahead of it); members show_members / plotted_members list besides
+  // follow it (a total). Moves when the date does.
+  time_window?: TimeWindow;
+}
+
+export interface TimeWindow {
+  dimension_id: string;
+  from_metric_id: string;
+  periods: number;
+  before?: number;
 }
 
 
@@ -3367,6 +3384,10 @@ export const api = {
   listExecutions: () => apiFetch<Execution[]>("/api/automation/executions"),
   // Stops a running instance: its open steps are withdrawn, it and its
   // execution read "cancelled", and its assignees and starter are told.
+  getTimeWindow: (revisionId: string, w: TimeWindow) =>
+    apiFetch<{ codes: string[] | null }>(`/api/time-window?${new URLSearchParams({ revision_id: revisionId, dimension_id: w.dimension_id, from_metric_id: w.from_metric_id, periods: String(w.periods), before: String(w.before ?? 0) })}`),
+  freezeBAValues: (body: { pairs: { from: string; to: string }[]; at?: Record<string, string>; dry_run?: boolean }) =>
+    apiFetch<{ cells: number; dry_run: boolean; values?: { to: string; members: Record<string, string>; value: number }[] }>("/api/business-admin/freeze-values", { method: "POST", body: JSON.stringify(body) }),
   copyBAValues: (body: { dimension_id: string; from: string; to: string; metric_ids?: string[]; only?: Record<string, string[]>; dry_run?: boolean }) =>
     apiFetch<{ cells: number; dry_run: boolean }>("/api/business-admin/copy-values", { method: "POST", body: JSON.stringify(body) }),
   reopenWorkflowInstance: (instanceId: string, reason: string) =>

@@ -108,7 +108,7 @@ test("notes, clears, highlights and planner-kept rows", async ({ page }) => {
 
   // A planner adds a row, renames one and removes one.
   await table.getByRole("button", { name: /Add strat activity/ }).click();
-  await page.getByLabel("New strat_activity name").fill("Loyalty programme");
+  await page.getByLabel("New strat activity name").fill("Loyalty programme");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect.poll(() => calls.filter(c => c.method === "POST" && c.url.endsWith("/members")).length).toBe(1);
   expect(calls.find(c => c.method === "POST" && c.url.endsWith("/members"))!.body).toMatchObject({ label: "Loyalty programme", parent_member_id: "a-all" });

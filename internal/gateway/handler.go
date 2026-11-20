@@ -399,6 +399,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/tasks", "any", cors(h.tasks))
 	register("POST", "/api/tasks/{stepId}/complete", "any", cors(h.taskAction))
 	register("GET", "/api/grid", "any", cors(h.gridEntry))
+	register("GET", "/api/time-window", "any", cors(h.timeWindowCodes))
 	register("GET", "/api/grid/export", "any", cors(h.gridExport))
 	// Generic grid reads for readers other than the grid screen (grid_reads.go).
 	register("GET", "/api/grids", "any", cors(h.gridCatalog))
@@ -664,6 +665,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PUT", "/api/business-admin/roles/{id}/access-rules", "business_admin", ba(h.baRoleAccessRules))
 	register("GET", "/api/business-admin/available", "business_admin", ba(h.baAvailable))
 	register("POST", "/api/business-admin/copy-values", "business_admin", ba(h.baCopyValues))
+	register("POST", "/api/business-admin/freeze-values", "developer_or_business_admin", baOrDev(h.baFreezeValues))
 
 	// Workflow / notifications (any authenticated user)
 	register("POST", "/api/workflow/submit", "any", cors(h.workflowSubmit))
@@ -2960,6 +2962,10 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	// would — a record posts within its creator's access, and its creator
 	// may have lost write access since saving it. The approval used to go
 	// through and the posting be dropped with only a log line.
+	// The run's own lock (a member field naming what its record posts into)
+	// does not refuse what it decides (writeguard.WithDecidingRun); the
+	// status the run sets is posted under the same context.
+	ctx = writeguard.WithDecidingRun(ctx, instanceID)
 	if req.Decision == "approve" || req.Decision == "approved" {
 		if code, msg, err := h.approvalRefusal(ctx, a, instanceID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -2967,6 +2973,50 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 		} else if code != 0 {
 			jsonErr(w, errors.New(msg), code)
 			return
+		}
+	}
+
+	// An approval that freezes values (on_approve.freeze: the forecast of the
+	// coming week kept for its review) is checked before it is decided — a
+	// value it could not write refuses the approval, saying why — and made
+	// once it is. The values are written as the person who started the run
+	// (the approver may only read them), read as the approver.
+	var freeze *freezeSpec
+	var freezeWriter *actor
+	var freezeModel, freezeRevision string
+	if req.Decision == "approve" || req.Decision == "approved" {
+		spec, ferr := h.approvalFreeze(ctx, stepID, instCtx)
+		if ferr != nil {
+			jsonErr(w, ferr, http.StatusBadRequest)
+			return
+		}
+		if spec != nil {
+			var startedBy string
+			if err := h.db.QueryRow(ctx, `
+				SELECT COALESCE(NULLIF(wi.context->>'model_id', ''), rv.model_id::text, ''),
+				       COALESCE(NULLIF(wi.context->>'revision_id', ''), wd.revision_id::text, ''),
+				       COALESCE(wi.started_by::text, '')
+				FROM workflow.workflow_instance wi
+				JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+				LEFT JOIN model.revision rv ON rv.id = wd.revision_id
+				WHERE wi.id = $1::uuid`, instanceID).Scan(&freezeModel, &freezeRevision, &startedBy); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			freezeWriter = a
+			if startedBy != "" {
+				if sa, err := h.actorByUserID(ctx, startedBy); err == nil {
+					freezeWriter = sa
+				}
+			}
+			if _, ref, err := h.freezeValues(ctx, r, freezeWriter, freezeModel, freezeRevision, *spec, true); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			} else if ref != nil {
+				jsonErr(w, fmt.Errorf("this approval freezes values and one cannot be written: %s", ref.message), ref.status)
+				return
+			}
+			freeze = spec
 		}
 	}
 
@@ -2985,6 +3035,22 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonErr(w, err, status)
 		return
+	}
+	if freeze != nil {
+		if values, ref, err := h.freezeValues(ctx, r, freezeWriter, freezeModel, freezeRevision, *freeze, false); err != nil || ref != nil {
+			msg := ""
+			if ref != nil {
+				msg = ref.message
+			}
+			h.log.Warn().Err(err).Str("instance_id", instanceID).Str("refusal", msg).Msg("the approval's freeze was not made")
+		} else {
+			auditlog.Log(context.WithoutCancel(ctx), h.db.For(ctx), h.log, auditlog.Fields{
+				Category: auditlog.CategoryDataChange, EventType: auditlog.EventCellsWritten,
+				ActorUserID: freezeWriter.UserID, ResourceType: "revision", ResourceID: freezeRevision, RevisionID: freezeRevision,
+				Metadata: map[string]string{"model_id": freezeModel, "cells": strconv.Itoa(len(values)), "via": "approval_freeze",
+					"instance_id": instanceID, "approved_by": a.UserID},
+			})
+		}
 	}
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -3209,6 +3275,11 @@ type gridDimension struct {
 	// number, currency — is the format of the cells there (migration 190).
 	FormatProperty string          `json:"format_property,omitempty"`
 	Members        []gridDimMember `json:"members"`
+	// MembersOmitted: a grid read left this dimension's members out of
+	// all_dimensions (leanAllDimensions) — MemberCount says how many it has;
+	// the model-wide read (meta_only) and all_members=1 carry them all.
+	MembersOmitted bool `json:"members_omitted,omitempty"`
+	MemberCount    int  `json:"member_count,omitempty"`
 	// TotalRule is how its members total (migration 174): "first", "last"
 	// or "none"; absent, they add up. MetricRules are the metrics' own
 	// rules over it, by metric id, which win (rollup.RuleCombo).
@@ -4633,12 +4704,16 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	respDims := allDims
+	if !metaOnly && gridDefID != "" && r.URL.Query().Get("all_members") != "1" {
+		respDims = leanAllDimensions(allDims, dims, metrics)
+	}
 	jsonOK(w, gridResponse{
 		RevisionID:         revisionID,
 		Metrics:            metrics,
 		AllMetrics:         allMetrics,
 		Dimensions:         dims,
-		AllDimensions:      allDims,
+		AllDimensions:      respDims,
 		Departments:        depts,
 		Cells:              cells,
 		Texts:              texts,
@@ -20932,6 +21007,18 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer release()
+	// A rolling window on the plotted time dimension: its periods, then the
+	// members the chart lists besides them (time_window.go).
+	if win := widgetTimeWindow(widgetPropsRaw); win != nil && win.DimensionID == cfg.DimensionID {
+		codes, werr := h.windowCodes(ctx, revisionID, *win)
+		if werr != nil {
+			jsonErr(w, werr, http.StatusBadRequest)
+			return
+		}
+		if codes != nil {
+			cfg.PlottedMembers = windowedMembers(codes, cfg.PlottedMembers)
+		}
+	}
 	resolver := query.NewChartResolver(h.db.For(ctx))
 	result, err := resolver.Resolve(ctx, cfg, req.Context, modelID, revisionID, gridDefID, a.UserID)
 	if err != nil {
@@ -21114,4 +21201,70 @@ func gridNameStatus(err error) int {
 		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
+}
+
+// leanMembersAbove is the member count past which a dimension unrelated to a
+// grid is sent without its members in that grid's all_dimensions.
+const leanMembersAbove = 200
+
+// leanAllDimensions is all_dimensions as a grid read sends it: every
+// dimension, with the members only of those the grid can need — its own, the
+// dimensions of the metrics it shows, their parent, child and grouping
+// dimensions, every time dimension — and of any dimension of up to
+// leanMembersAbove members. A large unrelated dimension (the records of a
+// table keep thousands of members: invoices, payments, contacts) comes as its
+// header and MemberCount. Every grid read used to carry every member of the
+// model: 1.79 MB of a 1.9 MB answer for a 312-cell grid of a model holding
+// 5,000 records, and 10–15 MB to open a dashboard (2026-11-20). The
+// dashboard's model-wide read (meta_only) still carries them all.
+func leanAllDimensions(allDims, gridDims []gridDimension, metrics []metricRow) []gridDimension {
+	need := map[string]bool{}
+	for _, d := range gridDims {
+		need[d.ID] = true
+	}
+	for _, m := range metrics {
+		for _, id := range m.DimensionIDs {
+			need[id] = true
+		}
+	}
+	byID := make(map[string]*gridDimension, len(allDims))
+	for i := range allDims {
+		byID[allDims[i].ID] = &allDims[i]
+	}
+	// Related dimensions both ways, to a fixed point: a parent or a grouping
+	// of a needed dimension, and a child or a grouping of one.
+	for changed := true; changed; {
+		changed = false
+		for _, d := range allDims {
+			related := []string{}
+			if d.ParentDimensionID != nil {
+				related = append(related, *d.ParentDimensionID)
+			}
+			if d.SourceDimensionID != nil {
+				related = append(related, *d.SourceDimensionID)
+			}
+			for _, rid := range related {
+				if _, ok := byID[rid]; !ok {
+					continue
+				}
+				if need[d.ID] && !need[rid] {
+					need[rid], changed = true, true
+				}
+				if need[rid] && !need[d.ID] {
+					need[d.ID], changed = true, true
+				}
+			}
+		}
+	}
+	out := make([]gridDimension, len(allDims))
+	for i, d := range allDims {
+		out[i] = d
+		if need[d.ID] || d.DimensionType == "time" || len(d.Members) <= leanMembersAbove {
+			continue
+		}
+		out[i].Members = []gridDimMember{}
+		out[i].MembersOmitted = true
+		out[i].MemberCount = len(d.Members)
+	}
+	return out
 }

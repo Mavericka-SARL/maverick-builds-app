@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useContext, useId } from "react";
+import { shownDecimals } from "../shownDecimals";
 import { serialToISO, serialToLocal, isoToSerial, parseDateText } from "../dateSerial";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
@@ -2575,9 +2576,12 @@ function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale, dateF
     case "currency": {
       // The sign before the symbol, as the KPI tile writes it: -$40.47, not $-40.47.
       const sym = m.format_currency || "$";
-      return (n < 0 ? "-" : "") + sym + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+      const cd = shownDecimals(n, d); // a large amount is written whole
+      return (n < 0 ? "-" : "") + sym + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: cd, maximumFractionDigits: cd });
     }
-    default:
-      return n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+    default: {
+      const nd = shownDecimals(n, d);
+      return n.toLocaleString("en-US", { minimumFractionDigits: nd, maximumFractionDigits: nd });
+    }
   }
 }

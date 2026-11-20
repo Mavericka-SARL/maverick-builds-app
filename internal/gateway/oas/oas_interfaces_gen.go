@@ -325,6 +325,10 @@ type FillSampleValuesRes interface {
 	fillSampleValuesRes()
 }
 
+type FreezeBAValuesRes interface {
+	freezeBAValuesRes()
+}
+
 type GenerateDimensionPeriodsRes interface {
 	generateDimensionPeriodsRes()
 }
@@ -427,6 +431,10 @@ type GetSsoSettingsRes interface {
 
 type GetTenantAISettingsRes interface {
 	getTenantAISettingsRes()
+}
+
+type GetTimeWindowRes interface {
+	getTimeWindowRes()
 }
 
 type GetUsageRes interface {

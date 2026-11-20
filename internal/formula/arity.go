@@ -16,7 +16,8 @@ import (
 var arity = map[string][2]int{
 	"IF": {2, 3}, "IFS": {2, -1}, "AND": {1, -1}, "OR": {1, -1}, "NOT": {1, 1},
 	"IFERROR": {2, 2}, "IFNA": {2, 2}, "SWITCH": {3, -1},
-	"ISBLANK": {1, 1},
+	"ISBLANK": {1, 1}, "ISNUMBER": {1, 1}, "ISTEXT": {1, 1}, "ISERROR": {1, 1}, "ISNA": {1, 1}, "NA": {0, 0},
+	"CHOOSE": {2, -1},
 
 	"ABS": {1, 1}, "INT": {1, 1}, "ROUND": {2, 2}, "ROUNDUP": {2, 2}, "ROUNDDOWN": {2, 2},
 	"CEILING": {2, 2}, "FLOOR": {2, 2}, "MOD": {2, 2}, "POWER": {2, 2}, "SQRT": {1, 1},
@@ -28,6 +29,7 @@ var arity = map[string][2]int{
 
 	"TODAY": {0, 0}, "DATE": {3, 3}, "YEAR": {1, 1}, "MONTH": {1, 1}, "DAY": {1, 1}, "DAYS": {2, 2},
 	"EDATE": {2, 2}, "EOMONTH": {2, 2}, "DAYSINMONTH": {2, 2}, "DAYSINYEAR": {1, 1},
+	"WEEKDAY": {1, 2}, "WEEKNUM": {1, 2}, "ISOWEEKNUM": {1, 1},
 }
 
 // CheckArguments parses text and refuses a call to a scalar built-in with a

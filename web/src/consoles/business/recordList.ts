@@ -3,6 +3,7 @@
 // and how a stored value reads on screen. The list itself is the server's
 // records query (POST /api/forms/{id}/records/query), so search, filters,
 // sort and pages cover every record the person may see, not one page.
+import { shownDecimals } from "../shownDecimals";
 import type { DevDimension, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
 import { localToday, statusFieldOf } from "../../api/client";
 import { formatIsoDate, isoToLocal } from "../dateSerial";
@@ -123,7 +124,10 @@ export function displayValue(f: FormField | undefined, value: unknown, dims: Dev
   }
   if (f.type === "boolean") return value === true || value === "true" ? "Yes" : "No";
   if (f.type === "date" && typeof value === "string") return isoToLocal(value, dateFormat);
-  if (f.format === "money" && typeof value === "number") return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (f.format === "money" && typeof value === "number") {
+    const d = shownDecimals(value, 2); // a large amount is written whole
+    return value.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
   if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
   return String(value);
 }

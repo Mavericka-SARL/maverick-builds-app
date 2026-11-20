@@ -163,6 +163,26 @@ func scalarCatalogue() []catCase {
 		{`ISBLANK(blank_m)`, boolean(true)},
 		{`ISBLANK(zero)`, boolean(false)}, // an entered 0 is a value
 		{`ISBLANK(word)`, boolean(false)},
+		// Excel's IS functions, NA and CHOOSE (2026-11-20).
+		{`ISNUMBER(zero)`, boolean(true)},
+		{`ISNUMBER(DATE(2026, 1, 1))`, boolean(true)},
+		{`ISNUMBER(word)`, boolean(false)},
+		{`ISNUMBER(blank_m)`, boolean(false)},
+		{`ISNUMBER(1 / 0)`, boolean(false)},
+		{`ISTEXT(word)`, boolean(true)},
+		{`ISTEXT(zero)`, boolean(false)},
+		{`ISERROR(1 / 0)`, boolean(true)},
+		{`ISERROR(zero)`, boolean(false)},
+		{`NA()`, fails("#N/A")},
+		{`NA() + 1`, fails("#N/A")},
+		{`ISNA(NA())`, boolean(true)},
+		{`ISNA(1 / 0)`, boolean(false)},
+		{`IFNA(NA(), 5)`, num(5)},
+		{`CHOOSE(2, 10, 20, 30)`, num(20)},
+		{`CHOOSE(2.9, 10, 20, 30)`, num(20)},
+		{`CHOOSE(1, 10, 1 / 0)`, num(10)},
+		{`CHOOSE(4, 10, 20, 30)`, fails("#VALUE!")},
+		{`CHOOSE(0, 10)`, fails("#VALUE!")},
 		{`ISBLANK("")`, boolean(true)},   // an empty text: a text input with nothing entered
 		{`ISBLANK(1/0)`, boolean(false)}, // an error is not blank, as in Excel
 		{`IF(ISBLANK(blank_m), "open", "closed")`, text("open")},
@@ -293,6 +313,22 @@ func scalarCatalogue() []catCase {
 		{`DAYSINYEAR(2026)`, num(365)},
 		{`TODAY(1)`, fails("#VALUE!")},
 		{`DATE(2026, 3)`, fails("#VALUE!")},
+		// Weeks (2026-11-20): 16-Nov-2026 is a Monday, 1-Jan-2026 a Thursday.
+		{`WEEKDAY(DATE(2026, 11, 16))`, num(2)},
+		{`WEEKDAY(DATE(2026, 11, 16), 2)`, num(1)},
+		{`WEEKDAY(DATE(2026, 11, 22), 2)`, num(7)},
+		{`WEEKDAY(DATE(2026, 11, 16), 3)`, num(0)},
+		{`WEEKDAY(DATE(2026, 11, 18), 13)`, num(1)},
+		{`WEEKDAY(DATE(2026, 11, 16), 5)`, fails("#NUM!")},
+		{`DATE(2026, 11, 20) - WEEKDAY(DATE(2026, 11, 20), 2) + 1`, num(d(2026, 11, 16))},
+		{`WEEKNUM(DATE(2026, 1, 1))`, num(1)},
+		{`WEEKNUM(DATE(2026, 1, 4))`, num(2)},
+		{`WEEKNUM(DATE(2026, 11, 16))`, num(47)},
+		{`WEEKNUM(DATE(2026, 1, 5), 2)`, num(2)},
+		{`WEEKNUM(DATE(2027, 1, 1), 21)`, num(53)},
+		{`ISOWEEKNUM(DATE(2026, 11, 16))`, num(47)},
+		{`ISOWEEKNUM(DATE(2027, 1, 1))`, num(53)},
+		{`WEEKNUM(DATE(2026, 1, 1), 9)`, fails("#NUM!")},
 
 		// ── Combinations ────────────────────────────────────────────────
 		{`IFERROR(ROUND((revenue - cost) / revenue * 100, 1), 0)`, num(25)},
@@ -650,6 +686,8 @@ func TestCatalogueArgumentCounts(t *testing.T) {
 		`CONCAT()`, `TEXTJOIN(",", TRUE)`, `LEN()`, `LEFT()`, `LEFT("a",1,2)`, `RIGHT()`, `MID("a",1)`,
 		`UPPER()`, `LOWER()`, `TRIM()`, `TEXT(1)`, `SUBSTITUTE("a","b")`, `TODAY(1)`, `DATE(1,2)`,
 		`YEAR()`, `MONTH()`, `DAY()`, `DAYS(1)`, `EDATE(1)`, `EOMONTH(1)`, `DAYSINMONTH(2026)`, `DAYSINYEAR()`,
+		`WEEKDAY()`, `WEEKDAY(1,2,3)`, `WEEKNUM()`, `ISOWEEKNUM()`, `ISOWEEKNUM(1,2)`, `ISNUMBER()`, `ISTEXT()`,
+		`ISERROR()`, `ISNA()`, `NA(1)`, `CHOOSE(1)`,
 	}
 	for _, f := range scalar {
 		v, err := Eval(f, nil)

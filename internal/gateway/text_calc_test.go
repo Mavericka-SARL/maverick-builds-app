@@ -47,9 +47,11 @@ func TestTextCalculations(t *testing.T) {
 	}
 	key := must("POST", "/api/developer/metrics", map[string]any{"name": "act_key", "formula": `act_row & "|" & act_type`, "format": "text", "revision_id": rev})
 	size := must("POST", "/api/developer/metrics", map[string]any{"name": "act_size", "formula": `IF(act_amount > 10, "Large", "Small")`, "format": "text", "revision_id": rev})
-	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "reads_text", "formula": `LEN(act_key)`, "revision_id": rev}); status != http.StatusBadRequest || !strings.Contains(raw, "TEXT_METRIC_IN_FORMULA") {
-		t.Errorf("a number formula reading a calculated text: %d %s, want TEXT_METRIC_IN_FORMULA", status, raw)
+	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "reads_text", "formula": `act_key * 2`, "revision_id": rev}); status != http.StatusBadRequest || !strings.Contains(raw, "TEXT_METRIC_IN_FORMULA") {
+		t.Errorf("arithmetic on a calculated text: %d %s, want TEXT_METRIC_IN_FORMULA", status, raw)
 	}
+	// A function reads it at the cell (2026-11-20).
+	keyLen := must("POST", "/api/developer/metrics", map[string]any{"name": "key_len", "formula": `LEN(act_key)`, "revision_id": rev})
 	// A number formula compares a text at the cell (a count of "Large"
 	// actions); arithmetic on it stays refused above.
 	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "is_large", "formula": `IF(act_size = "Large", 1, 0)`, "revision_id": rev}); status != http.StatusOK {
@@ -60,13 +62,18 @@ func TestTextCalculations(t *testing.T) {
 	refKey := must("POST", "/api/developer/metrics", map[string]any{"name": "act_ref_key", "formula": `act_ref & "|" & act_type`, "format": "text", "revision_id": rev})
 	label := must("POST", "/api/developer/metrics", map[string]any{"name": "act_label", "formula": `act_key & " (" & act_size & ")"`, "format": "text", "revision_id": rev})
 	if status, raw := call("POST", "/api/developer/metrics", map[string]any{"name": "ref_count", "formula": `IF(COUNTIFS(act_ref, "E1") > 0, "yes", "no")`, "format": "text", "revision_id": rev}); status != http.StatusBadRequest || !strings.Contains(raw, "TEXT_METRIC_IN_FORMULA") {
-		t.Errorf("a text metric as a criteria range: %d %s, want TEXT_METRIC_IN_FORMULA", status, raw)
+		t.Errorf("a text calculation with a text criteria range: %d %s, want TEXT_METRIC_IN_FORMULA", status, raw)
 	}
+	// A number formula counts by a text input's notes (2026-11-20; owner
+	// decision 2026-10-06), on a grid without act_row: over every row.
+	refHits := must("POST", "/api/developer/metrics", map[string]any{"name": "ref_hits", "formula": `COUNTIFS(act_ref, "E*")`, "revision_id": rev})
 	grid := must("POST", "/api/developer/grids", map[string]any{"name": "Actions", "revision_id": rev})
 	must("POST", "/api/developer/grids/"+grid+"/dimensions/"+act, nil)
-	for _, m := range []string{actType, amount, ref, key, size, refKey, label} {
+	for _, m := range []string{actType, amount, ref, key, size, refKey, label, keyLen} {
 		must("POST", "/api/developer/grids/"+grid+"/metrics/"+m, nil)
 	}
+	totalsGrid := must("POST", "/api/developer/grids", map[string]any{"name": "Totals", "revision_id": rev})
+	must("POST", "/api/developer/grids/"+totalsGrid+"/metrics/"+refHits, nil)
 	write := func(metric, row string, body map[string]any) {
 		t.Helper()
 		body["model_id"], body["revision_id"], body["metric_id"] = f.modelID, rev, metric
@@ -100,11 +107,31 @@ func TestTextCalculations(t *testing.T) {
 			t.Errorf("texts[%s] = %q, want %q", k, texts[k], want)
 		}
 	}
+	numbers := func(gridID string) (map[string]float64, map[string]float64) {
+		t.Helper()
+		_, raw := call("GET", "/api/grid?grid_def_id="+gridID+"&model_id="+f.modelID+"&revision_id="+rev, nil)
+		var g struct {
+			Cells  map[string]float64 `json:"cells"`
+			Totals map[string]float64 `json:"totals"`
+		}
+		_ = json.Unmarshal([]byte(raw), &g)
+		return g.Cells, g.Totals
+	}
+	if cells, _ := numbers(grid); cells[keyLen+":A1"] != 7 {
+		t.Errorf("LEN(act_key) at A1 = %v, want 7 (A1|HIRE)", cells[keyLen+":A1"])
+	}
+	if _, totals := numbers(totalsGrid); totals[refHits] != 1 {
+		t.Errorf(`COUNTIFS(act_ref, "E*") = %v, want 1 (E004)`, totals[refHits])
+	}
 	// The text follows its inputs.
 	write(actType, "A2", map[string]any{"member": "HIRE"})
 	write(amount, "A2", map[string]any{"value": 40})
 	write(ref, "A2", map[string]any{"text": "E012"})
 	texts = read()
+	write(ref, "A1", map[string]any{"text": "E101"})
+	if _, totals := numbers(totalsGrid); totals[refHits] != 2 {
+		t.Errorf(`COUNTIFS(act_ref, "E*") after A1's note became E101 = %v, want 2`, totals[refHits])
+	}
 	if texts[key+":A2"] != "A2|HIRE" || texts[size+":A2"] != "Large" || texts[refKey+":A2"] != "E012|HIRE" || texts[label+":A2"] != "A2|HIRE (Large)" {
 		t.Errorf("after the inputs changed: key %q size %q ref key %q label %q, want A2|HIRE, Large, E012|HIRE, A2|HIRE (Large)",
 			texts[key+":A2"], texts[size+":A2"], texts[refKey+":A2"], texts[label+":A2"])

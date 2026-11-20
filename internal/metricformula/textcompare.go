@@ -6,46 +6,48 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/formula"
 )
 
-// textComparedOnly reports whether every reference to name in node is an
-// operand of a comparison (chk_status = "OK", stage <> "Lost") or the
-// argument of ISBLANK: the one way a number formula reads a text metric.
-// The comparison's result is a number (TRUE 1, FALSE 0), so a count of
-// accepted months is SUM(IF(chk_status = "OK", 1, 0)) over the text the
-// workbook shows — before, it needed a numeric twin of the status
-// (restaurant model, 2026-10-31). Anywhere else (arithmetic, a function
-// argument, LOOKUP) the text would read as 0.
-func textComparedOnly(node formula.Node, name string) bool {
-	ok := true
-	var walk func(n formula.Node, allowed bool)
-	walk = func(n formula.Node, allowed bool) {
+// textInArithmetic reports whether name — a text metric — is an operand of
+// arithmetic in node (+, -, *, /, ^, a unary minus) or a condition by itself
+// (IF(chk_status, 1, 0)): there its text can only be #VALUE! or a wrong
+// truth. A number formula reads a text metric everywhere else at the cell:
+// compared (chk_status = "OK", the restaurant model's count of accepted
+// months, 2026-10-31), joined with & ("W" & week_code), as a function's
+// argument (LEN, LEFT, VALUE, TEXT) or a LOOKUP member (LOOKUP(drv, week,
+// week_code)) — the 13-week cash model repeated TEXT(start, "yyyy-mm-dd") in
+// every LOOKUP while the code was a metric of its own (2026-11-20).
+func textInArithmetic(node formula.Node, name string) bool {
+	found := false
+	direct := func(n formula.Node) bool {
+		id, ok := n.(*formula.Ident)
+		return ok && strings.EqualFold(id.Name, name)
+	}
+	var walk func(n formula.Node)
+	walk = func(n formula.Node) {
 		switch v := n.(type) {
-		case *formula.Ident:
-			if strings.EqualFold(v.Name, name) && !allowed {
-				ok = false
-			}
 		case *formula.BinaryExpr:
-			cmp := false
 			switch v.Op {
-			case "=", "<>", "<", "<=", ">", ">=":
-				cmp = true
+			case "+", "-", "*", "/", "^":
+				if direct(v.Left) || direct(v.Right) {
+					found = true
+				}
 			}
-			walk(v.Left, cmp)
-			walk(v.Right, cmp)
+			walk(v.Left)
+			walk(v.Right)
 		case *formula.UnaryExpr:
-			walk(v.Expr, false)
-		case *formula.CallExpr:
-			// VALUE reads its number ("2027"), from the text itself or a
-			// part of it (VALUE(RIGHT(plan_year, 4))): within it the text
-			// is read as text.
-			if strings.EqualFold(v.Name, "VALUE") {
-				return
+			if direct(v.Expr) {
+				found = true
 			}
-			isBlank := strings.EqualFold(v.Name, "ISBLANK")
+			walk(v.Expr)
+		case *formula.CallExpr:
+			// IF / IFS take a condition: the text alone there is no truth.
+			if (strings.EqualFold(v.Name, "IF") || strings.EqualFold(v.Name, "IFS")) && len(v.Args) > 0 && direct(v.Args[0]) {
+				found = true
+			}
 			for _, a := range v.Args {
-				walk(a, isBlank)
+				walk(a)
 			}
 		}
 	}
-	walk(node, false)
-	return ok
+	walk(node)
+	return found
 }

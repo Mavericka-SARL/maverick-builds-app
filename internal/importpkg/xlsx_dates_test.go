@@ -50,6 +50,13 @@ func TestXLSXDateCellsReadAsISODates(t *testing.T) {
 	if v, ok := dateSerial("2020-01-02T09:30:00"); !ok || v != 43832.395833333 {
 		t.Errorf("dateSerial(2020-01-02T09:30) = %v, %v", v, ok)
 	}
+	// An ISO date cell (t="d") arrives as written: with milliseconds and Z,
+	// or an offset; its wall-clock date is the serial (2026-11-20).
+	for _, iso := range []string{"2026-10-19T00:00:00.000Z", "2026-10-19T00:00:00Z", "2026-10-19T00:00:00+02:00", "2026-10-19 00:00:00"} {
+		if v, ok := dateSerial(iso); !ok || v != 46314 {
+			t.Errorf("dateSerial(%s) = %v, %v; want 46314", iso, v, ok)
+		}
+	}
 	if _, ok := dateSerial("Jan"); ok {
 		t.Error("dateSerial read text that is no date")
 	}

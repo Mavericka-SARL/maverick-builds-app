@@ -156,4 +156,43 @@ func TestCancelRunningWorkflowInstance(t *testing.T) {
 	if notes := cancelNotes(f.devID, inst); len(notes) != 1 {
 		t.Errorf("the override told the starter %d time(s), want once", len(notes))
 	}
+
+	// Steps the run has not reached, and steps nobody is assigned to (a
+	// notification, a condition), tell nobody: a run waiting at its first
+	// approval, with a later approval for developers and a notification
+	// after, told everyone in the tenant (2026-11-20).
+	steps, _ = json.Marshal([]map[string]any{
+		{"id": "a1", "name": "Approve", "type": "approval", "assignee_roles": []string{"business_admin"},
+			"routes": map[string]string{"approve": "a2", "reject": "end-rejected"}},
+		{"id": "a2", "name": "Approve again", "type": "approval", "assignee_roles": []string{"developer"},
+			"routes": map[string]string{"approve": "n1", "reject": "end-rejected"}},
+		{"id": "n1", "name": "Tell", "type": "notification",
+			"notification": map[string]any{"recipient_type": "requester", "subject": "Done", "message": "Done."},
+			"routes":       map[string]string{"sent": "end-completed"}},
+	})
+	def2, err := ws.CreateWorkflowDefFull(ctx, f.appID, "", "Two approvals", "", "manual", f.devID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.UpdateWorkflowDefFull(ctx, def2.ID, def2.Name, def2.Description, def2.TriggerEvent, "none", f.devID, steps, []byte("[]"), []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.PublishWorkflowDef(ctx, def2.ID, f.devID); err != nil {
+		t.Fatal(err)
+	}
+	rule2, err := ws.CreateAutomationRule(ctx, f.appID, "", "Start two approvals", "", "manual", "", def2.ID, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex2, err := ws.TriggerRule(ctx, rule2.ID, f.devID, nil)
+	if err != nil || ex2.InstanceID == "" {
+		t.Fatalf("trigger: %v %+v", err, ex2)
+	}
+	inst = ex2.InstanceID
+	if status, body := f.do(t, "POST", "/api/workflow/instances/"+inst+"/cancel", f.devSub, nil); status != http.StatusOK || body["notified"] != float64(1) {
+		t.Fatalf("cancel at the first of two approvals: %d %v, want the one waiting assignee told", status, body)
+	}
+	if notes := cancelNotes(f.baID, inst); len(notes) != 1 {
+		t.Errorf("the waiting approval's assignee got %d notification(s), want one", len(notes))
+	}
 }

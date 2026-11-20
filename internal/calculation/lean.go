@@ -159,7 +159,7 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 			if firstErr == nil {
 				firstErr = err
 			}
-			s.log.Warn().Err(err).Str("metric", def.Name).Msg("per-combo eval failed")
+			s.log.Debug().Err(err).Str("metric", def.Name).Msg("per-combo eval failed") // the pass logs one summary
 			return
 		}
 		leaves.add(at, v)

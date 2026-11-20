@@ -64,6 +64,11 @@ type DimEvalContext struct {
 	// the source) the implementer returns CodeConflictingDimensions, never
 	// a value.
 	Resolve func(metric string, overrides map[string]string) (value float64, found bool, err *FormulaError)
+	// Text reads a text metric at the coordinates, as Resolve reads a
+	// number: isText false for a metric that is not text (nil: none is).
+	// A text metric as a criteria range — COUNTIFS(status_note, "Late*") —
+	// matches its text (2026-11-20; owner decision 2026-10-06).
+	Text func(metric string, overrides map[string]string) (text string, isText bool)
 	// NoValue reports, for a read Resolve did not find, whether the source
 	// has no value at the overridden coordinates by its own rules (time
 	// summary none over several periods, aggregation none above its
@@ -740,6 +745,18 @@ func metricCriteriaMatch(d *DimEvalContext, crits []evaluatedCriterion, override
 						own[k] = code
 					}
 				}
+			}
+		}
+		if d.Text != nil {
+			if text, isText := d.Text(c.rng.dim, own); isText {
+				candidate := BlankVal()
+				if text != "" {
+					candidate = StringVal(text)
+				}
+				if !c.crit.matches(candidate) {
+					return false, nil
+				}
+				continue
 			}
 		}
 		v, found, ferr := d.Resolve(c.rng.dim, own)

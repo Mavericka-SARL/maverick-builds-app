@@ -1754,7 +1754,16 @@ func (ps *Poster) WorkflowRecordStatus(ctx context.Context, recordID, status, by
 		return
 	}
 	bgCtx := context.WithoutCancel(ctx)
-	go func() { _ = ps.Apply(bgCtx, recordID, formID, status, nil, byUserID) }()
+	if writeguard.DecidingRun(ctx) != "" {
+		// The run deciding the record keeps what it approved right after
+		// (approvalsnap.Take): its own re-posting is part of that, so it is
+		// made first. In the background it landed after the snapshot, and
+		// the run's own decision read as "changed since approval" (a
+		// deferral's open request date, withdrawn once approved; 2026-11-20).
+		_ = ps.Apply(bgCtx, recordID, formID, status, nil, byUserID)
+	} else {
+		go func() { _ = ps.Apply(bgCtx, recordID, formID, status, nil, byUserID) }()
+	}
 	appID, _ := ps.appOfForm(ctx, formID)
 	auditlog.Log(ctx, ps.db(ctx), ps.Log, auditlog.Fields{
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordUpdated,

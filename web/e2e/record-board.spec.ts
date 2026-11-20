@@ -108,7 +108,7 @@ test.describe("board widget", () => {
     await expect(qual.locator(".mvx-board__column-count")).toHaveText("2");
     // The total reads whole; its title has it in full.
     await expect(qual.locator(".mvx-board__column-sum")).toHaveText("1,050");
-    await expect(qual.locator(".mvx-board__column-sum")).toHaveAttribute("title", "Deal Value total: 1,050.00");
+    await expect(qual.locator(".mvx-board__column-sum")).toHaveAttribute("title", "Deal Value total: 1,050"); // a large amount is written whole (shownDecimals)
     await expect(qual.getByRole("article", { name: "Big" })).toContainText("Acme");
     // A next action whose date has passed reads as overdue.
     await expect(qual.getByRole("article", { name: "Big" }).locator(".mvx-overdue")).toContainText("overdue");

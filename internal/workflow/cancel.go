@@ -71,8 +71,11 @@ func (s *Store) CancelInstance(ctx context.Context, instanceID, userID, reason s
 		return nil, ErrInstanceNotRunning
 	}
 
-	// Who holds the open steps, read before they are withdrawn.
-	recipients, err := stepRecipients(ctx, tx, instanceID, `ws.status IN ('pending', 'in_progress')`)
+	// Who holds the open steps, read before they are withdrawn: the steps
+	// waiting for a person. Steps the run has not reached are created
+	// pending; counting them told the later approvers, and every step with
+	// no roles (a notification, a condition) everyone in scope (2026-11-20).
+	recipients, err := stepRecipients(ctx, tx, instanceID, `ws.status = 'in_progress'`)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +201,10 @@ type querier interface {
 
 // stepRecipients resolves who a run's steps matching where were assigned to:
 // the named assignee, else everyone the step's roles assign it to (as the
-// inbox and the reminders resolve them).
+// inbox and the reminders resolve them). A step with neither — a
+// notification, a condition, a join — was assigned to nobody: an empty role
+// list reads as "everyone in scope" to assignee.SQL, so such a step told the
+// whole tenant of a cancel or a reopen (2026-11-20).
 func stepRecipients(ctx context.Context, tx querier, instanceID, where string, args ...any) (map[string]bool, error) {
 	recipients := map[string]bool{}
 	rows, err := tx.Query(ctx, `
@@ -213,7 +219,11 @@ func stepRecipients(ctx context.Context, tx querier, instanceID, where string, a
 		JOIN identity.user u ON u.id = ws.assignee_user_id
 		    OR (ws.assignee_user_id IS NULL
 		        AND `+assignee.SQL("wd.application_id", "COALESCE(step_def.elem->'assignee_roles', '[]'::jsonb)", "u.id")+`)
-		WHERE ws.instance_id = $1::uuid AND `+where, append([]any{instanceID}, args...)...)
+		WHERE ws.instance_id = $1::uuid
+		  AND (ws.assignee_user_id IS NOT NULL
+		       OR jsonb_array_length(CASE WHEN jsonb_typeof(step_def.elem->'assignee_roles') = 'array'
+		                                  THEN step_def.elem->'assignee_roles' ELSE '[]'::jsonb END) > 0)
+		  AND `+where, append([]any{instanceID}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve assignees: %w", err)
 	}

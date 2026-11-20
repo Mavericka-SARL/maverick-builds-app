@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	workflowv1 "github.com/mavericks-engine/mavericks/gen/go/workflow/v1"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
 // RecordStatusFunc sets a record's status on a workflow run's behalf, as
@@ -182,7 +183,7 @@ func (s *Store) driveRecords(ctx context.Context, instanceID, event, byUserID st
 		if event == runCancelled && s.otherRunOpen(ctx, instanceID, id) {
 			continue
 		}
-		s.recordStatus(ctx, id, target, byUserID)
+		s.recordStatus(writeguard.WithDecidingRun(ctx, instanceID), id, target, byUserID)
 	}
 }
 

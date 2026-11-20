@@ -813,6 +813,8 @@ components:
         format_property:      { type: string, description: "The dimension's text property whose value at a member — percentage, number or currency — is the number format of every cell at that member, and what a calculated member's METRICFORMAT() reads there; \"\" for none" }
         editor_roles: { type: array, items: { type: string }, description: "Business roles that may add, change and delete its members and properties (with the application's administrators); empty: every user who may" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
+        members_omitted: { type: boolean, description: "In a grid read's all_dimensions: this dimension (more than 200 members, unrelated to the grid) is sent without its members; meta_only=1 or all_members=1 carries them" }
+        member_count:    { type: integer, description: "With members_omitted: how many members the dimension has" }
 
     GridAccessRules:
       type: object
@@ -9360,6 +9362,81 @@ paths:
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+
+  /api/time-window:
+    get:
+      operationId: getTimeWindow
+      tags: [Dashboards]
+      summary: The periods of a rolling window — from the period holding a metric's date, N periods
+      description: >-
+        What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the one
+        whose dates hold (or follow) the date the metric holds at no dimension, `before` periods ahead of it
+        and `periods` in all from it. `codes` is null while the metric holds no date.
+      parameters:
+        - { name: revision_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: dimension_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: from_metric_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: periods, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 400 } }
+        - { name: before, in: query, schema: { type: integer, minimum: 0, maximum: 400 } }
+      responses:
+        "200":
+          description: The window's period codes, in order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codes: { type: array, nullable: true, items: { type: string } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/business-admin/freeze-values:
+    post:
+      operationId: freezeBAValues
+      tags: [Business Admin]
+      summary: Freeze metrics' current values, calculated or typed, into input metrics
+      description: >-
+        In the live revision of the model the caller has open, each pair's `from` metric is read
+        as it is now (the grid's own read, the caller's access: a withheld value refuses the freeze)
+        and written into its `to` input metric as a typed value (access rules, workflow locks, closed
+        and posted cells), all or nothing. Every dimension of `to` is pinned in `at` or shared with
+        `from` (then every leaf member of it is frozen); a dimension only `from` has is pinned or read
+        at its total. A workflow approval step freezes the same way with `on_approve.freeze`, its `at`
+        values `{key}` taken from the run's context. At most 20,000 values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairs]
+              properties:
+                pairs:
+                  type: array
+                  items:
+                    type: object
+                    required: [from, to]
+                    properties:
+                      from: { type: string, description: A metric id or name }
+                      to:   { type: string, description: An input metric id or name }
+                at:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: "Dimension id or name → member code"
+                dry_run: { type: boolean }
+      responses:
+        "200":
+          description: Values frozen (or, on a dry run, that would be)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cells:   { type: integer }
+                  dry_run: { type: boolean }
+                  values:  { type: array, items: { type: object, additionalProperties: true } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/ai/sessions:
     get:

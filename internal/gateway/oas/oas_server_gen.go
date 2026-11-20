@@ -734,6 +734,18 @@ type Handler interface {
 	//
 	// POST /api/developer/grids/{id}/sample-values
 	FillSampleValues(ctx context.Context, req *FillSampleValuesReq, params FillSampleValuesParams) (FillSampleValuesRes, error)
+	// FreezeBAValues implements freezeBAValues operation.
+	//
+	// In the live revision of the model the caller has open, each pair's `from` metric is read as it is
+	// now (the grid's own read, the caller's access: a withheld value refuses the freeze) and written
+	// into its `to` input metric as a typed value (access rules, workflow locks, closed and posted
+	// cells), all or nothing. Every dimension of `to` is pinned in `at` or shared with `from` (then
+	// every leaf member of it is frozen); a dimension only `from` has is pinned or read at its total. A
+	// workflow approval step freezes the same way with `on_approve.freeze`, its `at` values `{key}`
+	// taken from the run's context. At most 20,000 values.
+	//
+	// POST /api/business-admin/freeze-values
+	FreezeBAValues(ctx context.Context, req *FreezeBAValuesReq) (FreezeBAValuesRes, error)
 	// GenerateDimensionPeriods implements generateDimensionPeriods operation.
 	//
 	// Bulk-generate a time dimension's periods between two dates (same validation and chronological
@@ -978,6 +990,14 @@ type Handler interface {
 	//
 	// GET /api/admin/ai-settings
 	GetTenantAISettings(ctx context.Context) (GetTenantAISettingsRes, error)
+	// GetTimeWindow implements getTimeWindow operation.
+	//
+	// What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the
+	// one whose dates hold (or follow) the date the metric holds at no dimension, `before` periods ahead
+	// of it and `periods` in all from it. `codes` is null while the metric holds no date.
+	//
+	// GET /api/time-window
+	GetTimeWindow(ctx context.Context, params GetTimeWindowParams) (GetTimeWindowRes, error)
 	// GetUsage implements getUsage operation.
 	//
 	// Per-tenant usage — every tenant for a platform admin, their own for a tenant admin

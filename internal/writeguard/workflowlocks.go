@@ -113,8 +113,32 @@ const LastApprovalJoinSQL = `
 // run that locks its scope for good (see the terminalApproved rule below).
 const ReopenableSQL = `COALESCE(wi.status::text = 'completed' AND ws.decision = 'approve', false)`
 
+type decidingRunKey struct{}
+
+// WithDecidingRun marks ctx as the work of run instanceID deciding the
+// record it is about: that run's own lock does not refuse, or keep out, the
+// record's move to the status it decides. A run whose Dimension member field
+// names the item its record posts into (a deferral request naming its
+// payment) locks that item while its approval is open; the approval's check
+// that the record can post as approved, and the posting itself, used to be
+// refused by that lock — the run could never be approved (2026-11-20). Every
+// other run's lock still refuses.
+func WithDecidingRun(ctx context.Context, instanceID string) context.Context {
+	if instanceID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, decidingRunKey{}, instanceID)
+}
+
+// DecidingRun is the run WithDecidingRun named, "" when none.
+func DecidingRun(ctx context.Context) string {
+	id, _ := ctx.Value(decidingRunKey{}).(string)
+	return id
+}
+
 // loadWorkflowLocks reads the workflow instances of modelID's application,
-// newest first, as locks.
+// newest first, as locks — but for the run ctx is deciding for
+// (WithDecidingRun).
 func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]workflowLock, error) {
 	var appID string
 	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID); err != nil {
@@ -138,8 +162,9 @@ func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]work
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 	`+LastApprovalJoinSQL+`
 		WHERE wd.application_id = $1::uuid
+		  AND ($2 = '' OR wi.id::text <> $2)
 		ORDER BY wi.started_at DESC
-	`, appID)
+	`, appID, DecidingRun(ctx))
 	if err != nil {
 		return nil, err
 	}

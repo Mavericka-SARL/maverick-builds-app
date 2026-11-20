@@ -266,7 +266,7 @@
 <p>Where one dimension is a parent of another (a Region dimension above Country) or groups another by a property (an Area dimension over employees by their <code>area</code> property), a reference across them resolves through that relation; see the Developer Manual, Dimensions.</p>
 
 <h3>What a result can be</h3>
-<p>Every stored result is a <b>number</b>. TRUE and FALSE are stored as 1 and 0; a blank result stores nothing (the cell stays empty, and it is left out of totals); a text result is an error (<code>#VALUE!</code>). Text functions are therefore used <i>inside</i> a formula, in comparisons, criteria and member codes, not as its final result. The metric's <b>Format</b> (number, percentage, currency) only changes how the number is shown.</p>
+<p>Every stored result is a <b>number</b>. TRUE and FALSE are stored as 1 and 0; a blank result stores nothing (the cell stays empty, and it is left out of totals) — an empty text, <code>""</code>, is a blank result, so <code>IF(condition, value, "")</code> leaves the cell empty where the condition is false; another text result is an error (<code>#VALUE!</code>) except in a metric of format Text. Text functions are therefore used <i>inside</i> a formula, in comparisons, criteria and member codes, not as its final result. The metric's <b>Format</b> (number, percentage, currency) only changes how the number is shown.</p>
 
 <h2 id="syntax">3. Syntax</h2>
 <pre>=revenue - cost
@@ -386,6 +386,24 @@
 <tr><td>IF(close_date = "", 1, 0)</td><td>the same, Excel's way</td><td>1 or 0</td></tr>
 <tr><td>ISBLANK(units)</td><td>units entered as 0</td><td>FALSE</td></tr></table></div>
 
+<div class="fn"><h4><span class="sig" id="fn-ISNUMBER">ISNUMBER(value)</span> · ISTEXT(value) · ISERROR(value) · ISNA(value)</h4>
+<p>As in Excel: ISNUMBER is TRUE for a number (a date is one), ISTEXT for a text, ISERROR for any error, ISNA for <code>#N/A</code> only. A blank is none of them.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISNUMBER(expected_date), expected_date, start_date)</td><td>a date when one is entered</td><td>a date</td></tr>
+<tr><td>ISNA(LOOKUP(sales, region, "XX"))</td><td>a missing member</td><td>TRUE</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig" id="fn-NA">NA()</span></h4>
+<p>The <code>#N/A</code> error, as Excel's: it passes through everything that reads it, and IFNA / ISNA catch it. A cell holding it shows as failed. <b>For a cell that should hold no value</b>, return an empty text instead: <code>IF(condition, value, "")</code> leaves the cell blank (stored as nothing, left out of totals and charts, ISBLANK TRUE). <code>IF(condition, value)</code> without an else gives FALSE, stored as 0, as in Excel.</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(ISBLANK(rate), NA(), amount * rate)</td><td>flags a missing input</td><td>#N/A or the amount</td></tr>
+<tr><td>IF(shortfall > 0, week_start, "")</td><td>a date only where there is a shortfall</td><td>a date or blank</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig" id="fn-CHOOSE">CHOOSE(index, value1, value2, …)</span></h4>
+<p>The value at position <i>index</i> (truncated to a whole number); only that value is evaluated. An index below 1 or past the values is <code>#VALUE!</code>. On a grid with a dimension, a member or a property picks more readably (<code>scenario</code>, LOOKUP).</p>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>CHOOSE(case_no, base_sales, upside_sales, downside_sales)</td><td>the workbook's scenario switch</td><td>one of the three</td></tr>
+<tr><td>CHOOSE(4, 10, 20, 30)</td><td>past the values</td><td>#VALUE!</td></tr></table></div>
+
 <div class="fn"><h4><span class="sig" id="fn-SWITCH">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
 <p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
 <table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
@@ -452,6 +470,8 @@
 <tr><td class="sig" id="fn-EOMONTH">EOMONTH(d, months)</td><td>The last day of the month <i>months</i> away.</td><td><code>EOMONTH(DATE(2026, 1, 31), 0)</code> = 2026-01-31, <code>EOMONTH(DATE(2024, 1, 31), 1)</code> = 2024-02-29</td></tr>
 <tr><td class="sig" id="fn-DAYSINMONTH">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
 <tr><td class="sig" id="fn-DAYSINYEAR">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
+<tr><td class="sig" id="fn-WEEKDAY">WEEKDAY(date [, return_type])</td><td>The day of the week, as Excel: type 1 (default) Sunday = 1 … Saturday = 7; 2 Monday = 1 … Sunday = 7; 3 Monday = 0 … Sunday = 6; 11–17 the week starting Monday … Sunday = 1. Another type is <code>#NUM!</code>.</td><td><code>d - WEEKDAY(d, 2) + 1</code> is the Monday of d's week</td></tr>
+<tr><td class="sig" id="fn-WEEKNUM">WEEKNUM(date [, return_type]) · ISOWEEKNUM(date)</td><td>The week of the year, week 1 holding 1 January, weeks starting Sunday (type 1, default), Monday (2) or the type's day (11–17); type 21 and ISOWEEKNUM are the ISO 8601 week (week 1 holds the year's first Thursday).</td><td><code>ISOWEEKNUM(DATE(2027, 1, 1))</code> = 53</td></tr>
 </table>
 <p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start. A text calculation is evaluated per period too: <code>IF(MONTH(START()) = 1, "Opening", "")</code> labels each January.</p>
 
@@ -570,7 +590,7 @@
 <tr><td>IF(act_status = "Cancelled", 0, strat)</td><td>on <code>[activity]</code>: the cell's own status</td><td>0 for A2</td></tr>
 <tr><td>IF(by_region &gt; 12, "Review", "Within_Range")</td><td>a calculated pick-list over a status dimension</td><td>Review for US</td></tr>
 </table>
-<p>A metric range ranges over every dimension of its metric — like a criterion on each — and, being read at other members, is a dependency of the formula: changing an activity's Region recalculates the total. A numeric metric can be a range too: <code>SUMIFS(sales, sales, "&gt;=100")</code>.</p>
+<p>A metric range ranges over every dimension of its metric — like a criterion on each — and, being read at other members, is a dependency of the formula: changing an activity's Region recalculates the total. A numeric metric can be a range too: <code>SUMIFS(sales, sales, "&gt;=100")</code>, and so can a text metric, matched by its text: <code>COUNTIFS(act_note, "Late*")</code> counts the rows whose note starts with Late (not beside a time function).</p>
 <p>Two readings to tell apart on a cell that carries every dimension of the source — say a Region × Product grid. <code>SUMIFS(weighted_base, Region, Region)</code> keeps the cell's own Product too, so it is the cell's own value, not the region's total; the region's total over products is <code>LOOKUP(weighted_base, Product, "All Products")</code>, the source at the products' total member. The AI Developer's plan check warns of the first.</p>
 
 
@@ -756,7 +776,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
 <tr><td><code>IF(product = "P1", 1, 0)</code> in a metric on a <i>[region, month]</i> grid</td><td>DIMENSION_NOT_ON_METRIC: … reads product at the cell (product), but product is not one of its grid's dimensions (month, region), so it is blank at every cell</td><td>Put product on the grid, or read it through a dimension the grid has (<code>region.segment</code> for a grouping of region)</td></tr>
-<tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it only in a comparison or ISBLANK at the cell</td><td>Compare it: <code>IF(act_comment = "", 0, 1)</code> counts the commented rows, <code>IF(chk_status = "OK", 1, 0)</code> the accepted months (not beside a time function)</td></tr>
+<tr><td><code>act_comment * 2</code>, <code>LOOKUP(act_comment, region, "DE")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it at the cell — compared, joined with &amp;, in a function such as LEN or VALUE, as a LOOKUP member — or as a criteria range; not in arithmetic, as the source of LOOKUP or *IFS, nor beside a time function</td><td>Compare it (<code>IF(act_comment = "", 1, 0)</code>), count it (<code>COUNTIFS(act_comment, "&lt;&gt;")</code>) or read a number from it (<code>VALUE(act_comment)</code>)</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
 <tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>
@@ -825,6 +845,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-AVERAGEIF">AVERAGEIF</a></td><td>AVERAGEIF(range, criterion, source)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-AVERAGEIFS">AVERAGEIFS</a></td><td>AVERAGEIFS(source, range, criterion, …)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-CEILING">CEILING</a></td><td>CEILING(x, significance)</td><td>Up to a multiple</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-CHOOSE">CHOOSE</a></td><td>CHOOSE(index, value1, value2, …)</td><td>The index-th value</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-CONCAT">CONCAT</a></td><td>CONCAT(a, b, …)</td><td>Joins text</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-COUNT">COUNT</a></td><td>COUNT(a, b, …)</td><td>How many are numbers or TRUE/FALSE</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-COUNTA">COUNTA</a></td><td>COUNTA(a, b, …)</td><td>How many are not blank</td><td><a href="#aggregates">8</a></td></tr>
@@ -849,6 +870,11 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-IFS">IFS</a></td><td>IFS(condition, value, …)</td><td>First true condition</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-INT">INT</a></td><td>INT(x)</td><td>Rounds down to a whole number</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ISBLANK">ISBLANK</a></td><td>ISBLANK(value)</td><td>No value entered</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISERROR</a></td><td>ISERROR(value)</td><td>Any error</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISNA</a></td><td>ISNA(value)</td><td>#N/A only</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISNUMBER</a></td><td>ISNUMBER(value)</td><td>A number (a date is one)</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-WEEKNUM">ISOWEEKNUM</a></td><td>ISOWEEKNUM(date)</td><td>ISO 8601 week</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISTEXT</a></td><td>ISTEXT(value)</td><td>A text</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-LAG">LAG</a></td><td>LAG(x, n, substitute [, mode])</td><td>x n periods back</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>
@@ -866,6 +892,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-MONTHTODATE">MONTHTODATE</a></td><td>MONTHTODATE(x)</td><td>Sum from the month start (daily axis)</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">MONTHVALUE</a></td><td>MONTHVALUE(metric)</td><td>The metric over the whole month (daily axis)</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MOVINGSUM">MOVINGSUM</a></td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NA">NA</a></td><td>NA()</td><td>The #N/A error</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-NEXT">NEXT</a></td><td>NEXT(x)</td><td>x one period ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-NOT">NOT</a></td><td>NOT(a)</td><td>Inverts</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-OFFSET">OFFSET</a></td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td><a href="#time">14</a></td></tr>
@@ -893,6 +920,8 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-VALUE">VALUE</a></td><td>VALUE(text)</td><td>A text as a number</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-WEEKDAY">WEEKDAY</a></td><td>WEEKDAY(date [, return_type])</td><td>Day of the week</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-WEEKNUM">WEEKNUM</a></td><td>WEEKNUM(date [, return_type])</td><td>Week of the year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>

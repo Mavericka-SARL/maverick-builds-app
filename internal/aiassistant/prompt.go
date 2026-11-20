@@ -252,7 +252,9 @@ current period's fiscal year/half/quarter/month, reduced by m's time_summary (th
 finer than that level, so MONTHVALUE needs day periods) — TIMESUM(x[, "start", "end"[, SUM|AVERAGE|MIN|MAX]])
 over the leaf periods from one period code to another (codes quoted; an aggregate such as "H1" means its
 first/last leaf; no range = all periods), and START()/END() (the current period's first/last date).
-DAYSINMONTH(year, month) and DAYSINYEAR(year) are plain date functions that need no time dimension.
+DAYSINMONTH(year, month) and DAYSINYEAR(year) are plain date functions that need no time dimension, as are
+WEEKDAY(date[, type]), WEEKNUM(date[, type]) and ISOWEEKNUM(date) (Excel's return types). CHOOSE, ISNUMBER, ISTEXT,
+ISERROR, ISNA and NA() work as in Excel; IF(c, x, "") leaves a cell blank (IF(c, x) without else stores 0).
 A LAG/LEAD/OFFSET offset may be any expression that evaluates to a whole number (e.g. LAG(revenue,
 lag_months, 0)); a non-whole result is a cell error. MOVINGSUM windows stay integer literals, and inside
 an opening/closing recurrence the offset must be a literal too. A prior-period value is
@@ -377,16 +379,17 @@ placed on a grid that has region — always add the add_grid_metric step.
 ## Text cells, highlights and lists users keep
 - A TEXT input (create_metric "format": "text", "is_input": true) holds a note in each cell — a per-row comment,
   an owner, a free label. It has no total (agg_rule and time_summary "none", the defaults); a number formula reads
-  it only in a comparison or ISBLANK at the cell (IF(owner = "Finance", 1, 0)), never in arithmetic, a function,
-  LOOKUP or beside a time function (TEXT_METRIC_IN_FORMULA). A workbook's comment column is a text input on the grid where the row lives; write
+  it at the cell — compared (IF(owner = "Finance", 1, 0)), joined with &, in a function (LEN, LEFT, VALUE), as a
+  LOOKUP member (LOOKUP(drv, week, week_code)) — or as a criteria range (COUNTIFS(note, "Late*")); never in
+  arithmetic, as the source of LOOKUP or *IFS, or beside a time function (TEXT_METRIC_IN_FORMULA). A workbook's comment column is a text input on the grid where the row lives; write
   its values with write_input_values "value": "the text", or import them with the sheet.
 - A TEXT calculation (create_metric "format": "text", "is_input": false, "formula": ...) shows the text its formula
   gives — a key built as ID & "|" & TYPE, a status word from IF. Use it for a workbook column whose formula gives
   text instead of labelling rows by hand. It has no total (agg_rule "none", the default) or its formula at every
   total ("formula"). It may read text inputs and other text calculations by name at the cell (an ID typed as a
-  text input & "|" & a pick-list); a number formula compares a text at the cell — the workbook's
-  COUNTIF(status, "OK") of accepted months is IF(chk_status = "OK", 1, 0) summed over time — and reads it no other way
-  (TEXT_METRIC_IN_FORMULA).
+  text input & "|" & a pick-list); a number formula reads a text at the cell or counts it as a criteria range — the
+  workbook's COUNTIF(status, "OK") over rows is COUNTIFS(chk_status, "OK"), over time IF(chk_status = "OK", 1, 0)
+  summed — never in arithmetic (TEXT_METRIC_IN_FORMULA).
 - Highlight rules tint a metric's cells, as a spreadsheet's conditional formatting does: create_metric /
   update_metric "highlight_rules": [{"op": ">", "value": 0.1 | "than": "<metric>", "abs": true, "metric":
   "<another metric at the same cell>", "tone": "negative" | "warning" | "positive" | "info"}]. op is > >= < <=
@@ -600,6 +603,10 @@ Keep what the workbook shows, not only what it computes:
   whole model, so the plan check refuses a formula that reads one.
 - "format_decimals" follows the workbook's number format (0.0 → 1, 0.00 → 2, 0.0% → 1); left out it is 2 for a
   number, currency or percentage. Never 0 for an amount or rate that has decimals: 0.3 (USD m) would show as 0.
+  Grids, tiles, lists and charts write any value of 1,000 or more whole whatever the decimals (€20,418,650, not
+  €20,418,650.00); the decimals show on smaller values (rates, prices) and on amounts in thousands or millions.
+  Grids, tiles and lists write any value of 1,000 or more whole whatever the decimals (€20,418,650, not
+  €20,418,650.00); the decimals show on smaller values (rates, prices) and on amounts in thousands or millions.
 - A currency amount says its currency: "format_currency": "€" (the workbook's symbol, "£", "CHF" …); left out
   it is "$", and euros show as dollars.
 - Keep every guard the workbook's formula has: IF(d = 0, 0, n / d) where it divides by something that can be 0 (the

@@ -27,6 +27,58 @@ type Scheduler struct {
 	store *Store
 }
 
+// failureLog is the last failure logged for each partition. A metric that
+// fails the same way on every recalculation — a model still being built, a
+// first forecast week not set yet — was logged once per failing cell
+// ("per-combo eval failed") and once per pass ("calculation failed") on every
+// recalculation: about 5,000 lines in two minutes of a 13-week cash model
+// being loaded (2026-11-20). Now each cell is at debug, and a pass's summary
+// is an error the first time the partition fails that way, debug while it
+// keeps failing the same way, and an error again once its failure changes.
+var failureLog = struct {
+	sync.Mutex
+	last map[string]string
+}{last: map[string]string{}}
+
+// failureLogCap bounds failureLog: past it the memory starts again (each
+// partition's next failure is then logged once more).
+const failureLogCap = 50000
+
+// logFailure logs a partition's failed pass, once per distinct failure.
+func (s *Scheduler) logFailure(pk, metric string, err error) {
+	msg := failedSummary(err)
+	failureLog.Lock()
+	prev, seen := failureLog.last[pk]
+	if !seen && len(failureLog.last) >= failureLogCap {
+		failureLog.last = map[string]string{}
+	}
+	failureLog.last[pk] = msg
+	failureLog.Unlock()
+	if seen && prev == msg {
+		s.log.Debug().Err(err).Str("metric", metric).Msg("calculation still failing")
+		return
+	}
+	s.log.Error().Err(err).Str("metric", metric).Msg("calculation failed")
+}
+
+// forgetFailure clears a partition's remembered failure once it calculates.
+func forgetFailure(pk string) {
+	failureLog.Lock()
+	delete(failureLog.last, pk)
+	failureLog.Unlock()
+}
+
+// failedSummary is what makes two failures the same: the error without its
+// count of failing combos ("4/63 combos failed …" and "5/63 …" are one
+// failure whose reach moved).
+func failedSummary(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, " combos failed"); i > 0 {
+		return msg[i:]
+	}
+	return msg
+}
+
 func NewScheduler(log zerolog.Logger, store *Store) *Scheduler {
 	return &Scheduler{log: log, store: store}
 }
@@ -383,9 +435,10 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 			return s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs, incs[metricID])
 		})
 		if calcErr != nil {
-			s.log.Error().Err(calcErr).Str("metric", def.Name).Msg("calculation failed")
+			s.logFailure(pk, def.Name, calcErr)
 			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck
 		} else {
+			forgetFailure(pk)
 			s.store.MarkClean(ctx, pk) //nolint:errcheck
 		}
 	})
@@ -695,7 +748,7 @@ func (s *Scheduler) executePartition(
 			if firstErr == nil {
 				firstErr = err
 			}
-			s.log.Warn().Err(err).Str("metric", def.Name).Msg("per-combo eval failed")
+			s.log.Debug().Err(err).Str("metric", def.Name).Msg("per-combo eval failed") // the pass logs one summary
 			continue
 		}
 		results = append(results, CalcResultRow{DimMembers: combo, Value: v})

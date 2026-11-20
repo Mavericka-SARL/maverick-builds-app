@@ -754,6 +754,18 @@ type Invoker interface {
 	//
 	// POST /api/developer/grids/{id}/sample-values
 	FillSampleValues(ctx context.Context, request *FillSampleValuesReq, params FillSampleValuesParams) (FillSampleValuesRes, error)
+	// FreezeBAValues invokes freezeBAValues operation.
+	//
+	// In the live revision of the model the caller has open, each pair's `from` metric is read as it is
+	// now (the grid's own read, the caller's access: a withheld value refuses the freeze) and written
+	// into its `to` input metric as a typed value (access rules, workflow locks, closed and posted
+	// cells), all or nothing. Every dimension of `to` is pinned in `at` or shared with `from` (then
+	// every leaf member of it is frozen); a dimension only `from` has is pinned or read at its total. A
+	// workflow approval step freezes the same way with `on_approve.freeze`, its `at` values `{key}`
+	// taken from the run's context. At most 20,000 values.
+	//
+	// POST /api/business-admin/freeze-values
+	FreezeBAValues(ctx context.Context, request *FreezeBAValuesReq) (FreezeBAValuesRes, error)
 	// GenerateDimensionPeriods invokes generateDimensionPeriods operation.
 	//
 	// Bulk-generate a time dimension's periods between two dates (same validation and chronological
@@ -998,6 +1010,14 @@ type Invoker interface {
 	//
 	// GET /api/admin/ai-settings
 	GetTenantAISettings(ctx context.Context) (GetTenantAISettingsRes, error)
+	// GetTimeWindow invokes getTimeWindow operation.
+	//
+	// What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the
+	// one whose dates hold (or follow) the date the metric holds at no dimension, `before` periods ahead
+	// of it and `periods` in all from it. `codes` is null while the metric holds no date.
+	//
+	// GET /api/time-window
+	GetTimeWindow(ctx context.Context, params GetTimeWindowParams) (GetTimeWindowRes, error)
 	// GetUsage invokes getUsage operation.
 	//
 	// Per-tenant usage — every tenant for a platform admin, their own for a tenant admin
@@ -15266,6 +15286,122 @@ func (c *Client) sendFillSampleValues(ctx context.Context, request *FillSampleVa
 	return result, nil
 }
 
+// FreezeBAValues invokes freezeBAValues operation.
+//
+// In the live revision of the model the caller has open, each pair's `from` metric is read as it is
+// now (the grid's own read, the caller's access: a withheld value refuses the freeze) and written
+// into its `to` input metric as a typed value (access rules, workflow locks, closed and posted
+// cells), all or nothing. Every dimension of `to` is pinned in `at` or shared with `from` (then
+// every leaf member of it is frozen); a dimension only `from` has is pinned or read at its total. A
+// workflow approval step freezes the same way with `on_approve.freeze`, its `at` values `{key}`
+// taken from the run's context. At most 20,000 values.
+//
+// POST /api/business-admin/freeze-values
+func (c *Client) FreezeBAValues(ctx context.Context, request *FreezeBAValuesReq) (FreezeBAValuesRes, error) {
+	res, err := c.sendFreezeBAValues(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendFreezeBAValues(ctx context.Context, request *FreezeBAValuesReq) (res FreezeBAValuesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("freezeBAValues"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/business-admin/freeze-values"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, FreezeBAValuesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/business-admin/freeze-values"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeFreezeBAValuesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, FreezeBAValuesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeFreezeBAValuesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GenerateDimensionPeriods invokes generateDimensionPeriods operation.
 //
 // Bulk-generate a time dimension's periods between two dates (same validation and chronological
@@ -19646,6 +19782,192 @@ func (c *Client) sendGetTenantAISettings(ctx context.Context) (res GetTenantAISe
 
 	stage = "DecodeResponse"
 	result, err := decodeGetTenantAISettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetTimeWindow invokes getTimeWindow operation.
+//
+// What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the
+// one whose dates hold (or follow) the date the metric holds at no dimension, `before` periods ahead
+// of it and `periods` in all from it. `codes` is null while the metric holds no date.
+//
+// GET /api/time-window
+func (c *Client) GetTimeWindow(ctx context.Context, params GetTimeWindowParams) (GetTimeWindowRes, error) {
+	res, err := c.sendGetTimeWindow(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetTimeWindow(ctx context.Context, params GetTimeWindowParams) (res GetTimeWindowRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getTimeWindow"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/time-window"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetTimeWindowOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/time-window"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.RevisionID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "dimension_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "dimension_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.DimensionID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "from_metric_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "from_metric_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.FromMetricID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "periods" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "periods",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.IntToString(params.Periods))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "before" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "before",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Before.Get(); ok {
+				return e.EncodeValue(conv.IntToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetTimeWindowOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetTimeWindowResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

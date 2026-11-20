@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useReducer, useMemo } from "react";
+import { TimeWindowFields } from "./TimeWindowFields";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
-import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
+import { api, dimLabel, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
@@ -561,7 +562,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
 
   // Fetch the resolved grid data for the selected grid widget so DEFAULT VIEW shows
   // the same dimensions business users will see (getGrid redirects to the active revision).
-  const selectedGridRefId = selectedWidget?.widget_type === "grid" ? (selectedWidget.ref_id ?? "") : "";
+  const selectedGridRefId = selectedWidget?.widget_type === "grid" || selectedWidget?.widget_type === "chart" ? (selectedWidget.ref_id ?? "") : "";
   const { data: selectedGridData } = useQuery({
     queryKey: ["grid-preview", previewCtx?.revision_id, selectedGridRefId],
     queryFn: () => api.getGrid(previewCtx!.revision_id, selectedGridRefId),
@@ -1380,6 +1381,20 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             })()}
 
             {/* Row hierarchy — grid only */}
+            {(selectedWidget.widget_type === "grid" || selectedWidget.widget_type === "chart") && selectedGridData && (() => {
+              // A rolling window on the widget's time dimension (time_window).
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              const timeDims = (selectedGridData.dimensions ?? []).filter(d => d.dimension_type === "time").map(d => ({ id: d.id, label: dimLabel(d) }));
+              const dateMetrics = (metrics as Metric[]).filter(m => m.format === "date" && (m.dimension_ids ?? []).length === 0)
+                .map(m => ({ id: m.id, label: m.label || m.name }));
+              return (
+                <TimeWindowFields timeDims={timeDims} dateMetrics={dateMetrics} value={wp.time_window}
+                  onChange={v => {
+                    const wid = selectedWidget!.id;
+                    setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, time_window: v } } }));
+                  }} />
+              );
+            })()}
             {selectedWidget.widget_type === "grid" && (() => {
               const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
               return (

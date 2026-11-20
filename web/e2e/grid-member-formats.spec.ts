@@ -65,6 +65,6 @@ test("a member's own format formats its row; the others keep the metric's", asyn
   await loadAs(page, "dept_head");
   const row = (label: string) => page.locator("table").first().locator("tbody tr", { has: page.locator("td", { hasText: new RegExp(`^${label}$`) }) });
   await expect(row("Gross margin").locator("td").last()).toHaveText("35.0%", { timeout: 15_000 });
-  await expect(row("Revenue").locator("td").last()).toHaveText("21,612.0");
+  await expect(row("Revenue").locator("td").last()).toHaveText("21,612"); // 1,000 or more: written whole (shownDecimals)
   await expect(row("Headcount").locator("td").last()).toHaveText("66.0");
 });

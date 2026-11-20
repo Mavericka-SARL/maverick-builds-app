@@ -1,3 +1,4 @@
+import { shownDecimals } from "../shownDecimals";
 import type { GridChartConfig, GridChartType } from "../../api/client";
 
 // Series colours are design tokens so they follow the light/dark theme.
@@ -24,7 +25,8 @@ export function formatValue(value: number | null | undefined, format: string | u
     case "compact":
       return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value);
     default:
-      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+      // A large amount is written whole (shownDecimals).
+      return new Intl.NumberFormat(undefined, { maximumFractionDigits: shownDecimals(value, 2) }).format(value);
   }
 }
 

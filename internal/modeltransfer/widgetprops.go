@@ -167,6 +167,12 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 	}
 
 	remapKeys(dimMap, root, "show_members")
+	// A rolling window (grid and chart): the time dimension and the date metric
+	// it starts at (2026-11-20).
+	if win, ok := root["time_window"].(map[string]any); ok {
+		remapStr(dimMap, win, "dimension_id")
+		remapStr(metricMap, win, "from_metric_id")
+	}
 
 	if !changed {
 		return props, false

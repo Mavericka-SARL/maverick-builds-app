@@ -405,6 +405,9 @@ type dimReads struct {
 	// (storedReads.within), for the reads through fetch only: ctx itself
 	// when not known.
 	listed context.Context
+	// texts are the text dependencies' cells (dependency ID → dimKey →
+	// text), for a text metric read as a criteria range; nil: none.
+	texts map[string]map[string]string
 }
 
 type pinnedRead struct {
@@ -442,6 +445,32 @@ func (r *dimReads) context(combo map[string]string, useMemo bool) *formula.DimEv
 	d := r.meta.CellContext(combo)
 	d.Resolve = func(metric string, overrides map[string]string) (float64, bool, *formula.FormulaError) {
 		return r.resolve(combo, metric, overrides)
+	}
+	if r.texts != nil {
+		d.Text = func(metric string, overrides map[string]string) (string, bool) {
+			depID, ok := r.byName[strings.ToUpper(metric)]
+			if !ok {
+				return "", false
+			}
+			cells, isText := r.texts[depID]
+			if !isText {
+				return "", false
+			}
+			own := make(map[string]string, len(r.metricDims[depID]))
+			for name, code := range overrides {
+				if id, ferr := r.meta.dimID(name, combo); ferr == nil {
+					own[id] = code
+				}
+			}
+			for _, id := range r.metricDims[depID] {
+				if _, ok := own[id]; !ok {
+					if code, pinned := combo[id]; pinned {
+						own[id] = code
+					}
+				}
+			}
+			return cells[dimKey(own)], true
+		}
 	}
 	d.NoValue = func(metric string, overrides map[string]string) bool {
 		depID, srcDims, byID, ferr := r.target(combo, metric, overrides)

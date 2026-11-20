@@ -14371,6 +14371,139 @@ func (s *FormulaRefsRequest) SetFormula(val string) {
 	s.Formula = val
 }
 
+type FreezeBAValuesBadRequest Error
+
+func (*FreezeBAValuesBadRequest) freezeBAValuesRes() {}
+
+type FreezeBAValuesForbidden Error
+
+func (*FreezeBAValuesForbidden) freezeBAValuesRes() {}
+
+type FreezeBAValuesOK struct {
+	Cells  OptInt                       `json:"cells"`
+	DryRun OptBool                      `json:"dry_run"`
+	Values []FreezeBAValuesOKValuesItem `json:"values"`
+}
+
+// GetCells returns the value of Cells.
+func (s *FreezeBAValuesOK) GetCells() OptInt {
+	return s.Cells
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *FreezeBAValuesOK) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetValues returns the value of Values.
+func (s *FreezeBAValuesOK) GetValues() []FreezeBAValuesOKValuesItem {
+	return s.Values
+}
+
+// SetCells sets the value of Cells.
+func (s *FreezeBAValuesOK) SetCells(val OptInt) {
+	s.Cells = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *FreezeBAValuesOK) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetValues sets the value of Values.
+func (s *FreezeBAValuesOK) SetValues(val []FreezeBAValuesOKValuesItem) {
+	s.Values = val
+}
+
+func (*FreezeBAValuesOK) freezeBAValuesRes() {}
+
+type FreezeBAValuesOKValuesItem map[string]jx.Raw
+
+func (s *FreezeBAValuesOKValuesItem) init() FreezeBAValuesOKValuesItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type FreezeBAValuesReq struct {
+	Pairs []FreezeBAValuesReqPairsItem `json:"pairs"`
+	// Dimension id or name → member code.
+	At     OptFreezeBAValuesReqAt `json:"at"`
+	DryRun OptBool                `json:"dry_run"`
+}
+
+// GetPairs returns the value of Pairs.
+func (s *FreezeBAValuesReq) GetPairs() []FreezeBAValuesReqPairsItem {
+	return s.Pairs
+}
+
+// GetAt returns the value of At.
+func (s *FreezeBAValuesReq) GetAt() OptFreezeBAValuesReqAt {
+	return s.At
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *FreezeBAValuesReq) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// SetPairs sets the value of Pairs.
+func (s *FreezeBAValuesReq) SetPairs(val []FreezeBAValuesReqPairsItem) {
+	s.Pairs = val
+}
+
+// SetAt sets the value of At.
+func (s *FreezeBAValuesReq) SetAt(val OptFreezeBAValuesReqAt) {
+	s.At = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *FreezeBAValuesReq) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// Dimension id or name → member code.
+type FreezeBAValuesReqAt map[string]string
+
+func (s *FreezeBAValuesReqAt) init() FreezeBAValuesReqAt {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type FreezeBAValuesReqPairsItem struct {
+	// A metric id or name.
+	From string `json:"from"`
+	// An input metric id or name.
+	To string `json:"to"`
+}
+
+// GetFrom returns the value of From.
+func (s *FreezeBAValuesReqPairsItem) GetFrom() string {
+	return s.From
+}
+
+// GetTo returns the value of To.
+func (s *FreezeBAValuesReqPairsItem) GetTo() string {
+	return s.To
+}
+
+// SetFrom sets the value of From.
+func (s *FreezeBAValuesReqPairsItem) SetFrom(val string) {
+	s.From = val
+}
+
+// SetTo sets the value of To.
+func (s *FreezeBAValuesReqPairsItem) SetTo(val string) {
+	s.To = val
+}
+
 type GenerateDimensionPeriodsOK struct {
 	Created OptInt `json:"created"`
 }
@@ -16140,6 +16273,30 @@ type GetTenantAISettingsForbidden struct{}
 
 func (*GetTenantAISettingsForbidden) getTenantAISettingsRes() {}
 
+type GetTimeWindowBadRequest Error
+
+func (*GetTimeWindowBadRequest) getTimeWindowRes() {}
+
+type GetTimeWindowForbidden Error
+
+func (*GetTimeWindowForbidden) getTimeWindowRes() {}
+
+type GetTimeWindowOK struct {
+	Codes OptNilStringArray `json:"codes"`
+}
+
+// GetCodes returns the value of Codes.
+func (s *GetTimeWindowOK) GetCodes() OptNilStringArray {
+	return s.Codes
+}
+
+// SetCodes sets the value of Codes.
+func (s *GetTimeWindowOK) SetCodes(val OptNilStringArray) {
+	s.Codes = val
+}
+
+func (*GetTimeWindowOK) getTimeWindowRes() {}
+
 // GetUsageBadRequest is response for GetUsage operation.
 type GetUsageBadRequest struct{}
 
@@ -17699,6 +17856,11 @@ type GridDimension struct {
 	// administrators); empty: every user who may.
 	EditorRoles []string     `json:"editor_roles"`
 	Members     []Department `json:"members"`
+	// In a grid read's all_dimensions: this dimension (more than 200 members, unrelated to the grid) is
+	// sent without its members; meta_only=1 or all_members=1 carries them.
+	MembersOmitted OptBool `json:"members_omitted"`
+	// With members_omitted: how many members the dimension has.
+	MemberCount OptInt `json:"member_count"`
 }
 
 // GetID returns the value of ID.
@@ -17751,6 +17913,16 @@ func (s *GridDimension) GetMembers() []Department {
 	return s.Members
 }
 
+// GetMembersOmitted returns the value of MembersOmitted.
+func (s *GridDimension) GetMembersOmitted() OptBool {
+	return s.MembersOmitted
+}
+
+// GetMemberCount returns the value of MemberCount.
+func (s *GridDimension) GetMemberCount() OptInt {
+	return s.MemberCount
+}
+
 // SetID sets the value of ID.
 func (s *GridDimension) SetID(val uuid.UUID) {
 	s.ID = val
@@ -17799,6 +17971,16 @@ func (s *GridDimension) SetEditorRoles(val []string) {
 // SetMembers sets the value of Members.
 func (s *GridDimension) SetMembers(val []Department) {
 	s.Members = val
+}
+
+// SetMembersOmitted sets the value of MembersOmitted.
+func (s *GridDimension) SetMembersOmitted(val OptBool) {
+	s.MembersOmitted = val
+}
+
+// SetMemberCount sets the value of MemberCount.
+func (s *GridDimension) SetMemberCount(val OptInt) {
+	s.MemberCount = val
 }
 
 type GridDimensionDimensionType string
@@ -27432,6 +27614,52 @@ func (o OptFormRecord) Get() (v FormRecord, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptFormRecord) Or(d FormRecord) FormRecord {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFreezeBAValuesReqAt returns new OptFreezeBAValuesReqAt with value set to v.
+func NewOptFreezeBAValuesReqAt(v FreezeBAValuesReqAt) OptFreezeBAValuesReqAt {
+	return OptFreezeBAValuesReqAt{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFreezeBAValuesReqAt is optional FreezeBAValuesReqAt.
+type OptFreezeBAValuesReqAt struct {
+	Value FreezeBAValuesReqAt
+	Set   bool
+}
+
+// IsSet returns true if OptFreezeBAValuesReqAt was set.
+func (o OptFreezeBAValuesReqAt) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFreezeBAValuesReqAt) Reset() {
+	var v FreezeBAValuesReqAt
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFreezeBAValuesReqAt) SetTo(v FreezeBAValuesReqAt) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFreezeBAValuesReqAt) Get() (v FreezeBAValuesReqAt, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFreezeBAValuesReqAt) Or(d FreezeBAValuesReqAt) FreezeBAValuesReqAt {
 	if v, ok := o.Get(); ok {
 		return v
 	}

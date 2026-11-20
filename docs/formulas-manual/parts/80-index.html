@@ -8,6 +8,7 @@
 <tr><td><a href="#fn-AVERAGEIF">AVERAGEIF</a></td><td>AVERAGEIF(range, criterion, source)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-AVERAGEIFS">AVERAGEIFS</a></td><td>AVERAGEIFS(source, range, criterion, …)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-CEILING">CEILING</a></td><td>CEILING(x, significance)</td><td>Up to a multiple</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-CHOOSE">CHOOSE</a></td><td>CHOOSE(index, value1, value2, …)</td><td>The index-th value</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-CONCAT">CONCAT</a></td><td>CONCAT(a, b, …)</td><td>Joins text</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-COUNT">COUNT</a></td><td>COUNT(a, b, …)</td><td>How many are numbers or TRUE/FALSE</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-COUNTA">COUNTA</a></td><td>COUNTA(a, b, …)</td><td>How many are not blank</td><td><a href="#aggregates">8</a></td></tr>
@@ -32,6 +33,11 @@
 <tr><td><a href="#fn-IFS">IFS</a></td><td>IFS(condition, value, …)</td><td>First true condition</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-INT">INT</a></td><td>INT(x)</td><td>Rounds down to a whole number</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ISBLANK">ISBLANK</a></td><td>ISBLANK(value)</td><td>No value entered</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISERROR</a></td><td>ISERROR(value)</td><td>Any error</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISNA</a></td><td>ISNA(value)</td><td>#N/A only</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISNUMBER</a></td><td>ISNUMBER(value)</td><td>A number (a date is one)</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-WEEKNUM">ISOWEEKNUM</a></td><td>ISOWEEKNUM(date)</td><td>ISO 8601 week</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-ISNUMBER">ISTEXT</a></td><td>ISTEXT(value)</td><td>A text</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-LAG">LAG</a></td><td>LAG(x, n, substitute [, mode])</td><td>x n periods back</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>
@@ -49,6 +55,7 @@
 <tr><td><a href="#fn-MONTHTODATE">MONTHTODATE</a></td><td>MONTHTODATE(x)</td><td>Sum from the month start (daily axis)</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">MONTHVALUE</a></td><td>MONTHVALUE(metric)</td><td>The metric over the whole month (daily axis)</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MOVINGSUM">MOVINGSUM</a></td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NA">NA</a></td><td>NA()</td><td>The #N/A error</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-NEXT">NEXT</a></td><td>NEXT(x)</td><td>x one period ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-NOT">NOT</a></td><td>NOT(a)</td><td>Inverts</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-OFFSET">OFFSET</a></td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td><a href="#time">14</a></td></tr>
@@ -76,6 +83,8 @@
 <tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-VALUE">VALUE</a></td><td>VALUE(text)</td><td>A text as a number</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-WEEKDAY">WEEKDAY</a></td><td>WEEKDAY(date [, return_type])</td><td>Day of the week</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-WEEKNUM">WEEKNUM</a></td><td>WEEKNUM(date [, return_type])</td><td>Week of the year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>
