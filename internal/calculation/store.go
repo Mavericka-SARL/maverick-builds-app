@@ -851,12 +851,18 @@ func (s *Store) LoadInputValueMap(ctx context.Context, modelID, revisionID, metr
 }
 
 // LoadInputTextMap is LoadInputValueMap for a text input: each cell's
-// latest typed note, keyed by dimKey, as the grid shows it (loadTextCells).
+// latest note, keyed by dimKey, as the grid shows it (loadTextCells) — its
+// records' texts when a table of records posts into it (migration 194,
+// writeguard.FedMetricsCTE's predicate), else its typed notes.
 func (s *Store) LoadInputTextMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]string, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (dim_members) dim_members::text, COALESCE(text_value, '')
 		FROM runtime.fact_input
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND source_ref IS NULL
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+		  AND (source_ref IS NULL) = NOT EXISTS (
+			SELECT 1 FROM model.form_metric_mapping mm
+			WHERE mm.model_id = $1::uuid AND (mm.revision_id IS NULL OR mm.revision_id = $2::uuid)
+			  AND mm.target_metric_id = $3::uuid)
 		ORDER BY dim_members, entered_at DESC, id DESC
 	`, modelID, revisionID, metricID)
 	if err != nil {

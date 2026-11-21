@@ -658,6 +658,63 @@ export interface WorkflowContextVar {
   label?: string;
   data_type?: string;
   dimension_id?: string;
+  /** The variable has a default; GET …/start-defaults gives its value. */
+  has_default?: boolean;
+}
+
+/** One thing the model check found (GET /api/developer/model-check). */
+export interface ModelCheckFinding {
+  rule: string;
+  severity: "error" | "warning" | "info";
+  title: string;
+  object: { kind: "metric" | "mapping" | "widget" | "dashboard" | "role" | "automation_rule"; id: string; name: string; dashboard?: string };
+  message: string;
+  fix: string;
+  /** Names the finding across revision copies; what an ignore keeps. */
+  key: string;
+  ignored: boolean;
+  ignore_reason?: string;
+  ignored_by?: string;
+  ignored_at?: string;
+}
+
+export interface ModelCheckReport {
+  revision_id: string;
+  findings: ModelCheckFinding[];
+  /** error, warning, info (not ignored) and ignored. */
+  counts: Record<string, number>;
+}
+
+/** A revision's workbook reconciliation (Integrations › Workbook reconciliation). The map and cases are edited as JSON. */
+export interface ReconciliationCounts { name: string; compared: number; matched: number }
+export interface ReconciliationReport {
+  ran_at: string;
+  compared: number;
+  matched: number;
+  cases: Array<{ name: string; status: "compared" | "skipped"; reason?: string; compared: number; matched: number; by_sheet: ReconciliationCounts[]; by_metric: ReconciliationCounts[] }>;
+  mapping_problems: string[];
+  differences: Array<{ case: string; sheet: string; cell: string; metric: string; members: Record<string, string>; expected: string; actual: string }>;
+  differences_total: number;
+}
+export interface Reconciliation {
+  revision_id: string;
+  file_name: string;
+  workbook_size: number;
+  sheets?: string[];
+  uploaded_at?: string;
+  map: { rules: unknown[]; [k: string]: unknown };
+  cases: unknown[];
+  status: "idle" | "running" | "done" | "failed";
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  report?: ReconciliationReport;
+}
+
+export interface WorkflowStartDefaults {
+  values: Record<string, string>;
+  /** Variables whose default could not be worked out, with the reason. */
+  errors: Record<string, string>;
 }
 
 export interface WorkflowDefPublic {
@@ -1989,6 +2046,10 @@ export interface ContextVariable {
   data_type: string;
   required: boolean;
   default_value?: string;
+  // A formula worked out when a start brings no value — a schedule never
+  // brings one: metric names of the revision, variables before this one,
+  // TODAY(). The start dialog shows it filled in.
+  default?: string;
   // How this variable's value is populated when the workflow starts.
   // "manual" (default) = caller/widget supplies it. "raci_responsible" =
   // server-resolved (and enforced) from the caller's security.raci_rule
@@ -2894,11 +2955,15 @@ export const api = {
   // sub-second instead of returning the whole cross-product.
   // signal: React Query's, so a read nobody waits for any more (a tab left,
   // a filter changed) is cancelled and the server stops working it out.
-  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; scope?: Record<string, string>; signal?: AbortSignal }) => {
+  // fields "totals" (with totalsOnly): only the totals and what qualifies them
+  // (texts, withheld, recalc_pending) — metrics, dimensions and cells come
+  // back empty. For a reader that has its metadata already (a KPI tile).
+  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; fields?: "totals"; scope?: Record<string, string>; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ revision_id: revisionId });
     if (gridDefId) params.set("grid_def_id", gridDefId);
     if (opts?.metaOnly) params.set("meta_only", "1");
     if (opts?.totalsOnly) params.set("totals_only", "1");
+    if (opts?.totalsOnly && opts?.fields) params.set("fields", opts.fields);
     if (opts?.scope && Object.keys(opts.scope).length > 0) params.set("scope", JSON.stringify(opts.scope));
     return apiFetch<GridData>(`/api/grid?${params.toString()}`, opts?.signal ? { signal: opts.signal } : undefined);
   },
@@ -2988,7 +3053,7 @@ export const api = {
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
   addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[]; closed_when?: ClosedRule[]; input_rules?: InputRules }) =>
-    apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
+    apiFetch<{ id: string; status: string; warnings?: ModelCheckFinding[] }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -3007,6 +3072,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+  getWorkflowStartDefaults: (workflowDefId: string) =>
+    apiFetch<WorkflowStartDefaults>(`/api/workflow/definitions/${encodeURIComponent(workflowDefId)}/start-defaults`),
   startWorkflow: (workflowDefId: string, context?: Record<string, string>) =>
     apiFetch<{ instance_id: string }>("/api/workflow/instances", {
       method: "POST",
@@ -3145,8 +3212,14 @@ export const api = {
     }),
   // revisionId: the history of that revision's model (the Build working
   // revision's), not the application's default model's.
-  getImportJobs: (revisionId?: string) =>
-    apiFetch<ImportJob[]>(`/api/import/jobs${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+  /** The newest imports: 20, or limit (at most 200). */
+  getImportJobs: (revisionId?: string, limit?: number) => {
+    const q = new URLSearchParams();
+    if (revisionId) q.set("revision_id", revisionId);
+    if (limit) q.set("limit", String(limit));
+    const qs = q.toString();
+    return apiFetch<ImportJob[]>(`/api/import/jobs${qs ? `?${qs}` : ""}`);
+  },
   deleteImportJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/import/jobs/${id}`, { method: "DELETE" }),
 
@@ -3300,8 +3373,27 @@ export const api = {
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}${withIds.length ? `?with=${encodeURIComponent(withIds.join(","))}` : ""}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
     closed_when?: ClosedRule[]; input_rules?: InputRules; dimension_rules?: Record<string, TotalRule>; row_style?: RowStyle; approval_watch?: boolean; is_input?: boolean; drop_values?: boolean }) =>
-    apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
+    apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }>; warnings?: ModelCheckFinding[] }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  getReconciliation: (revisionId: string) =>
+    apiFetch<{ reconciliation: Reconciliation; recalculation: boolean }>(`/api/developer/reconciliation?revision_id=${encodeURIComponent(revisionId)}`),
+  putReconciliationWorkbook: (revisionId: string, fileName: string, dataBase64: string) =>
+    apiFetch<{ file_name: string; sheets: string[]; workbook_size: number }>("/api/developer/reconciliation/workbook", { method: "PUT", body: JSON.stringify({ revision_id: revisionId, file_name: fileName, data_base64: dataBase64 }) }),
+  putReconciliationMap: (revisionId: string, map: unknown, cases: unknown) =>
+    apiFetch<{ saved: boolean }>("/api/developer/reconciliation/map", { method: "PUT", body: JSON.stringify({ revision_id: revisionId, map, cases }) }),
+  proposeReconciliationMap: (revisionId: string) =>
+    apiFetch<{ map: Reconciliation["map"]; notes: string[] }>("/api/developer/reconciliation/propose", { method: "POST", body: JSON.stringify({ revision_id: revisionId }) }),
+  runReconciliation: (revisionId: string) =>
+    apiFetch<{ status: string }>("/api/developer/reconciliation/run", { method: "POST", body: JSON.stringify({ revision_id: revisionId }) }),
+  downloadReconciliationCSV: (revisionId: string) =>
+    apiFetchBlob(`/api/developer/reconciliation/differences.csv?revision_id=${encodeURIComponent(revisionId)}`),
+  getModelCheck: (revisionId?: string) =>
+    apiFetch<ModelCheckReport>(`/api/developer/model-check${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+  ignoreModelCheckFinding: (revisionId: string, key: string, reason: string) =>
+    apiFetch<{ ignored: boolean }>("/api/developer/model-check/ignores", { method: "PUT", body: JSON.stringify({ revision_id: revisionId, key, reason }) }),
+  unignoreModelCheckFinding: (revisionId: string, key: string) =>
+    apiFetch<{ ignored: boolean }>(`/api/developer/model-check/ignores?revision_id=${encodeURIComponent(revisionId)}&key=${encodeURIComponent(key)}`, { method: "DELETE" }),
 
   createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number; tags?: string[];
     source_dimension_id?: string; source_property?: string; derive_members?: boolean }) =>

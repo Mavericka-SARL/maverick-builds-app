@@ -224,6 +224,49 @@ func singleLeafScope(rollupDims map[string]*rollup.Dimension, ownDims []string) 
 	return true
 }
 
+// ruledLeaves keeps the leaves a calculated metric's total reads under its
+// total rules (migration 174): over a dimension that totals as its first or
+// last member, only that member's leaves — the reading rollup.RuleCombo gives
+// the unscoped rollup and the scoped input totals (inputTotalsByRule). ok is
+// false when a rule "none" leaves no total. oneLeaf is singleLeafScope with
+// each ruled dimension counted as the one member it reads. Before
+// 2026-11-21 a scoped read added the members up: a location pin over a model
+// with a scenario dimension totalling as Base showed every calculated KPI
+// as the sum of the scenarios.
+func ruledLeaves(rollupDims map[string]*rollup.Dimension, metricID string, ownDims []string, pins map[string]string, leaves []leafValue) (kept []leafValue, oneLeaf, ok bool) {
+	oneLeaf = singleLeafScope(rollupDims, ownDims)
+	if !rollup.HasMemberRules(rollupDims, metricID, ownDims) {
+		return leaves, oneLeaf, true
+	}
+	rc, ok := rollup.RuleCombo(rollupDims, metricID, ownDims, pins)
+	if !ok {
+		return nil, false, false
+	}
+	ruled := map[string]string{}
+	for _, d := range ownDims {
+		r := rollupDims[d].RuleFor(metricID)
+		if code, pinned := rc[d]; pinned && r != "" && r != rollup.TotalSum {
+			ruled[d] = code
+		}
+	}
+	for _, l := range leaves {
+		if atRuled(l.combo, ruled) {
+			kept = append(kept, l)
+		}
+	}
+	oneLeaf = true
+	for _, d := range ownDims {
+		dim := rollupDims[d]
+		if dim == nil {
+			return kept, false, true
+		}
+		if _, one := ruled[d]; !one && !dim.IsTime && len(dim.Members) != 1 {
+			oneLeaf = false
+		}
+	}
+	return kept, oneLeaf, true
+}
+
 // isFormulaRule: the total and rollups are the formula evaluated at the
 // aggregate, never a combination of leaves.
 func isFormulaRule(aggRule string) bool {
@@ -365,7 +408,9 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 		// No total across periods; a scope of one period is that period
 		// (calculation.TimeSummaryOver).
 	default:
-		res.total, res.hasTotal = combineLeaves(leaves, axis, rule, timeSummary, singleLeafScope(rollupDims, ownDims))
+		if kept, oneLeaf, ok := ruledLeaves(rollupDims, m.ID, ownDims, sr.totalCombo(), leaves); ok {
+			res.total, res.hasTotal = combineLeaves(kept, axis, rule, timeSummary, oneLeaf)
+		}
 	}
 	return res
 }
@@ -864,7 +909,12 @@ func scopeOrdinaryMetric(
 	if isFormulaRule(rule) {
 		axis = nil
 	}
-	oneLeaf := singleLeafScope(rollupDims, ownDims)
+	leaves, oneLeaf, ruledOK := ruledLeaves(rollupDims, m.ID, ownDims, sr.totalCombo(), leaves)
+	if !ruledOK {
+		// A rule "none" leaves no total here; a formula total (below) is
+		// evaluated at the aggregate and reads its own rules.
+		leaves = nil
+	}
 	if axis != nil {
 		if v, ok := combineLeaves(leaves, axis, rule, m.TimeSummary, oneLeaf); ok {
 			totals[m.ID] = v

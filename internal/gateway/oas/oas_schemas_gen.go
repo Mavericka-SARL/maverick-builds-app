@@ -8810,6 +8810,8 @@ func (*CreateMetricConflict) createMetricRes() {}
 type CreateMetricOK struct {
 	ID     OptUUID   `json:"id"`
 	Status OptString `json:"status"`
+	// The model check's findings about this metric (GET /api/developer/model-check), not ignored.
+	Warnings []CreateMetricOKWarningsItem `json:"warnings"`
 }
 
 // GetID returns the value of ID.
@@ -8822,6 +8824,11 @@ func (s *CreateMetricOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetWarnings returns the value of Warnings.
+func (s *CreateMetricOK) GetWarnings() []CreateMetricOKWarningsItem {
+	return s.Warnings
+}
+
 // SetID sets the value of ID.
 func (s *CreateMetricOK) SetID(val OptUUID) {
 	s.ID = val
@@ -8832,7 +8839,23 @@ func (s *CreateMetricOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetWarnings sets the value of Warnings.
+func (s *CreateMetricOK) SetWarnings(val []CreateMetricOKWarningsItem) {
+	s.Warnings = val
+}
+
 func (*CreateMetricOK) createMetricRes() {}
+
+type CreateMetricOKWarningsItem map[string]jx.Raw
+
+func (s *CreateMetricOKWarningsItem) init() CreateMetricOKWarningsItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
 
 // Ref: #/components/schemas/CreateMetricRequest
 type CreateMetricRequest struct {
@@ -10760,6 +10783,20 @@ func (s *DeleteNotificationOK) SetDeleted(val OptInt) {
 
 func (*DeleteNotificationOK) deleteNotificationRes() {}
 
+type DeleteReconciliationOK struct {
+	Deleted OptBool `json:"deleted"`
+}
+
+// GetDeleted returns the value of Deleted.
+func (s *DeleteReconciliationOK) GetDeleted() OptBool {
+	return s.Deleted
+}
+
+// SetDeleted sets the value of Deleted.
+func (s *DeleteReconciliationOK) SetDeleted(val OptBool) {
+	s.Deleted = val
+}
+
 type DeleteRevisionOK struct {
 	Status OptString `json:"status"`
 }
@@ -11921,98 +11958,106 @@ func (s *Error) SetError(val string) {
 	s.Error = val
 }
 
-func (*Error) addGridDimensionRes()            {}
-func (*Error) addGridMetricRes()               {}
-func (*Error) approveAiPlanRes()               {}
-func (*Error) compactAiSessionMemoryRes()      {}
-func (*Error) createAdminApplicationRes()      {}
-func (*Error) createAdminModelRes()            {}
-func (*Error) createAdminRevisionRes()         {}
-func (*Error) createDashboardRes()             {}
-func (*Error) createDashboardWidgetRes()       {}
-func (*Error) createFormRes()                  {}
-func (*Error) createIntegrationConnectionRes() {}
-func (*Error) debugFactsRes()                  {}
-func (*Error) deleteAiDocumentRes()            {}
-func (*Error) deleteAiSessionRes()             {}
-func (*Error) deleteDimensionRes()             {}
-func (*Error) deleteImportJobRes()             {}
-func (*Error) deleteNotificationRes()          {}
-func (*Error) deleteRevisionRes()              {}
-func (*Error) deleteTenantRes()                {}
-func (*Error) deleteWorkflowRes()              {}
-func (*Error) disconnectIntegrationOAuthRes()  {}
-func (*Error) duplicateIntegrationRes()        {}
-func (*Error) generateDimensionPeriodsRes()    {}
-func (*Error) getAiSessionMemoryRes()          {}
-func (*Error) getAiSessionRes()                {}
-func (*Error) getAiWorkbookMapRes()            {}
-func (*Error) getBusinessDashboardRes()        {}
-func (*Error) getDemoRes()                     {}
-func (*Error) getFormRecordRes()               {}
-func (*Error) getIntegrationRes()              {}
-func (*Error) getIntegrationRunRes()           {}
-func (*Error) getRecordChoicesRes()            {}
-func (*Error) getRecordDeletePlanRes()         {}
-func (*Error) getRecordHistoryRes()            {}
-func (*Error) getRelatedRecordsRes()           {}
-func (*Error) getWorkflowDefinitionRes()       {}
-func (*Error) getWorkflowInstanceRes()         {}
-func (*Error) getWorkflowRes()                 {}
-func (*Error) getWorkflowStatusRes()           {}
-func (*Error) grantAdminUserAppAccessRes()     {}
-func (*Error) grantAdminUserModelAccessRes()   {}
-func (*Error) importDimensionMembersRes()      {}
-func (*Error) listAiConversionsRes()           {}
-func (*Error) listAiProposalsRes()             {}
-func (*Error) listAuditEventsRes()             {}
-func (*Error) listAutomationRulesRes()         {}
-func (*Error) listBARolesRes()                 {}
-func (*Error) listBAUsersRes()                 {}
-func (*Error) listBusinessFoldersRes()         {}
-func (*Error) listBusinessIntegrationsRes()    {}
-func (*Error) listDevPersonasRes()             {}
-func (*Error) listDeveloperFoldersRes()        {}
-func (*Error) listDeveloperIntegrationsRes()   {}
-func (*Error) listDormancyRes()                {}
-func (*Error) listFormMappingsRes()            {}
-func (*Error) listFormsRes()                   {}
-func (*Error) listGridsRes()                   {}
-func (*Error) listIntegrationRunsRes()         {}
-func (*Error) listIntegrationTemplatesRes()    {}
-func (*Error) listPlansRes()                   {}
-func (*Error) listUserAccessRulesRes()         {}
-func (*Error) listUserRoleAccessRulesRes()     {}
-func (*Error) listWorkflowRolesRes()           {}
-func (*Error) listWorkflowTriggerEventsRes()   {}
-func (*Error) previewExportIntegrationRes()    {}
-func (*Error) previewImportReshapeRes()        {}
-func (*Error) removeAdminUserRoleRes()         {}
-func (*Error) removeGridDimensionRes()         {}
-func (*Error) restoreWorkflowRes()             {}
-func (*Error) revokeAdminUserAppAccessRes()    {}
-func (*Error) revokeAdminUserModelAccessRes()  {}
-func (*Error) setActiveRevisionRes()           {}
-func (*Error) setDefaultModelRes()             {}
-func (*Error) startIntegrationOAuthRes()       {}
-func (*Error) testIntegrationConnectionRes()   {}
-func (*Error) updateAdminModelRes()            {}
-func (*Error) updateAutomationRuleRes()        {}
-func (*Error) updateConnectorSettingsRes()     {}
-func (*Error) updateDashboardRes()             {}
-func (*Error) updateDashboardWidgetRes()       {}
-func (*Error) updateFormMappingRes()           {}
-func (*Error) updateGridRes()                  {}
-func (*Error) updateIntegrationConfigRes()     {}
-func (*Error) updateIntegrationConnectionRes() {}
-func (*Error) updateIntegrationRes()           {}
-func (*Error) updateNotificationSettingsRes()  {}
-func (*Error) updateTenantAISettingsRes()      {}
-func (*Error) updateTenantRes()                {}
-func (*Error) updateWorkflowRes()              {}
-func (*Error) upsertPlanRes()                  {}
-func (*Error) validateIntegrationRes()         {}
-func (*Error) validateWorkflowRes()            {}
+func (*Error) addGridDimensionRes()             {}
+func (*Error) addGridMetricRes()                {}
+func (*Error) approveAiPlanRes()                {}
+func (*Error) compactAiSessionMemoryRes()       {}
+func (*Error) createAdminApplicationRes()       {}
+func (*Error) createAdminModelRes()             {}
+func (*Error) createAdminRevisionRes()          {}
+func (*Error) createDashboardRes()              {}
+func (*Error) createDashboardWidgetRes()        {}
+func (*Error) createFormRes()                   {}
+func (*Error) createIntegrationConnectionRes()  {}
+func (*Error) debugFactsRes()                   {}
+func (*Error) deleteAiDocumentRes()             {}
+func (*Error) deleteAiSessionRes()              {}
+func (*Error) deleteDimensionRes()              {}
+func (*Error) deleteImportJobRes()              {}
+func (*Error) deleteNotificationRes()           {}
+func (*Error) deleteRevisionRes()               {}
+func (*Error) deleteTenantRes()                 {}
+func (*Error) deleteWorkflowRes()               {}
+func (*Error) disconnectIntegrationOAuthRes()   {}
+func (*Error) duplicateIntegrationRes()         {}
+func (*Error) generateDimensionPeriodsRes()     {}
+func (*Error) getAiSessionMemoryRes()           {}
+func (*Error) getAiSessionRes()                 {}
+func (*Error) getAiWorkbookMapRes()             {}
+func (*Error) getBusinessDashboardRes()         {}
+func (*Error) getDemoRes()                      {}
+func (*Error) getFormRecordRes()                {}
+func (*Error) getIntegrationRes()               {}
+func (*Error) getIntegrationRunRes()            {}
+func (*Error) getModelCheckRes()                {}
+func (*Error) getReconciliationDifferencesRes() {}
+func (*Error) getReconciliationRes()            {}
+func (*Error) getRecordChoicesRes()             {}
+func (*Error) getRecordDeletePlanRes()          {}
+func (*Error) getRecordHistoryRes()             {}
+func (*Error) getRelatedRecordsRes()            {}
+func (*Error) getWorkflowDefinitionRes()        {}
+func (*Error) getWorkflowInstanceRes()          {}
+func (*Error) getWorkflowRes()                  {}
+func (*Error) getWorkflowStatusRes()            {}
+func (*Error) grantAdminUserAppAccessRes()      {}
+func (*Error) grantAdminUserModelAccessRes()    {}
+func (*Error) importDimensionMembersRes()       {}
+func (*Error) listAiConversionsRes()            {}
+func (*Error) listAiProposalsRes()              {}
+func (*Error) listAuditEventsRes()              {}
+func (*Error) listAutomationRulesRes()          {}
+func (*Error) listBARolesRes()                  {}
+func (*Error) listBAUsersRes()                  {}
+func (*Error) listBusinessFoldersRes()          {}
+func (*Error) listBusinessIntegrationsRes()     {}
+func (*Error) listDevPersonasRes()              {}
+func (*Error) listDeveloperFoldersRes()         {}
+func (*Error) listDeveloperIntegrationsRes()    {}
+func (*Error) listDormancyRes()                 {}
+func (*Error) listFormMappingsRes()             {}
+func (*Error) listFormsRes()                    {}
+func (*Error) listGridsRes()                    {}
+func (*Error) listIntegrationRunsRes()          {}
+func (*Error) listIntegrationTemplatesRes()     {}
+func (*Error) listPlansRes()                    {}
+func (*Error) listUserAccessRulesRes()          {}
+func (*Error) listUserRoleAccessRulesRes()      {}
+func (*Error) listWorkflowRolesRes()            {}
+func (*Error) listWorkflowTriggerEventsRes()    {}
+func (*Error) previewExportIntegrationRes()     {}
+func (*Error) previewImportReshapeRes()         {}
+func (*Error) proposeReconciliationMapRes()     {}
+func (*Error) putReconciliationMapRes()         {}
+func (*Error) putReconciliationWorkbookRes()    {}
+func (*Error) removeAdminUserRoleRes()          {}
+func (*Error) removeGridDimensionRes()          {}
+func (*Error) restoreWorkflowRes()              {}
+func (*Error) revokeAdminUserAppAccessRes()     {}
+func (*Error) revokeAdminUserModelAccessRes()   {}
+func (*Error) runReconciliationRes()            {}
+func (*Error) setActiveRevisionRes()            {}
+func (*Error) setDefaultModelRes()              {}
+func (*Error) startIntegrationOAuthRes()        {}
+func (*Error) testIntegrationConnectionRes()    {}
+func (*Error) unignoreModelCheckFindingRes()    {}
+func (*Error) updateAdminModelRes()             {}
+func (*Error) updateAutomationRuleRes()         {}
+func (*Error) updateConnectorSettingsRes()      {}
+func (*Error) updateDashboardRes()              {}
+func (*Error) updateDashboardWidgetRes()        {}
+func (*Error) updateFormMappingRes()            {}
+func (*Error) updateGridRes()                   {}
+func (*Error) updateIntegrationConfigRes()      {}
+func (*Error) updateIntegrationConnectionRes()  {}
+func (*Error) updateIntegrationRes()            {}
+func (*Error) updateNotificationSettingsRes()   {}
+func (*Error) updateTenantAISettingsRes()       {}
+func (*Error) updateTenantRes()                 {}
+func (*Error) updateWorkflowRes()               {}
+func (*Error) upsertPlanRes()                   {}
+func (*Error) validateIntegrationRes()          {}
+func (*Error) validateWorkflowRes()             {}
 
 // ExportAuditBadRequest is response for ExportAudit operation.
 type ExportAuditBadRequest struct{}
@@ -15880,6 +15925,40 @@ type GetGoogleConnectionForbidden struct{}
 
 func (*GetGoogleConnectionForbidden) getGoogleConnectionRes() {}
 
+type GetGridFields string
+
+const (
+	GetGridFieldsTotals GetGridFields = "totals"
+)
+
+// AllValues returns all GetGridFields values.
+func (GetGridFields) AllValues() []GetGridFields {
+	return []GetGridFields{
+		GetGridFieldsTotals,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetGridFields) MarshalText() ([]byte, error) {
+	switch s {
+	case GetGridFieldsTotals:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetGridFields) UnmarshalText(data []byte) error {
+	switch GetGridFields(data) {
+	case GetGridFieldsTotals:
+		*s = GetGridFieldsTotals
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type GetGridInternalServerError Error
 
 func (*GetGridInternalServerError) getGridRes() {}
@@ -16186,10 +16265,401 @@ type GetMeUnauthorized struct{}
 
 func (*GetMeUnauthorized) getMeRes() {}
 
+type GetModelCheckOK struct {
+	RevisionID OptUUID                       `json:"revision_id"`
+	Counts     OptGetModelCheckOKCounts      `json:"counts"`
+	Findings   []GetModelCheckOKFindingsItem `json:"findings"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *GetModelCheckOK) GetRevisionID() OptUUID {
+	return s.RevisionID
+}
+
+// GetCounts returns the value of Counts.
+func (s *GetModelCheckOK) GetCounts() OptGetModelCheckOKCounts {
+	return s.Counts
+}
+
+// GetFindings returns the value of Findings.
+func (s *GetModelCheckOK) GetFindings() []GetModelCheckOKFindingsItem {
+	return s.Findings
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *GetModelCheckOK) SetRevisionID(val OptUUID) {
+	s.RevisionID = val
+}
+
+// SetCounts sets the value of Counts.
+func (s *GetModelCheckOK) SetCounts(val OptGetModelCheckOKCounts) {
+	s.Counts = val
+}
+
+// SetFindings sets the value of Findings.
+func (s *GetModelCheckOK) SetFindings(val []GetModelCheckOKFindingsItem) {
+	s.Findings = val
+}
+
+func (*GetModelCheckOK) getModelCheckRes() {}
+
+type GetModelCheckOKCounts map[string]int
+
+func (s *GetModelCheckOKCounts) init() GetModelCheckOKCounts {
+	m := *s
+	if m == nil {
+		m = map[string]int{}
+		*s = m
+	}
+	return m
+}
+
+type GetModelCheckOKFindingsItem struct {
+	Rule         OptString                              `json:"rule"`
+	Severity     OptGetModelCheckOKFindingsItemSeverity `json:"severity"`
+	Title        OptString                              `json:"title"`
+	Object       OptGetModelCheckOKFindingsItemObject   `json:"object"`
+	Message      OptString                              `json:"message"`
+	Fix          OptString                              `json:"fix"`
+	Key          OptString                              `json:"key"`
+	Ignored      OptBool                                `json:"ignored"`
+	IgnoreReason OptString                              `json:"ignore_reason"`
+	IgnoredBy    OptString                              `json:"ignored_by"`
+	IgnoredAt    OptDateTime                            `json:"ignored_at"`
+}
+
+// GetRule returns the value of Rule.
+func (s *GetModelCheckOKFindingsItem) GetRule() OptString {
+	return s.Rule
+}
+
+// GetSeverity returns the value of Severity.
+func (s *GetModelCheckOKFindingsItem) GetSeverity() OptGetModelCheckOKFindingsItemSeverity {
+	return s.Severity
+}
+
+// GetTitle returns the value of Title.
+func (s *GetModelCheckOKFindingsItem) GetTitle() OptString {
+	return s.Title
+}
+
+// GetObject returns the value of Object.
+func (s *GetModelCheckOKFindingsItem) GetObject() OptGetModelCheckOKFindingsItemObject {
+	return s.Object
+}
+
+// GetMessage returns the value of Message.
+func (s *GetModelCheckOKFindingsItem) GetMessage() OptString {
+	return s.Message
+}
+
+// GetFix returns the value of Fix.
+func (s *GetModelCheckOKFindingsItem) GetFix() OptString {
+	return s.Fix
+}
+
+// GetKey returns the value of Key.
+func (s *GetModelCheckOKFindingsItem) GetKey() OptString {
+	return s.Key
+}
+
+// GetIgnored returns the value of Ignored.
+func (s *GetModelCheckOKFindingsItem) GetIgnored() OptBool {
+	return s.Ignored
+}
+
+// GetIgnoreReason returns the value of IgnoreReason.
+func (s *GetModelCheckOKFindingsItem) GetIgnoreReason() OptString {
+	return s.IgnoreReason
+}
+
+// GetIgnoredBy returns the value of IgnoredBy.
+func (s *GetModelCheckOKFindingsItem) GetIgnoredBy() OptString {
+	return s.IgnoredBy
+}
+
+// GetIgnoredAt returns the value of IgnoredAt.
+func (s *GetModelCheckOKFindingsItem) GetIgnoredAt() OptDateTime {
+	return s.IgnoredAt
+}
+
+// SetRule sets the value of Rule.
+func (s *GetModelCheckOKFindingsItem) SetRule(val OptString) {
+	s.Rule = val
+}
+
+// SetSeverity sets the value of Severity.
+func (s *GetModelCheckOKFindingsItem) SetSeverity(val OptGetModelCheckOKFindingsItemSeverity) {
+	s.Severity = val
+}
+
+// SetTitle sets the value of Title.
+func (s *GetModelCheckOKFindingsItem) SetTitle(val OptString) {
+	s.Title = val
+}
+
+// SetObject sets the value of Object.
+func (s *GetModelCheckOKFindingsItem) SetObject(val OptGetModelCheckOKFindingsItemObject) {
+	s.Object = val
+}
+
+// SetMessage sets the value of Message.
+func (s *GetModelCheckOKFindingsItem) SetMessage(val OptString) {
+	s.Message = val
+}
+
+// SetFix sets the value of Fix.
+func (s *GetModelCheckOKFindingsItem) SetFix(val OptString) {
+	s.Fix = val
+}
+
+// SetKey sets the value of Key.
+func (s *GetModelCheckOKFindingsItem) SetKey(val OptString) {
+	s.Key = val
+}
+
+// SetIgnored sets the value of Ignored.
+func (s *GetModelCheckOKFindingsItem) SetIgnored(val OptBool) {
+	s.Ignored = val
+}
+
+// SetIgnoreReason sets the value of IgnoreReason.
+func (s *GetModelCheckOKFindingsItem) SetIgnoreReason(val OptString) {
+	s.IgnoreReason = val
+}
+
+// SetIgnoredBy sets the value of IgnoredBy.
+func (s *GetModelCheckOKFindingsItem) SetIgnoredBy(val OptString) {
+	s.IgnoredBy = val
+}
+
+// SetIgnoredAt sets the value of IgnoredAt.
+func (s *GetModelCheckOKFindingsItem) SetIgnoredAt(val OptDateTime) {
+	s.IgnoredAt = val
+}
+
+type GetModelCheckOKFindingsItemObject struct {
+	Kind      OptGetModelCheckOKFindingsItemObjectKind `json:"kind"`
+	ID        OptString                                `json:"id"`
+	Name      OptString                                `json:"name"`
+	Dashboard OptString                                `json:"dashboard"`
+}
+
+// GetKind returns the value of Kind.
+func (s *GetModelCheckOKFindingsItemObject) GetKind() OptGetModelCheckOKFindingsItemObjectKind {
+	return s.Kind
+}
+
+// GetID returns the value of ID.
+func (s *GetModelCheckOKFindingsItemObject) GetID() OptString {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetModelCheckOKFindingsItemObject) GetName() OptString {
+	return s.Name
+}
+
+// GetDashboard returns the value of Dashboard.
+func (s *GetModelCheckOKFindingsItemObject) GetDashboard() OptString {
+	return s.Dashboard
+}
+
+// SetKind sets the value of Kind.
+func (s *GetModelCheckOKFindingsItemObject) SetKind(val OptGetModelCheckOKFindingsItemObjectKind) {
+	s.Kind = val
+}
+
+// SetID sets the value of ID.
+func (s *GetModelCheckOKFindingsItemObject) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetModelCheckOKFindingsItemObject) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetDashboard sets the value of Dashboard.
+func (s *GetModelCheckOKFindingsItemObject) SetDashboard(val OptString) {
+	s.Dashboard = val
+}
+
+type GetModelCheckOKFindingsItemObjectKind string
+
+const (
+	GetModelCheckOKFindingsItemObjectKindMetric         GetModelCheckOKFindingsItemObjectKind = "metric"
+	GetModelCheckOKFindingsItemObjectKindMapping        GetModelCheckOKFindingsItemObjectKind = "mapping"
+	GetModelCheckOKFindingsItemObjectKindWidget         GetModelCheckOKFindingsItemObjectKind = "widget"
+	GetModelCheckOKFindingsItemObjectKindDashboard      GetModelCheckOKFindingsItemObjectKind = "dashboard"
+	GetModelCheckOKFindingsItemObjectKindRole           GetModelCheckOKFindingsItemObjectKind = "role"
+	GetModelCheckOKFindingsItemObjectKindAutomationRule GetModelCheckOKFindingsItemObjectKind = "automation_rule"
+)
+
+// AllValues returns all GetModelCheckOKFindingsItemObjectKind values.
+func (GetModelCheckOKFindingsItemObjectKind) AllValues() []GetModelCheckOKFindingsItemObjectKind {
+	return []GetModelCheckOKFindingsItemObjectKind{
+		GetModelCheckOKFindingsItemObjectKindMetric,
+		GetModelCheckOKFindingsItemObjectKindMapping,
+		GetModelCheckOKFindingsItemObjectKindWidget,
+		GetModelCheckOKFindingsItemObjectKindDashboard,
+		GetModelCheckOKFindingsItemObjectKindRole,
+		GetModelCheckOKFindingsItemObjectKindAutomationRule,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetModelCheckOKFindingsItemObjectKind) MarshalText() ([]byte, error) {
+	switch s {
+	case GetModelCheckOKFindingsItemObjectKindMetric:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemObjectKindMapping:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemObjectKindWidget:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemObjectKindDashboard:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemObjectKindRole:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemObjectKindAutomationRule:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetModelCheckOKFindingsItemObjectKind) UnmarshalText(data []byte) error {
+	switch GetModelCheckOKFindingsItemObjectKind(data) {
+	case GetModelCheckOKFindingsItemObjectKindMetric:
+		*s = GetModelCheckOKFindingsItemObjectKindMetric
+		return nil
+	case GetModelCheckOKFindingsItemObjectKindMapping:
+		*s = GetModelCheckOKFindingsItemObjectKindMapping
+		return nil
+	case GetModelCheckOKFindingsItemObjectKindWidget:
+		*s = GetModelCheckOKFindingsItemObjectKindWidget
+		return nil
+	case GetModelCheckOKFindingsItemObjectKindDashboard:
+		*s = GetModelCheckOKFindingsItemObjectKindDashboard
+		return nil
+	case GetModelCheckOKFindingsItemObjectKindRole:
+		*s = GetModelCheckOKFindingsItemObjectKindRole
+		return nil
+	case GetModelCheckOKFindingsItemObjectKindAutomationRule:
+		*s = GetModelCheckOKFindingsItemObjectKindAutomationRule
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type GetModelCheckOKFindingsItemSeverity string
+
+const (
+	GetModelCheckOKFindingsItemSeverityError   GetModelCheckOKFindingsItemSeverity = "error"
+	GetModelCheckOKFindingsItemSeverityWarning GetModelCheckOKFindingsItemSeverity = "warning"
+	GetModelCheckOKFindingsItemSeverityInfo    GetModelCheckOKFindingsItemSeverity = "info"
+)
+
+// AllValues returns all GetModelCheckOKFindingsItemSeverity values.
+func (GetModelCheckOKFindingsItemSeverity) AllValues() []GetModelCheckOKFindingsItemSeverity {
+	return []GetModelCheckOKFindingsItemSeverity{
+		GetModelCheckOKFindingsItemSeverityError,
+		GetModelCheckOKFindingsItemSeverityWarning,
+		GetModelCheckOKFindingsItemSeverityInfo,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetModelCheckOKFindingsItemSeverity) MarshalText() ([]byte, error) {
+	switch s {
+	case GetModelCheckOKFindingsItemSeverityError:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemSeverityWarning:
+		return []byte(s), nil
+	case GetModelCheckOKFindingsItemSeverityInfo:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetModelCheckOKFindingsItemSeverity) UnmarshalText(data []byte) error {
+	switch GetModelCheckOKFindingsItemSeverity(data) {
+	case GetModelCheckOKFindingsItemSeverityError:
+		*s = GetModelCheckOKFindingsItemSeverityError
+		return nil
+	case GetModelCheckOKFindingsItemSeverityWarning:
+		*s = GetModelCheckOKFindingsItemSeverityWarning
+		return nil
+	case GetModelCheckOKFindingsItemSeverityInfo:
+		*s = GetModelCheckOKFindingsItemSeverityInfo
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // GetNotificationSettingsForbidden is response for GetNotificationSettings operation.
 type GetNotificationSettingsForbidden struct{}
 
 func (*GetNotificationSettingsForbidden) getNotificationSettingsRes() {}
+
+type GetReconciliationDifferencesOK struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s GetReconciliationDifferencesOK) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*GetReconciliationDifferencesOK) getReconciliationDifferencesRes() {}
+
+type GetReconciliationOK struct {
+	Reconciliation OptGetReconciliationOKReconciliation `json:"reconciliation"`
+	Recalculation  OptBool                              `json:"recalculation"`
+}
+
+// GetReconciliation returns the value of Reconciliation.
+func (s *GetReconciliationOK) GetReconciliation() OptGetReconciliationOKReconciliation {
+	return s.Reconciliation
+}
+
+// GetRecalculation returns the value of Recalculation.
+func (s *GetReconciliationOK) GetRecalculation() OptBool {
+	return s.Recalculation
+}
+
+// SetReconciliation sets the value of Reconciliation.
+func (s *GetReconciliationOK) SetReconciliation(val OptGetReconciliationOKReconciliation) {
+	s.Reconciliation = val
+}
+
+// SetRecalculation sets the value of Recalculation.
+func (s *GetReconciliationOK) SetRecalculation(val OptBool) {
+	s.Recalculation = val
+}
+
+func (*GetReconciliationOK) getReconciliationRes() {}
+
+type GetReconciliationOKReconciliation map[string]jx.Raw
+
+func (s *GetReconciliationOKReconciliation) init() GetReconciliationOKReconciliation {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
 
 type GetRecordChoicesOK struct {
 	People   GetRecordChoicesOKPeople   `json:"people"`
@@ -17080,6 +17550,63 @@ func (s *GetWorkflowInstanceOKStepsItem) SetComment(val OptString) {
 // SetCompletedAt sets the value of CompletedAt.
 func (s *GetWorkflowInstanceOKStepsItem) SetCompletedAt(val OptString) {
 	s.CompletedAt = val
+}
+
+type GetWorkflowStartDefaultsForbidden Error
+
+func (*GetWorkflowStartDefaultsForbidden) getWorkflowStartDefaultsRes() {}
+
+type GetWorkflowStartDefaultsNotFound Error
+
+func (*GetWorkflowStartDefaultsNotFound) getWorkflowStartDefaultsRes() {}
+
+type GetWorkflowStartDefaultsOK struct {
+	Values GetWorkflowStartDefaultsOKValues `json:"values"`
+	Errors GetWorkflowStartDefaultsOKErrors `json:"errors"`
+}
+
+// GetValues returns the value of Values.
+func (s *GetWorkflowStartDefaultsOK) GetValues() GetWorkflowStartDefaultsOKValues {
+	return s.Values
+}
+
+// GetErrors returns the value of Errors.
+func (s *GetWorkflowStartDefaultsOK) GetErrors() GetWorkflowStartDefaultsOKErrors {
+	return s.Errors
+}
+
+// SetValues sets the value of Values.
+func (s *GetWorkflowStartDefaultsOK) SetValues(val GetWorkflowStartDefaultsOKValues) {
+	s.Values = val
+}
+
+// SetErrors sets the value of Errors.
+func (s *GetWorkflowStartDefaultsOK) SetErrors(val GetWorkflowStartDefaultsOKErrors) {
+	s.Errors = val
+}
+
+func (*GetWorkflowStartDefaultsOK) getWorkflowStartDefaultsRes() {}
+
+type GetWorkflowStartDefaultsOKErrors map[string]string
+
+func (s *GetWorkflowStartDefaultsOKErrors) init() GetWorkflowStartDefaultsOKErrors {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetWorkflowStartDefaultsOKValues map[string]string
+
+func (s *GetWorkflowStartDefaultsOKValues) init() GetWorkflowStartDefaultsOKValues {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
 }
 
 type GetWorkflowStatusOK struct {
@@ -18994,6 +19521,66 @@ func (s *HistogramChartDataContext) init() HistogramChartDataContext {
 		*s = m
 	}
 	return m
+}
+
+type IgnoreModelCheckFindingBadRequest Error
+
+func (*IgnoreModelCheckFindingBadRequest) ignoreModelCheckFindingRes() {}
+
+type IgnoreModelCheckFindingNotFound Error
+
+func (*IgnoreModelCheckFindingNotFound) ignoreModelCheckFindingRes() {}
+
+type IgnoreModelCheckFindingOK struct {
+	Ignored OptBool `json:"ignored"`
+}
+
+// GetIgnored returns the value of Ignored.
+func (s *IgnoreModelCheckFindingOK) GetIgnored() OptBool {
+	return s.Ignored
+}
+
+// SetIgnored sets the value of Ignored.
+func (s *IgnoreModelCheckFindingOK) SetIgnored(val OptBool) {
+	s.Ignored = val
+}
+
+func (*IgnoreModelCheckFindingOK) ignoreModelCheckFindingRes() {}
+
+type IgnoreModelCheckFindingReq struct {
+	RevisionID uuid.UUID `json:"revision_id"`
+	Key        string    `json:"key"`
+	Reason     string    `json:"reason"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *IgnoreModelCheckFindingReq) GetRevisionID() uuid.UUID {
+	return s.RevisionID
+}
+
+// GetKey returns the value of Key.
+func (s *IgnoreModelCheckFindingReq) GetKey() string {
+	return s.Key
+}
+
+// GetReason returns the value of Reason.
+func (s *IgnoreModelCheckFindingReq) GetReason() string {
+	return s.Reason
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *IgnoreModelCheckFindingReq) SetRevisionID(val uuid.UUID) {
+	s.RevisionID = val
+}
+
+// SetKey sets the value of Key.
+func (s *IgnoreModelCheckFindingReq) SetKey(val string) {
+	s.Key = val
+}
+
+// SetReason sets the value of Reason.
+func (s *IgnoreModelCheckFindingReq) SetReason(val string) {
+	s.Reason = val
 }
 
 type ImportDimensionMembersOK struct {
@@ -28253,6 +28840,52 @@ func (o OptGetAiWorkbookMapOKSheetsItemNotMappedLabels) Or(d GetAiWorkbookMapOKS
 	return d
 }
 
+// NewOptGetGridFields returns new OptGetGridFields with value set to v.
+func NewOptGetGridFields(v GetGridFields) OptGetGridFields {
+	return OptGetGridFields{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetGridFields is optional GetGridFields.
+type OptGetGridFields struct {
+	Value GetGridFields
+	Set   bool
+}
+
+// IsSet returns true if OptGetGridFields was set.
+func (o OptGetGridFields) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetGridFields) Reset() {
+	var v GetGridFields
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetGridFields) SetTo(v GetGridFields) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetGridFields) Get() (v GetGridFields, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetGridFields) Or(d GetGridFields) GetGridFields {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGetGridMetaOnly returns new OptGetGridMetaOnly with value set to v.
 func NewOptGetGridMetaOnly(v GetGridMetaOnly) OptGetGridMetaOnly {
 	return OptGetGridMetaOnly{
@@ -28431,6 +29064,236 @@ func (o OptGetGridTotalsOnly) Get() (v GetGridTotalsOnly, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGetGridTotalsOnly) Or(d GetGridTotalsOnly) GetGridTotalsOnly {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetModelCheckOKCounts returns new OptGetModelCheckOKCounts with value set to v.
+func NewOptGetModelCheckOKCounts(v GetModelCheckOKCounts) OptGetModelCheckOKCounts {
+	return OptGetModelCheckOKCounts{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetModelCheckOKCounts is optional GetModelCheckOKCounts.
+type OptGetModelCheckOKCounts struct {
+	Value GetModelCheckOKCounts
+	Set   bool
+}
+
+// IsSet returns true if OptGetModelCheckOKCounts was set.
+func (o OptGetModelCheckOKCounts) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetModelCheckOKCounts) Reset() {
+	var v GetModelCheckOKCounts
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetModelCheckOKCounts) SetTo(v GetModelCheckOKCounts) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetModelCheckOKCounts) Get() (v GetModelCheckOKCounts, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetModelCheckOKCounts) Or(d GetModelCheckOKCounts) GetModelCheckOKCounts {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetModelCheckOKFindingsItemObject returns new OptGetModelCheckOKFindingsItemObject with value set to v.
+func NewOptGetModelCheckOKFindingsItemObject(v GetModelCheckOKFindingsItemObject) OptGetModelCheckOKFindingsItemObject {
+	return OptGetModelCheckOKFindingsItemObject{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetModelCheckOKFindingsItemObject is optional GetModelCheckOKFindingsItemObject.
+type OptGetModelCheckOKFindingsItemObject struct {
+	Value GetModelCheckOKFindingsItemObject
+	Set   bool
+}
+
+// IsSet returns true if OptGetModelCheckOKFindingsItemObject was set.
+func (o OptGetModelCheckOKFindingsItemObject) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetModelCheckOKFindingsItemObject) Reset() {
+	var v GetModelCheckOKFindingsItemObject
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetModelCheckOKFindingsItemObject) SetTo(v GetModelCheckOKFindingsItemObject) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetModelCheckOKFindingsItemObject) Get() (v GetModelCheckOKFindingsItemObject, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetModelCheckOKFindingsItemObject) Or(d GetModelCheckOKFindingsItemObject) GetModelCheckOKFindingsItemObject {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetModelCheckOKFindingsItemObjectKind returns new OptGetModelCheckOKFindingsItemObjectKind with value set to v.
+func NewOptGetModelCheckOKFindingsItemObjectKind(v GetModelCheckOKFindingsItemObjectKind) OptGetModelCheckOKFindingsItemObjectKind {
+	return OptGetModelCheckOKFindingsItemObjectKind{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetModelCheckOKFindingsItemObjectKind is optional GetModelCheckOKFindingsItemObjectKind.
+type OptGetModelCheckOKFindingsItemObjectKind struct {
+	Value GetModelCheckOKFindingsItemObjectKind
+	Set   bool
+}
+
+// IsSet returns true if OptGetModelCheckOKFindingsItemObjectKind was set.
+func (o OptGetModelCheckOKFindingsItemObjectKind) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetModelCheckOKFindingsItemObjectKind) Reset() {
+	var v GetModelCheckOKFindingsItemObjectKind
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetModelCheckOKFindingsItemObjectKind) SetTo(v GetModelCheckOKFindingsItemObjectKind) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetModelCheckOKFindingsItemObjectKind) Get() (v GetModelCheckOKFindingsItemObjectKind, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetModelCheckOKFindingsItemObjectKind) Or(d GetModelCheckOKFindingsItemObjectKind) GetModelCheckOKFindingsItemObjectKind {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetModelCheckOKFindingsItemSeverity returns new OptGetModelCheckOKFindingsItemSeverity with value set to v.
+func NewOptGetModelCheckOKFindingsItemSeverity(v GetModelCheckOKFindingsItemSeverity) OptGetModelCheckOKFindingsItemSeverity {
+	return OptGetModelCheckOKFindingsItemSeverity{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetModelCheckOKFindingsItemSeverity is optional GetModelCheckOKFindingsItemSeverity.
+type OptGetModelCheckOKFindingsItemSeverity struct {
+	Value GetModelCheckOKFindingsItemSeverity
+	Set   bool
+}
+
+// IsSet returns true if OptGetModelCheckOKFindingsItemSeverity was set.
+func (o OptGetModelCheckOKFindingsItemSeverity) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetModelCheckOKFindingsItemSeverity) Reset() {
+	var v GetModelCheckOKFindingsItemSeverity
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetModelCheckOKFindingsItemSeverity) SetTo(v GetModelCheckOKFindingsItemSeverity) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetModelCheckOKFindingsItemSeverity) Get() (v GetModelCheckOKFindingsItemSeverity, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetModelCheckOKFindingsItemSeverity) Or(d GetModelCheckOKFindingsItemSeverity) GetModelCheckOKFindingsItemSeverity {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetReconciliationOKReconciliation returns new OptGetReconciliationOKReconciliation with value set to v.
+func NewOptGetReconciliationOKReconciliation(v GetReconciliationOKReconciliation) OptGetReconciliationOKReconciliation {
+	return OptGetReconciliationOKReconciliation{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetReconciliationOKReconciliation is optional GetReconciliationOKReconciliation.
+type OptGetReconciliationOKReconciliation struct {
+	Value GetReconciliationOKReconciliation
+	Set   bool
+}
+
+// IsSet returns true if OptGetReconciliationOKReconciliation was set.
+func (o OptGetReconciliationOKReconciliation) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetReconciliationOKReconciliation) Reset() {
+	var v GetReconciliationOKReconciliation
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetReconciliationOKReconciliation) SetTo(v GetReconciliationOKReconciliation) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetReconciliationOKReconciliation) Get() (v GetReconciliationOKReconciliation, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetReconciliationOKReconciliation) Or(d GetReconciliationOKReconciliation) GetReconciliationOKReconciliation {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -30895,6 +31758,98 @@ func (o OptPromoteAiDraftReq) Or(d PromoteAiDraftReq) PromoteAiDraftReq {
 	return d
 }
 
+// NewOptProposeReconciliationMapOKMap returns new OptProposeReconciliationMapOKMap with value set to v.
+func NewOptProposeReconciliationMapOKMap(v ProposeReconciliationMapOKMap) OptProposeReconciliationMapOKMap {
+	return OptProposeReconciliationMapOKMap{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptProposeReconciliationMapOKMap is optional ProposeReconciliationMapOKMap.
+type OptProposeReconciliationMapOKMap struct {
+	Value ProposeReconciliationMapOKMap
+	Set   bool
+}
+
+// IsSet returns true if OptProposeReconciliationMapOKMap was set.
+func (o OptProposeReconciliationMapOKMap) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptProposeReconciliationMapOKMap) Reset() {
+	var v ProposeReconciliationMapOKMap
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptProposeReconciliationMapOKMap) SetTo(v ProposeReconciliationMapOKMap) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptProposeReconciliationMapOKMap) Get() (v ProposeReconciliationMapOKMap, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptProposeReconciliationMapOKMap) Or(d ProposeReconciliationMapOKMap) ProposeReconciliationMapOKMap {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptProposeReconciliationMapReq returns new OptProposeReconciliationMapReq with value set to v.
+func NewOptProposeReconciliationMapReq(v ProposeReconciliationMapReq) OptProposeReconciliationMapReq {
+	return OptProposeReconciliationMapReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptProposeReconciliationMapReq is optional ProposeReconciliationMapReq.
+type OptProposeReconciliationMapReq struct {
+	Value ProposeReconciliationMapReq
+	Set   bool
+}
+
+// IsSet returns true if OptProposeReconciliationMapReq was set.
+func (o OptProposeReconciliationMapReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptProposeReconciliationMapReq) Reset() {
+	var v ProposeReconciliationMapReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptProposeReconciliationMapReq) SetTo(v ProposeReconciliationMapReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptProposeReconciliationMapReq) Get() (v ProposeReconciliationMapReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptProposeReconciliationMapReq) Or(d ProposeReconciliationMapReq) ProposeReconciliationMapReq {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptProtoTimestamp returns new OptProtoTimestamp with value set to v.
 func NewOptProtoTimestamp(v ProtoTimestamp) OptProtoTimestamp {
 	return OptProtoTimestamp{
@@ -31257,6 +32212,52 @@ func (o OptReopenWorkflowInstanceOKStatus) Get() (v ReopenWorkflowInstanceOKStat
 
 // Or returns value if set, or given parameter if does not.
 func (o OptReopenWorkflowInstanceOKStatus) Or(d ReopenWorkflowInstanceOKStatus) ReopenWorkflowInstanceOKStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptRunReconciliationReq returns new OptRunReconciliationReq with value set to v.
+func NewOptRunReconciliationReq(v RunReconciliationReq) OptRunReconciliationReq {
+	return OptRunReconciliationReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRunReconciliationReq is optional RunReconciliationReq.
+type OptRunReconciliationReq struct {
+	Value RunReconciliationReq
+	Set   bool
+}
+
+// IsSet returns true if OptRunReconciliationReq was set.
+func (o OptRunReconciliationReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRunReconciliationReq) Reset() {
+	var v RunReconciliationReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRunReconciliationReq) SetTo(v RunReconciliationReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRunReconciliationReq) Get() (v RunReconciliationReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRunReconciliationReq) Or(d RunReconciliationReq) RunReconciliationReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -34135,6 +35136,58 @@ func (s *PropertyRequest) SetClearValues(val OptBool) {
 	s.ClearValues = val
 }
 
+type ProposeReconciliationMapOK struct {
+	Map   OptProposeReconciliationMapOKMap `json:"map"`
+	Notes []string                         `json:"notes"`
+}
+
+// GetMap returns the value of Map.
+func (s *ProposeReconciliationMapOK) GetMap() OptProposeReconciliationMapOKMap {
+	return s.Map
+}
+
+// GetNotes returns the value of Notes.
+func (s *ProposeReconciliationMapOK) GetNotes() []string {
+	return s.Notes
+}
+
+// SetMap sets the value of Map.
+func (s *ProposeReconciliationMapOK) SetMap(val OptProposeReconciliationMapOKMap) {
+	s.Map = val
+}
+
+// SetNotes sets the value of Notes.
+func (s *ProposeReconciliationMapOK) SetNotes(val []string) {
+	s.Notes = val
+}
+
+func (*ProposeReconciliationMapOK) proposeReconciliationMapRes() {}
+
+type ProposeReconciliationMapOKMap map[string]jx.Raw
+
+func (s *ProposeReconciliationMapOKMap) init() ProposeReconciliationMapOKMap {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type ProposeReconciliationMapReq struct {
+	RevisionID OptUUID `json:"revision_id"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *ProposeReconciliationMapReq) GetRevisionID() OptUUID {
+	return s.RevisionID
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *ProposeReconciliationMapReq) SetRevisionID(val OptUUID) {
+	s.RevisionID = val
+}
+
 // The wire shape of a google.protobuf.Timestamp field on this endpoint — ImportJob is a
 // protobuf-generated Go struct serialized with the standard library's encoding/json (not protojson),
 // so timestamps appear as their raw {seconds, nanos} fields rather than an RFC3339 string.
@@ -34270,6 +35323,154 @@ func (s *PutGoogleConnectionReq) SetKeyFile(val string) {
 type PutGoogleConnectionServiceUnavailable struct{}
 
 func (*PutGoogleConnectionServiceUnavailable) putGoogleConnectionRes() {}
+
+type PutReconciliationMapOK struct {
+	Saved OptBool `json:"saved"`
+}
+
+// GetSaved returns the value of Saved.
+func (s *PutReconciliationMapOK) GetSaved() OptBool {
+	return s.Saved
+}
+
+// SetSaved sets the value of Saved.
+func (s *PutReconciliationMapOK) SetSaved(val OptBool) {
+	s.Saved = val
+}
+
+func (*PutReconciliationMapOK) putReconciliationMapRes() {}
+
+type PutReconciliationMapReq struct {
+	RevisionID uuid.UUID                          `json:"revision_id"`
+	Map        PutReconciliationMapReqMap         `json:"map"`
+	Cases      []PutReconciliationMapReqCasesItem `json:"cases"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *PutReconciliationMapReq) GetRevisionID() uuid.UUID {
+	return s.RevisionID
+}
+
+// GetMap returns the value of Map.
+func (s *PutReconciliationMapReq) GetMap() PutReconciliationMapReqMap {
+	return s.Map
+}
+
+// GetCases returns the value of Cases.
+func (s *PutReconciliationMapReq) GetCases() []PutReconciliationMapReqCasesItem {
+	return s.Cases
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *PutReconciliationMapReq) SetRevisionID(val uuid.UUID) {
+	s.RevisionID = val
+}
+
+// SetMap sets the value of Map.
+func (s *PutReconciliationMapReq) SetMap(val PutReconciliationMapReqMap) {
+	s.Map = val
+}
+
+// SetCases sets the value of Cases.
+func (s *PutReconciliationMapReq) SetCases(val []PutReconciliationMapReqCasesItem) {
+	s.Cases = val
+}
+
+type PutReconciliationMapReqCasesItem map[string]jx.Raw
+
+func (s *PutReconciliationMapReqCasesItem) init() PutReconciliationMapReqCasesItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type PutReconciliationMapReqMap map[string]jx.Raw
+
+func (s *PutReconciliationMapReqMap) init() PutReconciliationMapReqMap {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type PutReconciliationWorkbookOK struct {
+	FileName     OptString `json:"file_name"`
+	Sheets       []string  `json:"sheets"`
+	WorkbookSize OptInt    `json:"workbook_size"`
+}
+
+// GetFileName returns the value of FileName.
+func (s *PutReconciliationWorkbookOK) GetFileName() OptString {
+	return s.FileName
+}
+
+// GetSheets returns the value of Sheets.
+func (s *PutReconciliationWorkbookOK) GetSheets() []string {
+	return s.Sheets
+}
+
+// GetWorkbookSize returns the value of WorkbookSize.
+func (s *PutReconciliationWorkbookOK) GetWorkbookSize() OptInt {
+	return s.WorkbookSize
+}
+
+// SetFileName sets the value of FileName.
+func (s *PutReconciliationWorkbookOK) SetFileName(val OptString) {
+	s.FileName = val
+}
+
+// SetSheets sets the value of Sheets.
+func (s *PutReconciliationWorkbookOK) SetSheets(val []string) {
+	s.Sheets = val
+}
+
+// SetWorkbookSize sets the value of WorkbookSize.
+func (s *PutReconciliationWorkbookOK) SetWorkbookSize(val OptInt) {
+	s.WorkbookSize = val
+}
+
+func (*PutReconciliationWorkbookOK) putReconciliationWorkbookRes() {}
+
+type PutReconciliationWorkbookReq struct {
+	RevisionID uuid.UUID `json:"revision_id"`
+	FileName   OptString `json:"file_name"`
+	DataBase64 string    `json:"data_base64"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *PutReconciliationWorkbookReq) GetRevisionID() uuid.UUID {
+	return s.RevisionID
+}
+
+// GetFileName returns the value of FileName.
+func (s *PutReconciliationWorkbookReq) GetFileName() OptString {
+	return s.FileName
+}
+
+// GetDataBase64 returns the value of DataBase64.
+func (s *PutReconciliationWorkbookReq) GetDataBase64() string {
+	return s.DataBase64
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *PutReconciliationWorkbookReq) SetRevisionID(val uuid.UUID) {
+	s.RevisionID = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *PutReconciliationWorkbookReq) SetFileName(val OptString) {
+	s.FileName = val
+}
+
+// SetDataBase64 sets the value of DataBase64.
+func (s *PutReconciliationWorkbookReq) SetDataBase64(val string) {
+	s.DataBase64 = val
+}
 
 type QueryFormRecordsBadRequest Error
 
@@ -36519,6 +37720,41 @@ func (s *RunIntegrationUnprocessableEntityErrorsItem) SetMessage(val OptString) 
 // SetRawValue sets the value of RawValue.
 func (s *RunIntegrationUnprocessableEntityErrorsItem) SetRawValue(val OptString) {
 	s.RawValue = val
+}
+
+type RunReconciliationAccepted struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *RunReconciliationAccepted) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *RunReconciliationAccepted) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*RunReconciliationAccepted) runReconciliationRes() {}
+
+// RunReconciliationConflict is response for RunReconciliation operation.
+type RunReconciliationConflict struct{}
+
+func (*RunReconciliationConflict) runReconciliationRes() {}
+
+type RunReconciliationReq struct {
+	RevisionID OptUUID `json:"revision_id"`
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *RunReconciliationReq) GetRevisionID() OptUUID {
+	return s.RevisionID
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *RunReconciliationReq) SetRevisionID(val OptUUID) {
+	s.RevisionID = val
 }
 
 type SaveAiSettingsOK struct {
@@ -39649,6 +40885,22 @@ func (s *TriggerPayloadField) SetRequired(val bool) {
 	s.Required = val
 }
 
+type UnignoreModelCheckFindingOK struct {
+	Ignored OptBool `json:"ignored"`
+}
+
+// GetIgnored returns the value of Ignored.
+func (s *UnignoreModelCheckFindingOK) GetIgnored() OptBool {
+	return s.Ignored
+}
+
+// SetIgnored sets the value of Ignored.
+func (s *UnignoreModelCheckFindingOK) SetIgnored(val OptBool) {
+	s.Ignored = val
+}
+
+func (*UnignoreModelCheckFindingOK) unignoreModelCheckFindingRes() {}
+
 type UpdateAdminApplicationOK struct {
 	Status OptString `json:"status"`
 }
@@ -40873,6 +42125,8 @@ func (*UpdateMetricNotFound) updateMetricRes() {}
 type UpdateMetricOK struct {
 	Status OptString                  `json:"status"`
 	Recalc []UpdateMetricOKRecalcItem `json:"recalc"`
+	// The model check's findings about this metric (GET /api/developer/model-check), not ignored.
+	Warnings []UpdateMetricOKWarningsItem `json:"warnings"`
 }
 
 // GetStatus returns the value of Status.
@@ -40885,6 +42139,11 @@ func (s *UpdateMetricOK) GetRecalc() []UpdateMetricOKRecalcItem {
 	return s.Recalc
 }
 
+// GetWarnings returns the value of Warnings.
+func (s *UpdateMetricOK) GetWarnings() []UpdateMetricOKWarningsItem {
+	return s.Warnings
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateMetricOK) SetStatus(val OptString) {
 	s.Status = val
@@ -40893,6 +42152,11 @@ func (s *UpdateMetricOK) SetStatus(val OptString) {
 // SetRecalc sets the value of Recalc.
 func (s *UpdateMetricOK) SetRecalc(val []UpdateMetricOKRecalcItem) {
 	s.Recalc = val
+}
+
+// SetWarnings sets the value of Warnings.
+func (s *UpdateMetricOK) SetWarnings(val []UpdateMetricOKWarningsItem) {
+	s.Warnings = val
 }
 
 func (*UpdateMetricOK) updateMetricRes() {}
@@ -40931,6 +42195,17 @@ func (s *UpdateMetricOKRecalcItem) SetMetric(val OptString) {
 // SetValue sets the value of Value.
 func (s *UpdateMetricOKRecalcItem) SetValue(val OptNilFloat64) {
 	s.Value = val
+}
+
+type UpdateMetricOKWarningsItem map[string]jx.Raw
+
+func (s *UpdateMetricOKWarningsItem) init() UpdateMetricOKWarningsItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
 }
 
 // Ref: #/components/schemas/UpdateMetricRequest

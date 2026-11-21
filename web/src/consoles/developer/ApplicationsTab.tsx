@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant, type ApiError } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
+import { ModelCheckSection } from "./ModelCheckTab";
 import { formatIsoDate } from "../dateSerial";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle, Txt } from "../../ui";
 
@@ -179,9 +180,20 @@ function DevModelRevisions({
                     size="sm"
                     title="Set as active revision"
                     disabled={activate.isPending || isDeleting}
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      confirm({ title: "Set as active revision?", body: `"${s.name}" becomes the live revision everyone sees. This can be changed again later.`, confirmLabel: "Set active", destructive: false, onConfirm: () => activate.mutate(s.id) });
+                      // The model check's summary of what goes live with it
+                      // (advice: without it, the confirmation stands alone).
+                      let summary = "";
+                      try {
+                        const rep = await api.getModelCheck(s.id);
+                        const errors = rep.counts.error ?? 0, warnings = rep.counts.warning ?? 0;
+                        if (errors + warnings > 0) {
+                          const titles = [...new Set(rep.findings.filter(f => !f.ignored && f.severity !== "info").map(f => f.title))].slice(0, 3);
+                          summary = ` The model check finds ${errors} error${errors === 1 ? "" : "s"} and ${warnings} warning${warnings === 1 ? "" : "s"} in it (${titles.join("; ")}) — see Model check on Developer Models.`;
+                        }
+                      } catch { /* no summary */ }
+                      confirm({ title: "Set as active revision?", body: `"${s.name}" becomes the live revision everyone sees.${summary} This can be changed again later.`, confirmLabel: "Set active", destructive: false, onConfirm: () => activate.mutate(s.id) });
                     }}
                   >
                     Set active
@@ -431,6 +443,7 @@ export function DevApplicationsTab({
           No revision selected — select a revision below to start working
         </div>
       )}
+      {revisionId && <ModelCheckSection revisionId={revisionId} revisionName={revisionName} />}
 
       {apps.map((app) => {
         const appOpen = !isCollapsed(`app:${app.id}`);

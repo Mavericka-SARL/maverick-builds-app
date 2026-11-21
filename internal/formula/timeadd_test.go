@@ -386,7 +386,11 @@ func TestAnalyzeTimeAdditions(t *testing.T) {
 	}
 	cases := map[string]map[string]want{
 		"LAG(x, y, 0)":                        {"x": {0, 0, true, true, false}, "y": {0, 0, false, false, false}},
-		"LEAD(x, y + 1, z, STRICT)":           {"x": {0, 0, true, true, false}, "y": {0, 0, false, false, false}, "z": {0, 0, false, false, false}},
+		"LEAD(x, y + 1, z, STRICT)":           {"x": {1, 1, false, true, false}, "y": {0, 0, false, false, false}, "z": {0, 0, false, false, false}},
+		"LAG(x, y, 0, STRICT)":                {"x": {-1, -1, true, false, false}, "y": {0, 0, false, false, false}},
+		"LAG(x, y, 0, SEMISTRICT)":            {"x": {0, 0, true, false, false}, "y": {0, 0, false, false, false}},
+		"LEAD(x, y, 0, SEMISTRICT)":           {"x": {0, 0, false, true, false}, "y": {0, 0, false, false, false}},
+		"OFFSET(x, y, 0)":                     {"x": {0, 0, true, true, false}, "y": {0, 0, false, false, false}},
 		"PREVIOUS(LAG(x, y, 0))":              {"x": {-1, -1, true, true, false}, "y": {-1, -1, false, false, false}},
 		"YEARVALUE(x)":                        {"x": {0, 0, true, true, true}},
 		"MONTHVALUE(x) + QUARTERVALUE(y)":     {"x": {0, 0, true, true, true}, "y": {0, 0, true, true, true}},

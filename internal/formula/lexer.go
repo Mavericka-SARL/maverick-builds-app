@@ -181,6 +181,28 @@ func (l *lexer) readNumber(start int) Token {
 
 func isIdentRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
 
+// dottedCall looks ahead from l.pos (on the dot after the word that starts at
+// start) for word(.word)* followed, after spaces, by "(": the end of that
+// chain when it is a built-in with dots in its name (DottedFunction), else 0.
+// Nothing is consumed.
+func (l *lexer) dottedCall(start int) int {
+	i := l.pos
+	for i+1 < len(l.src) && l.src[i] == '.' && isIdentRune(l.src[i+1]) {
+		i++
+		for i < len(l.src) && isIdentRune(l.src[i]) {
+			i++
+		}
+	}
+	j := i
+	for j < len(l.src) && unicode.IsSpace(l.src[j]) {
+		j++
+	}
+	if j < len(l.src) && l.src[j] == '(' && DottedFunction(string(l.src[start:i])) {
+		return i
+	}
+	return 0
+}
+
 func (l *lexer) readWord() {
 	for l.pos < len(l.src) && isIdentRune(l.peek()) {
 		l.advance()
@@ -194,6 +216,14 @@ func (l *lexer) readWord() {
 func (l *lexer) readIdent(start int) Token {
 	l.readWord()
 	if l.peek() != '.' || l.pos+1 >= len(l.src) {
+		return Token{Type: tokIdent, Val: string(l.src[start:l.pos]), Pos: start}
+	}
+	// A spreadsheet function with dots in its name (NORM.S.INV, STDEV.S):
+	// the dotted chain directly before "(" when it names one.
+	if end := l.dottedCall(start); end > 0 {
+		for l.pos < end {
+			l.advance()
+		}
 		return Token{Type: tokIdent, Val: string(l.src[start:l.pos]), Pos: start}
 	}
 	after := l.src[l.pos+1]

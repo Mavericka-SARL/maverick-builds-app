@@ -4543,6 +4543,63 @@ func decodeDeleteNotificationParams(args [1]string, argsEscaped bool, r *http.Re
 	return params, nil
 }
 
+// DeleteReconciliationParams is parameters of deleteReconciliation operation.
+type DeleteReconciliationParams struct {
+	RevisionID uuid.UUID
+}
+
+func unpackDeleteReconciliationParams(packed middleware.Parameters) (params DeleteReconciliationParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		params.RevisionID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeDeleteReconciliationParams(args [0]string, argsEscaped bool, r *http.Request) (params DeleteReconciliationParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.RevisionID = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DeleteRevisionParams is parameters of deleteRevision operation.
 type DeleteRevisionParams struct {
 	ID uuid.UUID
@@ -7584,6 +7641,10 @@ type GetGridParams struct {
 	MetaOnly OptGetGridMetaOnly `json:",omitempty,omitzero"`
 	// "1" returns per-metric totals with no per-combo cells — the KPI read shape.
 	TotalsOnly OptGetGridTotalsOnly `json:",omitempty,omitzero"`
+	// "totals" with totals_only=1 answers with the totals, texts, withheld and recalc_pending only;
+	// metrics, dimensions, departments and cells are empty (a KPI tile polling, its metadata read once
+	// with meta_only).
+	Fields OptGetGridFields `json:",omitempty,omitzero"`
 }
 
 func unpackGetGridParams(packed middleware.Parameters) (params GetGridParams) {
@@ -7630,6 +7691,15 @@ func unpackGetGridParams(packed middleware.Parameters) (params GetGridParams) {
 		}
 		if v, ok := packed[key]; ok {
 			params.TotalsOnly = v.(OptGetGridTotalsOnly)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "fields",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Fields = v.(OptGetGridFields)
 		}
 	}
 	return params
@@ -7868,6 +7938,62 @@ func decodeGetGridParams(args [0]string, argsEscaped bool, r *http.Request) (par
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "totals_only",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: fields.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "fields",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotFieldsVal GetGridFields
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotFieldsVal = GetGridFields(c)
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Fields.SetTo(paramsDotFieldsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.Fields.Get(); ok {
+					if err := func() error {
+						if err := value.Validate(); err != nil {
+							return err
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "fields",
 			In:   "query",
 			Err:  err,
 		}
@@ -8579,6 +8705,71 @@ func decodeGetIntegrationRunParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// GetModelCheckParams is parameters of getModelCheck operation.
+type GetModelCheckParams struct {
+	// The revision to check; the model's active revision when left out.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetModelCheckParams(packed middleware.Parameters) (params GetModelCheckParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetModelCheckParams(args [0]string, argsEscaped bool, r *http.Request) (params GetModelCheckParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetMyWorkflowHistoryParams is parameters of getMyWorkflowHistory operation.
 type GetMyWorkflowHistoryParams struct {
 	InstanceID OptUUID `json:",omitempty,omitzero"`
@@ -8688,6 +8879,134 @@ func decodeGetMyWorkflowHistoryParams(args [0]string, argsEscaped bool, r *http.
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "before",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetReconciliationParams is parameters of getReconciliation operation.
+type GetReconciliationParams struct {
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetReconciliationParams(packed middleware.Parameters) (params GetReconciliationParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetReconciliationParams(args [0]string, argsEscaped bool, r *http.Request) (params GetReconciliationParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetReconciliationDifferencesParams is parameters of getReconciliationDifferences operation.
+type GetReconciliationDifferencesParams struct {
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackGetReconciliationDifferencesParams(packed middleware.Parameters) (params GetReconciliationDifferencesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeGetReconciliationDifferencesParams(args [0]string, argsEscaped bool, r *http.Request) (params GetReconciliationDifferencesParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
 			In:   "query",
 			Err:  err,
 		}
@@ -9580,6 +9899,71 @@ func unpackGetWorkflowInstancesParams(packed middleware.Parameters) (params GetW
 }
 
 func decodeGetWorkflowInstancesParams(args [1]string, argsEscaped bool, r *http.Request) (params GetWorkflowInstancesParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetWorkflowStartDefaultsParams is parameters of getWorkflowStartDefaults operation.
+type GetWorkflowStartDefaultsParams struct {
+	ID uuid.UUID
+}
+
+func unpackGetWorkflowStartDefaultsParams(packed middleware.Parameters) (params GetWorkflowStartDefaultsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGetWorkflowStartDefaultsParams(args [1]string, argsEscaped bool, r *http.Request) (params GetWorkflowStartDefaultsParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -11918,6 +12302,8 @@ func decodeListGridsParams(args [0]string, argsEscaped bool, r *http.Request) (p
 // ListImportJobsParams is parameters of listImportJobs operation.
 type ListImportJobsParams struct {
 	RevisionID OptUUID `json:",omitempty,omitzero"`
+	// How many of the newest jobs to list (default 20, at most 200).
+	Limit OptInt `json:",omitempty,omitzero"`
 }
 
 func unpackListImportJobsParams(packed middleware.Parameters) (params ListImportJobsParams) {
@@ -11928,6 +12314,15 @@ func unpackListImportJobsParams(packed middleware.Parameters) (params ListImport
 		}
 		if v, ok := packed[key]; ok {
 			params.RevisionID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "limit",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Limit = v.(OptInt)
 		}
 	}
 	return params
@@ -11972,6 +12367,72 @@ func decodeListImportJobsParams(args [0]string, argsEscaped bool, r *http.Reques
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: limit.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "limit",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotLimitVal int
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToInt(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotLimitVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Limit.SetTo(paramsDotLimitVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.Limit.Get(); ok {
+					if err := func() error {
+						if err := (validate.Int{
+							MinSet:        true,
+							Min:           1,
+							MaxSet:        false,
+							Max:           0,
+							MinExclusive:  false,
+							MaxExclusive:  false,
+							MultipleOfSet: false,
+							MultipleOf:    0,
+							Pattern:       nil,
+						}).Validate(int64(value)); err != nil {
+							return errors.Wrap(err, "int")
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "limit",
 			In:   "query",
 			Err:  err,
 		}
@@ -17001,6 +17462,107 @@ func decodeTriggerAutomationRuleParams(args [1]string, argsEscaped bool, r *http
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// UnignoreModelCheckFindingParams is parameters of unignoreModelCheckFinding operation.
+type UnignoreModelCheckFindingParams struct {
+	RevisionID uuid.UUID
+	Key        string
+}
+
+func unpackUnignoreModelCheckFindingParams(packed middleware.Parameters) (params UnignoreModelCheckFindingParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		params.RevisionID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "key",
+			In:   "query",
+		}
+		params.Key = packed[key].(string)
+	}
+	return params
+}
+
+func decodeUnignoreModelCheckFindingParams(args [0]string, argsEscaped bool, r *http.Request) (params UnignoreModelCheckFindingParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.RevisionID = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: key.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "key",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.Key = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "key",
+			In:   "query",
 			Err:  err,
 		}
 	}

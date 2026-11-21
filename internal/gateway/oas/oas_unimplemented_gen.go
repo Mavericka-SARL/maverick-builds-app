@@ -863,6 +863,15 @@ func (UnimplementedHandler) DeleteNotification(ctx context.Context, params Delet
 	return r, ht.ErrNotImplemented
 }
 
+// DeleteReconciliation implements deleteReconciliation operation.
+//
+// Remove a revision's reconciliation (workbook, map, cases, report).
+//
+// DELETE /api/developer/reconciliation
+func (UnimplementedHandler) DeleteReconciliation(ctx context.Context, params DeleteReconciliationParams) (r *DeleteReconciliationOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DeleteRevision implements deleteRevision operation.
 //
 // Delete a revision (rejected if it is the model's active revision).
@@ -1329,6 +1338,20 @@ func (UnimplementedHandler) GetMe(ctx context.Context) (r GetMeRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
+// GetModelCheck implements getModelCheck operation.
+//
+// Rules: a schedule that cannot start its workflow (error); a record field mapped into a number
+// metric that holds no number; a calculated pick-list or text whose total is worked out from blanks;
+// a SUMIFS whose metric range spans a dimension whose members are never added up; a fixed member
+// list on a dimension business users maintain; hidden members under figures read across them
+// (warnings); an input open to every business role while others are restricted (info). A finding's
+// key names it by what it is about, so ignores hold across revision copies and model exports.
+//
+// GET /api/developer/model-check
+func (UnimplementedHandler) GetModelCheck(ctx context.Context, params GetModelCheckParams) (r GetModelCheckRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetMyWorkflowHistory implements getMyWorkflowHistory operation.
 //
 // The caller's runs — started, assigned a step, or notified of — in the selected application
@@ -1349,6 +1372,25 @@ func (UnimplementedHandler) GetMyWorkflowHistory(ctx context.Context, params Get
 //
 // GET /api/notifications/settings
 func (UnimplementedHandler) GetNotificationSettings(ctx context.Context) (r GetNotificationSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetReconciliation implements getReconciliation operation.
+//
+// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
+// the last run's status and report (first 500 differences).
+//
+// GET /api/developer/reconciliation
+func (UnimplementedHandler) GetReconciliation(ctx context.Context, params GetReconciliationParams) (r GetReconciliationRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetReconciliationDifferences implements getReconciliationDifferences operation.
+//
+// The last run's differences as CSV (case, sheet, cell, metric, members, expected, actual).
+//
+// GET /api/developer/reconciliation/differences.csv
+func (UnimplementedHandler) GetReconciliationDifferences(ctx context.Context, params GetReconciliationDifferencesParams) (r GetReconciliationDifferencesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1503,6 +1545,19 @@ func (UnimplementedHandler) GetWorkflowInstances(ctx context.Context, params Get
 	return r, ht.ErrNotImplemented
 }
 
+// GetWorkflowStartDefaults implements getWorkflowStartDefaults operation.
+//
+// Each variable with a default formula (context_schema[].default) is worked out as a start with
+// nothing given would: names in it are metrics of the workflow's revision, read at the members the
+// variables before it pin, or earlier variables. Only someone who may start the workflow asks (403
+// otherwise). A default that cannot be worked out is listed in errors with the reason, and its field
+// stays empty.
+//
+// GET /api/workflow/definitions/{id}/start-defaults
+func (UnimplementedHandler) GetWorkflowStartDefaults(ctx context.Context, params GetWorkflowStartDefaultsParams) (r GetWorkflowStartDefaultsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetWorkflowStatus implements getWorkflowStatus operation.
 //
 // One published workflow of the caller's model, by name: its latest run (test runs left out) and
@@ -1553,6 +1608,15 @@ func (UnimplementedHandler) GrantAdminUserModelAccess(ctx context.Context, param
 //
 // GET /healthz
 func (UnimplementedHandler) Healthz(ctx context.Context) (r *HealthzOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// IgnoreModelCheckFinding implements ignoreModelCheckFinding operation.
+//
+// Keep a finding the revision has now, with the reason it is kept.
+//
+// PUT /api/developer/model-check/ignores
+func (UnimplementedHandler) IgnoreModelCheckFinding(ctx context.Context, req *IgnoreModelCheckFindingReq) (r IgnoreModelCheckFindingRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2249,6 +2313,16 @@ func (UnimplementedHandler) PromoteAiDraft(ctx context.Context, req OptPromoteAi
 	return r, ht.ErrNotImplemented
 }
 
+// ProposeReconciliationMap implements proposeReconciliationMap operation.
+//
+// A map drafted from the stored workbook and what the revision knows (metric labels, member codes
+// and labels, period dates), not saved.
+//
+// POST /api/developer/reconciliation/propose
+func (UnimplementedHandler) ProposeReconciliationMap(ctx context.Context, req OptProposeReconciliationMapReq) (r ProposeReconciliationMapRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // PublishWorkflow implements publishWorkflow operation.
 //
 // Publishing a workflow that is already published changes nothing and answers it as it is; an
@@ -2266,6 +2340,29 @@ func (UnimplementedHandler) PublishWorkflow(ctx context.Context, params PublishW
 //
 // PUT /api/developer/integrations/google-service-account
 func (UnimplementedHandler) PutGoogleConnection(ctx context.Context, req *PutGoogleConnectionReq) (r PutGoogleConnectionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// PutReconciliationMap implements putReconciliationMap operation.
+//
+// A rule is a rectangle of a sheet (rows or row_list, optionally repeated in blocks; columns or
+// column_list), the metric of each cell (metric, metrics_by_column or metrics_by_row) and where each
+// dimension's member comes from (members: code, case, column — with block_row in blocks — row,
+// cell; split and part take one part of a key; total). A case names its members of the dimensions
+// bound to the case and the input edits (cell and value, or range and copy_from) that make the
+// workbook calculate it; a case without edits reads the saved values.
+//
+// PUT /api/developer/reconciliation/map
+func (UnimplementedHandler) PutReconciliationMap(ctx context.Context, req *PutReconciliationMapReq) (r PutReconciliationMapRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// PutReconciliationWorkbook implements putReconciliationWorkbook operation.
+//
+// Store (or replace) the workbook a revision rebuilds, at most 25 MB.
+//
+// PUT /api/developer/reconciliation/workbook
+func (UnimplementedHandler) PutReconciliationWorkbook(ctx context.Context, req *PutReconciliationWorkbookReq) (r PutReconciliationWorkbookRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2532,6 +2629,16 @@ func (UnimplementedHandler) RevokeScimToken(ctx context.Context, params RevokeSc
 //
 // POST /api/integrations/{id}/run
 func (UnimplementedHandler) RunIntegration(ctx context.Context, req *IntegrationRunRequest, params RunIntegrationParams) (r RunIntegrationRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// RunReconciliation implements runReconciliation operation.
+//
+// Compare the workbook with the revision, case by case, in the background; GET
+// /api/developer/reconciliation follows it.
+//
+// POST /api/developer/reconciliation/run
+func (UnimplementedHandler) RunReconciliation(ctx context.Context, req OptRunReconciliationReq) (r RunReconciliationRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2949,6 +3056,15 @@ func (UnimplementedHandler) TestTenantAISettings(ctx context.Context, req OptTen
 //
 // POST /api/automation/trigger/{id}
 func (UnimplementedHandler) TriggerAutomationRule(ctx context.Context, req OptTriggerAutomationRequest, params TriggerAutomationRuleParams) (r TriggerAutomationRuleRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// UnignoreModelCheckFinding implements unignoreModelCheckFinding operation.
+//
+// Bring an ignored finding back.
+//
+// DELETE /api/developer/model-check/ignores
+func (UnimplementedHandler) UnignoreModelCheckFinding(ctx context.Context, params UnignoreModelCheckFindingParams) (r UnignoreModelCheckFindingRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

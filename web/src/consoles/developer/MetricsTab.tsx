@@ -7,6 +7,8 @@ import { HighlightRulesEditor } from "./HighlightRulesEditor";
 import { ClosedRulesEditor } from "./ClosedRulesEditor";
 import { InputRulesEditor } from "./InputRulesEditor";
 import { TotalRulesEditor } from "./TotalRulesEditor";
+import { SaveWarnings } from "./ModelCheckTab";
+import { showSaveWarnings } from "./saveWarnings";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter, Txt } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
@@ -123,6 +125,7 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
 
   return (
     <div>
+      <SaveWarnings />
       <Toolbar className="mvx-toolbar--spaced">
         <ToolbarGroup>
           <span className="mvx-admin-muted">
@@ -297,6 +300,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       invalidateModelData(qc);
       setEditing(false);
       if (data.recalc && data.recalc.length > 0) setRecalcResults(data.recalc);
+      showSaveWarnings(qc, data.warnings);
     },
     // An input holding values becomes calculated only once they may go.
     onError: (err) => {
@@ -613,12 +617,16 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   // A text input holds notes: never totalled, across members or time.
   const isNotes = format === "text" && isInput;
   const isCalcText = format === "text" && !isInput;
+  // A calculated pick-list whose aggregation is not chosen (Formula or None).
+  const autoPick = isPicklist && !isInput && aggRule !== "formula" && aggRule !== "none";
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
       name, label, is_input: isInput, formula, revision_id: revisionId,
       // A pick-list never totals: "none", or "formula" for a calculated one.
-      agg_rule: isNotes || (isCalcText && aggRule !== "formula") || (format === "date" && (aggRule === "sum" || aggRule === "rate")) ? "none" : !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
+      // A calculated one left on Automatic sends none: the server totals it
+      // by its formula only when what the formula reads has a total.
+      agg_rule: isNotes || (isCalcText && aggRule !== "formula") || (format === "date" && (aggRule === "sum" || aggRule === "rate")) ? "none" : !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : aggRule === "formula" ? "formula" : "",
       // Only sent for "rate"; any other rule has no operands and the server
       // rejects a pair it did not ask for.
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
@@ -628,8 +636,9 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
       picklist_dimension_id: isPicklist ? picklistDim : undefined,
       picklist_allow_parents: isPicklist ? allowParents : undefined,
     }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
+      showSaveWarnings(qc, data.warnings);
       setName(""); setLabel(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]); setPicklistDim("");
       onSuccess?.();
     },
@@ -729,7 +738,9 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
         {!(isInput && isPicklist) && (
           <Field
             label="Aggregation rule"
-            description={aggRule === "formula"
+            description={autoPick
+              ? "the formula evaluated at the total when everything it reads has a total; no total when it reads a metric without one or the row's own member (a class or an action of one item means nothing on a total row)"
+              : aggRule === "formula"
               ? "the total is this metric's formula evaluated against aggregated inputs — use for ratios and percentages, where summing members is meaningless"
               : aggRule === "rate"
               ? "the total is one metric divided by another, so it reflects weight rather than averaging members equally"
@@ -737,7 +748,8 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
               ? "no total: values at the members only, nothing on total rows — an index, a correction %, a pick-list"
               : "how per-member results combine into this metric's total"}
           >
-            <Select value={aggRule} onChange={(e) => setAggRule(e.target.value)} style={{ width: 160 }} aria-label="Aggregation rule">
+            <Select value={autoPick ? "auto" : aggRule} onChange={(e) => setAggRule(e.target.value)} style={{ width: 160 }} aria-label="Aggregation rule">
+              {isPicklist && !isInput && <option value="auto">Automatic</option>}
               {!isPicklist && <>
                 <option value="sum">Sum</option>
                 <option value="average">Average</option>

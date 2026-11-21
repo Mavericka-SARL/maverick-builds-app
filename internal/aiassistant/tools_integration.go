@@ -15,8 +15,10 @@ package aiassistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
@@ -24,6 +26,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
+	"github.com/mavericks-engine/mavericks/internal/reconcile"
 	"github.com/mavericks-engine/mavericks/internal/recordpost"
 )
 
@@ -106,6 +109,10 @@ type ReadHooks struct {
 	// QueryRecords answers a records query on a table (its records, or
 	// totals over them) through the records query route, as the developer.
 	QueryRecords func(ctx context.Context, tableID string, query json.RawMessage) (string, error)
+	// Reconcile runs the revision's workbook reconciliation (Developer ›
+	// Reconcile) now and answers its report; nil report when the revision
+	// has none.
+	Reconcile func(ctx context.Context, revisionID string) (*reconcile.Report, error)
 }
 
 // WithReadHooks sets the read executor's gateway hooks and returns it.
@@ -175,6 +182,17 @@ func integrationToolDefs() []toolDef {
 			Name:        "compare_with_sheet",
 			Description: "Compares ONE row of an attached sheet with the metric it became, period by period (each column's period read from the header above it), at the members you name for its other dimensions — to check a whole sheet use check_sheet: how many periods match and every one that differs (sheet value, model value). Use it before saying a row or a sheet is done — a model can look complete and still differ — and after each fix. A percentage metric matches the sheet's fraction.",
 			Parameters:  compareWithSheetSchema,
+		},
+		{
+			Name: "reconcile_workbook",
+			Description: "Runs the revision's workbook reconciliation — the workbook the developer stored with the revision under Integrations › Workbook reconciliation, " +
+				"its map of the workbook's cells in model terms and its cases (scenarios; a case that changes inputs is recalculated by the server) — and " +
+				"answers how many cells match per case, the metrics that differ most and the first differences (sheet, cell, members, workbook value, " +
+				"model value), with the map's own problems apart. It is the acceptance test of a rebuilt workbook: run it after each stage of a build and " +
+				"fix the model until it is clean; a MAPPING problem is fixed in the map (ask the developer), never in the model. Read-only.",
+			Parameters: `{"type":"object","properties":{
+				"max_differences":{"type":"integer","description":"How many differences to list (default 25)"}
+			},"required":[]}`,
 		},
 		{
 			Name: "check_sheet",
@@ -1340,4 +1358,71 @@ func (e *ToolExecutor) planSheet(ctx context.Context, raw json.RawMessage) (stri
 		}
 	}
 	return e.hooks.PlanSheet(ctx, p.Sheet, rows)
+}
+
+// reconcileWorkbook is the reconcile_workbook tool.
+func (e *ToolExecutor) reconcileWorkbook(ctx context.Context, raw json.RawMessage) (string, error) {
+	var p struct {
+		MaxDifferences int `json:"max_differences"`
+	}
+	_ = json.Unmarshal(raw, &p)
+	if p.MaxDifferences <= 0 {
+		p.MaxDifferences = 25
+	}
+	if e.hooks.Reconcile == nil {
+		return "", errors.New("reconciliation is not available here")
+	}
+	rep, err := e.hooks.Reconcile(ctx, e.revID)
+	if err != nil {
+		return "", err
+	}
+	if rep == nil {
+		return "This revision has no workbook reconciliation: the developer stores the workbook and its map under Integrations › Workbook reconciliation.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Reconciliation: %d / %d cells match.\n", rep.Matched, rep.Compared)
+	for _, c := range rep.Cases {
+		if c.Status != "compared" {
+			fmt.Fprintf(&sb, "- %s: not compared — %s\n", c.Name, c.Reason)
+			continue
+		}
+		fmt.Fprintf(&sb, "- %s: %d / %d\n", c.Name, c.Matched, c.Compared)
+		shown := 0
+		for _, m := range c.ByMetric {
+			if m.Compared == m.Matched || shown == 8 {
+				continue
+			}
+			fmt.Fprintf(&sb, "    %s: %d of %d differ\n", m.Name, m.Compared-m.Matched, m.Compared)
+			shown++
+		}
+	}
+	if len(rep.MappingProblems) > 0 {
+		sb.WriteString("MAPPING problems (the map reads the workbook wrongly — fixed in the map, not the model):\n")
+		for i, pr := range rep.MappingProblems {
+			if i == 10 {
+				fmt.Fprintf(&sb, "  … and %d more\n", len(rep.MappingProblems)-10)
+				break
+			}
+			sb.WriteString("  " + pr + "\n")
+		}
+	}
+	if rep.DifferencesTotal > 0 {
+		fmt.Fprintf(&sb, "Differences (%d in all; workbook → model):\n", rep.DifferencesTotal)
+		for i, d := range rep.Differences {
+			if i == p.MaxDifferences {
+				break
+			}
+			keys := make([]string, 0, len(d.Members))
+			for k := range d.Members {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			parts := make([]string, 0, len(keys))
+			for _, k := range keys {
+				parts = append(parts, k+"="+d.Members[k])
+			}
+			fmt.Fprintf(&sb, "  %s %s!%s %s [%s]: %q → %q\n", d.Case, d.Sheet, d.Cell, d.Metric, strings.Join(parts, ", "), d.Expected, d.Actual)
+		}
+	}
+	return sb.String(), nil
 }

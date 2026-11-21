@@ -409,8 +409,20 @@ type GetMeRes interface {
 	getMeRes()
 }
 
+type GetModelCheckRes interface {
+	getModelCheckRes()
+}
+
 type GetNotificationSettingsRes interface {
 	getNotificationSettingsRes()
+}
+
+type GetReconciliationDifferencesRes interface {
+	getReconciliationDifferencesRes()
+}
+
+type GetReconciliationRes interface {
+	getReconciliationRes()
 }
 
 type GetRecordChoicesRes interface {
@@ -457,6 +469,10 @@ type GetWorkflowRes interface {
 	getWorkflowRes()
 }
 
+type GetWorkflowStartDefaultsRes interface {
+	getWorkflowStartDefaultsRes()
+}
+
 type GetWorkflowStatusRes interface {
 	getWorkflowStatusRes()
 }
@@ -467,6 +483,10 @@ type GrantAdminUserAppAccessRes interface {
 
 type GrantAdminUserModelAccessRes interface {
 	grantAdminUserModelAccessRes()
+}
+
+type IgnoreModelCheckFindingRes interface {
+	ignoreModelCheckFindingRes()
 }
 
 type ImportDimensionMembersRes interface {
@@ -649,12 +669,24 @@ type PromoteAiDraftRes interface {
 	promoteAiDraftRes()
 }
 
+type ProposeReconciliationMapRes interface {
+	proposeReconciliationMapRes()
+}
+
 type PublishWorkflowRes interface {
 	publishWorkflowRes()
 }
 
 type PutGoogleConnectionRes interface {
 	putGoogleConnectionRes()
+}
+
+type PutReconciliationMapRes interface {
+	putReconciliationMapRes()
+}
+
+type PutReconciliationWorkbookRes interface {
+	putReconciliationWorkbookRes()
 }
 
 type QueryFormRecordsRes interface {
@@ -747,6 +779,10 @@ type RevokeScimTokenRes interface {
 
 type RunIntegrationRes interface {
 	runIntegrationRes()
+}
+
+type RunReconciliationRes interface {
+	runReconciliationRes()
 }
 
 type SaveIntegrationTemplateRes interface {
@@ -895,6 +931,10 @@ type TestTenantAISettingsRes interface {
 
 type TriggerAutomationRuleRes interface {
 	triggerAutomationRuleRes()
+}
+
+type UnignoreModelCheckFindingRes interface {
+	unignoreModelCheckFindingRes()
 }
 
 type UpdateAdminModelRes interface {

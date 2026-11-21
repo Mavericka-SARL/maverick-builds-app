@@ -67,7 +67,7 @@ func (ps *Poster) postedNow(ctx context.Context, m formMapping, recs []postingRe
 		ids[j] = r.id
 	}
 	rows, err := ps.db(ctx).Query(ctx, `
-		SELECT form_record_id::text, dim_members, COALESCE(posted_value, 0)::float8
+		SELECT form_record_id::text, dim_members, COALESCE(posted_value, 0)::float8, COALESCE(posted_text, '')
 		FROM runtime.form_record_posting WHERE mapping_id = $1::uuid AND form_record_id = ANY($2::uuid[])`, m.id, ids)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func (ps *Poster) postedNow(ctx context.Context, m formMapping, recs []postingRe
 		var id string
 		var raw []byte
 		p := &plannedPosting{}
-		if err := rows.Scan(&id, &raw, &p.value); err != nil {
+		if err := rows.Scan(&id, &raw, &p.value, &p.text); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &p.members)
@@ -165,7 +165,7 @@ func MappingChangeRefusal(ctx context.Context, db dbx.DB, mappingID string, to M
 		return "", err
 	}
 	rows, err := db.Query(ctx, `
-		SELECT p.dim_members, COALESCE(p.posted_value, 0)::float8, COALESCE(r.status::text, ''), r.data
+		SELECT p.dim_members, COALESCE(p.posted_value, 0)::float8, COALESCE(p.posted_text, ''), COALESCE(r.status::text, ''), r.data
 		FROM runtime.form_record_posting p JOIN runtime.form_record r ON r.id = p.form_record_id
 		WHERE p.mapping_id = $1::uuid`, mappingID)
 	if err != nil {
@@ -181,7 +181,7 @@ func MappingChangeRefusal(ctx context.Context, db dbx.DB, mappingID string, to M
 	for rows.Next() {
 		var p posted
 		var dims, data []byte
-		if err := rows.Scan(&dims, &p.now.value, &p.status, &data); err != nil {
+		if err := rows.Scan(&dims, &p.now.value, &p.now.text, &p.status, &data); err != nil {
 			rows.Close()
 			return "", err
 		}
@@ -203,6 +203,10 @@ func MappingChangeRefusal(ctx context.Context, db dbx.DB, mappingID string, to M
 	m := formMapping{
 		id: mappingID, sourceField: to.SourceField, targetMetricID: to.TargetMetricID, aggregation: to.Aggregation,
 		rowFilter: to.RowFilter, postingStatuses: to.PostingStatuses, dimMappings: to.DimensionMappings, modelID: modelID,
+	}
+	var format string
+	if err := db.QueryRow(ctx, `SELECT format FROM model.metric_def WHERE id = $1::uuid`, to.TargetMetricID).Scan(&format); err == nil {
+		m.textTarget = format == "text"
 	}
 	period, hasStatus := periodResolverOn(ctx, db), form.HasStatus()
 	moved := 0

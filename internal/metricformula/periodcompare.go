@@ -59,7 +59,7 @@ func checkPeriodComparisons(node formula.Node, rd *revisionDims) error {
 func periodCriterion(call *formula.CallExpr, rd *revisionDims) (string, formula.Node) {
 	var first int // index of the first criteria range
 	switch strings.ToUpper(call.Name) {
-	case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
+	case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS", "STDEVIFS", "VARIFS", "RANKIFS":
 		first = 1
 	case "COUNTIFS", "COUNTIF", "SUMIF", "AVERAGEIF", "MEMBERIFS":
 		first = 0

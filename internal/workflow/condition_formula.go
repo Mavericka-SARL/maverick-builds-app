@@ -44,7 +44,8 @@ func checkConditionFormula(label, text string) string {
 
 // CheckConditionNames resolves every name of def's formula conditions in its
 // workflow's revision: a metric or a context variable of the definition. It
-// returns one line per name that is neither.
+// returns one line per name that is neither — and checks the variables'
+// defaults (checkContextDefaults).
 func (s *Store) CheckConditionNames(ctx context.Context, def *WorkflowDefFull) []string {
 	var steps []map[string]any
 	if json.Unmarshal(def.Steps, &steps) != nil {
@@ -84,7 +85,7 @@ func (s *Store) CheckConditionNames(ctx context.Context, def *WorkflowDefFull) [
 			}
 		}
 	}
-	return errs
+	return append(errs, s.checkContextDefaults(ctx, def, modelID, revisionID)...)
 }
 
 // defModelRevision is the model and revision a definition's conditions read:
@@ -131,31 +132,10 @@ func (s *Store) evalConditionFormula(ctx context.Context, instanceID, text strin
 		return false, false, "the workflow's model could not be read"
 	}
 
-	// Each "Dimension member" variable pins its dimension in the revision
-	// read: the copy of the same lineage, so a definition built on another
-	// revision still pins, and so does a dimension renamed since (by name,
-	// a rename lost the member, 2026-11-09); else one of the same name.
-	var schema []struct {
-		Key         string `json:"key"`
-		DataType    string `json:"data_type"`
-		DimensionID string `json:"dimension_id"`
-	}
+	// Each "Dimension member" variable pins its dimension (memberPoint).
+	var schema []startContextVarDef
 	_ = json.Unmarshal(schemaJSON, &schema)
-	point := map[string]string{}
-	for _, v := range schema {
-		code := ctxVars[v.Key]
-		if v.DataType != "Dimension member" || v.DimensionID == "" || code == "" {
-			continue
-		}
-		var dimID string
-		if s.db.QueryRow(ctx, `
-			SELECT d.id::text FROM model.dimension_def d
-			JOIN model.dimension_def o ON o.lineage_id = d.lineage_id OR lower(o.name) = lower(d.name)
-			WHERE o.id::text = $1 AND d.model_id::text = $2 AND d.revision_id::text = $3
-			ORDER BY (o.lineage_id = d.lineage_id) DESC LIMIT 1`, v.DimensionID, modelID, revisionID).Scan(&dimID) == nil {
-			point[dimID] = code
-		}
-	}
+	point := s.memberPoint(ctx, schema, ctxVars, modelID, revisionID)
 
 	// Values still being recalculated are not read: a condition reached a
 	// second after a file load read July as "MISSING GL" while the load's
@@ -228,9 +208,10 @@ var ConditionRecalcWait = 20 * time.Second
 // revision is still being recalculated after the wait.
 const conditionHeldReason = "the model's recalculation is still running"
 
-// heldConditionComment is the comment a held condition step shows; it is how
-// ResumeHeldConditions finds the steps to decide.
-const heldConditionComment = "Waiting for the model's recalculation to finish before deciding."
+// HeldConditionComment is the comment a held condition step shows; it is how
+// ResumeHeldConditions finds the steps to decide, and how the inbox and task
+// completion tell a step nobody decides.
+const HeldConditionComment = "Waiting for the model's recalculation to finish before deciding."
 
 // waitForRecalc waits up to limit while revisionID has a recalculation
 // pending; false when it is still pending then (or the context ended).
@@ -255,7 +236,7 @@ func (s *Store) waitForRecalc(ctx context.Context, revisionID string, limit time
 func (s *Store) ResumeHeldConditions(ctx context.Context) int {
 	rows, err := s.db.Query(ctx, `
 		SELECT st.instance_id::text, st.step_def_id FROM workflow.workflow_step st
-		WHERE st.status = 'in_progress' AND st.comment = $1`, heldConditionComment)
+		WHERE st.status = 'in_progress' AND st.comment = $1`, HeldConditionComment)
 	if err != nil {
 		return 0
 	}

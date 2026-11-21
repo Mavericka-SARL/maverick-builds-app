@@ -215,7 +215,8 @@ func (m *fakeModel) ctx(cell map[string]string) *EvalContext {
 			sort.Strings(parts)
 			return strings.Join(parts, ",")
 		},
-		Memo: map[string]Value{},
+		Memo:  map[string]Value{},
+		Ranks: map[string]*RankedSet{},
 	}
 	return &EvalContext{Vars: vars, Dim: d}
 }
@@ -436,6 +437,9 @@ func TestConditionalAggregation(t *testing.T) {
 		{formula: "AVERAGEIFS(sales, region, \"<>US\", product, \"A*\")", num: 31.0 / 3}, // FR/A200 has no value: skipped
 		{formula: "MAXIFS(sales, region, \"<>US\", product, \"A*\")", num: 20},
 		{formula: "MINIFS(sales, region, \"<>US\", product, \"A*\")", num: 1},
+		{formula: "VARIFS(sales, region, \"<>US\", product, \"A*\")", num: 271.0 / 3}, // 1, 10, 20: the sample variance
+		{formula: "STDEVIFS(sales, region, \"<>US\", product, \"A*\")", num: math.Sqrt(271.0 / 3)},
+		{formula: "STDEVIFS(sales, region, \"FR\", product, \"A200\")", code: "#DIV/0!"}, // nothing recorded
 		// Nothing matches.
 		{formula: "SUMIFS(sales, region, \"ZZ\")", num: 0},
 		{formula: "COUNTIFS(region, \"ZZ\", product, \"*\")", num: 0},
@@ -599,7 +603,9 @@ func TestDottedLexing(t *testing.T) {
 			t.Errorf("Parse(%q) = %#v, want %#v", text, got, want)
 		}
 	}
-	for _, text := range []string{"a.b.c", "region.2026", "x.5", "STDEV.S(x)", "region .currency", "region. currency", "region.", "a.b.c + 1"} {
+	// A dotted name before "(" is a call only when it names a function with
+	// dots (STDEV.S, NORM.S.INV, statistics.go): region.factor(x) still fails.
+	for _, text := range []string{"a.b.c", "region.2026", "x.5", "region.factor(x)", "a.b.c(x)", "region .currency", "region. currency", "region.", "a.b.c + 1"} {
 		if _, err := Parse(text); err == nil {
 			t.Errorf("Parse(%q) must fail", text)
 		}

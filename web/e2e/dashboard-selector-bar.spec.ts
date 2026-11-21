@@ -193,3 +193,49 @@ test("selector bar: a grid shows no value and takes no input while the new selec
   await expect(grid.locator("tbody input").first()).toHaveValue("18");
   await expect(grid.locator("tbody .mvx-cell--loading")).toHaveCount(0);
 });
+
+// A chart under the bar: its first answer names the bar's dimension, and the
+// chart copies the bar's member into its own context — the scope its request
+// already carried (the bar's values go with it). It loads once, not twice
+// (2026-11-21: every chart under a selector bar was requested twice), and
+// again when the viewer changes the bar.
+test("selector bar: a chart under it loads once, and again when the bar changes", async ({ page }) => {
+  const chartDash = {
+    ...dashboard, id: "bar-chart-dash", name: "Bar Chart Dashboard",
+    widgets: [{
+      id: "w-ch", widget_type: "chart", ref_id: GRID_ID, content: null, sort_order: 0, pos_x: 0, pos_y: 0, size_w: 600, size_h: 320,
+      widget_props: { chart: { chart_type: "bar", dimension_id: "dept", metric_ids: ["m-cost"], value_format: "number" } },
+    }],
+  };
+  const sent: { at: number; period: string }[] = [];
+  await mockApi(page);
+  await mockBarDashboard(page);
+  await page.route("**/api/dashboards", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([chartDash]) }));
+  await page.route("**/api/dashboards/bar-chart-dash", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chartDash) }));
+  await page.route("**/api/dashboard-widgets/*/chart-data", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as { context?: Record<string, string>; shared?: Record<string, string> };
+    const period = body.context?.period ?? body.shared?.period ?? "";
+    sent.push({ at: Date.now(), period });
+    return route.fulfill({
+      status: 200, contentType: "application/json", body: JSON.stringify({
+        chart_type: "bar", as_of: "2026-11-21T00:00:00Z",
+        categories: [{ key: "ENG", label: "Engineering" }],
+        series: [{ metric_id: "m-cost", label: "Cost", values: [period === "JAN" ? 100 : 200], format: "number", format_decimals: 0 }],
+        context_dims: [dimensions[1]], context: { period },
+      }),
+    });
+  });
+  await loadAs(page, "dept_head");
+  await expect(page.locator(".recharts-wrapper")).toHaveCount(1, { timeout: 15_000 });
+  await page.waitForTimeout(1_200);
+  const first = sent[0];
+  expect(first?.period).toBe("FEB");
+  expect(sent.filter(s => s.at - first.at < 1_500)).toHaveLength(1);
+
+  const bar = page.getByRole("toolbar", { name: "Dashboard selectors" });
+  await bar.getByRole("button", { name: "Period", exact: true }).click();
+  await page.getByRole("listbox").getByRole("option", { name: "January" }).click();
+  await expect.poll(() => sent.some(s => s.period === "JAN")).toBe(true);
+});

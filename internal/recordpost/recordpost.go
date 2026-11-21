@@ -857,13 +857,17 @@ type formMapping struct {
 	postingStatuses                 []string
 	dimMappings                     map[string]string // dimension id → field name
 	modelID, revisionID             string            // revisionID "" for a revision-global mapping
+	// textTarget: the metric is a text metric, which takes the field's text
+	// (migration 194) unless the mapping counts records.
+	textTarget bool
 }
 
 // liveFormMappings lists formID's live mappings.
 func (ps *Poster) liveFormMappings(ctx context.Context, formID string) ([]formMapping, error) {
 	rows, err := ps.db(ctx).Query(ctx, `
 		SELECT m.id::text, m.source_field, m.target_metric_id::text, COALESCE(m.aggregation,''), m.row_filter, m.posting_statuses, m.dimension_mappings,
-		       m.model_id::text, COALESCE(m.revision_id::text,'')
+		       m.model_id::text, COALESCE(m.revision_id::text,''),
+		       COALESCE((SELECT md.format FROM model.metric_def md WHERE md.id = m.target_metric_id), '') = 'text'
 		FROM model.form_metric_mapping m
 		WHERE m.form_id=$1::uuid AND m.live_posting = TRUE
 		  -- Only a mapping of the table's own model into one of its metrics:
@@ -879,7 +883,7 @@ func (ps *Poster) liveFormMappings(ctx context.Context, formID string) ([]formMa
 	for rows.Next() {
 		var m formMapping
 		var dimRaw, filterRaw []byte
-		if err := rows.Scan(&m.id, &m.sourceField, &m.targetMetricID, &m.aggregation, &filterRaw, &m.postingStatuses, &dimRaw, &m.modelID, &m.revisionID); err != nil {
+		if err := rows.Scan(&m.id, &m.sourceField, &m.targetMetricID, &m.aggregation, &filterRaw, &m.postingStatuses, &dimRaw, &m.modelID, &m.revisionID, &m.textTarget); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(dimRaw, &m.dimMappings)
@@ -1044,6 +1048,7 @@ func (ps *Poster) postingRevision(ctx context.Context, m formMapping) string {
 // plannedPosting is what a record posts through one mapping.
 type plannedPosting struct {
 	value   float64
+	text    string // into a text metric: the field's text (value 0)
 	members map[string]string
 }
 
@@ -1061,18 +1066,53 @@ func (m formMapping) planned(hasStatus bool, status string, data map[string]any,
 	} else if !m.postsAt(hasStatus, status) {
 		return nil
 	}
-	v, ok := m.value(data)
+	v, text, ok := m.posting(data)
 	if !ok {
 		return nil
 	}
-	return &plannedPosting{value: v, members: m.members(data, period)}
+	return &plannedPosting{value: v, text: text, members: m.members(data, period)}
 }
 
 func samePosting(a, b *plannedPosting) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.value == b.value && maps.Equal(a.members, b.members)
+	return a.value == b.value && a.text == b.text && maps.Equal(a.members, b.members)
+}
+
+// posting is what data posts through m: a number, or into a text metric the
+// field's text — a reason, an owner, a status word — with value 0, as a
+// text cell is stored (migration 111). ok is false when it posts nothing.
+// Before 2026-11-21 a text field posted nothing at all, and a mapping of
+// one saved without a word (value).
+func (m formMapping) posting(data map[string]any) (float64, string, bool) {
+	if m.textTarget && m.aggregation != "count" {
+		t := postedText(data[m.sourceField])
+		return 0, t, t != ""
+	}
+	v, ok := m.value(data)
+	return v, "", ok
+}
+
+// postedText is a field value as the text a text metric holds.
+func postedText(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case json.Number:
+		return x.String()
+	case bool:
+		return strconv.FormatBool(x)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	return string(b)
 }
 
 // RecordState is a record's status and data after a change.
@@ -1109,7 +1149,7 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 	posted := map[string]*plannedPosting{}
 	if recordID != "" {
 		rows, err := ps.db(ctx).Query(ctx, `
-			SELECT mapping_id::text, dim_members, COALESCE(posted_value, 0)::float8
+			SELECT mapping_id::text, dim_members, COALESCE(posted_value, 0)::float8, COALESCE(posted_text, '')
 			FROM runtime.form_record_posting WHERE form_record_id = $1::uuid`, recordID)
 		if err != nil {
 			return 0, "", err
@@ -1118,7 +1158,7 @@ func (ps *Poster) postingRefusal(ctx context.Context, tp *tablePosting, creatorI
 			var id string
 			var raw []byte
 			p := &plannedPosting{}
-			if err := rows.Scan(&id, &raw, &p.value); err != nil {
+			if err := rows.Scan(&id, &raw, &p.value, &p.text); err != nil {
 				rows.Close()
 				return 0, "", err
 			}
@@ -1567,10 +1607,12 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 	// flight when it was deleted used to post its total back, under the id
 	// of a mapping that no longer existed, where nothing could take it out.
 	var targetMetricID, aggregation, modelID string
+	var textTarget bool
 	err = tx.QueryRow(ctx, `
-		SELECT target_metric_id::text, COALESCE(aggregation, ''), model_id::text
-		FROM model.form_metric_mapping WHERE id=$1::uuid FOR SHARE`, mappingID,
-	).Scan(&targetMetricID, &aggregation, &modelID)
+		SELECT target_metric_id::text, COALESCE(aggregation, ''), model_id::text,
+		       COALESCE((SELECT md.format FROM model.metric_def md WHERE md.id = m.target_metric_id), '') = 'text'
+		FROM model.form_metric_mapping m WHERE id=$1::uuid FOR SHARE OF m`, mappingID,
+	).Scan(&targetMetricID, &aggregation, &modelID, &textTarget)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -1581,7 +1623,8 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 	rows, err := tx.Query(ctx, `
 		SELECT revision_id::text, dim_members, SUM(posted_value), AVG(posted_value),
 		       MIN(posted_value), MAX(posted_value), COUNT(*),
-		       MAX(posted_value) FILTER (WHERE posted_at = (SELECT MAX(p2.posted_at) FROM runtime.form_record_posting p2 WHERE p2.mapping_id=$1::uuid))
+		       MAX(posted_value) FILTER (WHERE posted_at = (SELECT MAX(p2.posted_at) FROM runtime.form_record_posting p2 WHERE p2.mapping_id=$1::uuid)),
+		       (ARRAY_AGG(posted_text ORDER BY posted_at DESC, posted_text DESC) FILTER (WHERE posted_text IS NOT NULL))[1]
 		FROM runtime.form_record_posting
 		WHERE mapping_id=$1::uuid
 		GROUP BY revision_id, dim_members`, mappingID)
@@ -1595,12 +1638,13 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 		sumVal, avgVal, minVal, maxVal *float64
 		cnt                            int64
 		lastVal                        *float64
+		lastText                       *string // the latest record's text (a text metric)
 	}
 	var aggs []aggRow
 	for rows.Next() {
 		var ag aggRow
 		if err := rows.Scan(&ag.revisionID, &ag.dimMembers,
-			&ag.sumVal, &ag.avgVal, &ag.minVal, &ag.maxVal, &ag.cnt, &ag.lastVal,
+			&ag.sumVal, &ag.avgVal, &ag.minVal, &ag.maxVal, &ag.cnt, &ag.lastVal, &ag.lastText,
 		); err == nil {
 			aggs = append(aggs, ag)
 		}
@@ -1679,6 +1723,21 @@ func (ps *Poster) recomputeFactInputOnce(ctx context.Context, mappingID, revisio
 			useRevID := ag.revisionID
 			if useRevID == "" {
 				useRevID = revisionID
+			}
+			if textTarget && aggregation != "count" {
+				// A text metric holds the latest record's text, as a text
+				// cell is stored: value 0 beside it.
+				if ag.lastText == nil {
+					continue
+				}
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO runtime.fact_input
+					  (model_id, revision_id, metric_id, dim_members, value, text_value, entered_by, source_ref)
+					VALUES ($1::uuid, NULLIF($2,'')::uuid, $3::uuid, $4, 0, $5, $6::uuid, $7::uuid)`,
+					modelID, useRevID, targetMetricID, ag.dimMembers, *ag.lastText, systemUserID, mappingID); err != nil {
+					return fmt.Errorf("insert text row: %w", err)
+				}
+				continue
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO runtime.fact_input

@@ -218,7 +218,7 @@ func stepRecipients(ctx context.Context, tx querier, instanceID, where string, a
 		) step_def ON TRUE
 		JOIN identity.user u ON u.id = ws.assignee_user_id
 		    OR (ws.assignee_user_id IS NULL
-		        AND `+assignee.SQL("wd.application_id", "COALESCE(step_def.elem->'assignee_roles', '[]'::jsonb)", "u.id")+`)
+		        AND `+assignee.SQL("wd.application_id", "COALESCE("+assignee.StepRolesSQL("step_def.elem")+", '[]'::jsonb)", "u.id")+`)
 		WHERE ws.instance_id = $1::uuid
 		  AND (ws.assignee_user_id IS NOT NULL
 		       OR jsonb_array_length(CASE WHEN jsonb_typeof(step_def.elem->'assignee_roles') = 'array'

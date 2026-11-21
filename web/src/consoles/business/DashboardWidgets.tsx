@@ -466,7 +466,9 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   const scopeKey = JSON.stringify(scope ?? {});
   const { data: grid } = useQuery({
     queryKey: ["kpi-totals", ctx.revision_id, scopeKey],
-    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, ...(scope ? { scope } : {}), signal }),
+    // fields "totals": the tile has its metadata (the meta query above) and
+    // polls this every two seconds, so only the totals travel.
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", ...(scope ? { scope } : {}), signal }),
     enabled: valueReady,
     staleTime: 0,
     // Same cadence as the grid and chart widgets, so a change made elsewhere
@@ -500,7 +502,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   const compareScope = compareOn ? { ...(scope ?? {}), [compare!.dimension_id]: compare!.member_code } : undefined;
   const { data: compareGrid } = useQuery({
     queryKey: ["kpi-totals", ctx.revision_id, JSON.stringify(compareScope ?? {})],
-    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, scope: compareScope, signal }),
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", scope: compareScope, signal }),
     enabled: valueReady && compareOn,
     staleTime: 0,
     refetchInterval: (q) => ((q.state.data as GridData | undefined)?.recalc_pending ? 250 : 2000),

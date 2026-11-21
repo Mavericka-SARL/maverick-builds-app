@@ -150,6 +150,7 @@ func (h *handler) checkProposalOnce(ctx context.Context, sessionID, modelID, rev
 		out.warnings = append(out.warnings, pageMetricWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, splitWidgetWarnings(ctx, tx, resolved, created)...)
 		out.warnings = append(out.warnings, untaggedWarnings(ctx, tx, revID, resolved, created)...)
+		out.warnings = append(out.warnings, h.planModelCheckWarnings(ctx, tx, modelID, revID)...)
 	}
 	return out, err
 }

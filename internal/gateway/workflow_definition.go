@@ -62,7 +62,82 @@ func (h *handler) workflowDefinition(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	out.ContextSchema = publicContextSchema(out.ContextSchema)
 	jsonOK(w, out)
+}
+
+// publicContextSchema is a context schema as the people who start and
+// follow a workflow read it: a variable's default formula is the
+// designer's machinery, so it reads has_default: true instead (the start
+// dialog asks start-defaults for the values). A schema without defaults is
+// returned as it is.
+func publicContextSchema(raw json.RawMessage) json.RawMessage {
+	var vars []map[string]any
+	if json.Unmarshal(raw, &vars) != nil {
+		return raw
+	}
+	changed := false
+	for _, v := range vars {
+		if d, ok := v["default"]; ok {
+			delete(v, "default")
+			if s, _ := d.(string); strings.TrimSpace(s) != "" {
+				v["has_default"] = true
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	b, err := json.Marshal(vars)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
+// workflowStartDefaults serves GET /api/workflow/definitions/{id}/start-defaults:
+// the values the workflow's variables default to, as a start with nothing
+// given would take them, for the start dialog to show filled in (people may
+// change them). Only someone who may start it asks: a default reads the
+// model as the workflow does, and the run it starts would hold the same
+// values. values maps a variable to its value; errors a variable whose
+// default cannot be worked out to the reason.
+func (h *handler) workflowStartDefaults(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	defID := r.PathValue("id")
+	modelID, err := h.resolveDemoModelID(ctx, r)
+	if err != nil {
+		jsonAccessErr(w, err, "resolve model")
+		return
+	}
+	var published bool
+	if err := h.db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM workflow.workflow_def wd JOIN core.model m ON m.application_id = wd.application_id
+		               WHERE wd.id::text = $1 AND m.id = $2::uuid AND wd.status = 'published'
+		                 AND (wd.revision_id IS NULL OR wd.revision_id = m.active_revision_id))`,
+		defID, modelID).Scan(&published); err != nil || !published {
+		jsonErr(w, fmt.Errorf("workflow not found"), http.StatusNotFound)
+		return
+	}
+	if onlyApprover(a) && !h.workflowStore(ctx).ApproverMayStart(ctx, defID) {
+		jsonErr(w, errApproverStarts, http.StatusForbidden)
+		return
+	}
+	if h.refuseNonStarter(ctx, w, a, defID) {
+		return
+	}
+	values, errs, err := h.workflowStore(ctx).StartDefaults(ctx, defID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{"values": values, "errors": errs})
 }
 
 // workflowStepOut is a step as workflowDefinition shows it.

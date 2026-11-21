@@ -208,8 +208,19 @@ func TestTimeDimensionAPI(t *testing.T) {
 	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "LAG(sales, 1.5, 0)", "revision_id": f.workingRevID}); status != http.StatusBadRequest || !strings.Contains(raw, "TIME_OFFSET_NOT_INTEGER") {
 		t.Errorf("a non-integer literal offset must be 400 TIME_OFFSET_NOT_INTEGER: %d %s", status, raw)
 	}
-	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "MOVINGSUM(sales, 0 - 2, 0)", "revision_id": f.workingRevID}); status != http.StatusBadRequest || !strings.Contains(raw, "MOVING_WINDOW_NOT_LITERAL") {
-		t.Errorf("a non-literal MOVINGSUM window must be 400 MOVING_WINDOW_NOT_LITERAL: %d %s", status, raw)
+	// A MOVINGSUM window bound may be an expression (2026-11-21); the
+	// metric goes again, so the activation below meets no metric off a
+	// time grid.
+	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "window_expr", "is_input": false, "formula": "MOVINGSUM(sales, 0 - 2, 0)", "revision_id": f.workingRevID}); status != http.StatusOK {
+		t.Errorf("a MOVINGSUM window bound that is an expression must save: %d %s", status, raw)
+	} else {
+		var made struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &made)
+		if st, body := doAs(t, f, "DELETE", "/api/developer/metrics/"+made.ID, dev, f.appID, nil); st != http.StatusOK {
+			t.Fatalf("delete window_expr: %d %s", st, body)
+		}
 	}
 	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "WEEKVALUE(sales)", "revision_id": f.workingRevID}); status != http.StatusBadRequest {
 		t.Errorf("later-parity function must stay unknown: %d %s", status, raw)

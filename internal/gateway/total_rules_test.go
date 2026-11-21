@@ -126,6 +126,34 @@ func TestDimensionTotalRules(t *testing.T) {
 	tot = totals(map[string]string{scenario: "DOWN"})
 	expect("units at Downside", tot, units, 3, true)
 
+	// A metric the region pin reaches across — by_scenario, on the scenarios
+	// only, reading units over every region — sends a region-pinned read
+	// through the scoped recomputation instead of the stored slice rows. Its
+	// calculated totals still read Base: before 2026-11-21 they added the
+	// scenarios up (doubled at EU 22). by_scenario totals over the regions, so
+	// the pin leaves it as it is (served from its rows): Base's 30, not 33.
+	byScenario := mk("/api/developer/metrics", map[string]any{"name": "by_scenario", "is_input": false, "formula": "units", "format": "number", "revision_id": f.revID})
+	scenarios := mk("/api/developer/grids", map[string]any{"name": "Scenarios", "revision_id": f.revID})
+	for _, p := range []string{"/dimensions/" + scenario, "/metrics/" + byScenario} {
+		if status, out := post("/api/developer/grids/"+scenarios+p, nil); status != http.StatusOK {
+			t.Fatalf("assign %s: %d %v", p, status, out)
+		}
+	}
+	for deadline := time.Now().Add(20 * time.Second); ; {
+		var v float64
+		if f.pool.QueryRow(ctx, `SELECT value::float8 FROM runtime.calc_result WHERE metric_id=$1::uuid AND dim_members='{}'::jsonb`, byScenario).Scan(&v) == nil && v == 30 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("by_scenario's stored total = %v, want 30 (Base)", v)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	tot = totals(map[string]string{f.dimID: "EU"})
+	expect("doubled at EU, read across", tot, doubled, 20, true)
+	expect("by_scenario at EU, read across", tot, byScenario, 30, true)
+	expect("units at EU, read across", tot, units, 10, true)
+
 	// A chart by region without a scenario selector reads Base.
 	var devID string
 	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE keycloak_sub='dev-audit-pa'`).Scan(&devID); err != nil {

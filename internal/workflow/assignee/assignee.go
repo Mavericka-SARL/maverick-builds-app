@@ -252,3 +252,15 @@ const stepAssigneeSQL = `EXISTS (
 	      )
 	  )
 )`
+
+// StepRolesSQL is the roles a step's assignee check names, for the step
+// definition elem (a jsonb SQL expression): its assignee_roles, except a
+// condition step's, which are the administrators' — business_admin and
+// tenant_admin. A condition reaches people only when the engine cannot decide
+// it, and it names no role: open to everyone who reaches the application, it
+// let the person whose request it routed pick their own branch (an override
+// sent to the smaller approver, 2026-11-21).
+func StepRolesSQL(elem string) string {
+	return `(CASE WHEN lower(COALESCE(` + elem + `->>'type', '')) IN ('condition', 'step_type_condition', '4')
+	         THEN '["business_admin", "tenant_admin"]'::jsonb ELSE ` + elem + `->'assignee_roles' END)`
+}

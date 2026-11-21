@@ -110,6 +110,21 @@ func TestWorkflowConditionWaitsForThePendingRecalculation(t *testing.T) {
 	if st, _, comment := check(inst2.Id); st != "in_progress" || comment != "Waiting for the model's recalculation to finish before deciding." {
 		t.Fatalf("a condition past the wait: %s (%q), want held in progress", st, comment)
 	}
+	// Held, it is no one's task: not in the starter's inbox, and refused to
+	// anyone, the administrator too. A person deciding it while the resume
+	// decided it as well sent the run down both branches (2026-11-21).
+	var heldStep string
+	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM workflow.workflow_step WHERE instance_id=$1::uuid AND step_def_id='check'`, inst2.Id).Scan(&heldStep); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []string{"rollup-test-manager", dev} {
+		if _, raw := doAs(t, f.rollupFixture, "GET", "/api/tasks", who, f.appID, nil); json.Valid([]byte(raw)) && containsStep(raw, heldStep) {
+			t.Errorf("%s's inbox lists the held condition", who)
+		}
+		if status, raw := doAs(t, f.rollupFixture, "POST", "/api/tasks/"+heldStep+"/complete", who, f.appID, map[string]any{"decision": "false"}); status == http.StatusOK {
+			t.Errorf("%s decided the held condition: %s", who, raw)
+		}
+	}
 	write(12)
 	waitIdle()
 	if err := calculation.RecalcFinished(ctx, f.pool, rev, seq); err != nil {
@@ -121,4 +136,58 @@ func TestWorkflowConditionWaitsForThePendingRecalculation(t *testing.T) {
 	if st, decision, _ := check(inst2.Id); st != "completed" || decision != "true" {
 		t.Errorf("after the recalculation the held condition is %s %q, want completed true", st, decision)
 	}
+	var explains int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM workflow.workflow_step WHERE instance_id=$1::uuid AND step_def_id='explain' AND status <> 'skipped'`, inst2.Id).Scan(&explains)
+	if explains != 0 {
+		t.Errorf("the run also took the false branch: %d explain steps", explains)
+	}
+
+	// A condition the engine cannot evaluate is the administrators' to
+	// decide (business_admin, tenant_admin), never any user's: open to
+	// everyone, it let the person whose request it routed pick the branch.
+	def2, err := store.CreateWorkflowDefFull(ctx, f.appID, rev, "Unreadable "+t.Name(), "", "manual", f.approverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps2 := json.RawMessage(`[
+		{"id":"check","name":"Size?","type":"condition","condition":{"formula":"no_such_name > 0"},"routes":{"true":"end-completed","false":"explain"}},
+		{"id":"explain","name":"Explain","type":"task","assignee_roles":["business_user"],"routes":{"next":"end-completed"}}
+	]`)
+	if _, err := store.UpdateWorkflowDefFull(ctx, def2.ID, def2.Name, "", "manual", "", f.approverID, steps2, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PublishWorkflowDef(ctx, def2.ID, f.approverID); err != nil {
+		t.Fatal(err)
+	}
+	inst3, err := store.StartWorkflow(ctx, def2.ID, f.managerID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var step3 string
+	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM workflow.workflow_step WHERE instance_id=$1::uuid AND step_def_id='check' AND status='in_progress'`, inst3.Id).Scan(&step3); err != nil {
+		t.Fatalf("the unreadable condition is not left for a person: %v", err)
+	}
+	if _, raw := doAs(t, f.rollupFixture, "GET", "/api/tasks", "rollup-test-manager", f.appID, nil); containsStep(raw, step3) {
+		t.Errorf("the starter (a business user) is offered the unreadable condition")
+	}
+	if status, _ := doAs(t, f.rollupFixture, "POST", "/api/tasks/"+step3+"/complete", "rollup-test-manager", f.appID, map[string]any{"decision": "true"}); status != http.StatusForbidden {
+		t.Errorf("a business user deciding the unreadable condition: %d, want 403", status)
+	}
+	if status, raw := doAs(t, f.rollupFixture, "POST", "/api/tasks/"+step3+"/complete", dev, f.appID, map[string]any{"decision": "true", "comment": "checked by hand"}); status != http.StatusOK {
+		t.Errorf("the business admin deciding it: %d %s", status, raw)
+	}
+}
+
+// containsStep reports whether an /api/tasks answer lists the step.
+func containsStep(raw, stepID string) bool {
+	var tasks []struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal([]byte(raw), &tasks)
+	for _, t := range tasks {
+		if t.ID == stepID {
+			return true
+		}
+	}
+	return false
 }

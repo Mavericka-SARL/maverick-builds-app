@@ -437,7 +437,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
                   <input
                     value={testRunContext[cv.key] ?? ""}
                     onChange={e => setTestRunContext(p => ({ ...p, [cv.key]: e.target.value }))}
-                    placeholder={cv.default_value ?? ""}
+                    placeholder={cv.default ? `default: ${cv.default}` : cv.default_value ?? ""}
                     style={inputStyle}
                   />
                 </Field>

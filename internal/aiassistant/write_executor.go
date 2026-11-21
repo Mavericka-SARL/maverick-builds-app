@@ -657,7 +657,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if err := metricformula.CheckNameFreeOfOtherKind(ctx, e.pool, e.modelID, revID, p.Name, "metric"); err != nil {
 		return "", "", err
 	}
-	picklist, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, revID, p.Format, p.PicklistDimension, p.AggRule, p.TimeSummary, p.IsInput)
+	picklist, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, revID, p.Format, p.PicklistDimension, p.AggRule, p.TimeSummary, p.IsInput, p.Formula)
 	if err != nil {
 		return "", "", err
 	}
@@ -983,7 +983,7 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 				p.TimeSummary = ""
 			}
 		}
-		pl, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, metricRev, format, p.PicklistDimension, p.AggRule, p.TimeSummary, metricIsInput)
+		pl, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, metricRev, format, p.PicklistDimension, p.AggRule, p.TimeSummary, metricIsInput, p.Formula)
 		if err != nil {
 			return "", "", err
 		}
@@ -3347,6 +3347,23 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			  AND nf.source_ref = o.id AND o.id <> n.id
 		`, e.modelID, newID); err != nil {
 			return "", "", fmt.Errorf("point copied postings at the new revision's mappings: %w", err)
+		}
+
+		// The model check's ignored findings, as the console's copy keeps
+		// them (keyed by names, they hold for the copy as they are).
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO model.check_ignore (revision_id, key, rule, reason, ignored_by, ignored_at)
+			SELECT $1::uuid, key, rule, reason, ignored_by, ignored_at
+			FROM model.check_ignore WHERE revision_id = $2::uuid
+		`, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("copy model-check ignores into new revision: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO model.reconciliation (revision_id, file_name, workbook, uploaded_by, uploaded_at, map, cases)
+			SELECT $1::uuid, file_name, workbook, uploaded_by, uploaded_at, map, cases
+			FROM model.reconciliation WHERE revision_id = $2::uuid
+		`, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("copy the workbook reconciliation into new revision: %w", err)
 		}
 
 		// Copy dashboard folders first (dashboards below reference them by

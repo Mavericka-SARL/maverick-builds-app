@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo, useRef, type MutableRefObject } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
-import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt, Checkbox } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone, Txt, Checkbox, SearchInput } from "../../ui";
+import { matchesAllWords } from "../business/taskSearch";
 import { RunParametersDialog } from "../RunParametersDialog";
 import { runParametersOf, replaceByFields, type RunParameter } from "../runParameters";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
@@ -12,6 +13,7 @@ import {
   api,
   type ApiError,
   type IntegrationDef,
+  type ImportJob,
   type GridDef,
   type FormDef,
   type DevDimension,
@@ -1481,12 +1483,29 @@ function fmtDuration(ms?: number): string {
 
 // revisionId: the working revision — the history is its model's, which the
 // list missed while the application's default model was another.
+// A list longer than this gets a search box and scrolls in place.
+const LIST_SEARCH_FROM = 10;
+
+/** What a Recent Imports row shows, for its search. */
+function importSearchText(j: ImportJob): string {
+  const s = STATUS[j.status] ?? STATUS[0];
+  return [
+    fmtDate(j.created_at),
+    j.target_type ? JOB_TARGET_LABEL[j.target_type] : "", j.target_name, j.file_name,
+    SOURCE_LABEL[j.source ?? ""] ?? j.source, j.revision_name,
+    j.import_mode ? IMPORT_MODE_LABEL[j.import_mode] ?? j.import_mode : "", j.by, s.label, j.error,
+  ].filter(Boolean).join(" · ").toLowerCase();
+}
+
 function ImportHistory({ revisionId }: { revisionId?: string }) {
   const qc = useQueryClient();
   const [delError, setDelError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  // The newest 200, searched and scrolled here (a dashboard's import
+  // widget keeps the newest 20).
   const { data: jobs, isSuccess } = useQuery({
-    queryKey: ["import-jobs", revisionId],
-    queryFn: () => api.getImportJobs(revisionId),
+    queryKey: ["import-jobs", revisionId, "history"],
+    queryFn: () => api.getImportJobs(revisionId, 200),
   });
 
   const del = useMutation({
@@ -1497,24 +1516,48 @@ function ImportHistory({ revisionId }: { revisionId?: string }) {
 
   if (!isSuccess) return null;
 
+  const many = jobs.length > LIST_SEARCH_FROM;
+  const searching = many && query.trim() !== "";
+  const rows = searching ? jobs.filter(j => matchesAllWords(importSearchText(j), query)) : jobs;
+
   return (
     <div style={{ marginTop: 32 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Recent Imports</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Recent Imports</div>
+        {many && (
+          <SearchInput
+            width={300}
+            placeholder="Search by file, grid, revision, person, status…"
+            aria-label="Search recent imports"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+        )}
+      </div>
       {delError && <p className="mvx-admin-error" style={{ marginBottom: 8 }}>Delete failed: {delError}</p>}
+      {searching && (
+        <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          {rows.length === 0 ? `No import matches “${query.trim()}”.` : `${rows.length} of ${jobs.length} imports`}
+        </p>
+      )}
       {jobs.length === 0 ? (
         <p className="mvx-admin-muted" style={{ fontSize: 13, margin: 0 }}>No imports into this model yet.</p>
-      ) : (
-      <div className="mvx-table-wrap">
+      ) : rows.length > 0 && (
+      <div
+        className="mvx-table-wrap"
+        data-testid="recent-imports"
+        style={many ? { maxHeight: 560, overflowY: "auto" } : undefined}
+      >
         <table className="mvx-table mvx-table--compact">
           <thead>
             <tr>
               {["Started", "Imported into", "Revision", "Mode", "By", "Imported", "Errors", "Took", "Status", ""].map((h, i) => (
-                <th key={i}>{h}</th>
+                <th key={i} style={many ? { position: "sticky", top: 0, zIndex: 1 } : undefined}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {jobs.slice(0, 20).map(j => {
+            {rows.map(j => {
               const s = STATUS[j.status] ?? STATUS[0];
               const how = [j.file_name, SOURCE_LABEL[j.source ?? ""] ?? j.source].filter(Boolean).join(" · ");
               return (
@@ -1839,6 +1882,7 @@ function SavedIntegrationsList({
   // creates there.
   const { data: integrations = [] } = useQuery({ queryKey: ["dev-integrations", revisionId], queryFn: () => api.listDevIntegrations(revisionId) });
   const [syncMsg, setSyncMsg] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
 
   const del = useMutation({
     mutationFn: (id: string) => api.deleteIntegration(id),
@@ -1878,16 +1922,44 @@ function SavedIntegrationsList({
   const { confirm, confirmElement } = useConfirm();
 
   const TARGET_LABEL: Record<string, string> = { grid: "Grid", form: "Table", dimension: "Dimension" };
-  const shown = (integrations as IntegrationDef[]).filter(d =>
+  const all = (integrations as IntegrationDef[]).filter(d =>
     sourceType === "google_sheets" ? d.type === "google_sheets" : d.type !== "google_sheets"
   );
+  const many = all.length > LIST_SEARCH_FROM;
+  const searching = many && query.trim() !== "";
+  // What a card shows: its name, source, target, tags and draft badge.
+  const shown = searching
+    ? all.filter(d => matchesAllWords([
+        d.name, d.type === "google_sheets" ? "Google Sheets" : "CSV Import", TARGET_LABEL[d.target_type] ?? d.target_type,
+        ...(d.tags ?? []), d.status === "draft" ? "draft" : "", d.config?.sheet_url,
+      ].filter(Boolean).join(" · ").toLowerCase(), query))
+    : all;
 
-  if (!shown.length) return null;
+  if (!all.length) return null;
 
   return (
     <div style={{ marginBottom: 24 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Saved Integrations</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Saved Integrations</div>
+        {many && (
+          <SearchInput
+            width={300}
+            placeholder="Search by name, target, tag…"
+            aria-label="Search saved integrations"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+        )}
+      </div>
+      {searching && (
+        <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          {shown.length === 0 ? `No integration matches “${query.trim()}”.` : `${shown.length} of ${all.length} integrations`}
+        </p>
+      )}
+      <div
+        data-testid="saved-integrations"
+        style={{ display: "flex", flexDirection: "column", gap: 8, ...(many ? { maxHeight: 560, overflowY: "auto", paddingRight: 4 } : {}) }}
+      >
         {shown.map(d => (
           <div key={d.id} className="mvx-panel" style={{ padding: "12px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

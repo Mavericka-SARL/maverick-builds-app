@@ -196,16 +196,14 @@ func TestEvalWithContextKeepsTime(t *testing.T) {
 }
 
 // TestDynamicOffsetsRejected keeps the static refusals that survive dynamic
-// offsets: a non-whole LITERAL offset, and any non-literal MOVINGSUM window.
-// Dynamic LAG/LEAD/OFFSET offsets are covered by TestDynamicOffsets.
+// offsets: a non-whole LITERAL offset. Dynamic LAG/LEAD/OFFSET offsets are
+// covered by TestDynamicOffsets, MOVINGSUM bounds that are expressions by
+// TestMovingSumExpressionBounds.
 func TestDynamicOffsetsRejected(t *testing.T) {
 	for f, code := range map[string]string{
-		"LAG(sales, 1.5, 0)":          CodeTimeOffsetNotInteger,
-		"LAG(sales, -2.5, 0)":         CodeTimeOffsetNotInteger,
-		"MOVINGSUM(sales, 1.5)":       CodeTimeOffsetNotInteger,
-		"MOVINGSUM(sales, -1 - 1, 0)": CodeMovingWindowNotLiteral,
-		"MOVINGSUM(sales, sales)":     CodeMovingWindowNotLiteral,
-		"MOVINGSUM(sales, 0, sales)":  CodeMovingWindowNotLiteral,
+		"LAG(sales, 1.5, 0)":    CodeTimeOffsetNotInteger,
+		"LAG(sales, -2.5, 0)":   CodeTimeOffsetNotInteger,
+		"MOVINGSUM(sales, 1.5)": CodeTimeOffsetNotInteger,
 	} {
 		vals := evalSeries(t, f, []float64{1, 2})
 		if !vals[0].IsError() || vals[0].Err().Code != code {
@@ -314,5 +312,39 @@ func TestLaterParityNamesStayUnknown(t *testing.T) {
 		if !IsBuiltin(name) {
 			t.Errorf("%s must be a registered builtin", name)
 		}
+	}
+}
+
+// TestMovingSumExpressionBounds: a MOVINGSUM window bound may be an
+// expression, evaluated at the cell (2026-11-21: demand over an item's lead
+// time); the window is then unbounded both ways for analysis, and a
+// fraction is the cell's TIME_OFFSET_NOT_INTEGER.
+func TestMovingSumExpressionBounds(t *testing.T) {
+	series := []float64{1, 2, 3, 4, 5}
+	for f, want := range map[string][]float64{
+		"MOVINGSUM(sales, -1 - 1, 0)":            {1, 3, 6, 9, 12},
+		"MOVINGSUM(sales, 0, sales - sales + 1)": {3, 5, 7, 9, 5},
+		"MOVINGSUM(sales, -(sales - 1), 0)":      {1, 3, 6, 10, 15}, // a window as long as the value
+	} {
+		vals := evalSeries(t, f, series)
+		for i, v := range vals {
+			if n, _ := v.Number(); v.IsError() || n != want[i] {
+				t.Errorf("%s @ %d: got %v want %v", f, i, v, want[i])
+			}
+		}
+		an, err := Analyze(f)
+		if err != nil {
+			t.Fatalf("Analyze(%s): %v", f, err)
+		}
+		r := an.References[0]
+		if !r.UnboundedPast || !r.UnboundedFuture || !an.ServedFromRows {
+			t.Errorf("%s: the source is read at any period: %+v served=%v", f, r, an.ServedFromRows)
+		}
+	}
+	if v := evalSeries(t, "MOVINGSUM(sales, sales / 2, 0)", series)[0]; !v.IsError() || v.Err().Code != CodeTimeOffsetNotInteger {
+		t.Errorf("a fractional bound must be TIME_OFFSET_NOT_INTEGER: %v", v)
+	}
+	if _, err := Analyze("MOVINGSUM(sales, k, 0, MEDIAN)"); err == nil {
+		t.Error("unknown moving method must be rejected with expression bounds too")
 	}
 }

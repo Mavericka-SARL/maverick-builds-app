@@ -27,6 +27,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/reconcile"
 	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
@@ -586,6 +587,13 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 				return h.aiPreviewAfterSteps(ctx, sessionID, modelID, userID, req)
 			}
 			return h.aiPreviewFileImport(ctx, sessionID, userID, req)
+		},
+		Reconcile: func(ctx context.Context, revisionID string) (*reconcile.Report, error) {
+			saved, err := reconcile.Load(ctx, h.db.For(ctx), revisionID)
+			if err != nil || saved == nil || saved.WorkbookSize == 0 || len(saved.Map.Rules) == 0 {
+				return nil, err
+			}
+			return h.runReconciliation(ctx, modelID, revisionID, saved)
 		},
 		PreviewExport: func(ctx context.Context, revisionID, gridID, name string, spec dataexport.Spec) (string, error) {
 			return h.aiPreviewExport(r.WithContext(ctx), gridID, name, spec)

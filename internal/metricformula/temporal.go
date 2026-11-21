@@ -220,9 +220,24 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 				continue
 			}
 			desc := fmt.Sprintf("%s → %s [%d, %d]", label(names, id), label(names, e.To), e.MinTimeOffset, e.MaxTimeOffset)
+			// Unbounded but strictly one way — a STRICT dynamic LAG reads
+			// only earlier periods (LEAD only later ones) — orders like a
+			// fixed offset: every period it can read is computed first.
+			strictlyPast := e.UnboundedPast && !e.UnboundedFuture && e.MaxTimeOffset < 0
+			strictlyFuture := e.UnboundedFuture && !e.UnboundedPast && e.MinTimeOffset > 0
+			if strictlyPast {
+				past = append(past, desc+" (any earlier period)")
+				offending = append(offending, desc)
+				continue
+			}
+			if strictlyFuture {
+				future = append(future, desc+" (any later period)")
+				offending = append(offending, desc)
+				continue
+			}
 			if e.UnboundedPast || e.UnboundedFuture {
 				return Component{}, &TemporalError{Members: scc, Detail: fmt.Sprintf(
-					"%s reads %s over an unbounded time range inside a dependency cycle; a recurrence must use a fixed offset such as PREVIOUS or LAG",
+					"%s reads %s over an unbounded time range inside a dependency cycle; a recurrence must use a fixed offset such as PREVIOUS or LAG, or a variable one that only looks back: LAG(x, n, substitute, STRICT)",
 					label(names, id), label(names, e.To))}
 			}
 			if e.MinTimeOffset <= 0 && e.MaxTimeOffset >= 0 {

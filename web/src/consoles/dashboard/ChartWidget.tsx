@@ -26,31 +26,50 @@ import { Txt } from "../../ui";
 
 // ── Category labels ───────────────────────────────────────────────────────────
 
-// A bar chart's category label, on up to two lines and shortened with "…" to
-// the width its bar has, so no category goes unlabelled (the axis used to
-// drop every label that would overlap a neighbour); the full name is the
-// label's tooltip. Wider charts and shorter names show it whole.
-function CategoryTick(props: { x?: number; y?: number; payload?: { value: string }; width?: number; visibleTicksCount?: number }) {
-  const { x = 0, y = 0, payload, width = 0, visibleTicksCount = 1 } = props;
-  const label = String(payload?.value ?? "");
-  const perTick = width > 0 && visibleTicksCount > 0 ? width / visibleTicksCount : 80;
-  const maxChars = Math.max(4, Math.floor((perTick - 6) / 6));
+// A bar chart's category label, wrapped to the width its bar has on as many
+// lines as it needs, so no category goes unlabelled (the axis used to drop
+// every label that would overlap a neighbour) and no label is cut: text is
+// never cut off (owner, 2026-11-21: "Unass…", "Business applicati…"). A word
+// longer than a line breaks with a hyphen; the full name is the tooltip.
+function tickChars(perTick: number): number {
+  return Math.max(4, Math.floor((perTick - 6) / 6));
+}
+
+function categoryLines(label: string, maxChars: number): string[] {
   const lines: string[] = [];
   let line = "";
-  for (const word of label.split(/\s+/)) {
+  for (let word of label.split(/\s+/).filter(Boolean)) {
+    while (word.length > maxChars) {
+      if (line) { lines.push(line); line = ""; }
+      lines.push(word.slice(0, maxChars - 1) + "-");
+      word = word.slice(maxChars - 1);
+    }
     const next = line ? `${line} ${word}` : word;
-    if (next.length <= maxChars || !line) { line = next; continue; }
+    if (next.length <= maxChars) { line = next; continue; }
     lines.push(line);
     line = word;
   }
   if (line) lines.push(line);
-  const shown = lines.slice(0, 2).map(l => (l.length > maxChars ? l.slice(0, maxChars - 1) + "…" : l));
-  if (lines.length > 2) shown[1] = (shown[1].length >= maxChars ? shown[1].slice(0, maxChars - 1) : shown[1]) + "…";
+  return lines.length ? lines : [""];
+}
+
+// The category axis is as tall as its longest label: two lines fit the
+// height it always had.
+function categoryAxisHeight(labels: string[], maxChars: number | undefined): number {
+  if (maxChars === undefined) return 36;
+  const most = labels.reduce((n, l) => Math.max(n, categoryLines(l, maxChars).length), 1);
+  return Math.max(36, 10 + 13 * most);
+}
+
+function CategoryTick(props: { x?: number; y?: number; payload?: { value: string }; width?: number; visibleTicksCount?: number; maxChars?: number }) {
+  const { x = 0, y = 0, payload, width = 0, visibleTicksCount = 1 } = props;
+  const label = String(payload?.value ?? "");
+  const maxChars = props.maxChars ?? tickChars(width > 0 && visibleTicksCount > 0 ? width / visibleTicksCount : 80);
   return (
     <g transform={`translate(${x},${y})`}>
       <title>{label}</title>
       <text textAnchor="middle" fontSize={11} fill="var(--color-text-muted)">
-        {shown.map((l, i) => <tspan key={i} x={0} dy={i === 0 ? 12 : 13}>{l}</tspan>)}
+        {categoryLines(label, maxChars).map((l, i) => <tspan key={i} x={0} dy={i === 0 ? 12 : 13}>{l}</tspan>)}
       </text>
     </g>
   );
@@ -161,16 +180,20 @@ function BarChartRenderer({ data, config, currencySymbol, decimals, onCategoryCl
   const every = categoryStep(data.categories.length, plotWidth, data.categories.length <= 24 ? 40 : 56);
   const ticks = valueTicks(data, !!config.stacked, true);
   const tickFmt = ticks.length > 1 ? axisTickFormatter(ticks, config.value_format, currencySymbol) : fmt;
+  // The plot is the chart less its margins (8 + 32) and the value axis (60).
+  const maxChars = plotWidth > 0 ? tickChars((plotWidth - 100) / Math.max(1, Math.ceil(data.categories.length / every))) : undefined;
+  // A value written above the tallest bar needs room over the plot ("4" was cut in half).
+  const top = config.show_values && !config.stacked ? 20 : 8;
   return (
     <ResponsiveContainer width="100%" height="100%" onResize={(w) => setPlotWidth(w)}>
       {/* The last bar's label is centred on a slot narrower than it once there are many bars (36 months). */}
-      <BarChart data={chartData} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
+      <BarChart data={chartData} margin={{ top, right: 32, left: 8, bottom: 8 }}
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
         {/* Every category labelled while there are few enough to read; a long run keeps the axis's own spacing. */}
         {data.categories.length <= 24
-          ? <XAxis dataKey="name" interval={every - 1} height={36} tick={<CategoryTick />} />
+          ? <XAxis dataKey="name" interval={every - 1} height={categoryAxisHeight(data.categories.map(c => c.label), maxChars)} tick={<CategoryTick maxChars={maxChars} />} />
           : <XAxis dataKey="name" interval={every - 1} tick={{ fontSize: 11 }} />}
         {ticks.length > 1
           ? <YAxis tickFormatter={tickFmt} tick={{ fontSize: 11 }} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
@@ -480,12 +503,22 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   // request used to go out with none and drew every scenario added together
   // until the second (2026-11-08).
   const shared = syncOn && sharedValues && Object.keys(sharedValues).length > 0 ? sharedValues : undefined;
+  // The scope the server reads: the chart's own context, and the page's
+  // values on the dimensions it does not name. The query is keyed on that, so
+  // adopting a page value the request already carried (the chart learns its
+  // dimensions from its first answer and copies the bar's member into its
+  // context) does not send the same request again: every chart under a
+  // selector bar loaded twice (2026-11-21).
+  const scopeKey = React.useMemo(() => {
+    const merged: Record<string, string> = { ...(shared ?? {}), ...context };
+    return JSON.stringify(Object.keys(merged).sort().map(k => [k, merged[k]]));
+  }, [shared, context]);
 
   // Fetch chart data — resolved and rolled up server-side (internal/rollup
   // via chart.go), matching the grid exactly instead of a second client-side
   // computation over raw grid cells.
   const { data: chartData, isPending, isError } = useQuery({
-    queryKey: ["chart-data", ctx.revision_id, widget.id, context, shared],
+    queryKey: ["chart-data", ctx.revision_id, widget.id, scopeKey],
     queryFn: ({ signal }) => api.getChartData(widget.id, context, shared, signal),
     enabled: !!chartConfig && isChartConfigComplete(chartConfig),
     staleTime: 0,

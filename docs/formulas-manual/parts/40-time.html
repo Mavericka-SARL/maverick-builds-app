@@ -18,16 +18,17 @@
 <tr><td class="sig" id="fn-LEAD">LEAD(x, n, substitute [, mode])</td><td>x <i>n</i> periods ahead</td><td><i>substitute</i></td></tr>
 <tr><td class="sig" id="fn-OFFSET">OFFSET(x, n, substitute)</td><td>x at <i>n</i> periods (negative: back); LEAD without a mode</td><td><i>substitute</i></td></tr>
 </table>
-<p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0.</p>
+<p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0. A <code>STRICT</code> LAG therefore only ever reads earlier periods, so it may close a recurrence even when <i>n</i> varies (below).</p>
 <p><b>Offsets.</b> <i>n</i> may be a whole-number literal or any expression that gives a whole number at the current period: a metric (<code>LAG(sales, lag_months, 0)</code>), a property (<code>LAG(sales, ROUND(region.factor, 0), 0)</code>), an <code>IF</code>. A literal like <code>1.5</code> is refused at save; an expression that gives a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>.</p>
 
 <h3>Windows and running totals</h3>
 <div class="fn"><h4><span class="sig" id="fn-MOVINGSUM">MOVINGSUM(x [, start [, end [, SUM | AVERAGE | MIN | MAX]]])</span></h4>
-<p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> must be whole-number <b>literals</b> (<code>MOVING_WINDOW_NOT_LITERAL</code> otherwise).</p>
+<p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> are whole numbers: literals, or expressions evaluated at the current period like a LAG offset (<code>MOVINGSUM(demand, 0, lead_weeks - 1)</code> is the demand over an item's lead time); a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>. A window given by expressions may reach any period, so such a MOVINGSUM cannot be part of a recurrence.</p>
 <table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>MOVINGSUM(sales, -2, 0)</td><td>trailing three periods</td><td></td></tr>
 <tr><td>MOVINGSUM(sales, -2, 0, AVERAGE)</td><td>trailing three-period average</td><td></td></tr>
-<tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr></table></div>
+<tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr>
+<tr><td>MOVINGSUM(demand, 0, lead_weeks - 1)</td><td>demand over the lead time, as long as each item's</td><td></td></tr></table></div>
 <div class="fn"><h4><span class="sig" id="fn-CUMULATE">CUMULATE(x [, reset])</span> · <span class="sig" id="fn-DECUMULATE">DECUMULATE(x)</span></h4>
 <p>CUMULATE is the running total from the first period through the current one. With <i>reset</i>, a period where it is TRUE starts a new run (its own value included): <code>CUMULATE(sales, MOD(MONTH(START()), 3) = 1)</code> restarts every quarter. DECUMULATE is x minus x of the previous period (in the first period, x itself).</p></div>
 
@@ -80,8 +81,8 @@
 closing = opening + flow           time summary: last</pre>
 <p>Each period's opening is the previous period's closing (100 before the first), so the engine can compute period by period. Create one of the two with a placeholder formula (for example <code>=flow * 0</code>), create the other, then edit the first to its real formula. The rules:</p>
 <ul>
-  <li>Within the cycle, a metric may read another metric of the cycle only through a <b>fixed</b> offset (<code>PREVIOUS</code>, <code>LAG(x, 1, …)</code>, <code>LEAD(x, 1, …)</code>), all in one direction. Same-period reads must not themselves form a loop.</li>
-  <li>No dynamic offset, CUMULATE, TIMESUM or *VALUE function on a metric of the cycle, and no LOOKUP or SUMIFS family anywhere in the cycle's metrics: all are refused with <code>TEMPORAL_CYCLE_NOT_CAUSAL</code>.</li>
+  <li>Within the cycle, a metric may read another metric of the cycle only through a <b>fixed</b> offset (<code>PREVIOUS</code>, <code>LAG(x, 1, …)</code>, <code>LEAD(x, 1, …)</code>) or a <code>STRICT</code> varying one (<code>LAG(release, lead_weeks, 0, STRICT)</code>: stock received a lead time after it was ordered), all in one direction. Same-period reads must not themselves form a loop.</li>
+  <li>No other varying offset, no MOVINGSUM with expression bounds, CUMULATE, TIMESUM or *VALUE function on a metric of the cycle, and no LOOKUP or SUMIFS family anywhere in the cycle's metrics: all are refused with <code>TEMPORAL_CYCLE_NOT_CAUSAL</code>.</li>
   <li><code>dimension</code>, <code>dimension.property</code> and <code>PARENT</code> are allowed.</li>
   <li>Set the time summaries so totals make sense: <b>first</b> for the opening, <b>last</b> for the closing.</li>
 </ul>

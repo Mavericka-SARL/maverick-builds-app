@@ -609,6 +609,12 @@ type Handler interface {
 	//
 	// DELETE /api/notifications/{id}
 	DeleteNotification(ctx context.Context, params DeleteNotificationParams) (DeleteNotificationRes, error)
+	// DeleteReconciliation implements deleteReconciliation operation.
+	//
+	// Remove a revision's reconciliation (workbook, map, cases, report).
+	//
+	// DELETE /api/developer/reconciliation
+	DeleteReconciliation(ctx context.Context, params DeleteReconciliationParams) (*DeleteReconciliationOK, error)
 	// DeleteRevision implements deleteRevision operation.
 	//
 	// Delete a revision (rejected if it is the model's active revision).
@@ -933,6 +939,17 @@ type Handler interface {
 	//
 	// GET /api/me
 	GetMe(ctx context.Context) (GetMeRes, error)
+	// GetModelCheck implements getModelCheck operation.
+	//
+	// Rules: a schedule that cannot start its workflow (error); a record field mapped into a number
+	// metric that holds no number; a calculated pick-list or text whose total is worked out from blanks;
+	// a SUMIFS whose metric range spans a dimension whose members are never added up; a fixed member
+	// list on a dimension business users maintain; hidden members under figures read across them
+	// (warnings); an input open to every business role while others are restricted (info). A finding's
+	// key names it by what it is about, so ignores hold across revision copies and model exports.
+	//
+	// GET /api/developer/model-check
+	GetModelCheck(ctx context.Context, params GetModelCheckParams) (GetModelCheckRes, error)
 	// GetMyWorkflowHistory implements getMyWorkflowHistory operation.
 	//
 	// The caller's runs — started, assigned a step, or notified of — in the selected application
@@ -950,6 +967,19 @@ type Handler interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetReconciliation implements getReconciliation operation.
+	//
+	// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
+	// the last run's status and report (first 500 differences).
+	//
+	// GET /api/developer/reconciliation
+	GetReconciliation(ctx context.Context, params GetReconciliationParams) (GetReconciliationRes, error)
+	// GetReconciliationDifferences implements getReconciliationDifferences operation.
+	//
+	// The last run's differences as CSV (case, sheet, cell, metric, members, expected, actual).
+	//
+	// GET /api/developer/reconciliation/differences.csv
+	GetReconciliationDifferences(ctx context.Context, params GetReconciliationDifferencesParams) (GetReconciliationDifferencesRes, error)
 	// GetRecordChoices implements getRecordChoices operation.
 	//
 	// For each person field, the people it may name — names only, never e-mail addresses: the holders
@@ -1055,6 +1085,16 @@ type Handler interface {
 	//
 	// GET /api/developer/workflows/{id}/instances
 	GetWorkflowInstances(ctx context.Context, params GetWorkflowInstancesParams) ([]WorkflowInstanceSummary, error)
+	// GetWorkflowStartDefaults implements getWorkflowStartDefaults operation.
+	//
+	// Each variable with a default formula (context_schema[].default) is worked out as a start with
+	// nothing given would: names in it are metrics of the workflow's revision, read at the members the
+	// variables before it pin, or earlier variables. Only someone who may start the workflow asks (403
+	// otherwise). A default that cannot be worked out is listed in errors with the reason, and its field
+	// stays empty.
+	//
+	// GET /api/workflow/definitions/{id}/start-defaults
+	GetWorkflowStartDefaults(ctx context.Context, params GetWorkflowStartDefaultsParams) (GetWorkflowStartDefaultsRes, error)
 	// GetWorkflowStatus implements getWorkflowStatus operation.
 	//
 	// One published workflow of the caller's model, by name: its latest run (test runs left out) and
@@ -1091,6 +1131,12 @@ type Handler interface {
 	//
 	// GET /healthz
 	Healthz(ctx context.Context) (*HealthzOK, error)
+	// IgnoreModelCheckFinding implements ignoreModelCheckFinding operation.
+	//
+	// Keep a finding the revision has now, with the reason it is kept.
+	//
+	// PUT /api/developer/model-check/ignores
+	IgnoreModelCheckFinding(ctx context.Context, req *IgnoreModelCheckFindingReq) (IgnoreModelCheckFindingRes, error)
 	// ImportDimensionMembers implements importDimensionMembers operation.
 	//
 	// A property:<name> column fills the property declared under that name whatever its case, or under
@@ -1576,6 +1622,13 @@ type Handler interface {
 	//
 	// POST /api/ai/sessions/{id}/promote-draft
 	PromoteAiDraft(ctx context.Context, req OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
+	// ProposeReconciliationMap implements proposeReconciliationMap operation.
+	//
+	// A map drafted from the stored workbook and what the revision knows (metric labels, member codes
+	// and labels, period dates), not saved.
+	//
+	// POST /api/developer/reconciliation/propose
+	ProposeReconciliationMap(ctx context.Context, req OptProposeReconciliationMapReq) (ProposeReconciliationMapRes, error)
 	// PublishWorkflow implements publishWorkflow operation.
 	//
 	// Publishing a workflow that is already published changes nothing and answers it as it is; an
@@ -1590,6 +1643,23 @@ type Handler interface {
 	//
 	// PUT /api/developer/integrations/google-service-account
 	PutGoogleConnection(ctx context.Context, req *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
+	// PutReconciliationMap implements putReconciliationMap operation.
+	//
+	// A rule is a rectangle of a sheet (rows or row_list, optionally repeated in blocks; columns or
+	// column_list), the metric of each cell (metric, metrics_by_column or metrics_by_row) and where each
+	// dimension's member comes from (members: code, case, column — with block_row in blocks — row,
+	// cell; split and part take one part of a key; total). A case names its members of the dimensions
+	// bound to the case and the input edits (cell and value, or range and copy_from) that make the
+	// workbook calculate it; a case without edits reads the saved values.
+	//
+	// PUT /api/developer/reconciliation/map
+	PutReconciliationMap(ctx context.Context, req *PutReconciliationMapReq) (PutReconciliationMapRes, error)
+	// PutReconciliationWorkbook implements putReconciliationWorkbook operation.
+	//
+	// Store (or replace) the workbook a revision rebuilds, at most 25 MB.
+	//
+	// PUT /api/developer/reconciliation/workbook
+	PutReconciliationWorkbook(ctx context.Context, req *PutReconciliationWorkbookReq) (PutReconciliationWorkbookRes, error)
 	// QueryFormRecords implements queryFormRecords operation.
 	//
 	// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
@@ -1784,6 +1854,13 @@ type Handler interface {
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, req *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
+	// RunReconciliation implements runReconciliation operation.
+	//
+	// Compare the workbook with the revision, case by case, in the background; GET
+	// /api/developer/reconciliation follows it.
+	//
+	// POST /api/developer/reconciliation/run
+	RunReconciliation(ctx context.Context, req OptRunReconciliationReq) (RunReconciliationRes, error)
 	// SaveAiSettings implements saveAiSettings operation.
 	//
 	// Save the caller's LLM provider settings.
@@ -2077,6 +2154,12 @@ type Handler interface {
 	//
 	// POST /api/automation/trigger/{id}
 	TriggerAutomationRule(ctx context.Context, req OptTriggerAutomationRequest, params TriggerAutomationRuleParams) (TriggerAutomationRuleRes, error)
+	// UnignoreModelCheckFinding implements unignoreModelCheckFinding operation.
+	//
+	// Bring an ignored finding back.
+	//
+	// DELETE /api/developer/model-check/ignores
+	UnignoreModelCheckFinding(ctx context.Context, params UnignoreModelCheckFindingParams) (UnignoreModelCheckFindingRes, error)
 	// UpdateAdminApplication implements updateAdminApplication operation.
 	//
 	// Rename an application or change its description.

@@ -560,3 +560,64 @@ func TestTimeSeriesTotalsFollowTheMemberRule(t *testing.T) {
 	check("flag in a month across scenarios: Base's", flagID, map[string]string{monthID: months[0]}, 1)
 	check("flag at the grand total: Base's months by max", flagID, nil, 1)
 }
+
+// TestRecurrenceWithVariableStrictLag: a recurrence may read itself through a
+// LAG whose offset varies by period when the LAG is STRICT — it then reads
+// only earlier periods, all computed first (2026-11-21: an inventory plan's
+// receipts are its releases a lead time back, and the lead time is an
+// input). A variable LAG that may read the current period or later is still
+// refused.
+func TestRecurrenceWithVariableStrictLag(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	modelID := "00000000-0000-0000-0000-0000000000a9"
+	revID := "00000000-0000-0000-0001-0000000000a9"
+
+	monthID := insertTimeDim(t, store, ctx, modelID, revID, "month")
+	months := insertMonths(t, store, ctx, monthID, 4)
+	flowID := insertMetric(t, store, ctx, modelID, revID, "flow", "", true)
+	lagID := insertMetric(t, store, ctx, modelID, revID, "lag_n", "", true)
+	closingID := insertMetric(t, store, ctx, modelID, revID, "closing", "opening + flow", false)
+	openingID := insertCalc(t, store, ctx, modelID, revID, "opening", "LAG(closing, lag_n, 100, STRICT)")
+	res, err := metricformula.Validate(ctx, store.Pool(), metricformula.Request{
+		ModelID: modelID, RevisionID: revID, MetricID: closingID, Name: "closing", Formula: "opening + flow"})
+	if err != nil {
+		t.Fatalf("a STRICT variable LAG must close a causal recurrence: %v", err)
+	}
+	if err := metricformula.WriteDependencies(ctx, store.Pool(), closingID, res.Edges); err != nil {
+		t.Fatal(err)
+	}
+	insertGridSetup(t, store, ctx, modelID, []string{monthID}, []string{flowID, lagID, closingID, openingID})
+	for i, v := range []float64{10, -20, 5, 7} {
+		insertFact(t, store, ctx, modelID, revID, flowID, fmt.Sprintf(`{"%s":"%s"}`, monthID, months[i]), v)
+	}
+	for i, v := range []float64{1, 1, 2, 1} {
+		insertFact(t, store, ctx, modelID, revID, lagID, fmt.Sprintf(`{"%s":"%s"}`, monthID, months[i]), v)
+	}
+	runRecalc(t, store, ctx, modelID, revID, []string{flowID, lagID})
+
+	// Month 3 reads two months back: the closing of month 1.
+	wantOpen := []float64{100, 110, 110, 115}
+	wantClose := []float64{110, 90, 115, 122}
+	for i, code := range months {
+		if got, ok := calcRow(t, store, ctx, modelID, revID, openingID, map[string]string{monthID: code}); !ok || math.Abs(got-wantOpen[i]) > 1e-6 {
+			t.Errorf("opening @ %s: got %v ok=%v want %v", code, got, ok, wantOpen[i])
+		}
+		if got, ok := calcRow(t, store, ctx, modelID, revID, closingID, map[string]string{monthID: code}); !ok || math.Abs(got-wantClose[i]) > 1e-6 {
+			t.Errorf("closing @ %s: got %v ok=%v want %v", code, got, ok, wantClose[i])
+		}
+	}
+
+	for _, f := range []string{
+		"LAG(closing, lag_n, 100)",                                           // non-strict: lag_n = 0 reads this period, < 0 a later one
+		"LAG(closing, lag_n, 100, SEMISTRICT)",                               // lag_n = 0 reads this period
+		"LAG(closing, lag_n, 100, STRICT) + LEAD(closing, lag_n, 0, STRICT)", // earlier and later periods
+	} {
+		_, err := metricformula.Validate(ctx, store.Pool(), metricformula.Request{
+			ModelID: modelID, RevisionID: revID, MetricID: openingID, Name: "opening", Formula: f})
+		if err == nil || !strings.Contains(err.Error(), "TEMPORAL_CYCLE_NOT_CAUSAL") {
+			t.Errorf("%s in the cycle must be refused: %v", f, err)
+		}
+	}
+}

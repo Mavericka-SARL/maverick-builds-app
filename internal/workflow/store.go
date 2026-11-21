@@ -166,6 +166,17 @@ func (s *Store) StartWorkflow(ctx context.Context, defID, startedByUserID string
 // dirty. See migration 065 for why this is a column on the instance rather
 // than a context flag.
 func (s *Store) StartTestRun(ctx context.Context, defID, startedByUserID string, contextVars map[string]string) (*workflowv1.WorkflowInstance, error) {
+	// A variable left empty takes its default, as in a real start.
+	if def, err := s.GetWorkflowDefFull(ctx, defID); err == nil {
+		var vars []startContextVarDef
+		_ = json.Unmarshal(def.ContextSchema, &vars)
+		filled := make(map[string]string, len(contextVars))
+		maps.Copy(filled, contextVars)
+		if err := s.applyContextDefaults(ctx, def.ID, def.ApplicationID, vars, filled); err != nil {
+			return nil, err
+		}
+		contextVars = filled
+	}
 	return s.startWorkflow(ctx, defID, startedByUserID, contextVars, true)
 }
 
@@ -995,12 +1006,13 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 			decision = "skipped"
 			comment = "No recipient configured or resolved"
 		}
-		_, _ = s.db.Exec(ctx, `
+		if tag, err := s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'completed', decision = $3, comment = $4, completed_at = now()
 			WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
-		`, instanceID, def.ID, decision, comment)
-		s.activateNextSteps(ctx, instanceID, def.ID, "sent", stepDefs)
+		`, instanceID, def.ID, decision, comment); err == nil && tag.RowsAffected() > 0 {
+			s.activateNextSteps(ctx, instanceID, def.ID, "sent", stepDefs)
+		}
 
 	case workflowv1.StepType_STEP_TYPE_CONDITION:
 		var result, evaluated bool
@@ -1011,7 +1023,7 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 			if result, evaluated, why = s.evalConditionFormula(ctx, instanceID, text); !evaluated {
 				comment := "The condition could not be evaluated: " + why
 				if why == conditionHeldReason {
-					comment = heldConditionComment // decided when the recalculation finishes
+					comment = HeldConditionComment // decided when the recalculation finishes
 				}
 				_, _ = s.db.Exec(ctx, `
 					UPDATE workflow.workflow_step SET comment = $3
@@ -1029,12 +1041,16 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 		if result {
 			decision = "true"
 		}
-		_, _ = s.db.Exec(ctx, `
+		// Only the call that decided the step routes the run: a held
+		// condition decided twice (a person and the resume) sent it down
+		// both branches (2026-11-21).
+		if tag, err := s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'completed', decision = $3, comment = 'Auto-evaluated', completed_at = now()
 			WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
-		`, instanceID, def.ID, decision)
-		s.activateNextSteps(ctx, instanceID, def.ID, decision, stepDefs)
+		`, instanceID, def.ID, decision); err == nil && tag.RowsAffected() > 0 {
+			s.activateNextSteps(ctx, instanceID, def.ID, decision, stepDefs)
+		}
 
 	default:
 		// TASK/APPROVAL/JOIN/UNSPECIFIED require human action or are routed
@@ -2379,6 +2395,9 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 		maxRetries = sched.MaxRetries
 		retryBackoff = sched.RetryBackoffSeconds
 		nextFireAt = &next
+		if err := s.refuseScheduleGaps(ctx, appID, revisionID, workflowDefID, workflowName); err != nil {
+			return nil, err
+		}
 	}
 
 	var id string
@@ -2506,6 +2525,9 @@ type startContextVarDef struct {
 	Required    bool   `json:"required"`
 	SourceHint  string `json:"source_hint"`
 	DimensionID string `json:"dimension_id"`
+	// Default is a formula worked out when a start brings no value
+	// (context_default.go); "" for none.
+	Default string `json:"default"`
 }
 
 // periodHolding is the code of dimensionID's shortest period holding the
@@ -2678,6 +2700,10 @@ func (s *Store) ResolveStartContext(ctx context.Context, defID, userID string, c
 
 	result := make(map[string]string, len(candidate))
 	maps.Copy(result, candidate)
+	// A variable left without a value takes its default, if it has one.
+	if err := s.applyContextDefaults(ctx, def.ID, def.ApplicationID, ctxVars, result); err != nil {
+		return nil, err
+	}
 
 	// Every "Metric" context var is validated against the app's active
 	// model and normalized to the metric's canonical NAME — names survive
@@ -3024,6 +3050,7 @@ func (s *Store) TriggerScheduledRule(ctx context.Context, rule AutomationRule, s
 			UPDATE workflow.execution SET status='failed', error=$2, completed_at=now()
 			WHERE id = $1::uuid
 		`, execID, fireErr.Error())
+		s.notifyScheduleFailure(ctx, rule, execID, fireErr)
 		return nil, fireErr
 	}
 
@@ -3206,6 +3233,32 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 		nextFireAt = &next
 	}
 
+	// What a schedule starts must be startable with nothing given: checked
+	// when the update sets what fires or when (an edit of the name, the
+	// description or enabled alone leaves an older rule as it was).
+	if triggerType != "" || workflowDefID != "" || sched != nil {
+		var appID, revisionID, curTrigger, curDefID, curName string
+		if err := s.db.QueryRow(ctx, `
+			SELECT application_id::text, COALESCE(revision_id::text,''), trigger_type::text, COALESCE(workflow_def_id::text,''), workflow_name
+			FROM workflow.automation_rule WHERE id = $1::uuid`, ruleID).Scan(&appID, &revisionID, &curTrigger, &curDefID, &curName); err == nil {
+			trig, defID, wfName := curTrigger, curDefID, curName
+			if triggerType != "" {
+				trig = triggerType
+			}
+			if workflowDefID != "" {
+				defID = workflowDefID
+			}
+			if workflowName != "" {
+				wfName = workflowName
+			}
+			if trig == "schedule" {
+				if err := s.refuseScheduleGaps(ctx, appID, revisionID, defID, wfName); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
 	var r AutomationRule
 	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.automation_rule
@@ -3305,7 +3358,7 @@ func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (
 		        WHERE elem->>'id' = ws.step_def_id LIMIT 1
 		    ) step_def
 		    WHERE ws.status = 'in_progress'
-		      AND `+assignee.SQL("wd.application_id", "step_def.elem->'assignee_roles'", "$2::uuid")+`
+		      AND `+assignee.SQL("wd.application_id", assignee.StepRolesSQL("step_def.elem"), "$2::uuid")+`
 		)
 	`, stepID, userID).Scan(&eligible)
 	return eligible, err

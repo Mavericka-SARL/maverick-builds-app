@@ -92,3 +92,55 @@ func TestChartReadAcrossADimensionWithNothingRecordedIsBlank(t *testing.T) {
 		t.Errorf("flag in March = %v, want -1", got["flag"])
 	}
 }
+
+// A calculated metric with no value at a point is blank to the formulas
+// reading it, as the calculation binds it (2026-11-21): bound as 0,
+// NOT(ISBLANK(first_short)) held for an item with no shortage, and a chart,
+// the chat connector and a workflow condition read "Expedite" where the
+// grid showed "Release order".
+func TestChartBlankCalculatedDependencyIsBlank(t *testing.T) {
+	pool, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	modelID := "00000000-0000-0000-0000-000000000036"
+	revisionID := "00000000-0000-0000-0036-000000000036"
+	userID := "00000000-0000-0000-0000-000000000336"
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	id := func(sql string, args ...any) string {
+		t.Helper()
+		var out string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&out); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return out
+	}
+	itemDim := id(`INSERT INTO model.dimension_def (model_id, name, revision_id) VALUES ($1::uuid, 'item', $2::uuid) RETURNING id::text`, modelID, revisionID)
+	for i, code := range []string{"SHORT", "FINE"} {
+		exec(`INSERT INTO model.dimension_member (dimension_id, code, label, sort_order) VALUES ($1::uuid, $2, $2, $3)`, itemDim, code, i)
+	}
+	backlog := id(`INSERT INTO model.metric_def (model_id, name, is_input, revision_id) VALUES ($1::uuid, 'backlog', true, $2::uuid) RETURNING id::text`, modelID, revisionID)
+	short := id(`INSERT INTO model.metric_def (model_id, name, is_input, revision_id, formula) VALUES ($1::uuid, 'first_short', false, $2::uuid, 'IF(backlog > 0, 7, "")') RETURNING id::text`, modelID, revisionID)
+	action := id(`INSERT INTO model.metric_def (model_id, name, is_input, revision_id, formula) VALUES ($1::uuid, 'expedite', false, $2::uuid, 'IF(NOT(ISBLANK(first_short)), 1, 0)') RETURNING id::text`, modelID, revisionID)
+	exec(`INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id) VALUES ($1::uuid, $2::uuid), ($3::uuid, $1::uuid)`, short, backlog, action)
+	grid := id(`INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid, 'Items') RETURNING id::text`, modelID)
+	exec(`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid, $2::uuid)`, grid, itemDim)
+	exec(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid, $2::uuid), ($1::uuid, $3::uuid), ($1::uuid, $4::uuid)`, grid, backlog, short, action)
+	exec(`INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, 5, $5::uuid), ($1::uuid, $2::uuid, $3::uuid, $6::jsonb, 0, $5::uuid)`,
+		modelID, revisionID, backlog, `{"`+itemDim+`":"SHORT"}`, userID, `{"`+itemDim+`":"FINE"}`)
+
+	resolver := query.NewChartResolver(pool)
+	for code, want := range map[string]float64{"SHORT": 1, "FINE": 0} {
+		vals, err := resolver.MetricValuesAt(ctx, modelID, revisionID, []string{"expedite"}, map[string]string{itemDim: code})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, ok := vals["expedite"].Number(); !ok || n != want {
+			t.Errorf("expedite at %s = %v, want %v (first_short blank there is blank to ISBLANK)", code, vals["expedite"], want)
+		}
+	}
+}

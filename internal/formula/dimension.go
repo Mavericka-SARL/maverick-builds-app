@@ -3,6 +3,7 @@ package formula
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +83,10 @@ type DimEvalContext struct {
 	// pass. The same map must be shared by every context of that pass,
 	// time-shifted children included. nil disables memoisation.
 	Memo map[string]Value
+	// Ranks caches, for one recalculation pass, the ranked sets a RANK or
+	// RANKIFS call ranks among, shared like Memo: every member of a
+	// ranked set reads the same list. nil disables it.
+	Ranks map[string]*RankedSet
 	// Picklist returns the codec of a metric whose format is "picklist"
 	// (its cells hold members of one dimension); ok is false for any other
 	// metric. nil: no metric is a pick-list.
@@ -129,7 +134,11 @@ const (
 	conditionalAverageIfs        = "AVERAGEIFS"
 	conditionalMinIfs            = "MINIFS"
 	conditionalMaxIfs            = "MAXIFS"
+	conditionalStdevIfs          = "STDEVIFS"
+	conditionalVarIfs            = "VARIFS"
 	conditionalMemberIfs         = "MEMBERIFS"
+	conditionalRank              = "RANK"
+	conditionalRankIfs           = "RANKIFS"
 	isoDateLayout                = "2006-01-02"
 	maxConditionalTuples         = 1_000_000 // a guard against a runaway cartesian product
 	memoKeySeparator             = "\x1f"
@@ -146,6 +155,7 @@ var DimensionalFunctionNames = []string{
 	dimensionalFuncLookup,
 	conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs,
 	conditionalSumIf, conditionalAverageIf, conditionalCountIf, conditionalMemberIfs,
+	conditionalStdevIfs, conditionalVarIfs, conditionalRank, conditionalRankIfs,
 }
 
 // IsDimensionalFunction reports whether name (any case) is one of
@@ -163,7 +173,7 @@ func IsDimensionalFunction(name string) bool {
 func init() {
 	builtins[dimensionalFuncParent] = fnPARENT
 	builtins[dimensionalFuncLookup] = fnLOOKUP
-	for _, name := range []string{conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs, conditionalSumIf, conditionalAverageIf, conditionalCountIf, conditionalMemberIfs} {
+	for _, name := range []string{conditionalSumIfs, conditionalAverageIfs, conditionalMinIfs, conditionalMaxIfs, conditionalCountIfs, conditionalSumIf, conditionalAverageIf, conditionalCountIf, conditionalMemberIfs, conditionalStdevIfs, conditionalVarIfs, conditionalRank, conditionalRankIfs} {
 		fn := name
 		builtins[fn] = func(ctx *EvalContext, args []Node) Value { return conditional(ctx, fn, args) }
 	}
@@ -435,6 +445,27 @@ func conditionalShape(fn string, args []Node) (source Node, pairs [][2]Node, fer
 			return nil, nil, errValue(fmt.Sprintf("%s: expected range, criterion pairs, got %d arguments", fn, len(args)))
 		}
 		return nil, pairsFrom(args), nil
+	case conditionalRank:
+		// RANK(source, dimension [, order]): every leaf of the dimension.
+		if len(args) != 2 && len(args) != 3 {
+			return nil, nil, errValue(fmt.Sprintf("%s: expected (metric, dimension [, order]), got %d arguments", fn, len(args)))
+		}
+		if _, ok := args[1].(*Ident); !ok {
+			return nil, nil, &FormulaError{Code: CodeDimensionArgRequired,
+				Message: fmt.Sprintf("%s: the second argument must be a dimension, got %s — rank within a group with RANKIFS(metric, dimension.property, dimension.property)", fn, describeNode(args[1]))}
+		}
+		return args[0], [][2]Node{{args[1], &StringLit{Val: "*"}}}, nil
+	case conditionalRankIfs:
+		// RANKIFS(source, range1, criterion1 [, ...] [, order]): an even
+		// count ends with the order.
+		if len(args) < 3 {
+			return nil, nil, errValue(fmt.Sprintf("%s: expected a metric followed by range, criterion pairs and an optional order, got %d arguments", fn, len(args)))
+		}
+		end := len(args)
+		if end%2 == 0 {
+			end--
+		}
+		return args[0], pairsFrom(args[1:end]), nil
 	}
 	if len(args) < 3 || len(args)%2 == 0 {
 		return nil, nil, errValue(fmt.Sprintf("%s: expected a source followed by range, criterion pairs, got %d arguments", fn, len(args)))
@@ -524,6 +555,11 @@ func conditional(ctx *EvalContext, fn string, args []Node) Value {
 		}
 	}
 
+	if fn == conditionalRank || fn == conditionalRankIfs {
+		// A rank differs at every member of the ranked set, so it never
+		// takes the memo below (keyed without the range dimensions).
+		return rankCall(ctx, d, fn, args, source, dimOrder, crits)
+	}
 	memoKey := ""
 	if d.Memo != nil && d.CoordKey != nil {
 		var sb strings.Builder
@@ -568,52 +604,9 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 			metricCrits = append(metricCrits, c)
 		}
 	}
-	// Every range dimension's leaves are fetched before any filtering, so
-	// an unknown dimension is an error whatever the argument order — never
-	// hidden behind an earlier range that matched nothing.
-	leavesOf := make([][]DimMember, len(dimOrder))
-	for i, dim := range dimOrder {
-		leaves, ferr := d.Leaves(dim)
-		if ferr != nil {
-			return ErrorVal(ferr)
-		}
-		leavesOf[i] = leaves
-	}
-	// Filter each dimension's leaves by every criterion on it, then take
-	// the cartesian product of the survivors. A candidate that is an error
-	// (an unparsable typed property) is not a failure of the whole call:
-	// criterion.matches treats it like a value of another kind, so the
-	// result never depends on the order of the criteria.
-	matches := make([][]string, len(dimOrder))
-	tuples := 1
-	for i, dim := range dimOrder {
-		for _, m := range leavesOf[i] {
-			keep := true
-			for _, c := range crits {
-				if c.metricDims != nil || !strings.EqualFold(c.rng.dim, dim) {
-					continue
-				}
-				candidate := StringVal(m.Code)
-				if c.rng.prop != "" {
-					candidate = memberProperty(m, c.rng.prop)
-				}
-				if !c.crit.matches(candidate) {
-					keep = false
-					break
-				}
-			}
-			if keep {
-				matches[i] = append(matches[i], m.Code)
-			}
-		}
-		tuples *= len(matches[i])
-		if tuples == 0 {
-			break
-		}
-		if tuples > maxConditionalTuples {
-			return ErrorVal(&FormulaError{Code: ErrNum.Code,
-				Message: fmt.Sprintf("%s: the criteria match more than %d member combinations", fn, maxConditionalTuples)})
-		}
+	matches, tuples, ferr := conditionalMatches(d, fn, dimOrder, crits)
+	if ferr != nil {
+		return ErrorVal(ferr)
 	}
 
 	counting := fn == conditionalCountIf || fn == conditionalCountIfs
@@ -659,6 +652,9 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 	}
 	var sum, lo, hi float64
 	found, counted := 0, 0
+	// STDEVIFS and VARIFS: the recorded values, for a two-pass variance.
+	spread := fn == conditionalStdevIfs || fn == conditionalVarIfs
+	var recorded []float64
 	if tuples > 0 {
 		idx := make([]int, len(dimOrder))
 		overrides := make(map[string]string, len(dimOrder))
@@ -681,6 +677,9 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 				}
 			}
 			if ok {
+				if spread {
+					recorded = append(recorded, v)
+				}
 				if found == 0 || v < lo {
 					lo = v
 				}
@@ -725,8 +724,75 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 			return NumberVal(0)
 		}
 		return NumberVal(hi)
+	case conditionalStdevIfs, conditionalVarIfs:
+		// The sample standard deviation (variance) of the matching members'
+		// recorded values, as STDEV.S over them: nothing recorded is
+		// skipped, as AVERAGEIFS skips it; fewer than two is #DIV/0!.
+		v, ok := varianceOf(recorded, true)
+		if !ok {
+			return ErrorVal(&FormulaError{Code: ErrDiv0.Code, Message: fmt.Sprintf("%s: fewer than two matching members have a recorded value", fn)})
+		}
+		if fn == conditionalStdevIfs {
+			return finite(math.Sqrt(v))
+		}
+		return finite(v)
 	}
 	return NumberVal(sum)
+}
+
+// conditionalMatches filters each range dimension's leaves by every
+// criterion on it (metric ranges aside): the codes that survive, per
+// dimension of dimOrder, and the size of their cartesian product (0 as
+// soon as one dimension has none).
+func conditionalMatches(d *DimEvalContext, fn string, dimOrder []string, crits []evaluatedCriterion) ([][]string, int, *FormulaError) {
+	// Every range dimension's leaves are fetched before any filtering, so
+	// an unknown dimension is an error whatever the argument order — never
+	// hidden behind an earlier range that matched nothing.
+	leavesOf := make([][]DimMember, len(dimOrder))
+	for i, dim := range dimOrder {
+		leaves, ferr := d.Leaves(dim)
+		if ferr != nil {
+			return nil, 0, ferr
+		}
+		leavesOf[i] = leaves
+	}
+	// Filter each dimension's leaves by every criterion on it, then take
+	// the cartesian product of the survivors. A candidate that is an error
+	// (an unparsable typed property) is not a failure of the whole call:
+	// criterion.matches treats it like a value of another kind, so the
+	// result never depends on the order of the criteria.
+	matches := make([][]string, len(dimOrder))
+	tuples := 1
+	for i, dim := range dimOrder {
+		for _, m := range leavesOf[i] {
+			keep := true
+			for _, c := range crits {
+				if c.metricDims != nil || !strings.EqualFold(c.rng.dim, dim) {
+					continue
+				}
+				candidate := StringVal(m.Code)
+				if c.rng.prop != "" {
+					candidate = memberProperty(m, c.rng.prop)
+				}
+				if !c.crit.matches(candidate) {
+					keep = false
+					break
+				}
+			}
+			if keep {
+				matches[i] = append(matches[i], m.Code)
+			}
+		}
+		tuples *= len(matches[i])
+		if tuples == 0 {
+			break
+		}
+		if tuples > maxConditionalTuples {
+			return nil, 0, &FormulaError{Code: ErrNum.Code,
+				Message: fmt.Sprintf("%s: the criteria match more than %d member combinations", fn, maxConditionalTuples)}
+		}
+	}
+	return matches, tuples, nil
 }
 
 // metricCriteriaMatch tests every metric-range criterion at one member

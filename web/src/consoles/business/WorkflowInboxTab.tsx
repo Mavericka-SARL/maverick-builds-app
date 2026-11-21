@@ -32,6 +32,27 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
   const [values, setValues] = useState<Record<string, string>>({});
   const [multi, setMulti] = useState<Record<string, string[]>>({});
   const schema = def.context_schema ?? [];
+  // Variables with a default open filled in with it (people may change it).
+  const { data: defaults } = useQuery({
+    queryKey: ["wf-start-defaults", def.id],
+    queryFn: () => api.getWorkflowStartDefaults(def.id),
+    enabled: schema.some(v => v.has_default),
+    staleTime: 0,
+  });
+  const [prefilledFrom, setPrefilledFrom] = useState<typeof defaults>(undefined);
+  if (defaults && prefilledFrom === undefined) {
+    setPrefilledFrom(defaults);
+    const single: Record<string, string> = {};
+    const lists: Record<string, string[]> = {};
+    for (const v of schema) {
+      const d = defaults.values[v.key];
+      if (!d) continue;
+      if (v.data_type === "Dimension member" || v.data_type === "Metric") lists[v.key] = [d];
+      else single[v.key] = d;
+    }
+    setValues(s => ({ ...single, ...s }));
+    setMulti(s => ({ ...lists, ...s }));
+  }
   const isMember = (v: { data_type?: string }) => v.data_type === "Dimension member";
   const isMetric = (v: { data_type?: string }) => v.data_type === "Metric";
   // Metric options for "Metric" context vars — an approval can scope the
@@ -221,6 +242,11 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
                   value={values[v.key] ?? ""}
                   onChange={e => setValues(s => ({ ...s, [v.key]: e.target.value }))}
                 />
+              )}
+              {defaults?.errors[v.key] && (
+                <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
+                  <Txt>Its default could not be worked out:</Txt> {defaults.errors[v.key]}
+                </span>
               )}
             </Field>
           );

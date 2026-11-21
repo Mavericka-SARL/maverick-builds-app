@@ -135,11 +135,37 @@ func walkTime(n *formula.CallExpr, w window, out *[]use) error {
 		return walk(arg(0), w.shift(+1), out)
 	case "LAG", "LEAD", "OFFSET":
 		if len(n.Args) < 3 || !formula.IsOffsetLiteral(n.Args[1]) {
-			// A dynamic offset reads the source at any period (C5).
-			if err := walk(arg(0), all, out); err != nil {
+			// A dynamic offset reads the source at any period (C5) — only
+			// earlier ones for a STRICT LAG, later ones for a STRICT LEAD,
+			// plus the current one for SEMISTRICT (Analyze's
+			// walkDynamicOffset).
+			src := all
+			if len(n.Args) == 4 {
+				if kw, ok := n.Args[3].(*formula.Ident); ok {
+					lag, lead := strings.EqualFold(n.Name, "LAG"), strings.EqualFold(n.Name, "LEAD")
+					switch strings.ToUpper(kw.Name) {
+					case "STRICT":
+						if lag {
+							src = w.widen(-1, -1, true, false)
+						} else if lead {
+							src = w.widen(1, 1, false, true)
+						}
+					case "SEMISTRICT":
+						if lag {
+							src = w.widen(0, 0, true, false)
+						} else if lead {
+							src = w.widen(0, 0, false, true)
+						}
+					}
+				}
+			}
+			if err := walk(arg(0), src, out); err != nil {
 				return err
 			}
-			return walk(arg(1), w, out)
+			if err := walk(arg(1), w, out); err != nil {
+				return err
+			}
+			return walk(arg(2), w, out)
 		}
 		k, ferr := formula.IntegerLiteral(n.Args[1], n.Name)
 		if ferr != nil {
@@ -153,6 +179,14 @@ func walkTime(n *formula.CallExpr, w window, out *[]use) error {
 		}
 		return walk(n.Args[2], w, out)
 	case "MOVINGSUM":
+		if len(n.Args) >= 2 && (!formula.IsOffsetLiteral(n.Args[1]) || (len(n.Args) >= 3 && !formula.IsOffsetLiteral(n.Args[2]))) {
+			// Window bounds that are expressions: the source at any period,
+			// the bounds at the cell's.
+			if err := walk(n.Args[0], all, out); err != nil {
+				return err
+			}
+			return walkAll(n.Args[1:min(len(n.Args), 3)], w, out)
+		}
 		var src window
 		switch len(n.Args) {
 		case 0:
@@ -256,6 +290,9 @@ func walkDimensional(n *formula.CallExpr, w window, out *[]use) error {
 		if err := walk(c.Expr, w, out); err != nil {
 			return err
 		}
+	}
+	if call.Order != nil {
+		return walk(call.Order, w, out)
 	}
 	return nil
 }

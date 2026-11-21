@@ -43,6 +43,19 @@ func sales(r string, m int) float64 {
 	}
 	return 200 - 3*float64(m)
 }
+
+// rankAmong is RANK.EQ of r's sales in month m among the peer regions: 1
+// for the largest (the smallest when asc), ties shared.
+func rankAmong(r string, m int, asc bool, peer func(string) bool) float64 {
+	n := 1.0
+	for _, o := range leafRegions {
+		if peer(o) && ((!asc && sales(o, m) > sales(r, m)) || (asc && sales(o, m) < sales(r, m))) {
+			n++
+		}
+	}
+	return n
+}
+
 func cost(r string, m int) float64 { return sales(r, m)/2 + float64(m) }
 func units(r string, m int) float64 {
 	return float64(m) + map[string]float64{"DE": 2, "UK": 1, "US": 3}[r]
@@ -349,6 +362,10 @@ func catalogue() []calcDef {
 			}
 			return v(x)
 		}},
+		// A window as long as a metric (2026-11-21): lag_n is 0..2.
+		{name: "ms_dyn", formula: "MOVINGSUM(sales, -lag_n, 0)", leaf: func(r string, m int) (float64, bool) {
+			return v(sumRange(of(r), m-int(lagN(r, m)), m))
+		}},
 		{name: "ms_all", formula: "MOVINGSUM(sales)", leaf: func(r string, _ int) (float64, bool) { return v(sumRange(of(r), 1, 12)) }},
 		{name: "cum", formula: "CUMULATE(sales)", leaf: func(r string, m int) (float64, bool) { return v(sumRange(of(r), 1, m)) }},
 		{name: "cum_q", formula: "CUMULATE(sales, MOD(MONTH(START()), 3) = 1)", leaf: func(r string, m int) (float64, bool) {
@@ -440,6 +457,13 @@ func catalogue() []calcDef {
 		}},
 		{name: "rank_like", formula: `COUNTIFS(region, "<>" & region) - SUMIFS(units, region, region) + units`,
 			leaf: func(string, int) (float64, bool) { return v(2) }},
+		{name: "rank", formula: `RANK(sales, region)`, agg: "none", noTotal: true, leaf: func(r string, m int) (float64, bool) {
+			return v(rankAmong(r, m, false, func(string) bool { return true }))
+		}},
+		{name: "rank_seg", formula: `RANKIFS(sales, region.segment, region.segment, "ASC")`, agg: "none", noTotal: true,
+			leaf: func(r string, m int) (float64, bool) {
+				return v(rankAmong(r, m, true, func(o string) bool { return props[o].segment == props[r].segment }))
+			}},
 		{name: "ifs_time", formula: `IFS(START() < DATE(2026, 4, 1), "Q1", END() > DATE(2026, 9, 30), "Q4", TRUE, "mid") = "Q1"`,
 			leaf: func(_ string, m int) (float64, bool) { return v(b2f(m <= 3)) }},
 
@@ -583,7 +607,6 @@ func refusals() []refusal {
 		{"bad_dim_arg", `LOOKUP(sales, region.segment, "SMB")`, "DIMENSION_ARGUMENT_REQUIRED"},
 		{"bad_not_on_source", `LOOKUP(sales, currency, "EUR")`, "DIMENSION_NOT_ON_SOURCE"},
 		{"bad_offset", "LAG(sales, 1.5, 0)", "TIME_OFFSET_NOT_INTEGER"},
-		{"bad_window", "MOVINGSUM(sales, lag_n, 0)", "MOVING_WINDOW_NOT_LITERAL"},
 		{"bad_keyword", "MOVINGSUM(sales, -1, 0, MEDIAN)", "unknown keyword"},
 		{"bad_self", "bad_self + 1", "references the metric it defines"},
 	}
@@ -614,6 +637,10 @@ func checkRefusals(e *environment) {
 	raw, status = e.dev.try("PATCH", "/api/developer/metrics/"+e.metric["opening"], map[string]any{"formula": "=LAG(closing, lag_n, 100)"})
 	check("refused at save: a dynamic offset inside a recurrence", status == 400 && strings.Contains(raw, "TEMPORAL_CYCLE_NOT_CAUSAL"),
 		"-> %d %s", status, clip(raw, 220))
+	// A STRICT one reads only earlier periods, so it orders (2026-11-21).
+	raw, status = e.dev.try("PATCH", "/api/developer/metrics/"+e.metric["opening"], map[string]any{"formula": "=LAG(closing, lag_n, 100, STRICT)"})
+	check("accepted: a STRICT dynamic offset inside a recurrence", status == 200, "-> %d %s", status, clip(raw, 220))
+	e.dev.call("PATCH", "/api/developer/metrics/"+e.metric["opening"], map[string]any{"formula": "=LAG(closing, 1, 100)"})
 
 	// A literal TIMESUM period is checked once the metric's time axis is
 	// known: at placement on a grid with a time dimension.

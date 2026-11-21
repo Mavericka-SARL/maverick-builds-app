@@ -24,6 +24,7 @@
 <tr><td><a href="#fn-EDATE">EDATE</a></td><td>EDATE(date, months)</td><td>Same day, months later</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-END">END</a></td><td>END()</td><td>Last day of the current period</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-EOMONTH">EOMONTH</a></td><td>EOMONTH(date, months)</td><td>Last day of a month</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-EXP">EXP</a></td><td>EXP(x)</td><td>e to the power x</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-FLOOR">FLOOR</a></td><td>FLOOR(x, significance)</td><td>Down to a multiple</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-HALFYEARTODATE">HALFYEARTODATE</a></td><td>HALFYEARTODATE(x)</td><td>Sum from the half-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">HALFYEARVALUE</a></td><td>HALFYEARVALUE(metric)</td><td>The metric over the whole half year</td><td><a href="#time">14</a></td></tr>
@@ -42,6 +43,9 @@
 <tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-LEN">LEN</a></td><td>LEN(text)</td><td>Number of characters</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-LN">LN</a></td><td>LN(x)</td><td>Natural logarithm</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-LOG">LOG</a></td><td>LOG(x [, base])</td><td>Logarithm, base 10 by default</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-LOG10">LOG10</a></td><td>LOG10(x)</td><td>Base-10 logarithm</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-LOOKUP">LOOKUP</a></td><td>LOOKUP(source, dimension, member, …)</td><td>The source at other members</td><td><a href="#lookup">12</a></td></tr>
 <tr><td><a href="#fn-UPPER">LOWER</a></td><td>LOWER(text)</td><td>Lower case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-MAX">MAX</a></td><td>MAX(a, b, …)</td><td>Largest argument</td><td><a href="#aggregates">8</a></td></tr>
@@ -57,6 +61,14 @@
 <tr><td><a href="#fn-MOVINGSUM">MOVINGSUM</a></td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-NA">NA</a></td><td>NA()</td><td>The #N/A error</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-NEXT">NEXT</a></td><td>NEXT(x)</td><td>x one period ahead</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NORM-DIST">NORM.DIST</a></td><td>NORM.DIST(x, mean, standard_dev, cumulative)</td><td>Normal probability below x, or density</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-INV">NORM.INV</a></td><td>NORM.INV(p, mean, standard_dev)</td><td>The x with probability p below it</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-S-DIST">NORM.S.DIST</a></td><td>NORM.S.DIST(z, cumulative)</td><td>Standard normal probability below z, or density</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-S-INV">NORM.S.INV</a></td><td>NORM.S.INV(p)</td><td>The z with probability p below it (a service level’s safety factor)</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMDIST</a></td><td>NORMDIST(x, mean, standard_dev, cumulative)</td><td>Older name of NORM.DIST</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMINV</a></td><td>NORMINV(p, mean, standard_dev)</td><td>Older name of NORM.INV</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMSDIST</a></td><td>NORMSDIST(z)</td><td>Older name of NORM.S.DIST, always cumulative</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMSINV</a></td><td>NORMSINV(p)</td><td>Older name of NORM.S.INV</td><td><a href="#normal">7</a></td></tr>
 <tr><td><a href="#fn-NOT">NOT</a></td><td>NOT(a)</td><td>Inverts</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-OFFSET">OFFSET</a></td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-OR">OR</a></td><td>OR(a, b, …)</td><td>TRUE when any argument is TRUE</td><td><a href="#logic">6</a></td></tr>
@@ -65,12 +77,19 @@
 <tr><td><a href="#fn-PREVIOUS">PREVIOUS</a></td><td>PREVIOUS(x)</td><td>x one period back</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-QUARTERTODATE">QUARTERTODATE</a></td><td>QUARTERTODATE(x)</td><td>Sum from the quarter start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">QUARTERVALUE</a></td><td>QUARTERVALUE(metric)</td><td>The metric over the whole quarter</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-RANK">RANK</a></td><td>RANK(source, dimension [, order])</td><td>Place of the cell's value among the members of a dimension (1 = largest)</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-RANK">RANKIFS</a></td><td>RANKIFS(source, range, criterion, … [, order])</td><td>Place of the cell's value among the matching member combinations</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-RIGHT">RIGHT</a></td><td>RIGHT(text [, n])</td><td>Last characters</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-ROUND">ROUND</a></td><td>ROUND(x, digits)</td><td>Half away from zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ROUNDDOWN">ROUNDDOWN</a></td><td>ROUNDDOWN(x, digits)</td><td>Toward zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ROUNDUP">ROUNDUP</a></td><td>ROUNDUP(x, digits)</td><td>Away from zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-SQRT">SQRT</a></td><td>SQRT(x)</td><td>Square root</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-START">START</a></td><td>START()</td><td>First day of the current period</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV</a></td><td>STDEV(a, b, …)</td><td>Older name of STDEV.S</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV.P</a></td><td>STDEV.P(a, b, …)</td><td>Population standard deviation</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV.S</a></td><td>STDEV.S(a, b, …)</td><td>Sample standard deviation</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEVIFS">STDEVIFS</a></td><td>STDEVIFS(source, range, criterion, …)</td><td>Sample standard deviation of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEVP</a></td><td>STDEVP(a, b, …)</td><td>Older name of STDEV.P</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-SUBSTITUTE">SUBSTITUTE</a></td><td>SUBSTITUTE(text, old, new [, instance])</td><td>Replaces text</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-SUM">SUM</a></td><td>SUM(a, b, …)</td><td>Sum of the arguments</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-SUMIF">SUMIF</a></td><td>SUMIF(range, criterion, source)</td><td>Sum of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
@@ -83,13 +102,18 @@
 <tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-VALUE">VALUE</a></td><td>VALUE(text)</td><td>A text as a number</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR</a></td><td>VAR(a, b, …)</td><td>Older name of VAR.S</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR.P</a></td><td>VAR.P(a, b, …)</td><td>Population variance</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR.S</a></td><td>VAR.S(a, b, …)</td><td>Sample variance</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEVIFS">VARIFS</a></td><td>VARIFS(source, range, criterion, …)</td><td>Sample variance of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VARP</a></td><td>VARP(a, b, …)</td><td>Older name of VAR.P</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-WEEKDAY">WEEKDAY</a></td><td>WEEKDAY(date [, return_type])</td><td>Day of the week</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-WEEKNUM">WEEKNUM</a></td><td>WEEKNUM(date [, return_type])</td><td>Week of the year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>
 </table>
-<p class="small">Also: a bare dimension name (the cell's member code) and <code>dimension.property</code> (a member property), chapter 11. Keywords in fixed positions: <code>STRICT</code>, <code>SEMISTRICT</code>, <code>NONSTRICT</code> (LAG, LEAD) and <code>SUM</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code> (MOVINGSUM, TIMESUM).</p>
+<p class="small">Also: a bare dimension name (the cell's member code) and <code>dimension.property</code> (a member property), chapter 11. Function names with dots (NORM.S.INV, STDEV.S) are read as functions only directly before their <code>(</code>. Keywords in fixed positions: <code>STRICT</code>, <code>SEMISTRICT</code>, <code>NONSTRICT</code> (LAG, LEAD) and <code>SUM</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code> (MOVINGSUM, TIMESUM).</p>
 
 <h2 id="error-index">Appendix B. Error index</h2>
 <table>
@@ -113,7 +137,6 @@
 <tr><td><code>TIME_DIMENSION_MISMATCH</code></td><td>A *VALUE source is not dimensioned by the cell's time dimension</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>INVALID_TIME_MEMBER</code></td><td>A granularity too coarse for the function, or a period straddling its boundary</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>TIME_OFFSET_NOT_INTEGER</code></td><td>An offset or window bound that is not a whole number</td><td><a href="#time">14</a></td></tr>
-<tr><td><code>MOVING_WINDOW_NOT_LITERAL</code></td><td>A MOVINGSUM window bound that is not a literal</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>TEMPORAL_CYCLE_NOT_CAUSAL</code></td><td>A cycle not broken by time, or LOOKUP / SUMIFS / an unbounded time read inside a recurrence</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>
 <tr><td><code>METRIC_NAME_TAKEN</code>, <code>DIMENSION_NAME_TAKEN</code></td><td>The revision already has a metric (dimension) of that name, in any case</td><td><a href="#validation">17</a></td></tr>
 <tr><td><code>METRIC_IN_USE, PROPERTY_IN_USE, DIMENSION_IN_USE, MEMBER_IN_USE</code></td><td>A delete refused while a formula (or, for a metric, a Rate total) uses what would be deleted</td><td><a href="#validation">17</a></td></tr>

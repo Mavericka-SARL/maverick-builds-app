@@ -527,14 +527,12 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 		return "", "", err
 	}
 	filter, filterJSON := p.rowFilter()
+	p.Aggregation = crudapp.MappingAggregation(ctx, e.pool, metricID, p.Aggregation)
 	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
 		FormID: formID, GridID: p.GridID, TargetMetricID: metricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
-		RowFilter: filter,
+		RowFilter: filter, Aggregation: p.Aggregation,
 	}); err != nil {
 		return "", "", err
-	}
-	if p.Aggregation == "" {
-		p.Aggregation = "sum"
 	}
 	if len(p.PostingStatuses) == 0 {
 		p.PostingStatuses = []string{"approved"}
@@ -677,7 +675,7 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	filter, filterJSON := p.rowFilter()
 	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
 		FormID: formID, GridID: p.GridID, TargetMetricID: p.TargetMetricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
-		RowFilter: filter,
+		RowFilter: filter, Aggregation: p.Aggregation,
 	}); err != nil {
 		return "", "", err
 	}

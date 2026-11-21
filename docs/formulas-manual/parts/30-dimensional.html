@@ -64,6 +64,7 @@
 <tr><td class="sig" id="fn-SUMIFS">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
 <tr><td class="sig" id="fn-AVERAGEIFS">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
 <tr><td class="sig" id="fn-MINIFS">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
+<tr><td class="sig" id="fn-STDEVIFS">STDEVIFS / VARIFS(source, range1, criterion1 [, …])</td><td>Sample standard deviation / variance (n − 1) of the recorded values: <code>STDEVIFS(demand, in_history, 1)</code> is the spread of weekly demand over the weeks a metric <code>in_history</code> flags with 1 (the safety-stock σ)</td><td><code>#DIV/0!</code> (also with one value)</td></tr>
 <tr><td class="sig" id="fn-COUNTIFS">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
 <tr><td class="sig" id="fn-SUMIF">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
 <tr><td class="sig" id="fn-AVERAGEIF">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
@@ -75,6 +76,19 @@
   <li>They run over the <b>leaf</b> members of each range dimension (for a time dimension, its dated periods). Criteria on several dimensions combine every matching member of one with every matching member of the other. Dimensions without a criterion stay at the cell's own members: in the March row, <code>SUMIFS(sales, region.segment, "Enterprise")</code> adds up March.</li>
   <li>AVERAGEIFS, MINIFS and MAXIFS skip members with nothing recorded; SUMIFS counts them as 0. <b>COUNTIFS counts members, not data cells</b> (Excel counts cells).</li>
   <li>The source must be a metric; each range dimension must be the source's or related to it (COUNTIFS, having no source, may use any dimension of the model). Criteria matching more than 1,000,000 combinations give <code>#NUM!</code>. Not allowed in an opening/closing recurrence.</li>
+</ul>
+
+<h3 id="fn-RANK">Ranking: RANK and RANKIFS</h3>
+<table>
+<tr><th style="width:42%">Form</th><th>Result</th></tr>
+<tr><td class="sig">RANK(source, dimension [, order])</td><td>The place of the cell's value of <i>source</i> among the values of every leaf member of <i>dimension</i>, the cell's other members kept: <code>RANK(sales, product)</code> in the Berlin row ranks Berlin's products.</td></tr>
+<tr><td class="sig">RANKIFS(source, range1, criterion1 [, …] [, order])</td><td>The place among the member combinations the criteria keep, as in SUMIFS: several dimensions, <code>RANKIFS(usage, product, "*", location, "*")</code> (every product at every location), or a group, <code>RANKIFS(sales, product.category, product.category)</code> (within the cell's category).</td></tr>
+</table>
+<ul>
+  <li>As Excel's RANK.EQ: the largest value is 1, <b>equal values share a rank</b> and the next is skipped (30, 20, 20, 5 rank 1, 2, 2, 4). <i>order</i> is <code>0</code> or <code>"DESC"</code> (largest first, the default) or <code>1</code> or <code>"ASC"</code> (smallest first). In RANKIFS an even number of arguments ends with the order.</li>
+  <li>Members with nothing recorded are not ranked. The cell is <b>blank</b> where it has no rank: its own value not recorded, a total of a ranked dimension, or a member the criteria leave out.</li>
+  <li>A new metric whose formula is a RANK or RANKIFS gives no total and no time summary (aggregation and time summary <b>None</b>): ranks never add up. A ranked dimension must be one of the metric's grid dimensions (<code>DIMENSION_NOT_ON_METRIC</code>) and the source's (<code>DIMENSION_NOT_ON_SOURCE</code>). Not allowed in an opening/closing recurrence.</li>
+  <li>The top 3 of each location: <code>IF(RANK(sales, product) &lt;= 3, sales, "")</code>. Excel's <code>RANK(B2, B$2:B$40)</code> over rows is <code>RANK(metric, dimension)</code>; a tie-break by code adds <code>COUNTIFS(metric, metric, product, "&lt;" &amp; product)</code>.</li>
 </ul>
 
 <h3>Criteria</h3>

@@ -427,6 +427,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.compareWithSheet(ctx, args)
 	case "check_sheet":
 		return e.checkSheetTool(ctx, args)
+	case "reconcile_workbook":
+		return e.reconcileWorkbook(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
 	case "get_integration":

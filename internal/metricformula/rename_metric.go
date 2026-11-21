@@ -63,24 +63,53 @@ func RenameMetricInFormulas(ctx context.Context, q QueryExecer, metricID, oldNam
 		return n, nil
 	}
 	wrows, err := q.Query(ctx, `
-		SELECT id::text, steps FROM workflow.workflow_def
-		WHERE revision_id=$1::uuid AND strpos(lower(steps::text), lower($2)) > 0`, revisionID, oldName)
+		SELECT id::text, steps, COALESCE(context_schema, '[]'::jsonb) FROM workflow.workflow_def
+		WHERE revision_id=$1::uuid
+		  AND (strpos(lower(steps::text), lower($2)) > 0 OR strpos(lower(COALESCE(context_schema::text,'')), lower($2)) > 0)`, revisionID, oldName)
 	if err != nil {
 		return n, err
 	}
 	type wf struct {
-		id    string
-		steps []byte
+		id     string
+		steps  []byte
+		schema []byte
 	}
 	defs, err := pgx.CollectRows(wrows, func(r pgx.CollectableRow) (wf, error) {
 		var x wf
-		err := r.Scan(&x.id, &x.steps)
+		err := r.Scan(&x.id, &x.steps, &x.schema)
 		return x, err
 	})
 	if err != nil {
 		return n, err
 	}
 	for _, d := range defs {
+		// A context variable's default formula (2026-11-21).
+		var schema []map[string]any
+		sdec := json.NewDecoder(bytes.NewReader(d.schema))
+		sdec.UseNumber()
+		if sdec.Decode(&schema) == nil {
+			schemaChanged := false
+			for _, v := range schema {
+				text, ok := v["default"].(string)
+				if !ok {
+					continue
+				}
+				if next, c := formula.RenameIdent(text, oldName, newName); c {
+					v["default"] = next
+					schemaChanged = true
+					n++
+				}
+			}
+			if schemaChanged {
+				b, err := json.Marshal(schema)
+				if err != nil {
+					return n, err
+				}
+				if _, err := q.Exec(ctx, `UPDATE workflow.workflow_def SET context_schema=$2::jsonb WHERE id=$1::uuid`, d.id, string(b)); err != nil {
+					return n, err
+				}
+			}
+		}
 		var steps []map[string]any
 		dec := json.NewDecoder(bytes.NewReader(d.steps))
 		dec.UseNumber() // numbers in a step stay as written

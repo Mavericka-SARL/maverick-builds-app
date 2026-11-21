@@ -73,6 +73,20 @@
 <tr><td class="sig" id="fn-MOD">MOD(x, divisor)</td><td>Remainder with the sign of the divisor, as in Excel. Divisor 0 is <code>#DIV/0!</code>.</td><td><code>MOD(23, 5)</code> = 3, <code>MOD(-7, 3)</code> = 2, <code>MOD(7, -3)</code> = -2</td></tr>
 <tr><td class="sig" id="fn-POWER">POWER(x, y)</td><td>Same as <code>x^y</code>; a result that is not a real number is <code>#NUM!</code>.</td><td><code>POWER(1.05, 2)</code> = 1.1025, <code>POWER(-8, 1/3)</code> = #NUM!</td></tr>
 <tr><td class="sig" id="fn-SQRT">SQRT(x)</td><td>Square root; negative is <code>#NUM!</code>.</td><td><code>SQRT(144)</code> = 12</td></tr>
+<tr><td class="sig" id="fn-EXP">EXP(x)</td><td><i>e</i> to the power x; a result too large for a number is <code>#NUM!</code>.</td><td><code>EXP(1)</code> = 2.718281828…, <code>EXP(LN(5))</code> = 5</td></tr>
+<tr><td class="sig" id="fn-LN">LN(x)</td><td>Natural logarithm; x ≤ 0 is <code>#NUM!</code>.</td><td><code>LN(EXP(2))</code> = 2</td></tr>
+<tr><td class="sig" id="fn-LOG">LOG(x [, base])</td><td>Logarithm to <i>base</i>, 10 when left out; x or base ≤ 0 is <code>#NUM!</code>, base 1 is <code>#DIV/0!</code>.</td><td><code>LOG(1000)</code> = 3, <code>LOG(8, 2)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-LOG10">LOG10(x)</td><td>Base-10 logarithm.</td><td><code>LOG10(0.01)</code> = -2</td></tr>
+</table>
+<h3 id="normal">The normal distribution</h3>
+<p>Under the spreadsheet's names, so a workbook's safety-stock or risk formulas carry over unchanged; Excel's older names (NORMSINV, NORMINV, NORMSDIST, NORMDIST) are accepted too. A name with dots is a function only directly before its <code>(</code>; anywhere else <code>a.b</code> is a member property (chapter 11).</p>
+<table>
+<tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig" id="fn-NORM-S-INV">NORM.S.INV(p)</td><td>The z of the standard normal distribution with probability p below it, 0 &lt; p &lt; 1 (<code>#NUM!</code> otherwise): the safety factor of a service level. Exact to the last digit or so, also far in the tails.</td><td><code>NORM.S.INV(0.95)</code> = 1.644853627, <code>CEILING(NORM.S.INV(service_level) * demand_sd * SQRT(lead_weeks), 1)</code></td></tr>
+<tr><td class="sig" id="fn-NORM-INV">NORM.INV(p, mean, standard_dev)</td><td><i>mean</i> + <i>standard_dev</i> × NORM.S.INV(p); standard_dev ≤ 0 is <code>#NUM!</code>.</td><td><code>NORM.INV(0.9, 100, 15)</code> = 119.2232735</td></tr>
+<tr><td class="sig" id="fn-NORM-S-DIST">NORM.S.DIST(z, cumulative)</td><td>The probability below z (cumulative TRUE), or the density at z (FALSE).</td><td><code>NORM.S.DIST(1.96, TRUE)</code> = 0.9750021</td></tr>
+<tr><td class="sig" id="fn-NORM-DIST">NORM.DIST(x, mean, standard_dev, cumulative)</td><td>The same for a normal distribution of that mean and standard deviation.</td><td><code>NORM.DIST(115, 100, 15, TRUE)</code> = 0.8413447</td></tr>
+<tr><td class="sig" id="fn-NORMSINV">NORMSINV(p) · NORMINV · NORMSDIST(z) · NORMDIST</td><td>The older names: NORMSDIST takes no <i>cumulative</i> and is always cumulative.</td><td><code>NORMSDIST(0)</code> = 0.5</td></tr>
 </table>
 <div class="note ok"><b>Rounding rounds the number you see.</b> ROUND, ROUNDUP, ROUNDDOWN, CEILING and FLOOR work on the number's 15 significant digits with exact decimal arithmetic, as a spreadsheet does, not on its binary approximation: <code>ROUND(1.005, 2)</code> = 1.01, <code>ROUND(2.675, 2)</code> = 2.68, <code>ROUNDUP(0.1 + 0.2, 1)</code> = 0.3, <code>ROUNDDOWN(0.7 * 3, 1)</code> = 2.1, <code>CEILING(0.1 + 0.2, 0.1)</code> = 0.3. Digits that are not whole are truncated (<code>ROUND(x, 2.7)</code> rounds to 2 decimals).</div>
 
@@ -86,7 +100,10 @@
 <tr><td class="sig" id="fn-MAX">MAX(…)</td><td>The largest; none is 0.</td><td><code>MAX(0, revenue - cost - 500)</code> = 0 (floors at zero)</td></tr>
 <tr><td class="sig" id="fn-COUNT">COUNT(…)</td><td>How many arguments are numbers or TRUE/FALSE (not text, blank or errors).</td><td><code>COUNT(1, "a", TRUE, 1/0)</code> = 2</td></tr>
 <tr><td class="sig" id="fn-COUNTA">COUNTA(…)</td><td>How many are not blank; errors are not counted (Excel counts them).</td><td><code>COUNTA(1, "a", "", 1/0)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-STDEV-S">STDEV.S(…) · STDEV.P(…)</td><td>Standard deviation of the non-blank arguments: as a sample (n − 1; fewer than two values is <code>#DIV/0!</code>) or of the whole population (n; none is <code>#DIV/0!</code>). Older names STDEV and STDEVP.</td><td><code>STDEV.S(2, 4, 4, 4, 5, 5, 7, 9)</code> = 2.138, <code>STDEV.P(…)</code> of the same = 2</td></tr>
+<tr><td class="sig" id="fn-VAR-S">VAR.S(…) · VAR.P(…)</td><td>The variance, the square of the above. Older names VAR and VARP.</td><td><code>VAR.P(2, 4, 4, 4, 5, 5, 7, 9)</code> = 4</td></tr>
 </table>
+<p>For the spread of a metric <b>across members or periods</b> (weekly demand over the last 52 weeks), use STDEVIFS or VARIFS (chapter 13), not a list of arguments.</p>
 <p>A metric with no recorded value at the cell reads as 0, not blank, so <code>AVERAGE(q1_sales, q2_sales)</code> averages a missing quarter in as 0.</p>
 
 <h2 id="text">9. Text</h2>

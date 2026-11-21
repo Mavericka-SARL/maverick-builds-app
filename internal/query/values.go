@@ -150,3 +150,90 @@ func (r *ChartResolver) EvalAt(ctx context.Context, modelID, revisionID string, 
 	}
 	return formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: dc}, node), nil
 }
+
+// RevisionReader reads any metric at any point of one revision, the
+// revision loaded once: a workbook reconciliation reads tens of thousands of
+// cells across hundreds of metrics (internal/reconcile). A calculated metric
+// at a leaf of each of its dimensions is the value the calculation stored
+// there — what its grid shows; any other point is read with the rules of
+// MetricValuesAt.
+type RevisionReader struct {
+	r      *ChartResolver
+	cc     *chartCalc
+	dims   map[string]*rollup.Dimension
+	byName map[string]*fullMetricDef
+	leaves map[string]map[string]bool // dimension ID → its leaf codes
+}
+
+// NewRevisionReader loads a revision for reading.
+func (r *ChartResolver) NewRevisionReader(ctx context.Context, modelID, revisionID string) (*RevisionReader, error) {
+	cc, err := r.loadChartCalc(ctx, modelID, revisionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	dims, err := r.loadAllDimensions(ctx, modelID, revisionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]*fullMetricDef, len(cc.defs))
+	for _, d := range cc.defs {
+		byName[strings.ToLower(d.Name)] = d
+	}
+	return &RevisionReader{r: r, cc: cc, dims: dims, byName: byName, leaves: map[string]map[string]bool{}}, nil
+}
+
+// ValueAt is metric name at point (dimension ID → member code; a dimension
+// left out is read at its total); false when there is no such metric.
+func (rr *RevisionReader) ValueAt(ctx context.Context, name string, point map[string]string) (formula.Value, bool) {
+	d, ok := rr.byName[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		return formula.Value{}, false
+	}
+	if !d.IsInput && len(d.DimensionIDs) > 0 {
+		if own, leaf := rr.leafPoint(d, point); leaf {
+			v, has, err := rr.cc.fetchCalc(ctx, d.ID, own)
+			switch {
+			case err != nil:
+				return formula.ErrorVal(&formula.FormulaError{Code: formula.ErrValue.Code, Message: err.Error()}), true
+			case !has:
+				return formula.BlankVal(), true
+			}
+			if codec, isPicklist := rr.cc.meta.Picklist(d.Name); isPicklist {
+				if code, known := codec.Code(v); known {
+					return formula.StringVal(code), true
+				}
+				if v == 0 {
+					return formula.BlankVal(), true
+				}
+			}
+			return formula.NumberVal(v), true
+		}
+	}
+	return rr.r.valueAt(ctx, d, point, rr.dims, rr.cc), true
+}
+
+// leafPoint is point on d's own dimensions when it pins a leaf of each.
+func (rr *RevisionReader) leafPoint(d *fullMetricDef, point map[string]string) (map[string]string, bool) {
+	own := make(map[string]string, len(d.DimensionIDs))
+	for _, id := range d.DimensionIDs {
+		code, ok := point[id]
+		if !ok {
+			return nil, false
+		}
+		leaves := rr.leaves[id]
+		if leaves == nil {
+			leaves = map[string]bool{}
+			if dim := rr.dims[id]; dim != nil {
+				for _, c := range rollup.LeafCodes(dim) {
+					leaves[c] = true
+				}
+			}
+			rr.leaves[id] = leaves
+		}
+		if !leaves[code] {
+			return nil, false
+		}
+		own[id] = code
+	}
+	return own, true
+}

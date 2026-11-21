@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { IntegrationTemplatesPanel } from "./IntegrationTemplatesPanel";
 import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
+import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server, Scale } from "lucide-react";
 import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting, type RowCondition } from "../../api/client";
 import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, InlineAlert, useConfirm, Txt } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
 import { ExportSection } from "./ExportSection";
+import { ReconcileTab } from "./ReconcileTab";
 
-type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "clickhouse" | "mysql" | "form_records" | "export";
+type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "clickhouse" | "mysql" | "form_records" | "export" | "reconcile";
 
 // ── Form Records Integration Section ─────────────────────────────────────────
 
@@ -529,6 +530,13 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       description: "Download a grid's values as CSV, Excel or JSON in a fixed format.",
       available: true,
     },
+    {
+      id: "reconcile",
+      icon: <Scale size={24} />,
+      title: "Workbook reconciliation",
+      description: "Compare the workbook this revision rebuilds with the model, cell by cell and scenario by scenario.",
+      available: true,
+    },
   ];
 
   return (
@@ -565,6 +573,8 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       {activeSource === "form_records" && <FormRecordsSection />}
 
       {activeSource === "export" && <ExportSection revisionId={revisionId} />}
+
+      {activeSource === "reconcile" && <ReconcileTab revisionId={revisionId} />}
 
       <IntegrationTemplatesPanel revisionId={revisionId} />
     </div>

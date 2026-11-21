@@ -63,3 +63,42 @@ test("a grid's text cells show their whole text, typed or read-only", async ({ p
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ metric_id: "m-meaning", text: "Accepted; someone is working on it" });
 });
+
+// A bar chart's category labels wrap whole — no "…", a long word split with a
+// hyphen — inside the chart, and a value over the tallest bar is not cut at
+// the top (the help desk's workload chart read "Unass…" and half a "4").
+test("a bar chart's category and value labels are whole", async ({ page }) => {
+  const labels = ["Unassigned queue", "Aisha Khan", "Ben Carter", "Chloe Dubois", "Diego Alvarez", "Farah Haddad",
+    "Business applications", "Billing and invoices", "Hana Sato"];
+  const chartDash = { id: "d-chart", name: "Workload", tags: [], widgets: [{
+    id: "w-chart", widget_type: "chart", ref_id: "g-x", content: null, sort_order: 0, pos_x: 0, pos_y: 0, size_w: 600, size_h: 360,
+    widget_props: { chart: { chart_type: "bar", dimension_id: "agent", metric_ids: ["m-open"], show_values: true } } }] };
+  const payload = { chart_type: "bar", as_of: "2026-11-21T00:00:00Z",
+    categories: labels.map((label, i) => ({ key: `A${i}`, label })),
+    series: [{ metric_id: "m-open", label: "Open tickets", values: [3, 3, 0, 4, 1, 4, 3, 1, 1], format: "number", format_decimals: 0 }],
+    context_dims: [], context: {} };
+  const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  await mockApi(page);
+  await page.route("**/api/dashboards", (r) => r.fulfill(json([chartDash])));
+  await page.route("**/api/dashboards/d-chart", (r) => r.fulfill(json(chartDash)));
+  await page.route("**/api/dashboard-widgets/w-chart/chart-data", (r) => r.fulfill(json(payload)));
+  await loadAs(page, "dept_head");
+
+  const svg = page.locator(".recharts-wrapper svg.recharts-surface").first();
+  // Each category label is a group titled with its full name (recharts draws the labels apart from the axis).
+  const titles = svg.locator("g > title");
+  await expect(titles).toHaveCount(labels.length, { timeout: 15_000 });
+  await expect(svg.getByText("…")).toHaveCount(0);
+  const ticks = await titles.evaluateAll((ts) => ts.map((t) => ({
+    lines: [...t.parentElement!.querySelectorAll("tspan")].map((x) => x.textContent ?? ""),
+    bottom: t.parentElement!.getBoundingClientRect().bottom,
+  })));
+  const box = await svg.boundingBox();
+  for (const [i, t] of ticks.entries()) {
+    expect(t.lines.join("\n").replace(/-\n/g, "").replace(/\n/g, " ")).toBe(labels[i]);
+    expect(t.bottom).toBeLessThanOrEqual(box!.y + box!.height + 1);
+  }
+  const tops = await svg.locator(".recharts-label-list text").evaluateAll((ts) => ts.map((t) => t.getBoundingClientRect().top));
+  expect(tops.length).toBeGreaterThan(0);
+  for (const top of tops) expect(top).toBeGreaterThanOrEqual(box!.y);
+});

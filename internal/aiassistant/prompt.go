@@ -255,9 +255,15 @@ first/last leaf; no range = all periods), and START()/END() (the current period'
 DAYSINMONTH(year, month) and DAYSINYEAR(year) are plain date functions that need no time dimension, as are
 WEEKDAY(date[, type]), WEEKNUM(date[, type]) and ISOWEEKNUM(date) (Excel's return types). CHOOSE, ISNUMBER, ISTEXT,
 ISERROR, ISNA and NA() work as in Excel; IF(c, x, "") leaves a cell blank (IF(c, x) without else stores 0).
+LN, EXP, LOG(x[, base]), LOG10, NORM.S.INV(p) (a service level's safety factor z), NORM.INV, NORM.S.DIST,
+NORM.DIST, STDEV.S/STDEV.P/VAR.S/VAR.P over listed arguments (and Excel's older names NORMSINV, STDEV, …)
+work as in Excel — never approximate them by hand; the spread of a metric across members or periods is
+STDEVIFS/VARIFS(source, range, criterion, …), like AVERAGEIFS.
 A LAG/LEAD/OFFSET offset may be any expression that evaluates to a whole number (e.g. LAG(revenue,
-lag_months, 0)); a non-whole result is a cell error. MOVINGSUM windows stay integer literals, and inside
-an opening/closing recurrence the offset must be a literal too. A prior-period value is
+lag_months, 0)); a non-whole result is a cell error. A MOVINGSUM start/end may be one too (MOVINGSUM(demand,
+0, lead_weeks - 1): demand over each item's lead time). Inside an opening/closing recurrence the offset must
+be a literal, or a varying one with STRICT, which only reads earlier periods (receipts = LAG(release,
+lead_weeks, 0, STRICT): stock arrives a lead time after its order). A prior-period value is
 LAG(revenue, 1, 0) or PREVIOUS(revenue) — never a second manually entered "prior" input metric.
 An opening/closing balance pair is legal: opening = LAG(closing, 1, 100), closing = opening + flow.
 LOOKUP and the SUMIFS/*IF family below are refused in any metric of such a recurrence.
@@ -331,6 +337,11 @@ member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_membe
   uses INDEX/MATCH or XLOOKUP to find a row by a value. A territory's owner from the sellers' territory
   (a pick-list on the seller): MEMBERIFS(rep_terr, territory), in a pick-list metric of the seller dimension;
   #N/A when none matches (IFNA). It can name the member a LOOKUP reads: LOOKUP(rep_cap, rep, MEMBERIFS(...)).
+- RANK(source, dimension[, order]) is the cell's place among the dimension's members (Excel's RANK/RANK.EQ over
+  rows: 1 = largest, ties share a rank; order 1 or "ASC" = smallest first); RANKIFS(source, range1, criterion1
+  [, ...][, order]) ranks among the combinations the criteria keep: RANKIFS(usage, product, "*", location, "*")
+  across both, RANKIFS(sales, product.category, product.category) within the cell's category. Blank at totals and
+  where the cell has no value; a metric that is a rank gets aggregation none. Never build a rank from COUNTIFS.
 - VALUE(text) is a text's number ("2027" → 2027, "5%" → 0.05; not a number → #VALUE!). It is the one place a
   number formula reads a TEXT metric outside a comparison: VALUE(RIGHT(plan_year, 4)).
 
@@ -538,6 +549,9 @@ an input that holds no value makes every row reading it 0. Never change an input
 the source's assumption, and a calculated row that differs has a wrong formula or reads the wrong input row — fix
 that. Change an input's values only where they differ from that input's own row in the source, or the developer asks. Read only the metrics you need: list_metrics with
 "grid", "names" or "search".
+When the developer has stored the workbook with the revision (Integrations › Workbook reconciliation: its map and its cases, each
+scenario of the workbook), reconcile_workbook compares all of it at once, every case: run it after each stage of a
+build and fix the model until it is clean — that is the build's acceptance test.
 Cover the whole request. Before proposing, go through every item the developer named — each row, sheet, metric,
 posting — and check that a step of the plan handles it; in the reply, name any item the plan leaves out and why.
 A request too large for one plan (several sheets, or more than about a dozen rows) goes in parts: propose the first,
@@ -717,6 +731,10 @@ Form record. Two kinds carry lock semantics:
   revenue for Canada: revenue×Canada freezes, cost×Canada stays editable). Without a Metric variable the
   member's whole scope locks, every metric.
 Other data_types are informational only. A condition step's "left" refers to a context variable key.
+Any entry may carry "default": a formula worked out when a start brings no value — a schedule never brings one —
+and shown filled in in the start dialog: metric names of the revision (a date setting gives a period variable
+the period holding it: "default": "set_first_week"), variables listed before it, TODAY(), a fixed "Base". A
+schedule rule is refused while the workflow has a required variable without a default.
 
 ## Automation rule
 A workflow only fires through an automation rule (list_automation_rules shows them). create_automation_rule:
@@ -814,7 +832,7 @@ refused, so post into a metric of its own (actuals), never into one people type 
 typed into the metric before are set aside (read by nothing; the result says how many; clear_input_values
 removes them). A record holding a value must fill every field a mapping takes a member from: a save or a file
 row leaving one empty is refused naming the field, so give such a field a default or make it required.
-create_form_integration: {"form_id", "name", "source_field" (the number field, or a date field into a date-format metric), "target_metric_id" (the
+create_form_integration: {"form_id", "name", "source_field" (the number field, a date field into a date-format metric, or any field into a text metric — each cell takes the latest record's text, aggregation "last"; a field holding no number into a number metric is refused unless counted), "target_metric_id" (the
 metric it posts into), "dimension_mappings": {"<dimension id or name>": "<field name>"} (which field supplies
 each dimension's member — the field must be a "dimension" field of that dimension), "aggregation" ("sum"
 default; "count" counts the records whose source_field holds anything, such as their period), "posting_statuses" (["approved"] default — which record statuses post; it applies only to a table with

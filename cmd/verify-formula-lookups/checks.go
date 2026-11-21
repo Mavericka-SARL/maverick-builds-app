@@ -455,7 +455,6 @@ func checkBadFormulas(e *environment) {
 		{`LOOKUP(revenue, revenue, "DE")`, "DIMENSION_ARGUMENT_REQUIRED"},
 		{`revenue * region.nosuch`, "UNKNOWN_PROPERTY"},
 		{`LAG(revenue, 1.5, 0)`, "TIME_OFFSET_NOT_INTEGER"},
-		{`MOVINGSUM(revenue, 0 - 2, 0)`, "MOVING_WINDOW_NOT_LITERAL"},
 		{`WEEKVALUE(revenue)`, ""},
 	} {
 		raw, status := e.dev.try("POST", "/api/developer/metrics", map[string]any{

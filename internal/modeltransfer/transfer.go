@@ -16,7 +16,9 @@ package modeltransfer
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -436,6 +438,28 @@ type Package struct {
 	// application, so a published "approved and locked" budget arrives
 	// locked (2026-11-13: it arrived open).
 	ApprovedLocks []ApprovedLock `json:"approved_locks,omitempty"`
+	// CheckIgnores are the model check's findings the revision keeps, with
+	// the reason (internal/modelcheck); keyed by names, they hold as they
+	// are in the imported revision.
+	CheckIgnores []CheckIgnore `json:"check_ignores,omitempty"`
+	// Reconciliation is the revision's workbook reconciliation (the
+	// workbook, its map and cases), so an importer can run it again.
+	Reconciliation *Reconciliation `json:"reconciliation,omitempty"`
+}
+
+// Reconciliation is a revision's workbook, map and cases (internal/reconcile).
+type Reconciliation struct {
+	FileName       string          `json:"file_name"`
+	WorkbookBase64 string          `json:"workbook_base64,omitempty"`
+	Map            json.RawMessage `json:"map"`
+	Cases          json.RawMessage `json:"cases"`
+}
+
+// CheckIgnore is one ignored model-check finding.
+type CheckIgnore struct {
+	Key    string `json:"key"`
+	Rule   string `json:"rule"`
+	Reason string `json:"reason"`
 }
 
 // ApprovedLock is one approved workflow run that locked a scope of values.
@@ -991,6 +1015,38 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 			ar.FiresOnImport = &firesOnImport // the default (true) is left out
 		}
 		pkg.AutomationRules = append(pkg.AutomationRules, ar)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	{
+		var rec Reconciliation
+		var wb []byte
+		switch err := q.QueryRow(ctx, `SELECT file_name, workbook, map, cases FROM model.reconciliation WHERE revision_id = $1::uuid`, revisionID).
+			Scan(&rec.FileName, &wb, &rec.Map, &rec.Cases); {
+		case err == nil:
+			if len(wb) > 0 {
+				rec.WorkbookBase64 = base64.StdEncoding.EncodeToString(wb)
+			}
+			pkg.Reconciliation = &rec
+		case !errors.Is(err, pgx.ErrNoRows):
+			return nil, err
+		}
+	}
+
+	rows, err = q.Query(ctx, `SELECT key, rule, reason FROM model.check_ignore WHERE revision_id = $1::uuid ORDER BY key`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var ci CheckIgnore
+		if err := rows.Scan(&ci.Key, &ci.Rule, &ci.Reason); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		pkg.CheckIgnores = append(pkg.CheckIgnores, ci)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -2687,6 +2743,37 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
+		}
+	}
+
+	if rec := pkg.Reconciliation; rec != nil {
+		var wb []byte
+		if rec.WorkbookBase64 != "" {
+			if wb, err = base64.StdEncoding.DecodeString(rec.WorkbookBase64); err != nil {
+				return "", fmt.Errorf("the reconciliation's workbook: %w", err)
+			}
+		}
+		m, cases := []byte(rec.Map), []byte(rec.Cases)
+		if len(m) == 0 {
+			m = []byte(`{"rules": []}`)
+		}
+		if len(cases) == 0 {
+			cases = []byte(`[]`)
+		}
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO model.reconciliation (revision_id, file_name, workbook, uploaded_by, uploaded_at, map, cases)
+			VALUES ($1::uuid, $2, $3, NULLIF($4, '')::uuid, CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END, $5::jsonb, $6::jsonb)`,
+			revisionID, rec.FileName, wb, importerID, string(m), string(cases)); err != nil {
+			return "", fmt.Errorf("the reconciliation: %w", err)
+		}
+	}
+
+	for _, ci := range pkg.CheckIgnores {
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO model.check_ignore (revision_id, key, rule, reason, ignored_by)
+			VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid) ON CONFLICT DO NOTHING`,
+			revisionID, ci.Key, ci.Rule, ci.Reason, importerID); err != nil {
+			return "", fmt.Errorf("model-check ignore %q: %w", ci.Key, err)
 		}
 	}
 

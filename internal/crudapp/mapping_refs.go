@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -31,6 +32,9 @@ type MappingRefs struct {
 	DimensionMappings map[string]string
 	// RowFilter: the conditions a record meets to post (row_filter.go).
 	RowFilter []RowCondition
+	// Aggregation, when given, is checked with the source field
+	// (checkPostsSomething); "" leaves that check out.
+	Aggregation string
 }
 
 // MappingRefError is a reference a mapping may not hold; its message says
@@ -127,7 +131,57 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 	if err := checkRowFilter(ctx, db, fields, m.RowFilter); err != nil {
 		return err
 	}
+	if err := checkPostsSomething(ctx, db, fields, m); err != nil {
+		return err
+	}
 	return checkMappedDimensionsPlaced(ctx, db, m, dims)
+}
+
+// MappingAggregation is the aggregation a new mapping stores: into a text
+// metric the latest record's text ("last") when none or the default "sum"
+// was asked for — what it posts there whatever it says, but count.
+func MappingAggregation(ctx context.Context, db dbx.DB, targetMetricID, asked string) string {
+	if asked != "" && asked != "sum" {
+		return asked
+	}
+	var format string
+	if db.QueryRow(ctx, `SELECT format FROM model.metric_def WHERE id = $1::uuid`, targetMetricID).Scan(&format) == nil && format == "text" {
+		return "last"
+	}
+	if asked == "" {
+		return "sum"
+	}
+	return asked
+}
+
+// checkPostsSomething refuses a mapping that can never post: a field that
+// never holds a number (a text, a code, a status, a yes/no, a person, a pick
+// of words) mapped into a number, date or pick-list metric other than by
+// counting its records. Such a mapping saved without a word and posted
+// nothing (2026-11-21: an override's reason). Into a text metric any field
+// posts its text, the latest record's in each cell (migration 194).
+func checkPostsSomething(ctx context.Context, db dbx.DB, fields []FormField, m MappingRefs) error {
+	if m.Aggregation == "" || m.Aggregation == "count" || m.SourceField == "" {
+		return nil
+	}
+	i := slices.IndexFunc(fields, func(f FormField) bool { return f.Name == m.SourceField })
+	if i < 0 {
+		return nil
+	}
+	f := fields[i]
+	var format string
+	if err := db.QueryRow(ctx, `SELECT format FROM model.metric_def WHERE id = $1::uuid`, m.TargetMetricID).Scan(&format); err != nil {
+		return nil // CheckMappingRefs has said what is wrong with the metric
+	}
+	if format == "text" {
+		return nil
+	}
+	if !FieldHoldsNoNumber(f) {
+		return nil
+	}
+	return refErr("source_field %q is a %s field, which holds no number: it would post nothing into a %s metric. "+
+		"Map it into a text metric (each cell takes the latest record's text), count the records (aggregation count), "+
+		"or show the field in a Records widget", m.SourceField, f.Type, format)
 }
 
 // checkMappedDimensionsPlaced holds a mapping to its target metric's grid
@@ -396,4 +450,23 @@ func CheckMetricPostingsPlaced(ctx context.Context, db dbx.DB, metricID string) 
 		}
 	}
 	return nil
+}
+
+// FieldHoldsNoNumber reports a field that never holds a number — a text, a
+// code, a status, a yes/no, a person, a pick of words: mapped into a number,
+// date or pick-list metric other than by counting, it posts nothing. A
+// metric field holds a number. The model check flags such mappings saved
+// before the refusal (internal/modelcheck).
+func FieldHoldsNoNumber(f FormField) bool {
+	switch f.Type {
+	case "text", "autocode", "status", "boolean", "person":
+		return true
+	case "select":
+		for _, o := range f.Options {
+			if _, err := strconv.ParseFloat(strings.TrimSpace(o), 64); err != nil {
+				return true
+			}
+		}
+	}
+	return false
 }

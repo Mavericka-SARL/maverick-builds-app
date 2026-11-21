@@ -629,6 +629,12 @@ type Invoker interface {
 	//
 	// DELETE /api/notifications/{id}
 	DeleteNotification(ctx context.Context, params DeleteNotificationParams) (DeleteNotificationRes, error)
+	// DeleteReconciliation invokes deleteReconciliation operation.
+	//
+	// Remove a revision's reconciliation (workbook, map, cases, report).
+	//
+	// DELETE /api/developer/reconciliation
+	DeleteReconciliation(ctx context.Context, params DeleteReconciliationParams) (*DeleteReconciliationOK, error)
 	// DeleteRevision invokes deleteRevision operation.
 	//
 	// Delete a revision (rejected if it is the model's active revision).
@@ -953,6 +959,17 @@ type Invoker interface {
 	//
 	// GET /api/me
 	GetMe(ctx context.Context) (GetMeRes, error)
+	// GetModelCheck invokes getModelCheck operation.
+	//
+	// Rules: a schedule that cannot start its workflow (error); a record field mapped into a number
+	// metric that holds no number; a calculated pick-list or text whose total is worked out from blanks;
+	// a SUMIFS whose metric range spans a dimension whose members are never added up; a fixed member
+	// list on a dimension business users maintain; hidden members under figures read across them
+	// (warnings); an input open to every business role while others are restricted (info). A finding's
+	// key names it by what it is about, so ignores hold across revision copies and model exports.
+	//
+	// GET /api/developer/model-check
+	GetModelCheck(ctx context.Context, params GetModelCheckParams) (GetModelCheckRes, error)
 	// GetMyWorkflowHistory invokes getMyWorkflowHistory operation.
 	//
 	// The caller's runs — started, assigned a step, or notified of — in the selected application
@@ -970,6 +987,19 @@ type Invoker interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetReconciliation invokes getReconciliation operation.
+	//
+	// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
+	// the last run's status and report (first 500 differences).
+	//
+	// GET /api/developer/reconciliation
+	GetReconciliation(ctx context.Context, params GetReconciliationParams) (GetReconciliationRes, error)
+	// GetReconciliationDifferences invokes getReconciliationDifferences operation.
+	//
+	// The last run's differences as CSV (case, sheet, cell, metric, members, expected, actual).
+	//
+	// GET /api/developer/reconciliation/differences.csv
+	GetReconciliationDifferences(ctx context.Context, params GetReconciliationDifferencesParams) (GetReconciliationDifferencesRes, error)
 	// GetRecordChoices invokes getRecordChoices operation.
 	//
 	// For each person field, the people it may name — names only, never e-mail addresses: the holders
@@ -1075,6 +1105,16 @@ type Invoker interface {
 	//
 	// GET /api/developer/workflows/{id}/instances
 	GetWorkflowInstances(ctx context.Context, params GetWorkflowInstancesParams) ([]WorkflowInstanceSummary, error)
+	// GetWorkflowStartDefaults invokes getWorkflowStartDefaults operation.
+	//
+	// Each variable with a default formula (context_schema[].default) is worked out as a start with
+	// nothing given would: names in it are metrics of the workflow's revision, read at the members the
+	// variables before it pin, or earlier variables. Only someone who may start the workflow asks (403
+	// otherwise). A default that cannot be worked out is listed in errors with the reason, and its field
+	// stays empty.
+	//
+	// GET /api/workflow/definitions/{id}/start-defaults
+	GetWorkflowStartDefaults(ctx context.Context, params GetWorkflowStartDefaultsParams) (GetWorkflowStartDefaultsRes, error)
 	// GetWorkflowStatus invokes getWorkflowStatus operation.
 	//
 	// One published workflow of the caller's model, by name: its latest run (test runs left out) and
@@ -1111,6 +1151,12 @@ type Invoker interface {
 	//
 	// GET /healthz
 	Healthz(ctx context.Context) (*HealthzOK, error)
+	// IgnoreModelCheckFinding invokes ignoreModelCheckFinding operation.
+	//
+	// Keep a finding the revision has now, with the reason it is kept.
+	//
+	// PUT /api/developer/model-check/ignores
+	IgnoreModelCheckFinding(ctx context.Context, request *IgnoreModelCheckFindingReq) (IgnoreModelCheckFindingRes, error)
 	// ImportDimensionMembers invokes importDimensionMembers operation.
 	//
 	// A property:<name> column fills the property declared under that name whatever its case, or under
@@ -1596,6 +1642,13 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/promote-draft
 	PromoteAiDraft(ctx context.Context, request OptPromoteAiDraftReq, params PromoteAiDraftParams) (PromoteAiDraftRes, error)
+	// ProposeReconciliationMap invokes proposeReconciliationMap operation.
+	//
+	// A map drafted from the stored workbook and what the revision knows (metric labels, member codes
+	// and labels, period dates), not saved.
+	//
+	// POST /api/developer/reconciliation/propose
+	ProposeReconciliationMap(ctx context.Context, request OptProposeReconciliationMapReq) (ProposeReconciliationMapRes, error)
 	// PublishWorkflow invokes publishWorkflow operation.
 	//
 	// Publishing a workflow that is already published changes nothing and answers it as it is; an
@@ -1610,6 +1663,23 @@ type Invoker interface {
 	//
 	// PUT /api/developer/integrations/google-service-account
 	PutGoogleConnection(ctx context.Context, request *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
+	// PutReconciliationMap invokes putReconciliationMap operation.
+	//
+	// A rule is a rectangle of a sheet (rows or row_list, optionally repeated in blocks; columns or
+	// column_list), the metric of each cell (metric, metrics_by_column or metrics_by_row) and where each
+	// dimension's member comes from (members: code, case, column — with block_row in blocks — row,
+	// cell; split and part take one part of a key; total). A case names its members of the dimensions
+	// bound to the case and the input edits (cell and value, or range and copy_from) that make the
+	// workbook calculate it; a case without edits reads the saved values.
+	//
+	// PUT /api/developer/reconciliation/map
+	PutReconciliationMap(ctx context.Context, request *PutReconciliationMapReq) (PutReconciliationMapRes, error)
+	// PutReconciliationWorkbook invokes putReconciliationWorkbook operation.
+	//
+	// Store (or replace) the workbook a revision rebuilds, at most 25 MB.
+	//
+	// PUT /api/developer/reconciliation/workbook
+	PutReconciliationWorkbook(ctx context.Context, request *PutReconciliationWorkbookReq) (PutReconciliationWorkbookRes, error)
 	// QueryFormRecords invokes queryFormRecords operation.
 	//
 	// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
@@ -1804,6 +1874,13 @@ type Invoker interface {
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
+	// RunReconciliation invokes runReconciliation operation.
+	//
+	// Compare the workbook with the revision, case by case, in the background; GET
+	// /api/developer/reconciliation follows it.
+	//
+	// POST /api/developer/reconciliation/run
+	RunReconciliation(ctx context.Context, request OptRunReconciliationReq) (RunReconciliationRes, error)
 	// SaveAiSettings invokes saveAiSettings operation.
 	//
 	// Save the caller's LLM provider settings.
@@ -2097,6 +2174,12 @@ type Invoker interface {
 	//
 	// POST /api/automation/trigger/{id}
 	TriggerAutomationRule(ctx context.Context, request OptTriggerAutomationRequest, params TriggerAutomationRuleParams) (TriggerAutomationRuleRes, error)
+	// UnignoreModelCheckFinding invokes unignoreModelCheckFinding operation.
+	//
+	// Bring an ignored finding back.
+	//
+	// DELETE /api/developer/model-check/ignores
+	UnignoreModelCheckFinding(ctx context.Context, params UnignoreModelCheckFindingParams) (UnignoreModelCheckFindingRes, error)
 	// UpdateAdminApplication invokes updateAdminApplication operation.
 	//
 	// Rename an application or change its description.
@@ -12768,6 +12851,131 @@ func (c *Client) sendDeleteNotification(ctx context.Context, params DeleteNotifi
 	return result, nil
 }
 
+// DeleteReconciliation invokes deleteReconciliation operation.
+//
+// Remove a revision's reconciliation (workbook, map, cases, report).
+//
+// DELETE /api/developer/reconciliation
+func (c *Client) DeleteReconciliation(ctx context.Context, params DeleteReconciliationParams) (*DeleteReconciliationOK, error) {
+	res, err := c.sendDeleteReconciliation(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDeleteReconciliation(ctx context.Context, params DeleteReconciliationParams) (res *DeleteReconciliationOK, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteReconciliation"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteReconciliationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.RevisionID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DeleteReconciliationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteReconciliationResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DeleteRevision invokes deleteRevision operation.
 //
 // Delete a revision (rejected if it is the model's active revision).
@@ -17995,6 +18203,23 @@ func (c *Client) sendGetGrid(ctx context.Context, params GetGridParams) (res Get
 			return res, errors.Wrap(err, "encode query")
 		}
 	}
+	{
+		// Encode "fields" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "fields",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Fields.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
 	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
@@ -18871,6 +19096,139 @@ func (c *Client) sendGetMe(ctx context.Context) (res GetMeRes, err error) {
 	return result, nil
 }
 
+// GetModelCheck invokes getModelCheck operation.
+//
+// Rules: a schedule that cannot start its workflow (error); a record field mapped into a number
+// metric that holds no number; a calculated pick-list or text whose total is worked out from blanks;
+// a SUMIFS whose metric range spans a dimension whose members are never added up; a fixed member
+// list on a dimension business users maintain; hidden members under figures read across them
+// (warnings); an input open to every business role while others are restricted (info). A finding's
+// key names it by what it is about, so ignores hold across revision copies and model exports.
+//
+// GET /api/developer/model-check
+func (c *Client) GetModelCheck(ctx context.Context, params GetModelCheckParams) (GetModelCheckRes, error) {
+	res, err := c.sendGetModelCheck(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetModelCheck(ctx context.Context, params GetModelCheckParams) (res GetModelCheckRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getModelCheck"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/model-check"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetModelCheckOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/model-check"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetModelCheckOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetModelCheckResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetMyWorkflowHistory invokes getMyWorkflowHistory operation.
 //
 // The caller's runs — started, assigned a step, or notified of — in the selected application
@@ -19121,6 +19479,263 @@ func (c *Client) sendGetNotificationSettings(ctx context.Context) (res GetNotifi
 
 	stage = "DecodeResponse"
 	result, err := decodeGetNotificationSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetReconciliation invokes getReconciliation operation.
+//
+// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
+// the last run's status and report (first 500 differences).
+//
+// GET /api/developer/reconciliation
+func (c *Client) GetReconciliation(ctx context.Context, params GetReconciliationParams) (GetReconciliationRes, error) {
+	res, err := c.sendGetReconciliation(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetReconciliation(ctx context.Context, params GetReconciliationParams) (res GetReconciliationRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getReconciliation"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetReconciliationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetReconciliationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetReconciliationResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetReconciliationDifferences invokes getReconciliationDifferences operation.
+//
+// The last run's differences as CSV (case, sheet, cell, metric, members, expected, actual).
+//
+// GET /api/developer/reconciliation/differences.csv
+func (c *Client) GetReconciliationDifferences(ctx context.Context, params GetReconciliationDifferencesParams) (GetReconciliationDifferencesRes, error) {
+	res, err := c.sendGetReconciliationDifferences(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetReconciliationDifferences(ctx context.Context, params GetReconciliationDifferencesParams) (res GetReconciliationDifferencesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getReconciliationDifferences"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation/differences.csv"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetReconciliationDifferencesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation/differences.csv"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetReconciliationDifferencesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetReconciliationDifferencesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -20886,6 +21501,136 @@ func (c *Client) sendGetWorkflowInstances(ctx context.Context, params GetWorkflo
 	return result, nil
 }
 
+// GetWorkflowStartDefaults invokes getWorkflowStartDefaults operation.
+//
+// Each variable with a default formula (context_schema[].default) is worked out as a start with
+// nothing given would: names in it are metrics of the workflow's revision, read at the members the
+// variables before it pin, or earlier variables. Only someone who may start the workflow asks (403
+// otherwise). A default that cannot be worked out is listed in errors with the reason, and its field
+// stays empty.
+//
+// GET /api/workflow/definitions/{id}/start-defaults
+func (c *Client) GetWorkflowStartDefaults(ctx context.Context, params GetWorkflowStartDefaultsParams) (GetWorkflowStartDefaultsRes, error) {
+	res, err := c.sendGetWorkflowStartDefaults(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetWorkflowStartDefaults(ctx context.Context, params GetWorkflowStartDefaultsParams) (res GetWorkflowStartDefaultsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getWorkflowStartDefaults"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/workflow/definitions/{id}/start-defaults"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetWorkflowStartDefaultsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/workflow/definitions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/start-defaults"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetWorkflowStartDefaultsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetWorkflowStartDefaultsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetWorkflowStatus invokes getWorkflowStatus operation.
 //
 // One published workflow of the caller's model, by name: its latest run (test runs left out) and
@@ -21500,6 +22245,116 @@ func (c *Client) sendHealthz(ctx context.Context) (res *HealthzOK, err error) {
 
 	stage = "DecodeResponse"
 	result, err := decodeHealthzResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// IgnoreModelCheckFinding invokes ignoreModelCheckFinding operation.
+//
+// Keep a finding the revision has now, with the reason it is kept.
+//
+// PUT /api/developer/model-check/ignores
+func (c *Client) IgnoreModelCheckFinding(ctx context.Context, request *IgnoreModelCheckFindingReq) (IgnoreModelCheckFindingRes, error) {
+	res, err := c.sendIgnoreModelCheckFinding(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendIgnoreModelCheckFinding(ctx context.Context, request *IgnoreModelCheckFindingReq) (res IgnoreModelCheckFindingRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("ignoreModelCheckFinding"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/developer/model-check/ignores"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, IgnoreModelCheckFindingOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/model-check/ignores"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeIgnoreModelCheckFindingRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, IgnoreModelCheckFindingOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeIgnoreModelCheckFindingResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -26698,6 +27553,23 @@ func (c *Client) sendListImportJobs(ctx context.Context, params ListImportJobsPa
 			return res, errors.Wrap(err, "encode query")
 		}
 	}
+	{
+		// Encode "limit" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "limit",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Limit.Get(); ok {
+				return e.EncodeValue(conv.IntToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
 	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
@@ -29893,6 +30765,117 @@ func (c *Client) sendPromoteAiDraft(ctx context.Context, request OptPromoteAiDra
 	return result, nil
 }
 
+// ProposeReconciliationMap invokes proposeReconciliationMap operation.
+//
+// A map drafted from the stored workbook and what the revision knows (metric labels, member codes
+// and labels, period dates), not saved.
+//
+// POST /api/developer/reconciliation/propose
+func (c *Client) ProposeReconciliationMap(ctx context.Context, request OptProposeReconciliationMapReq) (ProposeReconciliationMapRes, error) {
+	res, err := c.sendProposeReconciliationMap(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendProposeReconciliationMap(ctx context.Context, request OptProposeReconciliationMapReq) (res ProposeReconciliationMapRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("proposeReconciliationMap"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation/propose"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ProposeReconciliationMapOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation/propose"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeProposeReconciliationMapRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ProposeReconciliationMapOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeProposeReconciliationMapResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // PublishWorkflow invokes publishWorkflow operation.
 //
 // Publishing a workflow that is already published changes nothing and answers it as it is; an
@@ -30124,6 +31107,231 @@ func (c *Client) sendPutGoogleConnection(ctx context.Context, request *PutGoogle
 
 	stage = "DecodeResponse"
 	result, err := decodePutGoogleConnectionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// PutReconciliationMap invokes putReconciliationMap operation.
+//
+// A rule is a rectangle of a sheet (rows or row_list, optionally repeated in blocks; columns or
+// column_list), the metric of each cell (metric, metrics_by_column or metrics_by_row) and where each
+// dimension's member comes from (members: code, case, column — with block_row in blocks — row,
+// cell; split and part take one part of a key; total). A case names its members of the dimensions
+// bound to the case and the input edits (cell and value, or range and copy_from) that make the
+// workbook calculate it; a case without edits reads the saved values.
+//
+// PUT /api/developer/reconciliation/map
+func (c *Client) PutReconciliationMap(ctx context.Context, request *PutReconciliationMapReq) (PutReconciliationMapRes, error) {
+	res, err := c.sendPutReconciliationMap(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendPutReconciliationMap(ctx context.Context, request *PutReconciliationMapReq) (res PutReconciliationMapRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("putReconciliationMap"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation/map"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, PutReconciliationMapOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation/map"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodePutReconciliationMapRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, PutReconciliationMapOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodePutReconciliationMapResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// PutReconciliationWorkbook invokes putReconciliationWorkbook operation.
+//
+// Store (or replace) the workbook a revision rebuilds, at most 25 MB.
+//
+// PUT /api/developer/reconciliation/workbook
+func (c *Client) PutReconciliationWorkbook(ctx context.Context, request *PutReconciliationWorkbookReq) (PutReconciliationWorkbookRes, error) {
+	res, err := c.sendPutReconciliationWorkbook(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendPutReconciliationWorkbook(ctx context.Context, request *PutReconciliationWorkbookReq) (res PutReconciliationWorkbookRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("putReconciliationWorkbook"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation/workbook"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, PutReconciliationWorkbookOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation/workbook"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodePutReconciliationWorkbookRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, PutReconciliationWorkbookOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodePutReconciliationWorkbookResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -33330,6 +34538,117 @@ func (c *Client) sendRunIntegration(ctx context.Context, request *IntegrationRun
 
 	stage = "DecodeResponse"
 	result, err := decodeRunIntegrationResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// RunReconciliation invokes runReconciliation operation.
+//
+// Compare the workbook with the revision, case by case, in the background; GET
+// /api/developer/reconciliation follows it.
+//
+// POST /api/developer/reconciliation/run
+func (c *Client) RunReconciliation(ctx context.Context, request OptRunReconciliationReq) (RunReconciliationRes, error) {
+	res, err := c.sendRunReconciliation(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendRunReconciliation(ctx context.Context, request OptRunReconciliationReq) (res RunReconciliationRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("runReconciliation"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/reconciliation/run"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RunReconciliationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/reconciliation/run"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeRunReconciliationRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RunReconciliationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRunReconciliationResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -38292,6 +39611,145 @@ func (c *Client) sendTriggerAutomationRule(ctx context.Context, request OptTrigg
 
 	stage = "DecodeResponse"
 	result, err := decodeTriggerAutomationRuleResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// UnignoreModelCheckFinding invokes unignoreModelCheckFinding operation.
+//
+// Bring an ignored finding back.
+//
+// DELETE /api/developer/model-check/ignores
+func (c *Client) UnignoreModelCheckFinding(ctx context.Context, params UnignoreModelCheckFindingParams) (UnignoreModelCheckFindingRes, error) {
+	res, err := c.sendUnignoreModelCheckFinding(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendUnignoreModelCheckFinding(ctx context.Context, params UnignoreModelCheckFindingParams) (res UnignoreModelCheckFindingRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("unignoreModelCheckFinding"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/developer/model-check/ignores"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, UnignoreModelCheckFindingOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/model-check/ignores"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.RevisionID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "key" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "key",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.StringToString(params.Key))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, UnignoreModelCheckFindingOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeUnignoreModelCheckFindingResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

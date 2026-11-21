@@ -396,6 +396,8 @@ type dimReads struct {
 	// memo is the conditional-aggregation memo for this metric's pass (nil
 	// disables it).
 	memo map[string]formula.Value
+	// ranks is the RANK/RANKIFS ranked sets of the pass, kept with memo.
+	ranks map[string]*formula.RankedSet
 	// pinned holds the pass's reads that pin every dimension of their
 	// source (nil with memo: values may still appear during the pass).
 	pinned map[string]pinnedRead
@@ -434,7 +436,7 @@ func newDimReads(ctx context.Context, meta *DimMetadata, def *MetricDef, allDefs
 		}
 	}
 	if memo {
-		r.memo = map[string]formula.Value{}
+		r.memo, r.ranks = map[string]formula.Value{}, map[string]*formula.RankedSet{}
 		r.pinned = map[string]pinnedRead{}
 	}
 	return r
@@ -485,7 +487,7 @@ func (r *dimReads) context(combo map[string]string, useMemo bool) *formula.DimEv
 		return rollup.NoValueByRule(r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule), rollup.TimeSummaryRule(def.TimeSummary), norm)
 	}
 	if useMemo {
-		d.Memo = r.memo
+		d.Memo, d.Ranks = r.memo, r.ranks
 	}
 	return d
 }
@@ -664,10 +666,14 @@ func plainReferences(node formula.Node, out map[string]bool) {
 // dimension rather than being evaluated as a value.
 func nonValueArg(fn string, i int) bool {
 	switch strings.ToUpper(fn) {
-	case "LOOKUP", "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
+	case "LOOKUP", "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS", "STDEVIFS", "VARIFS":
 		return i == 0 || i%2 == 1 // source, then dimension/range at odd positions
 	case "COUNTIFS", "MEMBERIFS":
 		return i%2 == 0 // ranges
+	case "RANK":
+		return i <= 1 // source, dimension; then the order
+	case "RANKIFS":
+		return i == 0 || i%2 == 1 // source, ranges; a trailing order is even
 	case "COUNTIF":
 		return i == 0
 	case "SUMIF", "AVERAGEIF":

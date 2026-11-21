@@ -9,6 +9,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
 // Text cells and cleared cells (migration 111). A text metric's cell holds
@@ -97,10 +98,15 @@ func (h *handler) loadTextCells(ctx context.Context, modelID, revisionID string,
 	}
 	args := append([]any{modelID, revisionID}, scopeArgs...)
 	args = append(args, textMetrics)
+	// A metric a table of records posts into shows its records' texts only
+	// (posted rows, migration 194), as a fed number shows its records
+	// (writeguard.FedMetricsCTE); any other its typed notes.
 	rows, err := h.db.Query(ctx, fmt.Sprintf(`
+		WITH `+writeguard.FedMetricsCTE+`
 		SELECT DISTINCT ON (metric_id, dim_members) metric_id::text, dim_members::text, COALESCE(text_value, '')
-		FROM runtime.fact_input
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL
+		FROM runtime.fact_input fi
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid
+		  AND (source_ref IS NULL) = NOT EXISTS (SELECT 1 FROM fed f WHERE f.metric_id = fi.metric_id)
 		  AND metric_id::text = ANY($%d::text[])%s
 		ORDER BY metric_id, dim_members, entered_at DESC, id DESC`, len(args), scopeSQL), args...)
 	if err != nil {

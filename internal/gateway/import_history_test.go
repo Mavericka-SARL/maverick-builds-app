@@ -16,6 +16,7 @@ import (
 // imported into what, from which file, by whom or how long it took.
 
 type historyLine struct {
+	ID           string `json:"id"`
 	Status       int    `json:"status"`
 	ValidRows    int    `json:"valid_rows"`
 	ErrorRows    int    `json:"error_rows"`
@@ -90,6 +91,14 @@ func TestRecentImportsDescribesEveryFileImportOfTheWorkingModel(t *testing.T) {
 	lines := history(f.devSub, "?revision_id="+f.revID)
 	if len(lines) != len(imports) {
 		t.Fatalf("the working model's history has %d line(s), want %d: %+v", len(lines), len(imports), lines)
+	}
+	// ?limit= lists fewer (or, up to 200, more than the default 20); a
+	// limit that is no number keeps the default.
+	if two := history(f.devSub, "?limit=2&revision_id="+f.revID); len(two) != 2 || two[0].ID != lines[0].ID {
+		t.Errorf("?limit=2 listed %d line(s), want the newest 2", len(two))
+	}
+	if all := history(f.devSub, "?limit=x&revision_id="+f.revID); len(all) != len(imports) {
+		t.Errorf("?limit=x listed %d line(s), want the default list of %d", len(all), len(imports))
 	}
 	// Newest first.
 	refusedTable, table, foreignGrid, grid, dimension := lines[0], lines[1], lines[2], lines[3], lines[4]

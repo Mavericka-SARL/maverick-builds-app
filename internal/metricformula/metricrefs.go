@@ -193,6 +193,29 @@ func revisionReadersOfMetric(ctx context.Context, q Querier, revisionID, name st
 			readers = append(readers, "workflow "+c.workflow+" (condition step "+c.step+")")
 		}
 	}
+	// A context variable's default reads metrics as a condition does.
+	rows, err = q.Query(ctx, `
+		SELECT wd.name, COALESCE(v->>'key', ''), v->>'default'
+		FROM workflow.workflow_def wd
+		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(wd.context_schema) = 'array' THEN wd.context_schema ELSE '[]'::jsonb END) v
+		WHERE wd.revision_id = $1::uuid AND jsonb_typeof(v) = 'object' AND COALESCE(v->>'default', '') <> ''
+		ORDER BY wd.name`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defaults, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (cond, error) {
+		var x cond
+		err := r.Scan(&x.workflow, &x.step, &x.text)
+		return x, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range defaults {
+		if FormulaReadsMetric(strings.TrimPrefix(strings.TrimSpace(c.text), "="), name) {
+			readers = append(readers, "workflow "+c.workflow+" (the default of "+c.step+")")
+		}
+	}
 	rows, err = q.Query(ctx, `
 		SELECT name, COALESCE(config->'metrics', '[]'::jsonb) FROM model.integration_def
 		WHERE revision_id = $1::uuid AND type = 'file_export' ORDER BY name`, revisionID)

@@ -424,6 +424,20 @@
 <tr><td class="sig" id="fn-MOD">MOD(x, divisor)</td><td>Remainder with the sign of the divisor, as in Excel. Divisor 0 is <code>#DIV/0!</code>.</td><td><code>MOD(23, 5)</code> = 3, <code>MOD(-7, 3)</code> = 2, <code>MOD(7, -3)</code> = -2</td></tr>
 <tr><td class="sig" id="fn-POWER">POWER(x, y)</td><td>Same as <code>x^y</code>; a result that is not a real number is <code>#NUM!</code>.</td><td><code>POWER(1.05, 2)</code> = 1.1025, <code>POWER(-8, 1/3)</code> = #NUM!</td></tr>
 <tr><td class="sig" id="fn-SQRT">SQRT(x)</td><td>Square root; negative is <code>#NUM!</code>.</td><td><code>SQRT(144)</code> = 12</td></tr>
+<tr><td class="sig" id="fn-EXP">EXP(x)</td><td><i>e</i> to the power x; a result too large for a number is <code>#NUM!</code>.</td><td><code>EXP(1)</code> = 2.718281828…, <code>EXP(LN(5))</code> = 5</td></tr>
+<tr><td class="sig" id="fn-LN">LN(x)</td><td>Natural logarithm; x ≤ 0 is <code>#NUM!</code>.</td><td><code>LN(EXP(2))</code> = 2</td></tr>
+<tr><td class="sig" id="fn-LOG">LOG(x [, base])</td><td>Logarithm to <i>base</i>, 10 when left out; x or base ≤ 0 is <code>#NUM!</code>, base 1 is <code>#DIV/0!</code>.</td><td><code>LOG(1000)</code> = 3, <code>LOG(8, 2)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-LOG10">LOG10(x)</td><td>Base-10 logarithm.</td><td><code>LOG10(0.01)</code> = -2</td></tr>
+</table>
+<h3 id="normal">The normal distribution</h3>
+<p>Under the spreadsheet's names, so a workbook's safety-stock or risk formulas carry over unchanged; Excel's older names (NORMSINV, NORMINV, NORMSDIST, NORMDIST) are accepted too. A name with dots is a function only directly before its <code>(</code>; anywhere else <code>a.b</code> is a member property (chapter 11).</p>
+<table>
+<tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig" id="fn-NORM-S-INV">NORM.S.INV(p)</td><td>The z of the standard normal distribution with probability p below it, 0 &lt; p &lt; 1 (<code>#NUM!</code> otherwise): the safety factor of a service level. Exact to the last digit or so, also far in the tails.</td><td><code>NORM.S.INV(0.95)</code> = 1.644853627, <code>CEILING(NORM.S.INV(service_level) * demand_sd * SQRT(lead_weeks), 1)</code></td></tr>
+<tr><td class="sig" id="fn-NORM-INV">NORM.INV(p, mean, standard_dev)</td><td><i>mean</i> + <i>standard_dev</i> × NORM.S.INV(p); standard_dev ≤ 0 is <code>#NUM!</code>.</td><td><code>NORM.INV(0.9, 100, 15)</code> = 119.2232735</td></tr>
+<tr><td class="sig" id="fn-NORM-S-DIST">NORM.S.DIST(z, cumulative)</td><td>The probability below z (cumulative TRUE), or the density at z (FALSE).</td><td><code>NORM.S.DIST(1.96, TRUE)</code> = 0.9750021</td></tr>
+<tr><td class="sig" id="fn-NORM-DIST">NORM.DIST(x, mean, standard_dev, cumulative)</td><td>The same for a normal distribution of that mean and standard deviation.</td><td><code>NORM.DIST(115, 100, 15, TRUE)</code> = 0.8413447</td></tr>
+<tr><td class="sig" id="fn-NORMSINV">NORMSINV(p) · NORMINV · NORMSDIST(z) · NORMDIST</td><td>The older names: NORMSDIST takes no <i>cumulative</i> and is always cumulative.</td><td><code>NORMSDIST(0)</code> = 0.5</td></tr>
 </table>
 <div class="note ok"><b>Rounding rounds the number you see.</b> ROUND, ROUNDUP, ROUNDDOWN, CEILING and FLOOR work on the number's 15 significant digits with exact decimal arithmetic, as a spreadsheet does, not on its binary approximation: <code>ROUND(1.005, 2)</code> = 1.01, <code>ROUND(2.675, 2)</code> = 2.68, <code>ROUNDUP(0.1 + 0.2, 1)</code> = 0.3, <code>ROUNDDOWN(0.7 * 3, 1)</code> = 2.1, <code>CEILING(0.1 + 0.2, 0.1)</code> = 0.3. Digits that are not whole are truncated (<code>ROUND(x, 2.7)</code> rounds to 2 decimals).</div>
 
@@ -437,7 +451,10 @@
 <tr><td class="sig" id="fn-MAX">MAX(…)</td><td>The largest; none is 0.</td><td><code>MAX(0, revenue - cost - 500)</code> = 0 (floors at zero)</td></tr>
 <tr><td class="sig" id="fn-COUNT">COUNT(…)</td><td>How many arguments are numbers or TRUE/FALSE (not text, blank or errors).</td><td><code>COUNT(1, "a", TRUE, 1/0)</code> = 2</td></tr>
 <tr><td class="sig" id="fn-COUNTA">COUNTA(…)</td><td>How many are not blank; errors are not counted (Excel counts them).</td><td><code>COUNTA(1, "a", "", 1/0)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-STDEV-S">STDEV.S(…) · STDEV.P(…)</td><td>Standard deviation of the non-blank arguments: as a sample (n − 1; fewer than two values is <code>#DIV/0!</code>) or of the whole population (n; none is <code>#DIV/0!</code>). Older names STDEV and STDEVP.</td><td><code>STDEV.S(2, 4, 4, 4, 5, 5, 7, 9)</code> = 2.138, <code>STDEV.P(…)</code> of the same = 2</td></tr>
+<tr><td class="sig" id="fn-VAR-S">VAR.S(…) · VAR.P(…)</td><td>The variance, the square of the above. Older names VAR and VARP.</td><td><code>VAR.P(2, 4, 4, 4, 5, 5, 7, 9)</code> = 4</td></tr>
 </table>
+<p>For the spread of a metric <b>across members or periods</b> (weekly demand over the last 52 weeks), use STDEVIFS or VARIFS (chapter 13), not a list of arguments.</p>
 <p>A metric with no recorded value at the cell reads as 0, not blank, so <code>AVERAGE(q1_sales, q2_sales)</code> averages a missing quarter in as 0.</p>
 
 <h2 id="text">9. Text</h2>
@@ -540,6 +557,7 @@
 <tr><td class="sig" id="fn-SUMIFS">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
 <tr><td class="sig" id="fn-AVERAGEIFS">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
 <tr><td class="sig" id="fn-MINIFS">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
+<tr><td class="sig" id="fn-STDEVIFS">STDEVIFS / VARIFS(source, range1, criterion1 [, …])</td><td>Sample standard deviation / variance (n − 1) of the recorded values: <code>STDEVIFS(demand, in_history, 1)</code> is the spread of weekly demand over the weeks a metric <code>in_history</code> flags with 1 (the safety-stock σ)</td><td><code>#DIV/0!</code> (also with one value)</td></tr>
 <tr><td class="sig" id="fn-COUNTIFS">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
 <tr><td class="sig" id="fn-SUMIF">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
 <tr><td class="sig" id="fn-AVERAGEIF">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
@@ -551,6 +569,19 @@
   <li>They run over the <b>leaf</b> members of each range dimension (for a time dimension, its dated periods). Criteria on several dimensions combine every matching member of one with every matching member of the other. Dimensions without a criterion stay at the cell's own members: in the March row, <code>SUMIFS(sales, region.segment, "Enterprise")</code> adds up March.</li>
   <li>AVERAGEIFS, MINIFS and MAXIFS skip members with nothing recorded; SUMIFS counts them as 0. <b>COUNTIFS counts members, not data cells</b> (Excel counts cells).</li>
   <li>The source must be a metric; each range dimension must be the source's or related to it (COUNTIFS, having no source, may use any dimension of the model). Criteria matching more than 1,000,000 combinations give <code>#NUM!</code>. Not allowed in an opening/closing recurrence.</li>
+</ul>
+
+<h3 id="fn-RANK">Ranking: RANK and RANKIFS</h3>
+<table>
+<tr><th style="width:42%">Form</th><th>Result</th></tr>
+<tr><td class="sig">RANK(source, dimension [, order])</td><td>The place of the cell's value of <i>source</i> among the values of every leaf member of <i>dimension</i>, the cell's other members kept: <code>RANK(sales, product)</code> in the Berlin row ranks Berlin's products.</td></tr>
+<tr><td class="sig">RANKIFS(source, range1, criterion1 [, …] [, order])</td><td>The place among the member combinations the criteria keep, as in SUMIFS: several dimensions, <code>RANKIFS(usage, product, "*", location, "*")</code> (every product at every location), or a group, <code>RANKIFS(sales, product.category, product.category)</code> (within the cell's category).</td></tr>
+</table>
+<ul>
+  <li>As Excel's RANK.EQ: the largest value is 1, <b>equal values share a rank</b> and the next is skipped (30, 20, 20, 5 rank 1, 2, 2, 4). <i>order</i> is <code>0</code> or <code>"DESC"</code> (largest first, the default) or <code>1</code> or <code>"ASC"</code> (smallest first). In RANKIFS an even number of arguments ends with the order.</li>
+  <li>Members with nothing recorded are not ranked. The cell is <b>blank</b> where it has no rank: its own value not recorded, a total of a ranked dimension, or a member the criteria leave out.</li>
+  <li>A new metric whose formula is a RANK or RANKIFS gives no total and no time summary (aggregation and time summary <b>None</b>): ranks never add up. A ranked dimension must be one of the metric's grid dimensions (<code>DIMENSION_NOT_ON_METRIC</code>) and the source's (<code>DIMENSION_NOT_ON_SOURCE</code>). Not allowed in an opening/closing recurrence.</li>
+  <li>The top 3 of each location: <code>IF(RANK(sales, product) &lt;= 3, sales, "")</code>. Excel's <code>RANK(B2, B$2:B$40)</code> over rows is <code>RANK(metric, dimension)</code>; a tie-break by code adds <code>COUNTIFS(metric, metric, product, "&lt;" &amp; product)</code>.</li>
 </ul>
 
 <h3>Criteria</h3>
@@ -613,16 +644,17 @@
 <tr><td class="sig" id="fn-LEAD">LEAD(x, n, substitute [, mode])</td><td>x <i>n</i> periods ahead</td><td><i>substitute</i></td></tr>
 <tr><td class="sig" id="fn-OFFSET">OFFSET(x, n, substitute)</td><td>x at <i>n</i> periods (negative: back); LEAD without a mode</td><td><i>substitute</i></td></tr>
 </table>
-<p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0.</p>
+<p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0. A <code>STRICT</code> LAG therefore only ever reads earlier periods, so it may close a recurrence even when <i>n</i> varies (below).</p>
 <p><b>Offsets.</b> <i>n</i> may be a whole-number literal or any expression that gives a whole number at the current period: a metric (<code>LAG(sales, lag_months, 0)</code>), a property (<code>LAG(sales, ROUND(region.factor, 0), 0)</code>), an <code>IF</code>. A literal like <code>1.5</code> is refused at save; an expression that gives a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>.</p>
 
 <h3>Windows and running totals</h3>
 <div class="fn"><h4><span class="sig" id="fn-MOVINGSUM">MOVINGSUM(x [, start [, end [, SUM | AVERAGE | MIN | MAX]]])</span></h4>
-<p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> must be whole-number <b>literals</b> (<code>MOVING_WINDOW_NOT_LITERAL</code> otherwise).</p>
+<p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> are whole numbers: literals, or expressions evaluated at the current period like a LAG offset (<code>MOVINGSUM(demand, 0, lead_weeks - 1)</code> is the demand over an item's lead time); a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>. A window given by expressions may reach any period, so such a MOVINGSUM cannot be part of a recurrence.</p>
 <table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>MOVINGSUM(sales, -2, 0)</td><td>trailing three periods</td><td></td></tr>
 <tr><td>MOVINGSUM(sales, -2, 0, AVERAGE)</td><td>trailing three-period average</td><td></td></tr>
-<tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr></table></div>
+<tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr>
+<tr><td>MOVINGSUM(demand, 0, lead_weeks - 1)</td><td>demand over the lead time, as long as each item's</td><td></td></tr></table></div>
 <div class="fn"><h4><span class="sig" id="fn-CUMULATE">CUMULATE(x [, reset])</span> · <span class="sig" id="fn-DECUMULATE">DECUMULATE(x)</span></h4>
 <p>CUMULATE is the running total from the first period through the current one. With <i>reset</i>, a period where it is TRUE starts a new run (its own value included): <code>CUMULATE(sales, MOD(MONTH(START()), 3) = 1)</code> restarts every quarter. DECUMULATE is x minus x of the previous period (in the first period, x itself).</p></div>
 
@@ -675,8 +707,8 @@
 closing = opening + flow           time summary: last</pre>
 <p>Each period's opening is the previous period's closing (100 before the first), so the engine can compute period by period. Create one of the two with a placeholder formula (for example <code>=flow * 0</code>), create the other, then edit the first to its real formula. The rules:</p>
 <ul>
-  <li>Within the cycle, a metric may read another metric of the cycle only through a <b>fixed</b> offset (<code>PREVIOUS</code>, <code>LAG(x, 1, …)</code>, <code>LEAD(x, 1, …)</code>), all in one direction. Same-period reads must not themselves form a loop.</li>
-  <li>No dynamic offset, CUMULATE, TIMESUM or *VALUE function on a metric of the cycle, and no LOOKUP or SUMIFS family anywhere in the cycle's metrics: all are refused with <code>TEMPORAL_CYCLE_NOT_CAUSAL</code>.</li>
+  <li>Within the cycle, a metric may read another metric of the cycle only through a <b>fixed</b> offset (<code>PREVIOUS</code>, <code>LAG(x, 1, …)</code>, <code>LEAD(x, 1, …)</code>) or a <code>STRICT</code> varying one (<code>LAG(release, lead_weeks, 0, STRICT)</code>: stock received a lead time after it was ordered), all in one direction. Same-period reads must not themselves form a loop.</li>
+  <li>No other varying offset, no MOVINGSUM with expression bounds, CUMULATE, TIMESUM or *VALUE function on a metric of the cycle, and no LOOKUP or SUMIFS family anywhere in the cycle's metrics: all are refused with <code>TEMPORAL_CYCLE_NOT_CAUSAL</code>.</li>
   <li><code>dimension</code>, <code>dimension.property</code> and <code>PARENT</code> are allowed.</li>
   <li>Set the time summaries so totals make sense: <b>first</b> for the opening, <b>last</b> for the closing.</li>
 </ul>
@@ -778,9 +810,8 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>IF(product = "P1", 1, 0)</code> in a metric on a <i>[region, month]</i> grid</td><td>DIMENSION_NOT_ON_METRIC: … reads product at the cell (product), but product is not one of its grid's dimensions (month, region), so it is blank at every cell</td><td>Put product on the grid, or read it through a dimension the grid has (<code>region.segment</code> for a grouping of region)</td></tr>
 <tr><td><code>act_comment * 2</code>, <code>LOOKUP(act_comment, region, "DE")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: a number formula reads it at the cell — compared, joined with &amp;, in a function such as LEN or VALUE, as a LOOKUP member — or as a criteria range; not in arithmetic, as the source of LOOKUP or *IFS, nor beside a time function</td><td>Compare it (<code>IF(act_comment = "", 1, 0)</code>), count it (<code>COUNTIFS(act_comment, "&lt;&gt;")</code>) or read a number from it (<code>VALUE(act_comment)</code>)</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
-<tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
 <tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>
-<tr><td>LOOKUP or a dynamic offset in an opening/closing pair</td><td>TEMPORAL_CYCLE_NOT_CAUSAL: closing calls LOOKUP … / reads closing over an unbounded time range</td><td>Move the lookup into a metric outside the cycle; use a fixed offset</td></tr>
+<tr><td>LOOKUP or a dynamic offset in an opening/closing pair</td><td>TEMPORAL_CYCLE_NOT_CAUSAL: closing calls LOOKUP … / reads closing over an unbounded time range</td><td>Move the lookup into a metric outside the cycle; use a fixed offset, or a varying one in STRICT mode (<code>LAG(closing, n, 0, STRICT)</code>)</td></tr>
 <tr><td>A metric <code>Sales</code> beside <code>sales</code>, a dimension <code>Region</code> beside <code>region</code></td><td>METRIC_NAME_TAKEN / DIMENSION_NAME_TAKEN (names are compared without regard to case)</td><td>Choose another name</td></tr>
 </table>
 
@@ -861,6 +892,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-EDATE">EDATE</a></td><td>EDATE(date, months)</td><td>Same day, months later</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-END">END</a></td><td>END()</td><td>Last day of the current period</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-EOMONTH">EOMONTH</a></td><td>EOMONTH(date, months)</td><td>Last day of a month</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-EXP">EXP</a></td><td>EXP(x)</td><td>e to the power x</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-FLOOR">FLOOR</a></td><td>FLOOR(x, significance)</td><td>Down to a multiple</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-HALFYEARTODATE">HALFYEARTODATE</a></td><td>HALFYEARTODATE(x)</td><td>Sum from the half-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">HALFYEARVALUE</a></td><td>HALFYEARVALUE(metric)</td><td>The metric over the whole half year</td><td><a href="#time">14</a></td></tr>
@@ -879,6 +911,9 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-LEN">LEN</a></td><td>LEN(text)</td><td>Number of characters</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-LN">LN</a></td><td>LN(x)</td><td>Natural logarithm</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-LOG">LOG</a></td><td>LOG(x [, base])</td><td>Logarithm, base 10 by default</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-LOG10">LOG10</a></td><td>LOG10(x)</td><td>Base-10 logarithm</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-LOOKUP">LOOKUP</a></td><td>LOOKUP(source, dimension, member, …)</td><td>The source at other members</td><td><a href="#lookup">12</a></td></tr>
 <tr><td><a href="#fn-UPPER">LOWER</a></td><td>LOWER(text)</td><td>Lower case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-MAX">MAX</a></td><td>MAX(a, b, …)</td><td>Largest argument</td><td><a href="#aggregates">8</a></td></tr>
@@ -894,6 +929,14 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-MOVINGSUM">MOVINGSUM</a></td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-NA">NA</a></td><td>NA()</td><td>The #N/A error</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-NEXT">NEXT</a></td><td>NEXT(x)</td><td>x one period ahead</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NORM-DIST">NORM.DIST</a></td><td>NORM.DIST(x, mean, standard_dev, cumulative)</td><td>Normal probability below x, or density</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-INV">NORM.INV</a></td><td>NORM.INV(p, mean, standard_dev)</td><td>The x with probability p below it</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-S-DIST">NORM.S.DIST</a></td><td>NORM.S.DIST(z, cumulative)</td><td>Standard normal probability below z, or density</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORM-S-INV">NORM.S.INV</a></td><td>NORM.S.INV(p)</td><td>The z with probability p below it (a service level’s safety factor)</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMDIST</a></td><td>NORMDIST(x, mean, standard_dev, cumulative)</td><td>Older name of NORM.DIST</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMINV</a></td><td>NORMINV(p, mean, standard_dev)</td><td>Older name of NORM.INV</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMSDIST</a></td><td>NORMSDIST(z)</td><td>Older name of NORM.S.DIST, always cumulative</td><td><a href="#normal">7</a></td></tr>
+<tr><td><a href="#fn-NORMSINV">NORMSINV</a></td><td>NORMSINV(p)</td><td>Older name of NORM.S.INV</td><td><a href="#normal">7</a></td></tr>
 <tr><td><a href="#fn-NOT">NOT</a></td><td>NOT(a)</td><td>Inverts</td><td><a href="#logic">6</a></td></tr>
 <tr><td><a href="#fn-OFFSET">OFFSET</a></td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-OR">OR</a></td><td>OR(a, b, …)</td><td>TRUE when any argument is TRUE</td><td><a href="#logic">6</a></td></tr>
@@ -902,12 +945,19 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-PREVIOUS">PREVIOUS</a></td><td>PREVIOUS(x)</td><td>x one period back</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-QUARTERTODATE">QUARTERTODATE</a></td><td>QUARTERTODATE(x)</td><td>Sum from the quarter start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">QUARTERVALUE</a></td><td>QUARTERVALUE(metric)</td><td>The metric over the whole quarter</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-RANK">RANK</a></td><td>RANK(source, dimension [, order])</td><td>Place of the cell's value among the members of a dimension (1 = largest)</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-RANK">RANKIFS</a></td><td>RANKIFS(source, range, criterion, … [, order])</td><td>Place of the cell's value among the matching member combinations</td><td><a href="#conditional">13</a></td></tr>
 <tr><td><a href="#fn-RIGHT">RIGHT</a></td><td>RIGHT(text [, n])</td><td>Last characters</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-ROUND">ROUND</a></td><td>ROUND(x, digits)</td><td>Half away from zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ROUNDDOWN">ROUNDDOWN</a></td><td>ROUNDDOWN(x, digits)</td><td>Toward zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-ROUNDUP">ROUNDUP</a></td><td>ROUNDUP(x, digits)</td><td>Away from zero</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-SQRT">SQRT</a></td><td>SQRT(x)</td><td>Square root</td><td><a href="#math">7</a></td></tr>
 <tr><td><a href="#fn-START">START</a></td><td>START()</td><td>First day of the current period</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV</a></td><td>STDEV(a, b, …)</td><td>Older name of STDEV.S</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV.P</a></td><td>STDEV.P(a, b, …)</td><td>Population standard deviation</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEV.S</a></td><td>STDEV.S(a, b, …)</td><td>Sample standard deviation</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEVIFS">STDEVIFS</a></td><td>STDEVIFS(source, range, criterion, …)</td><td>Sample standard deviation of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-STDEV-S">STDEVP</a></td><td>STDEVP(a, b, …)</td><td>Older name of STDEV.P</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-SUBSTITUTE">SUBSTITUTE</a></td><td>SUBSTITUTE(text, old, new [, instance])</td><td>Replaces text</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-SUM">SUM</a></td><td>SUM(a, b, …)</td><td>Sum of the arguments</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-SUMIF">SUMIF</a></td><td>SUMIF(range, criterion, source)</td><td>Sum of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
@@ -920,13 +970,18 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
 <tr><td><a href="#fn-VALUE">VALUE</a></td><td>VALUE(text)</td><td>A text as a number</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR</a></td><td>VAR(a, b, …)</td><td>Older name of VAR.S</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR.P</a></td><td>VAR.P(a, b, …)</td><td>Population variance</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VAR.S</a></td><td>VAR.S(a, b, …)</td><td>Sample variance</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-STDEVIFS">VARIFS</a></td><td>VARIFS(source, range, criterion, …)</td><td>Sample variance of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-VAR-S">VARP</a></td><td>VARP(a, b, …)</td><td>Older name of VAR.P</td><td><a href="#aggregates">8</a></td></tr>
 <tr><td><a href="#fn-WEEKDAY">WEEKDAY</a></td><td>WEEKDAY(date [, return_type])</td><td>Day of the week</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-WEEKNUM">WEEKNUM</a></td><td>WEEKNUM(date [, return_type])</td><td>Week of the year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
 <tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
 <tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>
 </table>
-<p class="small">Also: a bare dimension name (the cell's member code) and <code>dimension.property</code> (a member property), chapter 11. Keywords in fixed positions: <code>STRICT</code>, <code>SEMISTRICT</code>, <code>NONSTRICT</code> (LAG, LEAD) and <code>SUM</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code> (MOVINGSUM, TIMESUM).</p>
+<p class="small">Also: a bare dimension name (the cell's member code) and <code>dimension.property</code> (a member property), chapter 11. Function names with dots (NORM.S.INV, STDEV.S) are read as functions only directly before their <code>(</code>. Keywords in fixed positions: <code>STRICT</code>, <code>SEMISTRICT</code>, <code>NONSTRICT</code> (LAG, LEAD) and <code>SUM</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code> (MOVINGSUM, TIMESUM).</p>
 
 <h2 id="error-index">Appendix B. Error index</h2>
 <table>
@@ -950,7 +1005,6 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>TIME_DIMENSION_MISMATCH</code></td><td>A *VALUE source is not dimensioned by the cell's time dimension</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>INVALID_TIME_MEMBER</code></td><td>A granularity too coarse for the function, or a period straddling its boundary</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>TIME_OFFSET_NOT_INTEGER</code></td><td>An offset or window bound that is not a whole number</td><td><a href="#time">14</a></td></tr>
-<tr><td><code>MOVING_WINDOW_NOT_LITERAL</code></td><td>A MOVINGSUM window bound that is not a literal</td><td><a href="#time">14</a></td></tr>
 <tr><td><code>TEMPORAL_CYCLE_NOT_CAUSAL</code></td><td>A cycle not broken by time, or LOOKUP / SUMIFS / an unbounded time read inside a recurrence</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>
 <tr><td><code>METRIC_NAME_TAKEN</code>, <code>DIMENSION_NAME_TAKEN</code></td><td>The revision already has a metric (dimension) of that name, in any case</td><td><a href="#validation">17</a></td></tr>
 <tr><td><code>METRIC_IN_USE, PROPERTY_IN_USE, DIMENSION_IN_USE, MEMBER_IN_USE</code></td><td>A delete refused while a formula (or, for a metric, a Rate total) uses what would be deleted</td><td><a href="#validation">17</a></td></tr>

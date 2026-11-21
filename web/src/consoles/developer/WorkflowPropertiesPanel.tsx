@@ -396,6 +396,21 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
                     </Field>
                   </>
                 )}
+                {cv.source_hint !== "raci_responsible" && (
+                  <Field label="Default (formula)">
+                    <input
+                      aria-label={`Default of ${cv.key}`}
+                      value={cv.default ?? ""}
+                      onChange={e => updateCtxVar(idx, { default: e.target.value.trim() === "" ? undefined : e.target.value })}
+                      placeholder={cv.data_type === "Dimension member" ? "first_week, \"Base\"" : cv.data_type === "Date" ? "TODAY()" : "a metric, an earlier variable…"}
+                      style={{ ...inputStyle, fontFamily: "monospace" }}
+                    />
+                    <div style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                      Used when a start brings no value — a schedule never brings one — and shown filled in when someone starts it.
+                      Metric names, variables above this one, TODAY(); a date gives a period variable the period holding it.
+                    </div>
+                  </Field>
+                )}
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 6 }}>
                   <input type="checkbox" checked={cv.required} onChange={e => updateCtxVar(idx, { required: e.target.checked })} />
                   Required

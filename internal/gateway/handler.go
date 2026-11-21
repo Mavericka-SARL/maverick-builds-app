@@ -99,6 +99,7 @@ type handler struct {
 	// administrator hands over, not an invitation e-mail
 	// (temporary_passwords.go).
 	tempPasswords bool
+	soffice       string
 	// lic answers edition and feature questions for gated routes (see
 	// license.go). nil behaves as the community edition, which is what a
 	// handler built without Deps.License gets.
@@ -175,6 +176,9 @@ type Deps struct {
 	// (temporary_passwords.go). Ignored with Signup.Enabled or
 	// Signup.Playground: there tenants do not trust one another.
 	TemporaryPasswords bool
+	// ReconcileSoffice is the LibreOffice program a workbook reconciliation
+	// recalculates a case with ("": such cases are skipped).
+	ReconcileSoffice string
 	// Legal identifies the operator and its published documents (legal.go).
 	// Zero means this deployment publishes none, and the sign-up page then
 	// claims agreement to nothing.
@@ -254,6 +258,7 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 		resetLimit:  discoverLimiter{rate: resetPasswordRate, burst: resetPasswordBurst},
 	}
 	h.tempPasswords = deps.TemporaryPasswords && !deps.Signup.Enabled && !deps.Signup.Playground
+	h.soffice = deps.ReconcileSoffice
 	h.plans = deps.Plans
 	if h.plans == nil {
 		h.plans = plan.NewEnforcer(h.db.Control())
@@ -421,6 +426,16 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("DELETE", "/api/developer/revisions/{id}", "developer", dev(h.developerRevisionAction))
 	register("GET", "/api/developer/model", "developer", dev(h.developerModel))
 	register("POST", "/api/developer/metrics", "developer", dev(h.developerMetrics))
+	register("GET", "/api/developer/model-check", "developer", dev(h.modelCheck))
+	register("GET", "/api/developer/reconciliation", "developer", dev(h.reconciliation))
+	register("DELETE", "/api/developer/reconciliation", "developer", dev(h.reconciliation))
+	register("PUT", "/api/developer/reconciliation/workbook", "developer", dev(h.reconciliationWorkbook))
+	register("PUT", "/api/developer/reconciliation/map", "developer", dev(h.reconciliationMap))
+	register("POST", "/api/developer/reconciliation/propose", "developer", dev(h.reconciliationPropose))
+	register("POST", "/api/developer/reconciliation/run", "developer", dev(h.reconciliationRun))
+	register("GET", "/api/developer/reconciliation/differences.csv", "developer", dev(h.reconciliationCSV))
+	register("PUT", "/api/developer/model-check/ignores", "developer", dev(h.modelCheckIgnores))
+	register("DELETE", "/api/developer/model-check/ignores", "developer", dev(h.modelCheckIgnores))
 	register("PATCH", "/api/developer/metrics/{id}", "developer", dev(h.developerMetricAction))
 	register("DELETE", "/api/developer/metrics/{id}", "developer", dev(h.developerMetricAction))
 	register("GET", "/api/developer/dimensions", "developer", dev(h.developerDimensions))
@@ -673,6 +688,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/workflow/my-history", "any", cors(h.workflowMyHistory))
 	register("GET", "/api/workflow/definitions", "any", cors(h.workflowDefinitions))
 	register("GET", "/api/workflow/definitions/{id}", "any", cors(h.workflowDefinition))
+	register("GET", "/api/workflow/definitions/{id}/start-defaults", "any", cors(h.workflowStartDefaults))
 	register("GET", "/api/workflow/status", "any", cors(h.workflowStatus))
 	register("GET", "/api/workflow/approval-changes", "any", cors(h.approvalChanges))
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
@@ -2724,7 +2740,7 @@ type taskRow struct {
 // role in every tenant; and even once scoped it matched a business role named
 // like a platform role (a business admin may call one "developer") as that
 // platform role, listing other workspaces' steps to the role's members.
-var taskAssigneeSQL = assignee.SQL("app.id", "step_def.elem->'assignee_roles'", "$1::uuid")
+var taskAssigneeSQL = assignee.SQL("app.id", assignee.StepRolesSQL("step_def.elem"), "$1::uuid")
 
 func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -2810,9 +2826,12 @@ func (h *handler) tasksIn(ctx context.Context, a *actor) ([]taskRow, error) {
 		  -- land in anyone's real inbox (found live 2026-09-13: a business
 		  -- user approved a test-run step and its notification was "skipped").
 		  AND wi.test_run = false
+		  -- A condition held for the model's recalculation decides itself
+		  -- when it finishes (workflow.ResumeHeldConditions): no one's task.
+		  AND ws.comment IS DISTINCT FROM $2
 		  AND `+taskAssigneeSQL+`
 		ORDER BY ws.due_at ASC NULLS LAST, ws.created_at DESC
-	`, a.UserID)
+	`, a.UserID, workflow.HeldConditionComment)
 	if err != nil {
 		return nil, err
 	}
@@ -2954,6 +2973,15 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	if stepType == "condition" || stepType == "4" {
 		if req.Decision != "true" && req.Decision != "false" {
 			jsonErr(w, fmt.Errorf("a condition step is routed by deciding \"true\" or \"false\""), http.StatusBadRequest)
+			return
+		}
+		// Held for the model's recalculation, it decides itself when that
+		// finishes; a person deciding it as well sent the run down both
+		// branches (2026-11-21).
+		var comment string
+		_ = h.db.QueryRow(ctx, `SELECT COALESCE(comment, '') FROM workflow.workflow_step WHERE id = $1::uuid`, stepID).Scan(&comment)
+		if comment == workflow.HeldConditionComment {
+			jsonErr(w, fmt.Errorf("this condition is decided by the model as soon as its recalculation finishes"), http.StatusConflict)
 			return
 		}
 	}
@@ -3455,6 +3483,20 @@ type gridResponse struct {
 	// review of the AI build read a grid of three dimensions as one of one
 	// (2026-11-08). Omitted when every dimension has members.
 	DimensionsWithoutMembers []emptyGridDimension `json:"dimensions_without_members,omitempty"`
+}
+
+// gridTotalsResponse is a totals_only read with fields=totals: the fields of
+// gridResponse a KPI tile polls, the other required ones empty.
+type gridTotalsResponse struct {
+	RevisionID    string             `json:"revision_id"`
+	Metrics       []metricRow        `json:"metrics"`
+	Dimensions    []gridDimension    `json:"dimensions"`
+	Departments   []deptRow          `json:"departments"`
+	Cells         map[string]float64 `json:"cells"`
+	Totals        map[string]float64 `json:"totals"`
+	Texts         map[string]string  `json:"texts,omitempty"`
+	Withheld      []string           `json:"withheld,omitempty"`
+	RecalcPending bool               `json:"recalc_pending,omitempty"`
 }
 
 // emptyGridDimension is a grid dimension with no member: its name, display
@@ -4217,6 +4259,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		sj, _ := json.Marshal(scopePinned)
 		sv, sErr := store.LoadCalcSlice(ctx, modelID, revisionID, string(sj))
 		var calcTotals map[string]float64 // '{}' rows, loaded lazily
+		var reach map[string]bool         // the metrics the pin can change, computed when first needed
 		loadTotals := func() {
 			if calcTotals == nil {
 				calcTotals, _ = store.LoadCalcTotals(ctx, modelID, revisionID)
@@ -4255,9 +4298,27 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				if dimmedByPin {
 					continue // no slice row → omitted from totals (renders "—")
 				}
-				// Dimensioned, but by other dimensions than the pin. Left to
-				// the scoped read — unless it's zero everywhere (a sum of
-				// non-negative parts), in which case its slice is zero too.
+				// Dimensioned, but by other dimensions than the pin. When
+				// nothing the metric reads reaches the pinned dimension, the
+				// pin cannot change it: its whole-model total is its total
+				// under the pin (pinReach).
+				if reach == nil {
+					names := make(map[string]string, len(allDims))
+					for _, d := range allDims {
+						names[d.ID] = d.Name
+					}
+					reach = pinReach(allMetrics, metricDims, toRollupDims(allDims), names, pinnedDim)
+				}
+				if !reach[m.ID] {
+					loadTotals()
+					if v, ok := calcTotals[m.ID]; ok {
+						served[m.ID] = v
+					}
+					continue
+				}
+				// Otherwise left to the scoped read — unless it's zero
+				// everywhere (a sum of non-negative parts), in which case its
+				// slice is zero too.
 				loadTotals()
 				if calcTotals[m.ID] == 0 {
 					continue
@@ -4705,6 +4766,22 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	if totalsOnly && r.URL.Query().Get("fields") == "totals" {
+		// fields=totals (opt-in): the totals and what qualifies them, without
+		// the model's metadata. A KPI tile reads its metadata once (meta_only)
+		// and polls this every two seconds: the full answer was ~340 KB on a
+		// 250-metric model, almost all of it dimensions and members.
+		bareTexts := map[string]string{}
+		for k, v := range texts {
+			if !strings.Contains(k, ":") {
+				bareTexts[k] = v
+			}
+		}
+		jsonOK(w, gridTotalsResponse{RevisionID: revisionID, Metrics: []metricRow{}, Dimensions: []gridDimension{},
+			Departments: []deptRow{}, Cells: map[string]float64{}, Totals: totals, Texts: bareTexts, Withheld: withheld,
+			RecalcPending: h.recalcPending(ctx, revisionID)})
+		return
+	}
 	respDims := allDims
 	if !metaOnly && gridDefID != "" && r.URL.Query().Get("all_members") != "1" {
 		respDims = leanAllDimensions(allDims, dims, metrics)
@@ -4835,7 +4912,7 @@ func (h *handler) workflowSubmit(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusForbidden)
 		case errors.Is(err, workflow.ErrDuplicateInstance):
 			jsonErr(w, err, http.StatusConflict)
-		case errors.Is(err, workflow.ErrUnknownMetric), errors.Is(err, workflow.ErrMissingContext), errors.Is(err, workflow.ErrUnknownMember):
+		case errors.Is(err, workflow.ErrUnknownMetric), errors.Is(err, workflow.ErrMissingContext), errors.Is(err, workflow.ErrUnknownMember), errors.Is(err, workflow.ErrContextDefault):
 			jsonErr(w, err, http.StatusBadRequest)
 		default:
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -5487,6 +5564,25 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		  AND nf.source_ref = o.id AND o.id <> n.id
 	`, modelID, newID); err != nil {
 		return "", fmt.Errorf("revision fact source_ref remap failed: %w", err)
+	}
+
+	// The model check's ignored findings: keyed by names, they hold for the
+	// copy as they are.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO model.check_ignore (revision_id, key, rule, reason, ignored_by, ignored_at)
+		SELECT $2::uuid, key, rule, reason, ignored_by, ignored_at
+		FROM model.check_ignore WHERE revision_id = $3::uuid AND $1::uuid IS NOT NULL
+	`, srcArgs...); err != nil {
+		return "", fmt.Errorf("revision model-check ignores copy failed: %w", err)
+	}
+	// The workbook reconciliation: workbook, map and cases (names, not
+	// ids), without the source's last run.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO model.reconciliation (revision_id, file_name, workbook, uploaded_by, uploaded_at, map, cases)
+		SELECT $2::uuid, file_name, workbook, uploaded_by, uploaded_at, map, cases
+		FROM model.reconciliation WHERE revision_id = $3::uuid AND $1::uuid IS NOT NULL
+	`, srcArgs...); err != nil {
+		return "", fmt.Errorf("revision reconciliation copy failed: %w", err)
 	}
 
 	// Step F: copy dashboard folders, then remap folder parents and the
@@ -6319,7 +6415,7 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	picklist, err := metricformula.ResolvePicklist(ctx, h.db.For(ctx), modelID, req.RevisionID, req.Format,
-		req.PicklistDimensionID, req.AggRule, req.TimeSummary, req.IsInput)
+		req.PicklistDimensionID, req.AggRule, req.TimeSummary, req.IsInput, req.Formula)
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
@@ -6501,7 +6597,8 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		Metadata: map[string]string{"name": req.Name, "revision_id": req.RevisionID},
 	})
 
-	jsonOK(w, map[string]string{"id": newID, "status": "created"})
+	jsonOK(w, map[string]any{"id": newID, "status": "created",
+		"warnings": h.saveWarnings(ctx, modelID, req.RevisionID, "metric", newID)})
 }
 
 // extractFormulaRefs returns all identifier references from a formula string.
@@ -6842,6 +6939,7 @@ func (h *handler) workflowDefinitions(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		d.ContextSchema = publicContextSchema(d.ContextSchema)
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
@@ -7028,7 +7126,8 @@ func (h *handler) workflowStartInstance(w http.ResponseWriter, r *http.Request) 
 			jsonErr(w, err, http.StatusForbidden)
 		case errors.Is(err, workflow.ErrDuplicateInstance):
 			jsonErr(w, err, http.StatusConflict)
-		case errors.Is(err, workflow.ErrUnknownMetric), errors.Is(err, workflow.ErrMissingContext), errors.Is(err, workflow.ErrUnknownMember):
+		case errors.Is(err, workflow.ErrUnknownMetric), errors.Is(err, workflow.ErrMissingContext), errors.Is(err, workflow.ErrUnknownMember),
+			errors.Is(err, workflow.ErrContextDefault):
 			// Bad start context, not a missing workflow: these used to fall
 			// through to 404 "workflow not found".
 			jsonErr(w, err, http.StatusBadRequest)
@@ -8847,7 +8946,13 @@ func (h *handler) importJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := importpkg.NewStore(h.db.For(ctx))
-	jobs, err := store.ListImportJobs(ctx, modelID, r.URL.Query().Get("revision_id"), 20)
+	// The newest 20, or ?limit= up to 200: Recent Imports asks for more so
+	// its search finds older imports (2026-11-21).
+	limit := int32(20)
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		limit = int32(min(n, 200))
+	}
+	jobs, err := store.ListImportJobs(ctx, modelID, r.URL.Query().Get("revision_id"), limit)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -10753,9 +10858,7 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 			jsonErr(w, fmt.Errorf("form_id and name required"), http.StatusBadRequest)
 			return
 		}
-		if body.Aggregation == "" {
-			body.Aggregation = "sum"
-		}
+		body.Aggregation = crudapp.MappingAggregation(ctx, h.db.For(ctx), body.TargetMetricID, body.Aggregation)
 		if len(body.PostingStatuses) == 0 {
 			body.PostingStatuses = []string{"approved"}
 		}
@@ -10768,6 +10871,7 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), modelID, revisionID, crudapp.MappingRefs{
 			FormID: body.FormID, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
 			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings, RowFilter: body.RowFilter,
+			Aggregation: body.Aggregation,
 		}); crudapp.IsMappingRefError(err) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -10961,6 +11065,7 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), mapModel, mapRevision, crudapp.MappingRefs{
 			FormID: mapForm, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
 			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings, RowFilter: body.RowFilter,
+			Aggregation: body.Aggregation,
 		}); crudapp.IsMappingRefError(err) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -12976,7 +13081,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 			pl, err := metricformula.ResolvePicklist(ctx, h.db.For(ctx), modelID, metricRevisionID, format,
-				body.PicklistDimensionID, agg, ts, metricIsInput)
+				body.PicklistDimensionID, agg, ts, metricIsInput, body.Formula)
 			if err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
@@ -13275,7 +13380,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				Metadata: map[string]string{"name": body.Name},
 			})
 		}
-		jsonOK(w, map[string]any{"status": "ok", "recalc": results})
+		jsonOK(w, map[string]any{"status": "ok", "recalc": results,
+			"warnings": h.saveWarnings(ctx, modelID, metricRevisionID, "metric", metricID)})
 
 	case http.MethodDelete:
 		var modelID, metricRevisionID, metricAppID string
@@ -20278,6 +20384,10 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 		// to set context["_test_mode"]="true", which nothing read, so a test
 		// run sent real notifications and wrote real facts.
 		instance, err := ws.StartTestRun(ctx, defID, a.UserID, body.Context)
+		if errors.Is(err, workflow.ErrContextDefault) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return

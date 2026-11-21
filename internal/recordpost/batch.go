@@ -167,7 +167,7 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 			// retracted and the postings that remain re-aggregated. A missing
 			// value used to retract without re-aggregating, leaving the old
 			// value in the metric until something else recomputed it.
-			val, hasValue := m.value(rec.data)
+			val, text, hasValue := m.posting(rec.data)
 			if !m.postsAt(hasStatus, rec.status) || !hasValue {
 				if !stays(rec, nil) {
 					retract = append(retract, rec)
@@ -205,10 +205,10 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 				if !stays(rec, nil) {
 					retract = append(retract, rec)
 				}
-			case stays(rec, &plannedPosting{value: val, members: members}):
+			case stays(rec, &plannedPosting{value: val, text: text, members: members}):
 			default:
 				dims, _ := json.Marshal(members)
-				rows = append(rows, postingRow{id: rec.id, readAt: rec.updatedAt, dims: string(dims), value: val})
+				rows = append(rows, postingRow{id: rec.id, readAt: rec.updatedAt, dims: string(dims), value: val, text: text})
 			}
 		}
 		retracted := ps.retractPostings(ctx, m, retract)
@@ -309,6 +309,7 @@ type postingRow struct {
 	readAt time.Time // the record's updated_at when it was read
 	dims   string    // the {dimension id: member code} coordinate, as JSON
 	value  float64
+	text   string // into a text metric (posted_text); "" for a number
 }
 
 // postingChunk is the most postings one statement writes.
@@ -337,21 +338,23 @@ func (ps *Poster) insertPostings(ctx context.Context, m formMapping, revisionID 
 		readAt := make([]time.Time, len(chunk))
 		dims := make([]string, len(chunk))
 		values := make([]float64, len(chunk))
+		texts := make([]string, len(chunk))
 		for j, r := range chunk {
-			ids[j], readAt[j], dims[j], values[j] = r.id, r.readAt, r.dims, r.value
+			ids[j], readAt[j], dims[j], values[j], texts[j] = r.id, r.readAt, r.dims, r.value, r.text
 		}
 		gone := false
 		err := RetryTransient(ctx, 3, func() error {
 			_, e := ps.db(ctx).Exec(ctx, `
 				INSERT INTO runtime.form_record_posting
-				  (mapping_id, form_record_id, target_metric_id, revision_id, dim_members, posted_value)
-				SELECT $1::uuid, u.id, $2::uuid, NULLIF($3,'')::uuid, u.dims::jsonb, u.value
-				FROM unnest($4::uuid[], $5::timestamptz[], $6::text[], $7::numeric[]) AS u(id, read_at, dims, value)
+				  (mapping_id, form_record_id, target_metric_id, revision_id, dim_members, posted_value, posted_text)
+				SELECT $1::uuid, u.id, $2::uuid, NULLIF($3,'')::uuid, u.dims::jsonb, u.value, NULLIF(u.text, '')
+				FROM unnest($4::uuid[], $5::timestamptz[], $6::text[], $7::numeric[], $8::text[]) AS u(id, read_at, dims, value, text)
 				JOIN runtime.form_record r ON r.id = u.id AND r.updated_at = u.read_at
 				ON CONFLICT (mapping_id, form_record_id) DO UPDATE
 				  SET target_metric_id = EXCLUDED.target_metric_id, revision_id = EXCLUDED.revision_id,
-				      dim_members = EXCLUDED.dim_members, posted_value = EXCLUDED.posted_value, posted_at = now()`,
-				m.id, m.targetMetricID, revisionID, ids, readAt, dims, values)
+				      dim_members = EXCLUDED.dim_members, posted_value = EXCLUDED.posted_value,
+				      posted_text = EXCLUDED.posted_text, posted_at = now()`,
+				m.id, m.targetMetricID, revisionID, ids, readAt, dims, values, texts)
 			if isForeignKeyViolation(e) {
 				gone = true
 				return nil

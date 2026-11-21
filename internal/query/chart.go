@@ -1499,6 +1499,13 @@ func (r *ChartResolver) evalFormulaPoint(
 			}
 			if ok {
 				val = v
+			} else {
+				// No value there is blank, as the calculation binds it:
+				// bound as 0, NOT(ISBLANK(first_short)) held for an item
+				// with no shortage, and a chart, the chat connector and a
+				// workflow condition read "Expedite" where the grid showed
+				// "Release order" (2026-11-21).
+				blank[depDef.Name] = true
 			}
 		}
 		varValues[depDef.Name] = val

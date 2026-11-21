@@ -4383,6 +4383,10 @@ paths:
           in: query
           description: '"1" returns per-metric totals with no per-combo cells — the KPI read shape'
           schema: { type: string, enum: ["1"] }
+        - name: fields
+          in: query
+          description: '"totals" with totals_only=1 answers with the totals, texts, withheld and recalc_pending only; metrics, dimensions, departments and cells are empty (a KPI tile polling, its metadata read once with meta_only)'
+          schema: { type: string, enum: ["totals"] }
       responses:
         "200":
           description: Grid data
@@ -4783,6 +4787,35 @@ paths:
                         required_comment: { type: boolean }
                         routes:           { type: object, additionalProperties: { type: string } }
                         next_step_ids:    { type: array, items: { type: string } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/workflow/definitions/{id}/start-defaults:
+    get:
+      operationId: getWorkflowStartDefaults
+      tags: [Workflows]
+      summary: The values a published workflow's context variables default to, for the start dialog to show filled in
+      description: >-
+        Each variable with a default formula (context_schema[].default) is worked out as a start with nothing given
+        would: names in it are metrics of the workflow's revision, read at the members the variables before it pin,
+        or earlier variables. Only someone who may start the workflow asks (403 otherwise). A default that cannot be
+        worked out is listed in errors with the reason, and its field stays empty.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The default values, and the reasons of the ones that could not be worked out
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [values, errors]
+                properties:
+                  values: { type: object, additionalProperties: { type: string } }
+                  errors: { type: object, additionalProperties: { type: string } }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/workflow/definitions:
@@ -5400,6 +5433,242 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/developer/model-check:
+    get:
+      operationId: getModelCheck
+      tags: [Developer]
+      summary: What in a revision is legal but costs time later — the model check's findings, ignored ones marked
+      description: >-
+        Rules: a schedule that cannot start its workflow (error); a record field mapped into a number metric that
+        holds no number; a calculated pick-list or text whose total is worked out from blanks; a SUMIFS whose metric
+        range spans a dimension whose members are never added up; a fixed member list on a dimension business users
+        maintain; hidden members under figures read across them (warnings); an input open to every business role while
+        others are restricted (info). A finding's key names it by what it is about, so ignores hold across revision
+        copies and model exports.
+      parameters:
+        - name: revision_id
+          in: query
+          required: false
+          description: The revision to check; the model's active revision when left out.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The findings, most serious first, ignored ones last
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision_id: { type: string, format: uuid }
+                  counts: { type: object, additionalProperties: { type: integer } }
+                  findings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rule:     { type: string }
+                        severity: { type: string, enum: [error, warning, info] }
+                        title:    { type: string }
+                        object:
+                          type: object
+                          properties:
+                            kind:      { type: string, enum: [metric, mapping, widget, dashboard, role, automation_rule] }
+                            id:        { type: string }
+                            name:      { type: string }
+                            dashboard: { type: string }
+                        message:       { type: string }
+                        fix:           { type: string }
+                        key:           { type: string }
+                        ignored:       { type: boolean }
+                        ignore_reason: { type: string }
+                        ignored_by:    { type: string }
+                        ignored_at:    { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/reconciliation:
+    get:
+      operationId: getReconciliation
+      tags: [Developer]
+      summary: A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases, the last run's status and report (first 500 differences)
+      parameters:
+        - { name: revision_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The reconciliation, and whether this server recalculates cases (RECONCILE_SOFFICE)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reconciliation: { type: object, additionalProperties: true }
+                  recalculation:  { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteReconciliation
+      tags: [Developer]
+      summary: Remove a revision's reconciliation (workbook, map, cases, report)
+      parameters:
+        - { name: revision_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { type: boolean } } }
+
+  /api/developer/reconciliation/workbook:
+    put:
+      operationId: putReconciliationWorkbook
+      tags: [Developer]
+      summary: Store (or replace) the workbook a revision rebuilds, at most 25 MB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision_id, data_base64]
+              properties:
+                revision_id: { type: string, format: uuid }
+                file_name:   { type: string }
+                data_base64: { type: string }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  file_name:     { type: string }
+                  sheets:        { type: array, items: { type: string } }
+                  workbook_size: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/developer/reconciliation/map:
+    put:
+      operationId: putReconciliationMap
+      tags: [Developer]
+      summary: Save the map (rules) of the workbook's cells in model terms, and the cases to compare
+      description: >-
+        A rule is a rectangle of a sheet (rows or row_list, optionally repeated in blocks; columns or column_list), the
+        metric of each cell (metric, metrics_by_column or metrics_by_row) and where each dimension's member comes from
+        (members: code, case, column — with block_row in blocks — row, cell; split and part take one part of a key; total).
+        A case names its members of the dimensions bound to the case and the input edits (cell and value, or range and
+        copy_from) that make the workbook calculate it; a case without edits reads the saved values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision_id, map]
+              properties:
+                revision_id: { type: string, format: uuid }
+                map:   { type: object, additionalProperties: true }
+                cases: { type: array, items: { type: object, additionalProperties: true } }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { type: object, properties: { saved: { type: boolean } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/developer/reconciliation/propose:
+    post:
+      operationId: proposeReconciliationMap
+      tags: [Developer]
+      summary: A map drafted from the stored workbook and what the revision knows (metric labels, member codes and labels, period dates), not saved
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { revision_id: { type: string, format: uuid } } }
+      responses:
+        "200":
+          description: The proposed map, and notes on what it could not place
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  map:   { type: object, additionalProperties: true }
+                  notes: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/developer/reconciliation/run:
+    post:
+      operationId: runReconciliation
+      tags: [Developer]
+      summary: Compare the workbook with the revision, case by case, in the background; GET /api/developer/reconciliation follows it
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { revision_id: { type: string, format: uuid } } }
+      responses:
+        "202":
+          description: Started
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: A run of this revision is under way
+
+  /api/developer/reconciliation/differences.csv:
+    get:
+      operationId: getReconciliationDifferences
+      tags: [Developer]
+      summary: The last run's differences as CSV (case, sheet, cell, metric, members, expected, actual)
+      parameters:
+        - { name: revision_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/model-check/ignores:
+    put:
+      operationId: ignoreModelCheckFinding
+      tags: [Developer]
+      summary: Keep a finding the revision has now, with the reason it is kept
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision_id, key, reason]
+              properties:
+                revision_id: { type: string, format: uuid }
+                key:         { type: string }
+                reason:      { type: string }
+      responses:
+        "200":
+          description: Ignored
+          content:
+            application/json:
+              schema: { type: object, properties: { ignored: { type: boolean } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: unignoreModelCheckFinding
+      tags: [Developer]
+      summary: Bring an ignored finding back
+      parameters:
+        - { name: revision_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: key, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: No longer ignored
+          content:
+            application/json:
+              schema: { type: object, properties: { ignored: { type: boolean } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/developer/metrics:
     post:
       operationId: createMetric
@@ -5420,6 +5689,10 @@ paths:
                 properties:
                   id:     { type: string, format: uuid }
                   status: { type: string }
+                  warnings:
+                    description: The model check's findings about this metric (GET /api/developer/model-check), not ignored
+                    type: array
+                    items: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/FormulaRejected" }
         "409":
           description: >-
@@ -5460,6 +5733,10 @@ paths:
                         revision_id: { type: string, format: uuid }
                         metric:      { type: string }
                         value:       { type: number, nullable: true }
+                  warnings:
+                    description: The model check's findings about this metric (GET /api/developer/model-check), not ignored
+                    type: array
+                    items: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/FormulaRejected" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
@@ -10501,7 +10778,7 @@ paths:
     get:
       operationId: listImportJobs
       tags: [Import & Integrations]
-      summary: List the 20 most recent import jobs for the model
+      summary: List the most recent import jobs for the model (20, or limit up to 200)
       description: >-
         File imports of every kind — a grid's values, a dimension's members, a table's records — newest first,
         from the wizard, a saved integration (refused runs too), a connector or the AI Developer. The model is
@@ -10512,6 +10789,10 @@ paths:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          description: How many of the newest jobs to list (default 20, at most 200).
+          schema: { type: integer, minimum: 1 }
       responses:
         "200":
           description: Import job list

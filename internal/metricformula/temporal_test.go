@@ -130,3 +130,35 @@ func TestPlanRefusesDimensionalCallInRecurrence(t *testing.T) {
 		t.Errorf("dim.property inside a recurrence must plan: %v", err)
 	}
 }
+
+// A variable offset that only looks back (a STRICT dynamic LAG) or only
+// forward orders like a fixed one; one that reaches the current period or
+// both ways does not (2026-11-21).
+func TestPlanStrictlyOneWayUnboundedEdge(t *testing.T) {
+	back := Edge{To: "b", MinTimeOffset: -1, MaxTimeOffset: -1, UnboundedPast: true}
+	comps, err := Plan(gr(map[string][]Edge{"a": {back}, "b": {edge("a", 0, 0)}}), []string{"a"}, nil)
+	if err != nil {
+		t.Fatalf("strictly-past variable offset must be a causal recurrence: %v", err)
+	}
+	if !comps[0].Recurrence || comps[0].Direction != DirectionForward {
+		t.Errorf("want a forward recurrence, got %+v", comps[0])
+	}
+	ahead := Edge{To: "b", MinTimeOffset: 1, MaxTimeOffset: 1, UnboundedFuture: true}
+	comps, err = Plan(gr(map[string][]Edge{"a": {ahead}, "b": {edge("a", 0, 0)}}), []string{"a"}, nil)
+	if err != nil || comps[0].Direction != DirectionBackward {
+		t.Errorf("strictly-future variable offset must be a backward recurrence: %+v %v", comps, err)
+	}
+	for name, e := range map[string]Edge{
+		"reaches now":     {To: "b", MinTimeOffset: 0, MaxTimeOffset: 0, UnboundedPast: true},
+		"both ways":       {To: "b", MinTimeOffset: -1, MaxTimeOffset: -1, UnboundedPast: true, UnboundedFuture: true},
+		"future reaching": {To: "b", MinTimeOffset: 0, MaxTimeOffset: 0, UnboundedFuture: true},
+	} {
+		if _, err := Plan(gr(map[string][]Edge{"a": {e}, "b": {edge("a", 0, 0)}}), []string{"a"}, map[string]string{"a": "A", "b": "B"}); err == nil {
+			t.Errorf("%s: want TEMPORAL_CYCLE_NOT_CAUSAL", name)
+		}
+	}
+	// One way back and one way forward in the same cycle is still mixed.
+	if _, err := Plan(gr(map[string][]Edge{"a": {back}, "b": {Edge{To: "a", MinTimeOffset: 1, MaxTimeOffset: 1, UnboundedFuture: true}}}), []string{"a"}, nil); err == nil {
+		t.Error("mixed directions must be refused")
+	}
+}

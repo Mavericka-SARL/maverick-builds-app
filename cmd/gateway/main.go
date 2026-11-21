@@ -106,6 +106,11 @@ type cfg struct {
 	// instead of an invitation e-mail (internal/gateway/temporary_passwords.go).
 	// Ignored with SIGNUP_ENABLED or PLAYGROUND.
 	TemporaryPasswords bool `mapstructure:"TEMPORARY_PASSWORDS"`
+	// ReconcileSoffice is the LibreOffice program (soffice) a workbook
+	// reconciliation recalculates a case with (internal/reconcile). Unset,
+	// cases that change the workbook's inputs are skipped; the images do
+	// not include LibreOffice.
+	ReconcileSoffice string `mapstructure:"RECONCILE_SOFFICE"`
 	// BackupRetentionDays is the backup job's setting of the same name
 	// (deploy/docker/pg-backup), read here to say how long a deleted
 	// workspace can still be restored. Default 14, as there.
@@ -375,6 +380,7 @@ func main() {
 			Signup: gateway.SignupConfig{Enabled: c.SignupEnabled, ContactURL: c.PlanContactURL,
 				BackupRetentionDays: c.BackupRetentionDays, Playground: c.Playground},
 			TemporaryPasswords: c.TemporaryPasswords,
+			ReconcileSoffice:   c.ReconcileSoffice,
 			Legal: gateway.LegalConfig{
 				Entity: c.LegalEntity, Address: c.LegalAddress, Email: c.LegalEmail,
 				Jurisdiction: c.LegalJurisdiction, Hosting: c.LegalHosting, Updated: c.LegalUpdated,

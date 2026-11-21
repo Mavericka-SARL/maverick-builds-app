@@ -106,8 +106,11 @@ type DimensionalCall struct {
 	Dims []string
 	// Members are LOOKUP's (dimension, member) pairs in argument order.
 	Members []DimensionalArg
-	// Criteria are the (range, criterion) pairs in argument order.
+	// Criteria are the (range, criterion) pairs in argument order (RANK's
+	// one dimension with the criterion "*").
 	Criteria []DimensionalArg
+	// Order is RANK's or RANKIFS's order argument; nil when left out.
+	Order Node
 }
 
 // TimeSumCall is one TIMESUM call. Start and End are meaningful only when
@@ -372,6 +375,27 @@ func (a *analyzer) walkTimeCall(n *CallExpr, w window) error {
 		if err := argCount(n, 1, 4); err != nil {
 			return err
 		}
+		if len(n.Args) >= 2 && (!IsOffsetLiteral(n.Args[1]) || (len(n.Args) >= 3 && !IsOffsetLiteral(n.Args[2]))) {
+			// A window bound that is an expression (an item's lead time):
+			// read at the cell, so the window may reach either way — not in
+			// a recurrence — and a scoped read serves the metric from its
+			// rows, as a dynamic LAG offset.
+			if len(n.Args) == 4 {
+				if err := keyword(n.Args[3], n.Name, movingMethodSum, movingMethodAverage, movingMethodMin, movingMethodMax); err != nil {
+					return err
+				}
+			}
+			a.servedFromRows = true
+			if err := a.walk(n.Args[0], w.widen(0, 0, true, true)); err != nil {
+				return err
+			}
+			for _, b := range n.Args[1:min(len(n.Args), 3)] {
+				if err := a.walk(b, w); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		var src window
 		switch len(n.Args) {
 		case 1:
@@ -521,13 +545,32 @@ func analysisSource(node Node, fn string) (string, error) {
 // walkDynamicOffset handles LAG/LEAD/OFFSET with a non-literal offset: the
 // offset is only known per cell, so the source may be read at any period.
 func (a *analyzer) walkDynamicOffset(n *CallExpr, w window) error {
+	mode := strictnessNonStrict
 	if len(n.Args) == 4 {
-		if err := keyword(n.Args[3], n.Name, strictnessNonStrict, strictnessSemiStrict, strictnessStrict); err != nil {
-			return err
+		m, ferr := keywordArg(n.Args[3], n.Name, strictnessNonStrict, strictnessSemiStrict, strictnessStrict)
+		if ferr != nil {
+			return &AnalysisError{Code: ferr.Code, Message: ferr.Message}
 		}
+		mode = m
 	}
 	a.servedFromRows = true
-	if err := a.walk(n.Args[0], w.widen(0, 0, true, true)); err != nil {
+	// The periods a dynamic offset can read. STRICT gives the substitute for
+	// an offset ≤ 0, so LAG reads only earlier periods and LEAD only later
+	// ones — a direction a recurrence can be ordered by (2026-11-21: stock
+	// received a lead time after its order, the lead time a metric);
+	// SEMISTRICT adds the current period; otherwise either way.
+	src := w.widen(0, 0, true, true)
+	switch {
+	case n.Name == "LAG" && mode == strictnessStrict:
+		src = w.widen(-1, -1, true, false)
+	case n.Name == "LAG" && mode == strictnessSemiStrict:
+		src = w.widen(0, 0, true, false)
+	case n.Name == "LEAD" && mode == strictnessStrict:
+		src = w.widen(1, 1, false, true)
+	case n.Name == "LEAD" && mode == strictnessSemiStrict:
+		src = w.widen(0, 0, false, true)
+	}
+	if err := a.walk(n.Args[0], src); err != nil {
 		return err
 	}
 	if err := a.walk(n.Args[1], w); err != nil {
@@ -625,6 +668,19 @@ func (a *analyzer) walkDimCall(n *CallExpr, w window) error {
 			return err
 		}
 		call.Criteria = append(call.Criteria, classifyArg(p[1], ranges[i].dim, ranges[i].prop))
+	}
+	if n.Name == conditionalRank || n.Name == conditionalRankIfs {
+		// A rank is the cell's own place along its range dimensions, so
+		// each is read at the cell too (refused when the grid has none).
+		for _, r := range ranges {
+			a.cellDim(r.dim, n.Name+"("+call.Source+dimensionalFunctionSeparator+r.dim+")")
+		}
+		if order := rankOrderArg(n.Name, n.Args); order != nil {
+			if err := a.walk(order, w); err != nil {
+				return err
+			}
+			call.Order = order
+		}
 	}
 	a.dimCalls[slot] = call
 	return nil

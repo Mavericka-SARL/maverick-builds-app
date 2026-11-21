@@ -201,6 +201,8 @@ func TestUsesMatchAnalyze(t *testing.T) {
 		`CUMULATE(x, y) + DECUMULATE(z)`,
 		`YEARTODATE(PREVIOUS(x)) + QUARTERVALUE(y)`,
 		`LAG(x, k, 0) + LEAD(y, 3, z)`,
+		`LAG(x, k, w, STRICT) + LEAD(y, k, 0, SEMISTRICT) + LAG(z, k, 0, SEMISTRICT) + LEAD(v, k, 0, STRICT)`,
+		`MOVINGSUM(x, -k, 0) + MOVINGSUM(y, 0 - 2, j, MAX)`,
 		`LOOKUP(x, region, "US") + SUMIFS(y, region, "U*") + PREVIOUS(LOOKUP(z, region, "EU"))`,
 		`TIMESUM(PREVIOUS(x))`,
 	} {

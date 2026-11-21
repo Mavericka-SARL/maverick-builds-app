@@ -231,6 +231,30 @@ func scalarCatalogue() []catCase {
 		{`POWER(-8, 1/3)`, fails("#NUM!")},
 		{`SQRT(144)`, num(12)},
 		{`SQRT(-1)`, fails("#NUM!")},
+		{`EXP(LN(5))`, num(5)},
+		{`LN(0)`, fails("#NUM!")},
+		{`LOG(1000)`, num(3)},
+		{`LOG(8, 2)`, num(3)},
+		{`LOG(8, 1)`, fails("#DIV/0!")},
+		{`LOG10(0.01)`, num(-2)},
+		{`ROUND(NORM.S.INV(0.95), 9)`, num(1.644853627)},
+		{`ROUND(NORMSINV(0.95), 9)`, num(1.644853627)},
+		{`NORM.S.INV(1)`, fails("#NUM!")},
+		{`ROUND(NORM.INV(0.9, 100, 15), 7)`, num(119.2232735)},
+		{`ROUND(NORMINV(0.9, 100, 15), 7)`, num(119.2232735)},
+		{`ROUND(NORM.S.DIST(1.96, TRUE), 7)`, num(0.9750021)},
+		{`NORMSDIST(0)`, num(0.5)},
+		{`ROUND(NORM.DIST(115, 100, 15, TRUE), 7)`, num(0.8413447)},
+		{`ROUND(NORMDIST(100, 100, 15, FALSE), 7)`, num(0.0265962)},
+		{`ROUND(STDEV.S(2, 4, 4, 4, 5, 5, 7, 9), 6)`, num(2.13809)},
+		{`ROUND(STDEV(2, 4, 4, 4, 5, 5, 7, 9), 6)`, num(2.13809)},
+		{`STDEV.P(2, 4, 4, 4, 5, 5, 7, 9)`, num(2)},
+		{`STDEVP(2, 4, 4, 4, 5, 5, 7, 9)`, num(2)},
+		{`VAR.P(2, 4, 4, 4, 5, 5, 7, 9)`, num(4)},
+		{`VARP(2, 4, 4, 4, 5, 5, 7, 9)`, num(4)},
+		{`VAR.S(1, 3)`, num(2)},
+		{`VAR(1, 3)`, num(2)},
+		{`STDEV.S(5)`, fails("#DIV/0!")},
 
 		// ── Aggregate over arguments ────────────────────────────────────
 		{`SUM(1, 2, 3)`, num(6)},
@@ -481,7 +505,9 @@ func timeCatalogue() []tsCase {
 		{formula: `MOVINGSUM(sales, -2, 0, MIN)`, pos: 5, num: 4},
 		{formula: `MOVINGSUM(sales, 1, 3, MAX)`, pos: 5, num: 9},
 		{formula: `MOVINGSUM(sales, 1, 0)`, pos: 3, num: 0},
-		{formula: `MOVINGSUM(sales, offsets, 0)`, pos: 3, code: CodeMovingWindowNotLiteral},
+		{formula: `MOVINGSUM(sales, -offsets, 0)`, pos: 3, num: 7},                         // offsets = 1 at pos 3: sales 3..4
+		{formula: `MOVINGSUM(sales, -offsets, 0)`, pos: 4, code: CodeTimeOffsetNotInteger}, // offsets = 1.5
+		{formula: `MOVINGSUM(sales, 1 - offsets, offsets - 1, MAX)`, pos: 1, num: 3},       // offsets = 2: positions 0..2
 		{formula: `MOVINGSUM(sales, -1.5, 0)`, pos: 3, code: CodeTimeOffsetNotInteger},
 		{formula: `CUMULATE(sales)`, pos: 3, num: 10},
 		{formula: `CUMULATE(sales, MONTH(START()) = 7)`, pos: 8, num: 24},
@@ -605,6 +631,9 @@ func dimCatalogue() []catCase {
 		{`AVERAGEIFS(sales, region.currency, "EUR")`, num(5.5)},
 		{`AVERAGEIFS(sales, region.currency, "GBP")`, fails("#DIV/0!")},
 		{`IFERROR(AVERAGEIFS(sales, region.currency, "GBP"), 0)`, num(0)},
+		{`VARIFS(sales, region.currency, "EUR")`, num(40.5)}, // DE 10, FR 1 at A100
+		{`ROUND(STDEVIFS(sales, region.currency, "EUR"), 6)`, num(6.363961)},
+		{`STDEVIFS(sales, region.currency, "USD")`, fails("#DIV/0!")}, // one value
 		{`MINIFS(sales, region.currency, "EUR")`, num(1)},
 		{`MAXIFS(sales, region.currency, "EUR")`, num(10)},
 		{`MAXIFS(sales, region.currency, "GBP")`, num(0)},
@@ -635,6 +664,29 @@ func dimCatalogue() []catCase {
 		{`MEMBERIFS(region.currency, "GBP")`, fails("#N/A")},
 		{`IFNA(MEMBERIFS(region.currency, "GBP"), "none")`, text("none")},
 		{`LOOKUP(sales, region, MEMBERIFS(region.currency, "USD"))`, num(100)},
+		// RANK among DE 10, FR 1, US 100 (product A100); among DE's
+		// products 20, 10, 5, 3 (star*code has no value).
+		{`RANK(sales, region)`, num(2)},
+		{`RANK(sales, product)`, num(2)},
+		{`RANK(sales, product, 1)`, num(3)},
+		{`RANK(sales, product, "asc")`, num(3)},
+		{`RANK(sales, product, "DESC")`, num(2)},
+		{`RANK(sales, product, 0)`, num(2)},
+		{`RANK(sales, product, "up")`, fails("#VALUE!")},
+		{`RANK(sales)`, fails("#VALUE!")},
+		{`RANK(sales, region.currency)`, fails(CodeDimensionArgRequired)},
+		{`RANK(sales * 2, region)`, fails(CodeSourceMustBeMetric)},
+		{`RANK(sales, nope)`, fails("#NAME?")},
+		// RANKIFS over every pair 100, 50, 20, 10, 5, 3, 2, 1; within the
+		// cell's currency (DE 10, FR 1); among the A products (10, 20).
+		{`RANKIFS(sales, region, "*", product, "*")`, num(4)},
+		{`RANKIFS(sales, region, "*", product, "*", 1)`, num(5)},
+		{`RANKIFS(sales, region.currency, region.currency)`, num(1)},
+		{`RANKIFS(sales, region.currency, region.currency, "ASC")`, num(2)},
+		{`RANKIFS(sales, product, "A*")`, num(2)},
+		{`RANKIFS(sales, product, "B*")`, blankV()}, // A100 is not ranked
+		{`RANKIFS(sales, region)`, fails("#VALUE!")},
+		{`IF(RANK(sales, product) <= 2, "top 2", "")`, text("top 2")},
 	}
 }
 
@@ -880,7 +932,7 @@ func TestFormulasManualIndexMatchesEngine(t *testing.T) {
 		t.Fatalf("read the manual's index: %v", err)
 	}
 	listed := map[string]bool{}
-	for _, m := range regexp.MustCompile(`<tr><td>(?:<a href="#[^"]+">)?([A-Z]+)(?:</a>)?</td>`).FindAllStringSubmatch(string(raw), -1) {
+	for _, m := range regexp.MustCompile(`<tr><td>(?:<a href="#[^"]+">)?([A-Z][A-Z0-9.]*)(?:</a>)?</td>`).FindAllStringSubmatch(string(raw), -1) {
 		listed[m[1]] = true
 	}
 	for _, name := range BuiltinNames() {

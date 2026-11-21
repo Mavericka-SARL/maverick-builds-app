@@ -241,7 +241,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.11.21          # a release: the newest is on the Releases page
+git checkout 2026.11.21.1          # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -338,7 +338,7 @@ checked out:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.11.21
+MAVERICKS_RELEASE=2026.11.21.1
 ```
 
 To run changes of your own instead, remove both lines and build from
@@ -580,7 +580,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.11.21
+git fetch --tags && git checkout <new release>       # e.g. 2026.11.21.1
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -650,6 +650,14 @@ containers whose settings changed.
   visitors create their own workspace, see
   [EDITIONS_AND_SIGNUP.md](EDITIONS_AND_SIGNUP.md), and publish your terms and
   privacy notice first ([LEGAL_AND_PRIVACY.md](LEGAL_AND_PRIVACY.md)).
+- **Workbook reconciliation** (Integrations › Workbook reconciliation) compares the values a
+  workbook was saved with out of the box. To compare its other cases (a
+  scenario the workbook calculates after an input changes), the gateway
+  recalculates the workbook with LibreOffice: set `RECONCILE_SOFFICE` to its
+  `soffice` program. The images do not include LibreOffice; install it where
+  the gateway runs (a derived image, or the host for a gateway run outside
+  Docker). Each recalculation runs headless, in a profile of its own, for at
+  most three minutes.
 
 **Changing a host name** takes one more step. Keycloak reads its realm file
 only on first start, so it keeps the old console address as the only place it
@@ -802,7 +810,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.11.21`; set the release you deploy, or, if you built your
+   release `2026.11.21.1`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -1001,7 +1009,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.21     # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.21.1     # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

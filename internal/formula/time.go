@@ -83,9 +83,9 @@ const (
 	// a decimal literal (refused at save), or a dynamic LAG/LEAD/OFFSET
 	// offset that does not evaluate to one (the cell's error at run time).
 	CodeTimeOffsetNotInteger = "TIME_OFFSET_NOT_INTEGER"
-	// CodeMovingWindowNotLiteral: a MOVINGSUM start or end that is not an
-	// integer literal. The window must be static so its read range is
-	// knowable at save.
+	// CodeMovingWindowNotLiteral: IntegerLiteral's refusal of a node that is
+	// not an integer literal. Since 2026-11-21 a MOVINGSUM bound may be an
+	// expression (windowBound), so no formula reaches it through MOVINGSUM.
 	CodeMovingWindowNotLiteral = "MOVING_WINDOW_NOT_LITERAL"
 	CodeTemporalCycleNotCausal = "TEMPORAL_CYCLE_NOT_CAUSAL"
 	CodeTimeDimensionMismatch  = "TIME_DIMENSION_MISMATCH"
@@ -182,11 +182,10 @@ func IsOffsetLiteral(node Node) bool {
 
 // IntegerLiteral extracts an integer offset argument that must be an
 // integer literal (optionally negated), so dependency ranges and
-// recurrence direction are statically knowable. MOVINGSUM windows always
-// are; LAG/LEAD/OFFSET use it for a literal offset only. A non-literal is
-// MOVING_WINDOW_NOT_LITERAL (only a MOVINGSUM window reaches that: callers
-// route a dynamic LAG/LEAD/OFFSET offset elsewhere first); a decimal
-// literal is TIME_OFFSET_NOT_INTEGER.
+// recurrence direction are statically knowable. Callers use it for a
+// literal offset or MOVINGSUM bound only (IsOffsetLiteral first); a
+// non-literal is MOVING_WINDOW_NOT_LITERAL, a decimal literal
+// TIME_OFFSET_NOT_INTEGER.
 func IntegerLiteral(node Node, fn string) (int, *FormulaError) {
 	sign := 1.0
 	if u, ok := node.(*UnaryExpr); ok && u.Op == "-" {
@@ -349,16 +348,16 @@ func fnMOVINGSUM(ctx *EvalContext, args []Node) Value {
 	last := len(t.Periods) - 1
 	from, to := 0, last
 	if len(args) >= 2 {
-		start, ferr := IntegerLiteral(args[1], fn)
-		if ferr != nil {
-			return ErrorVal(ferr)
+		start, errv := windowBound(ctx, args[1], fn)
+		if errv.IsError() {
+			return errv
 		}
 		from = t.Position + start
 	}
 	if len(args) >= 3 {
-		end, ferr := IntegerLiteral(args[2], fn)
-		if ferr != nil {
-			return ErrorVal(ferr)
+		end, errv := windowBound(ctx, args[2], fn)
+		if errv.IsError() {
+			return errv
 		}
 		to = t.Position + end
 	}
@@ -370,6 +369,36 @@ func fnMOVINGSUM(ctx *EvalContext, args []Node) Value {
 		}
 	}
 	return reduceWindow(t, args[0], from, to, method)
+}
+
+// windowBound is a MOVINGSUM start or end: a whole-number literal, or an
+// expression evaluated at the current period (2026-11-21: a window as long as
+// an item's lead time). A fraction is TIME_OFFSET_NOT_INTEGER, as a LAG
+// offset; a blank reads as 0.
+func windowBound(ctx *EvalContext, node Node, fn string) (int, Value) {
+	if IsOffsetLiteral(node) {
+		k, ferr := IntegerLiteral(node, fn)
+		if ferr != nil {
+			return 0, ErrorVal(ferr)
+		}
+		return k, Value{}
+	}
+	v := ctx.eval(node)
+	if v.IsError() {
+		return 0, v
+	}
+	if v.IsBlank() {
+		return 0, Value{}
+	}
+	n, ok := v.Number()
+	if !ok {
+		return 0, ErrorVal(ErrValue)
+	}
+	if n != math.Trunc(n) || math.IsInf(n, 0) || math.IsNaN(n) {
+		return 0, ErrorVal(&FormulaError{Code: CodeTimeOffsetNotInteger,
+			Message: fmt.Sprintf("%s: the window bound must be a whole number, got %v", fn, n)})
+	}
+	return int(n), Value{}
 }
 
 // reduceWindow reduces source over the inclusive position window from..to

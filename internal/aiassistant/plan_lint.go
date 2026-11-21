@@ -362,7 +362,7 @@ func SelfCriteriaSums(text string) []SelfCriteriaSum {
 			var source formula.Node
 			var pairs []formula.Node
 			switch strings.ToUpper(v.Name) {
-			case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
+			case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS", "STDEVIFS", "VARIFS":
 				if len(v.Args) >= 3 && len(v.Args)%2 == 1 {
 					source, pairs = v.Args[0], v.Args[1:]
 				}
