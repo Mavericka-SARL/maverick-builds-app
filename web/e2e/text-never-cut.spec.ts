@@ -98,7 +98,11 @@ test("a bar chart's category and value labels are whole", async ({ page }) => {
     expect(t.lines.join("\n").replace(/-\n/g, "").replace(/\n/g, " ")).toBe(labels[i]);
     expect(t.bottom).toBeLessThanOrEqual(box!.y + box!.height + 1);
   }
-  const tops = await svg.locator(".recharts-label-list text").evaluateAll((ts) => ts.map((t) => t.getBoundingClientRect().top));
+  // The values are drawn once the bars' animation ends: on a slow runner,
+  // after the category labels (the public CI read none, 2026-11-21).
+  const values = svg.locator(".recharts-label-list text");
+  await expect(values.first()).toBeVisible({ timeout: 15_000 });
+  const tops = await values.evaluateAll((ts) => ts.map((t) => t.getBoundingClientRect().top));
   expect(tops.length).toBeGreaterThan(0);
   for (const top of tops) expect(top).toBeGreaterThanOrEqual(box!.y);
 });
