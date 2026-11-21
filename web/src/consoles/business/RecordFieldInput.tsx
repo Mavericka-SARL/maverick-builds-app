@@ -37,6 +37,7 @@ function toDimFormMembers(allMembers: DevDimensionMember[]): DimFormMember[] {
 // picker opens that table's form.
 export function FormFieldInput({
   f, value, onChange, dims, metrics, id, readOnlyMembersOut, onCreateLinked, linkedLabel,
+  readOnly, readOnlyText, saved, moves, people, named, inactive,
 }: {
   f: FormField;
   value: unknown;
@@ -47,8 +48,38 @@ export function FormFieldInput({
   readOnlyMembersOut?: boolean;
   onCreateLinked?: () => void;
   linkedLabel?: string;
+  /** Shown, not changed: a locked record's other fields, a date the server stamps. */
+  readOnly?: boolean;
+  /** What a read-only field reads ("" shows the value). */
+  readOnlyText?: string;
+  /** The record's saved value, always offered beside its moves. */
+  saved?: unknown;
+  /** A field with transitions: the values the person may move it to from saved. */
+  moves?: string[];
+  /** A person field: the people it may name, and every person's name by id. */
+  people?: { id: string; name: string }[];
+  named?: Record<string, string>;
+  /** A dimension field: members no longer offered for a new choice. */
+  inactive?: string[];
 }) {
   const dateFormat = useDateFormat();
+  if (readOnly) {
+    return <TextInput id={id} value={readOnlyText ?? String(value ?? "")} readOnly disabled style={{ width: "100%" }} />;
+  }
+  // A move keeps the saved value and offers the moves from it; a field
+  // without transitions (moves undefined) offers every value.
+  const offered = (v: string) => moves === undefined || v === String(saved ?? "") || moves.includes(v);
+  if (f.type === "person") {
+    const current = String(value ?? "");
+    const list = people ?? [];
+    return (
+      <Select id={id} value={current} onChange={e => onChange(e.target.value)} style={{ width: "100%" }} aria-label={f.label || f.name}>
+        <option value="">— nobody —</option>
+        {current && !list.some(p => p.id === current) && <option value={current}>{named?.[current] ?? "Someone no longer offered"}</option>}
+        {list.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </Select>
+    );
+  }
   if (f.type === "autocode") {
     // The server gives the code; nobody types it.
     return <TextInput id={id} value={value ? String(value) : "Given when the record is saved"} readOnly disabled style={{ width: "100%" }} />;
@@ -57,8 +88,10 @@ export function FormFieldInput({
     const dim = dims.find(d => d.id === f.dimension_id) ?? dims.find(d => d.name === f.dimension_id);
     const allMembers = toDimFormMembers(dim?.members ?? []);
     const allowedSet = f.allowed_members && f.allowed_members.length > 0 ? new Set(f.allowed_members) : null;
-    const selectable = allowedSet || readOnlyMembersOut
+    const offInactive = (code: string) => !inactive?.includes(code) || code === String(saved ?? "");
+    const selectable = allowedSet || readOnlyMembersOut || moves !== undefined || (inactive && inactive.length > 0)
       ? (m: DimFormMember) => (!allowedSet || allowedSet.has(m.code)) && !(readOnlyMembersOut && m.access === "read")
+        && offered(m.code) && offInactive(m.code)
       : undefined;
     const picker = (
       <HierarchicalMemberSelect
@@ -108,7 +141,7 @@ export function FormFieldInput({
     return (
       <Select id={id} value={String(value ?? "")} onChange={e => onChange(e.target.value)} style={{ width: "100%" }}>
         <option value="">Select…</option>
-        {(f.options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
+        {(f.options ?? []).filter(offered).map(o => <option key={o} value={o}>{o}</option>)}
       </Select>
     );
   }

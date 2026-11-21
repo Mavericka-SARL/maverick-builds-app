@@ -127,13 +127,15 @@ func (h *handler) checkRecordSave(ctx context.Context, scope formRecordScope, re
 	if err != nil {
 		return 0, "", nil, err
 	}
+	view.SetAdmin(scope.admin)
 	var current map[string]any
 	recordID, creator := "", scope.userID
 	if rec != nil {
 		current, recordID = rec.Data, rec.ID
 		// A legacy record with no creator posts within the access of
-		// whoever changes it.
-		if rec.CreatedBy != nil {
+		// whoever changes it; so does every record of an open table
+		// (record_scope "open", migration 193): its saves are the saver's.
+		if rec.CreatedBy != nil && !scope.form.IsOpen() {
 			creator = *rec.CreatedBy
 		}
 	}

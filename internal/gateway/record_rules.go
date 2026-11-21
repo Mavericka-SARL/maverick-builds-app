@@ -9,6 +9,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
@@ -52,7 +53,9 @@ func (h *handler) approvalRefusal(ctx context.Context, act *actor, instanceID st
 			return 0, "", err
 		}
 		creator := act.UserID
-		if rec.CreatedBy != nil {
+		// An open table's record posts within the access of whoever saves
+		// it — here the approver (record_scope "open", migration 193).
+		if rec.CreatedBy != nil && !form.IsOpen() {
 			creator = *rec.CreatedBy
 		}
 		code, msg, err := h.postingRefusal(ctx, creator, creator == act.UserID, form, rec.ID, &recordState{Status: crudapp.StatusApproved, Data: rec.Data})
@@ -65,3 +68,8 @@ func (h *handler) approvalRefusal(ctx context.Context, act *actor, instanceID st
 	}
 	return 0, "", nil
 }
+
+// errRecordChangedSince answers a save that sent the time it read the
+// record at (expected_updated_at) when someone changed it since: 409, and
+// nothing is written over their change.
+var errRecordChangedSince = errors.New("someone changed this record since you opened it: reload it to see their change, then make yours")

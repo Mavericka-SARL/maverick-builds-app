@@ -428,6 +428,9 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 		}
 	}
 
+	if RebuiltPostings(ctx) {
+		return "", nil // the approvals that came with the values: see WithRebuiltPostings
+	}
 	if len(uniqueMembers) > 0 {
 		locked, lockReason, err := WorkflowLockReasonForMetrics(ctx, pool, modelID, uniqueMembers, metricIDs)
 		if err != nil {

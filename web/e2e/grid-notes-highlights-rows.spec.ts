@@ -93,8 +93,15 @@ test("notes, clears, highlights and planner-kept rows", async ({ page }) => {
   await expect.poll(() => calls.filter(c => c.url === "/api/cells").length).toBe(1);
   expect(calls[0].body).toMatchObject({ metric_id: "m-note", text: "Owner: K. Weber", dim_codes: { [DIM_ID]: "STRAT-002" } });
 
+  // A long note shows whole: its box wraps and grows, nothing hidden
+  // (2026-11-20: a fixed 200px box cut a scenario's description). Put back
+  // as it was, it writes nothing.
+  await note.fill("Sales -15%, slower collections (42 days, sensitive invoices +14 days, 90% realised), suppliers at 21 days, and a credit line drawn in week 6");
+  expect(await note.evaluate((e: HTMLTextAreaElement) => e.scrollHeight <= e.clientHeight + 2 && e.scrollWidth <= e.clientWidth + 2)).toBe(true);
+  await note.fill("Retailer confirmed the listing");
+
   // Emptying a number clears the cell — no value, not 0.
-  const amount = row1.locator("input.mvx-cell-input").nth(1);
+  const amount = row1.locator("input.mvx-cell-input[data-metric=\"m-amount\"]");
   await amount.fill("");
   await amount.press("Enter");
   await expect.poll(() => calls.filter(c => c.url === "/api/cells").length).toBe(2);

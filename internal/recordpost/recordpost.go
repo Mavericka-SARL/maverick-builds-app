@@ -159,11 +159,17 @@ func isForeignKeyViolation(err error) bool {
 // read once per dimension for the whole file.
 type MemberCache struct {
 	dims map[string]*dimMembers
+	// choosable: the people each person field may name; inactiveCodes:
+	// the members each dimension's keeping table marks inactive
+	// (field_rules.go). Read on first use only.
+	choosable     map[string][]Person
+	inactiveCodes map[string]map[string]bool
 }
 
 type dimMembers struct {
 	leaf    map[string]bool     // code → has no children
 	byLabel map[string][]string // label → the codes of the members with it
+	label   map[string]string   // code → label
 	// periods: a time dimension's leaf periods, narrowest first, for a
 	// field given a date (timedim.DayOf).
 	periods []leafPeriod
@@ -191,7 +197,7 @@ func (c *MemberCache) load(ctx context.Context, ps *Poster, dimID string) (*dimM
 		return nil, err
 	}
 	defer rows.Close()
-	m := &dimMembers{leaf: map[string]bool{}, byLabel: map[string][]string{}}
+	m := &dimMembers{leaf: map[string]bool{}, byLabel: map[string][]string{}, label: map[string]string{}}
 	for rows.Next() {
 		var code, label string
 		var leaf bool
@@ -201,6 +207,7 @@ func (c *MemberCache) load(ctx context.Context, ps *Poster, dimID string) (*dimM
 		m.leaf[code] = leaf
 		if label != "" {
 			m.byLabel[label] = append(m.byLabel[label], code)
+			m.label[code] = label
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -270,6 +277,11 @@ type AccessView struct {
 	// hiddenMetricNames: the names and labels of the metrics of the table's
 	// revision hidden from the person.
 	hiddenMetricNames []string
+	// admin: the person administers the table's application (SetAdmin);
+	// heldRoles: which of the roles the table's transitions name they hold
+	// (field_rules.go). Both only matter to a table with transitions.
+	admin     bool
+	heldRoles map[string]bool
 }
 
 // NarrowsForm reports whether the view keeps any member of form's
@@ -374,6 +386,9 @@ func (ps *Poster) AccessViewFor(ctx context.Context, userID string, form *crudap
 			return nil, err
 		}
 	}
+	if err := ps.resolveTransitionRoles(ctx, v, userID, form); err != nil {
+		return nil, err
+	}
 	return v, nil
 }
 
@@ -390,9 +405,13 @@ func (v *AccessView) Visibility(form *crudapp.FormDef, reach, admin bool, userID
 			vis.Nothing = true
 		}
 	}
+	// An open table (record_scope "open", migration 193): members' access
+	// rules do not narrow its records; a metric field hidden from the
+	// person stays withheld.
+	open := form.IsOpen()
 	// A table keeping a dimension: a record is the member its code names,
 	// hidden with it.
-	if form.KeepsDimension() {
+	if form.KeepsDimension() && !open {
 		if codes := v.hiddenCodes[form.KeepsDimensionID]; len(codes) > 0 {
 			vis.HiddenCodes = map[string][]string{form.CodeField().Name: slices.Sorted(maps.Keys(codes))}
 		}
@@ -400,7 +419,7 @@ func (v *AccessView) Visibility(form *crudapp.FormDef, reach, admin bool, userID
 	for _, f := range form.Fields {
 		switch {
 		case f.Type == "dimension" && f.DimensionID != "":
-			if codes := v.hiddenCodes[f.DimensionID]; len(codes) > 0 {
+			if codes := v.hiddenCodes[f.DimensionID]; len(codes) > 0 && !open {
 				if vis.HiddenCodes == nil {
 					vis.HiddenCodes = map[string][]string{}
 				}
@@ -441,7 +460,7 @@ func (ps *Poster) VisibilityFor(ctx context.Context, view *AccessView, form *cru
 
 func (ps *Poster) linkedVisibility(ctx context.Context, view *AccessView, form *crudapp.FormDef, reach, admin bool, userID string, seen map[string]bool) (crudapp.Visibility, error) {
 	vis := view.Visibility(form, reach, admin, userID)
-	if vis.Nothing || len(seen) > maxLinkDepth {
+	if vis.Nothing || len(seen) > maxLinkDepth || form.IsOpen() {
 		return vis, nil
 	}
 	keepers, err := ps.KeepersOf(ctx, form)
@@ -536,11 +555,18 @@ func (v *AccessView) HiddenCode(dimID, code string) bool { return v.hiddenCodes[
 // member read-only for the view's person ("" when none is): in a table
 // everyone edits, such a record is theirs to see, not to change.
 func (v *AccessView) ReadOnlyMember(form *crudapp.FormDef, data map[string]any) string {
-	if len(v.readCodes) == 0 {
+	// In an open table a record naming a member hidden from the person is
+	// theirs to see, not to change, as one naming a read-only member is: its
+	// save would post where they may not write.
+	open := form.IsOpen()
+	if len(v.readCodes) == 0 && (!open || len(v.hiddenCodes) == 0) {
 		return ""
 	}
+	not := func(dimID, code string) bool {
+		return v.readCodes[dimID][code] || open && v.hiddenCodes[dimID][code]
+	}
 	if form.KeepsDimension() {
-		if code := form.MemberCode(data); code != "" && v.readCodes[form.KeepsDimensionID][code] {
+		if code := form.MemberCode(data); code != "" && not(form.KeepsDimensionID, code) {
 			return firstNonEmpty(form.CodeField().Label, form.CodeField().Name)
 		}
 	}
@@ -548,7 +574,7 @@ func (v *AccessView) ReadOnlyMember(form *crudapp.FormDef, data map[string]any) 
 		if f.Type != "dimension" || f.DimensionID == "" {
 			continue
 		}
-		if s, ok := data[f.Name].(string); ok && v.readCodes[f.DimensionID][s] {
+		if s, ok := data[f.Name].(string); ok && not(f.DimensionID, s) {
 			return firstNonEmpty(f.Label, f.Name)
 		}
 	}
@@ -657,6 +683,16 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 				continue
 			}
 			data[f.Name] = u
+		case f.Type == crudapp.FieldPerson:
+			id, msg, err := ps.personValue(ctx, form, f, v, leaves)
+			if err != nil {
+				return nil, err
+			}
+			if msg != "" {
+				bad(f, "%s", msg)
+				continue
+			}
+			data[f.Name] = id
 		case f.Type == "dimension" && f.DimensionID != "":
 			raw := fmt.Sprintf("%v", v)
 			// A member is named by its code, or by its label when no code
@@ -680,6 +716,10 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			}
 			if msg != "" {
 				bad(f, "%s", msg)
+			} else if off, err := leaves.inactive(ctx, ps, form, f.DimensionID, code); err != nil {
+				return nil, err
+			} else if off {
+				bad(f, "%q is inactive: it stays on the records that name it and is not chosen for others", raw)
 			}
 			data[f.Name] = code
 		case f.Type == "metric":
@@ -713,6 +753,17 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 				bad(missing, "%s is required when %s is filled in", firstNonEmpty(missing.Label, missing.Name), firstNonEmpty(filled.Label, filled.Name))
 			}
 		}
+		for _, p := range crudapp.RequiredWhenMissing(form, data, leaves.valueLabel(ctx, ps)) {
+			problems = append(problems, FieldProblem{Field: p.Field, Message: p.Message})
+		}
+	}
+	// The table's field rules (crudapp/field_rules.go): moves, locks and
+	// stamped dates. A table without them is left as it was.
+	if form.HasFieldRules() {
+		for _, p := range crudapp.RuleProblems(form, current, data, view.Holds, leaves.valueLabel(ctx, ps)) {
+			problems = append(problems, FieldProblem{Field: p.Field, Message: p.Message})
+		}
+		crudapp.ApplyStamps(form, current, data, time.Now().UTC().Format("2006-01-02"))
 	}
 	return problems, nil
 }
@@ -1410,8 +1461,11 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 // left the grid. Each record posts as Apply posts it (its status, its
 // value, leaf members, within its creator's access); the totals stay as
 // they arrived until the next save rebuilds them from every record, as in
-// the revision they came from. It returns how many records it went through.
+// the revision they came from. The approvals that came with the revision
+// do not refuse those postings (writeguard.WithRebuiltPostings). It
+// returns how many records it went through.
 func (ps *Poster) RebuildPostings(ctx context.Context, modelID, revisionID, userID string) (int, error) {
+	ctx = writeguard.WithRebuiltPostings(ctx)
 	ids := func(sql string, args ...any) ([]string, error) {
 		rows, err := ps.db(ctx).Query(ctx, sql, args...)
 		if err != nil {

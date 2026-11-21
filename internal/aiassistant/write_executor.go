@@ -3270,7 +3270,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			),
 			new_forms AS (
 				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
+					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes)
 				SELECT f.model_id, f.name, f.label,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -3282,7 +3282,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					), '[]'::jsonb),
 					$2::uuid, f.own_records_only,
 					f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-					f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code
+					f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes
 				FROM model.form_def f
 				WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 				RETURNING id AS new_id, name
@@ -3992,13 +3992,22 @@ type tableSettingParams struct {
 	EditAccess          *string `json:"edit_access"`
 	// CreateRoles: the roles whose people may add records; [] for anyone.
 	CreateRoles *[]string `json:"create_roles"`
+	// DeleteAccess "admins": only administrators (and editors holding one
+	// of DeleteRoles) delete records; "" as before.
+	DeleteAccess *string   `json:"delete_access"`
+	DeleteRoles  *[]string `json:"delete_roles"`
+	// RecordScope "open": everyone sees every record; ExistingCodes: a file
+	// row naming an auto code is refused ("refuse") or updates ("update").
+	RecordScope   *string `json:"record_scope"`
+	ExistingCodes *string `json:"existing_codes"`
 }
 
 // applyTableSettings resolves p's dimension in revID and saves the
 // settings on form; it describes what it set for the tool's answer.
 func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.FormDef, revID string, p tableSettingParams) (string, error) {
 	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess, CreateRoles: p.CreateRoles,
-		MemberLabelWithCode: p.MemberLabelWithCode}
+		MemberLabelWithCode: p.MemberLabelWithCode, DeleteAccess: p.DeleteAccess, DeleteRoles: p.DeleteRoles,
+		RecordScope: p.RecordScope, ExistingCodes: p.ExistingCodes}
 	if p.KeepsDimension != nil {
 		ref := strings.TrimSpace(*p.KeepsDimension)
 		id := ""
@@ -4013,7 +4022,8 @@ func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.Fo
 		}
 		s.KeepsDimensionID = &id
 	}
-	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil && s.EditAccess == nil && s.CreateRoles == nil {
+	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil && s.EditAccess == nil && s.CreateRoles == nil && s.DeleteAccess == nil && s.DeleteRoles == nil &&
+		s.RecordScope == nil && s.ExistingCodes == nil {
 		return "", nil
 	}
 	added, err := recordpost.ApplyTableSettingsOn(ctx, e.pool, form, s)
@@ -4033,6 +4043,26 @@ func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.Fo
 		} else {
 			note += ", records added only by " + strings.Join(form.CreateRoles, ", ") + " and administrators"
 		}
+	}
+	if s.DeleteAccess != nil || s.DeleteRoles != nil {
+		switch {
+		case form.DeleteAccess != crudapp.DeleteAdmins:
+			note += ", records deleted by whoever may change them"
+		case len(form.DeleteRoles) == 0:
+			note += ", records deleted only by administrators"
+		default:
+			note += ", records deleted only by administrators and " + strings.Join(form.DeleteRoles, ", ")
+		}
+	}
+	if s.RecordScope != nil {
+		if form.IsOpen() {
+			note += ", every record seen by everyone who opens the table (saves within the saver's access)"
+		} else {
+			note += ", records narrowed by members' access rules"
+		}
+	}
+	if s.ExistingCodes != nil {
+		note += ", a file row naming a code " + map[string]string{crudapp.CodesRefuse: "refused", crudapp.CodesUpdate: "updates that record"}[form.ExistingCodes]
 	}
 	return note, nil
 }

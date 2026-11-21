@@ -970,6 +970,15 @@ type Invoker interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetRecordChoices invokes getRecordChoices operation.
+	//
+	// For each person field, the people it may name — names only, never e-mail addresses: the holders
+	// of the field's roles, or everyone who reaches the application; the names of every person the
+	// table's records name; and for each dimension field, the members its keeping table marks inactive
+	// (offered for no new choice). Empty for a table with neither.
+	//
+	// GET /api/forms/{id}/choices
+	GetRecordChoices(ctx context.Context, params GetRecordChoicesParams) (GetRecordChoicesRes, error)
 	// GetRecordDeletePlan invokes getRecordDeletePlan operation.
 	//
 	// What deleting a record would do — refused, or the records deleted and cleared with it.
@@ -19112,6 +19121,135 @@ func (c *Client) sendGetNotificationSettings(ctx context.Context) (res GetNotifi
 
 	stage = "DecodeResponse"
 	result, err := decodeGetNotificationSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetRecordChoices invokes getRecordChoices operation.
+//
+// For each person field, the people it may name — names only, never e-mail addresses: the holders
+// of the field's roles, or everyone who reaches the application; the names of every person the
+// table's records name; and for each dimension field, the members its keeping table marks inactive
+// (offered for no new choice). Empty for a table with neither.
+//
+// GET /api/forms/{id}/choices
+func (c *Client) GetRecordChoices(ctx context.Context, params GetRecordChoicesParams) (GetRecordChoicesRes, error) {
+	res, err := c.sendGetRecordChoices(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetRecordChoices(ctx context.Context, params GetRecordChoicesParams) (res GetRecordChoicesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getRecordChoices"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/forms/{id}/choices"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetRecordChoicesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/forms/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/choices"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetRecordChoicesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetRecordChoicesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

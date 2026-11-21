@@ -84,6 +84,8 @@ func (f *FormDef) Columns() []Column {
 			c.Kind = KindDate
 		case fd.Type == "boolean":
 			c.Kind = KindBoolean
+		case fd.Type == FieldPerson:
+			c.Kind = KindUser // a filter may say "me"
 		case fd.Type == "dimension":
 			c.DimensionID = fd.DimensionID
 		}

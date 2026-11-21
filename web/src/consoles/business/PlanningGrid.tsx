@@ -28,8 +28,9 @@ import { cellAt, cellsBetween, copyText, editableIn, parseClipboard, pastedDate,
 // widget's own overflow container can't clip it.
 // Two exports (2026-11-20: one Export gave a report of what is shown on one
 // grid and a load file on the next): "Export values" writes every metric as
-// shown, by label; "Export for re-import" the input metrics only, by name, in
-// the shape the import reads back — offered where the grid has any.
+// shown, by label; "Export to edit and upload" (owner, 2026-11-20: "Export
+// for re-import" read as jargon) the input metrics only, by name, in the shape
+// the import reads back — offered where the grid has any.
 function GridActionsMenu({
   canExport,
   canExportForImport,
@@ -99,11 +100,11 @@ function GridActionsMenu({
           {canExport && canExportForImport && (
             <button
               type="button" role="menuitem" style={itemStyle} disabled={exporting}
-              title="The input metrics only, in the layout the import reads back"
+              title="The input metrics only, in the layout the grid's import reads back: change them in a spreadsheet and upload the file again"
               onClick={() => { onExport(""); setMenuPos(null); }}
             >
               <Download size={14} />
-              Export for re-import
+              Export to edit and upload
             </button>
           )}
           <button
@@ -1867,17 +1868,22 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
     if (isText) {
       // A note (a comment, an owner): typed as text; emptied, it clears.
+      // The box fills its column, wraps and grows with its text (owner,
+      // 2026-11-20: a fixed 200px box cut a scenario's description); Enter
+      // still saves.
       const isActive = editing[key] !== undefined;
       return (
-        <td className={tone || undefined} style={{ ...td, textAlign: "left", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title={note ? `${note}\n\nRight-click for history` : "Right-click for history"}>
-          <input
+        <td className={tone || undefined} style={{ ...td, textAlign: "left", paddingTop: 4, paddingRight: 5, paddingBottom: 4, paddingLeft: 5, borderLeft, minWidth: 200, maxWidth: 420 }} onContextMenu={(e) => openHistory(e, m, fc)} title={note ? `${note}\n\nRight-click for history` : "Right-click for history"}>
+          {/* The whole note shows: the box grows with it (owner, 2026-11-21:
+              text is never cut). Enter saves, as in the other cells. */}
+          <GrowingText
             value={isActive ? editing[key] : note} placeholder="—"
             aria-label={`${m.label ?? m.name} — note`}
             {...pasteAttrs("text", note)}
             className={["mvx-cell-input", "mvx-cell-input--text", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
             onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
             onBlur={() => commitCell(m, fc)}
-            onKeyDown={e => e.key === "Enter" && commitCell(m, fc)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitCell(m, fc); } }}
           />
         </td>
       );
@@ -2403,7 +2409,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
               none, and the hint promised a click that did nothing. */}
           {pushSync && rowDims.length + colDims.length > 0 && <span>Click a row or column label to select it in synced widgets</span>}
           {followed.length > 0 && <span>{followed.some(f => f.shown === 0) ? "Nothing here is under the dashboard's selection" : "Shows what is under the dashboard's selection"}</span>}
-          {gridMetrics.some(m => m.is_input) && <span>Shift+click selects cells; ⌘/Ctrl+C and ⌘/Ctrl+V copy and paste them, also from a spreadsheet</span>}
+          {gridMetrics.some(m => m.is_input) && <span>Shift+click selects cells; {COPY_PASTE_KEYS} copy and paste them, also from a spreadsheet</span>}
           </>}
           {!toolbarRow && (
             <span style={{ marginLeft: "auto" }}>
@@ -2518,7 +2524,31 @@ function isTextMetric(m: Metric): boolean {
   return m.format === "text";
 }
 
-const textCellStyle: React.CSSProperties = { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+// The copy/paste keys of the reader's own keyboard (2026-11-20: one hint
+// read "⌘/Ctrl+C" to everyone). The keys work either way: the grid copies
+// and pastes on the browser's own copy and paste.
+const COPY_PASTE_KEYS = (() => {
+  const nav = typeof navigator === "undefined" ? undefined : navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = nav?.userAgentData?.platform || nav?.platform || nav?.userAgent || "";
+  return /mac|iphone|ipad/i.test(platform) ? "⌘C and ⌘V" : "Ctrl+C and Ctrl+V";
+})();
+
+// A text cell shows its whole text, wrapped: it is never cut (owner,
+// 2026-11-21). The column grows to a reading width, then the text wraps.
+const textCellStyle: React.CSSProperties = { minWidth: 200, maxWidth: 420, whiteSpace: "pre-wrap", overflowWrap: "anywhere" };
+
+/** A text box as tall as its text, wrapping at the cell's width: a note is read whole while it is typed. */
+function GrowingText(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // scrollHeight leaves out the box's borders: add them, or its last line is clipped.
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [props.value]);
+  return <textarea ref={ref} rows={1} {...props} />;
+}
 
 // overlay applies pending writes over the server's cells: a value replaces
 // the cell, null (a clear) removes it.

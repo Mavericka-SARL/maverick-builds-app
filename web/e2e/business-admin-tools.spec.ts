@@ -48,7 +48,7 @@ test("a business admin checks, then copies one member's values into another", as
     calls.push(body);
     await r.fulfill(json({ cells: 3, dry_run: !!body.dry_run }));
   });
-  await open(page, "Copy values");
+  await open(page, "Manage values");
   await page.getByLabel("Dimension").selectOption({ index: 1 });
   await page.getByLabel("Copy from").selectOption({ index: 1 });
   await page.getByLabel("Copy to").selectOption({ index: 1 });
@@ -68,7 +68,7 @@ test("a copy can be narrowed to members of another dimension and to some metrics
     calls.push(body);
     await r.fulfill(json({ cells: 2, dry_run: !!body.dry_run }));
   });
-  await open(page, "Copy values");
+  await open(page, "Manage values");
   await page.getByLabel("Dimension").selectOption({ index: 1 });
   await page.getByLabel("Copy from").selectOption({ index: 1 });
   await page.getByLabel("Copy to").selectOption({ index: 1 });

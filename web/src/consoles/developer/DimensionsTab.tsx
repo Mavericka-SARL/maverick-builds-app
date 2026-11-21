@@ -723,7 +723,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
             <th style={{ textAlign: "left" }}>Member</th>
             <th style={{ width: 90 }}>Code</th>
             {showProps && propKeys.map(k => (
-              <th key={k} style={{ textAlign: "left", whiteSpace: "nowrap", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }} title={k}>{k}</th>
+              <th key={k} style={{ textAlign: "left", maxWidth: 180, whiteSpace: "normal", overflowWrap: "anywhere" }} title={k}>{k}</th>
             ))}
             <th style={{ width: 64, textAlign: "center" }}>Children</th>
             <th style={{ width: 166 }}>Actions</th>
@@ -792,13 +792,12 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
                           <span style={{ display: "inline-block", width: 20, flexShrink: 0 }} />
                         )}
                         {/* Label */}
-                        <span style={{ fontWeight: node.level === 0 ? 600 : 400, color: "var(--color-text)",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ fontWeight: node.level === 0 ? 600 : 400, color: "var(--color-text)", whiteSpace: "normal", overflowWrap: "anywhere" }}>
                           {node.label}
                         </span>
                         {node.formula && (
                           <span className="mvx-admin-mono mvx-admin-muted" title="Calculated member: computed from the other members for every metric"
-                            style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            style={{ fontSize: 11, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                             = {node.formula}
                           </span>
                         )}
@@ -833,7 +832,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
                           style={{ width: "100%", fontSize: 12 }}
                         />
                       ) : (
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                        <span style={{ display: "block", whiteSpace: "normal", overflowWrap: "anywhere" }}>
                           {node.properties?.[k] ?? <span className="mvx-admin-muted">—</span>}
                         </span>
                       )}

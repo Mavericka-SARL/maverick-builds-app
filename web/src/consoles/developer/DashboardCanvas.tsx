@@ -995,7 +995,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                         {widgetTypeLabel(w.widget_type).toUpperCase()}
                       </span>
                       {widgetSourceLabel(w) && (
-                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-strong)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-strong)", flex: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                           {widgetSourceLabel(w)}
                         </span>
                       )}
@@ -1935,7 +1935,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                           <span className="mvx-admin-mono" style={{ fontWeight: 700, color: item.isMetrics ? "var(--color-brand-600)" : "var(--color-text-subtle)", width: 14, flexShrink: 0 }}>
                             {item.isMetrics ? "fx" : "≡"}
                           </span>
-                          <span style={{ flex: 1, fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ flex: 1, fontSize: 12, fontWeight: 500, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                             {item.label}
                           </span>
                           <Select

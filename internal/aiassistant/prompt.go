@@ -743,12 +743,20 @@ save — requests, expenses, deals — shown on dashboards by a records widget. 
 the table's field list on update_form_def if you supply it — a whole-list replace, not a per-field patch: call
 get_form first and resupply every field you keep plus the new one (or omit "fields" to leave them untouched).
 Each field: "name" (unique within the table), "label", "type" (text | longtext | url | number | select | date |
-boolean | dimension | metric | autocode | status), "required". Optional on any field: "default" (a new record's
+boolean | dimension | metric | autocode | status | person), "required". Optional on any field: "default" (a new record's
 value; a date's may be "today"), "required_with": "<other field>" (filled in together: either asks for both),
 "hidden": true (kept, not shown), "core": true (cannot be removed while marked), "history": true (each change is
 kept and shown with the record — a deal's stage history). A number may have "format": "money", and accepted values "min", "max", "whole": true (a record, file
 row or connector row outside them is refused, naming the field — a CRM intent 1–5, an FTE 0–1, an amount ≥ 0). A date may be a
-"deadline": true — shown overdue once past, unless "done_field" holds one of "done_values". A "select" field needs "options": [...]. A "dimension"
+"deadline": true — shown overdue once past, unless "done_field" holds one of "done_values". Opt-in rules (a ticket's life; none: saves as
+before): a select or dimension field's "transitions": [{"from": [values], "to": [values], "roles": [<role names>]}] are the moves its
+value may make once set (roles: only their holders and administrators make that move), and "locks_in": [values] makes the record
+read-only while it holds one (only that field moves — a closed ticket is reopened); "required_when": {"field": "<other>", "is": [values]}
+(or "is_not") requires a field in some states (a resolution once Resolved); a date's "stamp_when": {...the same} is set by the server
+to the day the record comes to meet it (resolved on); a boolean "active_flag": true in a table keeping a dimension marks its member
+inactive when unticked (kept where named, not offered again). A "person" field names a user of the application ("roles": [...] limits
+it to their holders; "notify": true tells the person named, in their notifications; on a dimension field naming records of a
+table with a person field — an agent — "notify" tells that record's person). A "select" field needs "options": [...]. A "dimension"
 field needs "dimension_id" and may restrict choices with "allowed_members": [<member codes>]. A "metric" field
 needs "metric_id" and "value_field" (the name of the sibling number field holding the amount). An "autocode"
 field gives each new record a code nobody types — "code_prefix" then the next number padded to "code_digits"
@@ -763,7 +771,11 @@ application's administrators still see all). "edit_access": "everyone" lets ever
 delete it ("creator", the default: its creator and the administrators); a member read-only for a person makes the
 records naming it theirs to see only. "create_roles": ["<role name>", ...] lets only people of those roles (and
 the administrators) add records — a table whose records add a plant or a GL account; [] or none: anyone who opens
-the application. "keeps_dimension": "<dimension name>" with "member_label_field": "<text
+the application. "delete_access": "admins" lets only the administrators — and those who may change a record and hold one
+of "delete_roles": [...] — delete records (tickets are closed, not deleted); "" or none: whoever may change a record.
+"record_scope": "open" lets everyone who opens the table see every record and checks a save against the access of the
+person saving it (a manager hands a ticket to another team); "" (default) narrows records by members' access rules.
+"existing_codes": "refuse" (new tables) or "update" — what a file row giving the auto code a value does. "keeps_dimension": "<dimension name>" with "member_label_field": "<text
 field>" makes the table's records that dimension's members (it needs a code field — an autocode field, or a text
 field with "code": true for codes from outside — and an empty
 dimension): adding, renaming and deleting a record adds, renames and deletes the member, and the dimension's

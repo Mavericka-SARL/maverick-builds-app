@@ -168,6 +168,7 @@ var operationRolesBearerAuth = map[string][]string{
 	GetMeOperation:                           []string{},
 	GetMyWorkflowHistoryOperation:            []string{},
 	GetNotificationSettingsOperation:         []string{},
+	GetRecordChoicesOperation:                []string{},
 	GetRecordDeletePlanOperation:             []string{},
 	GetRecordHistoryOperation:                []string{},
 	GetRelatedRecordsOperation:               []string{},

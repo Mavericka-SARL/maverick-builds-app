@@ -136,6 +136,7 @@ const (
 	GetMeOperation                           OperationName = "GetMe"
 	GetMyWorkflowHistoryOperation            OperationName = "GetMyWorkflowHistory"
 	GetNotificationSettingsOperation         OperationName = "GetNotificationSettings"
+	GetRecordChoicesOperation                OperationName = "GetRecordChoices"
 	GetRecordDeletePlanOperation             OperationName = "GetRecordDeletePlan"
 	GetRecordHistoryOperation                OperationName = "GetRecordHistory"
 	GetRelatedRecordsOperation               OperationName = "GetRelatedRecords"

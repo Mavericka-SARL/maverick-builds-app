@@ -106,7 +106,7 @@ func assignMissingCodes(ctx context.Context, db dbx.DB, formID string, f FormFie
 // KeepServerValues returns data with the values the server owns put back
 // from the record's current data: an auto-code field keeps its code, and a
 // status field holds nothing (the status is the record's own). A person
-// saving a record changes neither. A hidden field the save does not name
+// saving a record changes neither, nor a stamped date. A hidden field the save does not name
 // keeps its value: no form shows it, so no form sends it back (a save
 // naming it, null included, sets it).
 func KeepServerValues(form *FormDef, current, data map[string]any) map[string]any {
@@ -131,6 +131,15 @@ func KeepServerValues(form *FormDef, current, data map[string]any) map[string]an
 				out[f.Name] = v
 				continue
 			}
+			// A stamped date is the server's (ApplyStamps).
+			if f.StampWhen != nil {
+				if v, ok := current[f.Name]; ok {
+					out[f.Name] = v
+				} else {
+					delete(out, f.Name)
+				}
+				continue
+			}
 			if _, sent := data[f.Name]; f.Hidden && !sent {
 				if v, ok := current[f.Name]; ok {
 					out[f.Name] = v
@@ -145,7 +154,7 @@ func KeepServerValues(form *FormDef, current, data map[string]any) map[string]an
 var fieldTypes = map[string]bool{
 	"text": true, "number": true, "select": true, "date": true, "boolean": true,
 	"dimension": true, "metric": true, FieldAutoCode: true, FieldStatus: true,
-	FieldURL: true, FieldLongText: true,
+	FieldURL: true, FieldLongText: true, FieldPerson: true,
 }
 
 // Field types holding text the person types: one line, a link, or
@@ -175,7 +184,7 @@ func ValidateFields(fields []FormField) error {
 		}
 		seen[name] = true
 		if !fieldTypes[f.Type] {
-			return fmt.Errorf("field %q has type %q, which is not a field type (text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status)", name, f.Type)
+			return fmt.Errorf("field %q has type %q, which is not a field type (text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status, person)", name, f.Type)
 		}
 		if f.Code {
 			if f.Type != "text" {
@@ -299,7 +308,7 @@ func validateFieldOptions(f FormField, fields []FormField) error {
 	if len(f.DoneValues) > 0 && f.DoneField == "" {
 		return fmt.Errorf("done_values belong to a done_field")
 	}
-	return nil
+	return validateRuleOptions(f, fields)
 }
 
 // checkDefault checks f's default is a value of its type.

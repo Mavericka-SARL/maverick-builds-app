@@ -168,16 +168,21 @@ func RenameReferences(ctx context.Context, db dbx.DB, wsID, oldName, newName str
 	}
 
 	// Tables of records.
+	// A table names roles in create_roles, delete_roles (migration 192),
+	// and in its fields: a person field's roles and a transition's
+	// (crudapp/field_rules.go).
 	type listRow struct {
-		id, name string
-		list     []byte
+		id, name                 string
+		list, deleteList, fields []byte
 	}
 	var tables []listRow
 	rows, err = db.Query(ctx, `
-		SELECT fd.id::text, fd.label, fd.create_roles
+		SELECT fd.id::text, fd.label, fd.create_roles, fd.delete_roles, COALESCE(fd.fields, '[]'::jsonb)
 		FROM model.form_def fd
 		WHERE fd.model_id IN (`+models+`)
-		  AND jsonb_typeof(fd.create_roles) = 'array' AND fd.create_roles ? $3
+		  AND (jsonb_typeof(fd.create_roles) = 'array' AND fd.create_roles ? $3
+		    OR jsonb_typeof(fd.delete_roles) = 'array' AND fd.delete_roles ? $3
+		    OR `+FieldsNameRole("fd.fields", "$3")+`)
 		ORDER BY fd.label, fd.id
 		FOR UPDATE OF fd`, wsID, shadowed, oldName)
 	if err != nil {
@@ -185,7 +190,7 @@ func RenameReferences(ctx context.Context, db dbx.DB, wsID, oldName, newName str
 	}
 	for rows.Next() {
 		var t listRow
-		if err := rows.Scan(&t.id, &t.name, &t.list); err != nil {
+		if err := rows.Scan(&t.id, &t.name, &t.list, &t.deleteList, &t.fields); err != nil {
 			rows.Close()
 			return out, fmt.Errorf("rename role references: tables: %w", err)
 		}
@@ -196,11 +201,14 @@ func RenameReferences(ctx context.Context, db dbx.DB, wsID, oldName, newName str
 		return out, fmt.Errorf("rename role references: tables: %w", err)
 	}
 	for _, t := range tables {
-		list, changed := renameInList(t.list, oldName, newName)
-		if !changed {
+		list, c1 := renameInList(t.list, oldName, newName)
+		deleteList, c2 := renameInList(t.deleteList, oldName, newName)
+		fields, c3 := renameInFields(t.fields, oldName, newName)
+		if !c1 && !c2 && !c3 {
 			continue
 		}
-		if _, err := db.Exec(ctx, `UPDATE model.form_def SET create_roles = $2::jsonb WHERE id = $1::uuid`, t.id, string(list)); err != nil {
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET create_roles = $2::jsonb, delete_roles = $3::jsonb, fields = $4::jsonb WHERE id = $1::uuid`,
+			t.id, string(list), string(deleteList), string(fields)); err != nil {
 			return out, fmt.Errorf("rename role references: table %s: %w", t.name, err)
 		}
 		out.Tables = appendOnce(out.Tables, t.name)
@@ -340,4 +348,58 @@ func joinAnd(items []string) string {
 		return items[0]
 	}
 	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
+// FieldsNameRole is a predicate, true when the fields (a table's jsonb
+// array, the SQL expression fields) name the role the SQL expression role
+// yields: a person field's roles or a transition's.
+func FieldsNameRole(fields, role string) string {
+	return "(jsonb_path_exists(" + fields + ", '$[*].roles[*] ? (@ == $n)', jsonb_build_object('n', " + role + "))" +
+		" OR jsonb_path_exists(" + fields + ", '$[*].transitions[*].roles[*] ? (@ == $n)', jsonb_build_object('n', " + role + ")))"
+}
+
+// renameInFields replaces oldName by newName in the role lists of a
+// table's fields (a person field's roles, each transition's roles),
+// reporting whether any held it. Fields it cannot read are left as they are.
+func renameInFields(raw []byte, oldName, newName string) ([]byte, bool) {
+	var fields []map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return raw, false
+	}
+	changed := false
+	swap := func(v any) any {
+		list, ok := v.([]any)
+		if !ok {
+			return v
+		}
+		for i, r := range list {
+			if s, ok := r.(string); ok && s == oldName {
+				list[i] = newName
+				changed = true
+			}
+		}
+		return list
+	}
+	for _, f := range fields {
+		if roles, ok := f["roles"]; ok {
+			f["roles"] = swap(roles)
+		}
+		if ts, ok := f["transitions"].([]any); ok {
+			for _, t := range ts {
+				if tm, ok := t.(map[string]any); ok {
+					if roles, ok := tm["roles"]; ok {
+						tm["roles"] = swap(roles)
+					}
+				}
+			}
+		}
+	}
+	if !changed {
+		return raw, false
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return raw, false
+	}
+	return out, true
 }

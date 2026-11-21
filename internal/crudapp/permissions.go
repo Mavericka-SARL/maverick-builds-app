@@ -62,6 +62,15 @@ type RecordAccess struct {
 	// administrators' to change; an administrator's change sends the parent
 	// back to draft (owner decision 2026-11-13).
 	ParentDecided bool
+	// Locked: a field's value makes the record read-only (FormField.LocksIn):
+	// only that field may change, so the record is not deleted either,
+	// except by an administrator.
+	Locked bool
+	// DeleteAdminsOnly: the table's delete_access is "admins" — only its
+	// application's administrators delete records, and those who may change
+	// a record and hold one of its delete roles (DeleteRole).
+	DeleteAdminsOnly bool
+	DeleteRole       bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -76,6 +85,13 @@ type RecordPermissions struct {
 	// SetStatus: the statuses the caller may move the record to. It never
 	// holds the record's current status, and is empty when there is none.
 	SetStatus []string `json:"set_status"`
+	// Moves: for each field with transitions that holds a value, the values
+	// the caller may move it to (empty: none). Absent for a table without
+	// transitions.
+	Moves map[string][]string `json:"moves,omitempty"`
+	// LockedBy names the field whose value makes the record read-only
+	// (FormField.LocksIn): the caller may change that field alone.
+	LockedBy string `json:"locked_by,omitempty"`
 }
 
 // Permissions is the rule for records ("submitter + admins"):
@@ -107,12 +123,16 @@ func (a RecordAccess) Permissions(status string) RecordPermissions {
 		}
 	case a.NotEditor:
 	case a.ParentDecided:
-	case a.Everyone && a.ReadOnly:
+	case a.ReadOnly: // set in a table everyone edits, or an open one (migration 193)
 	case (a.Creator || a.Everyone) && (status == "" || slices.Contains(creatorStatuses, status)):
 		p.Edit, p.Delete = true, true
 		if a.Statuses {
 			p.SetStatus = otherStatuses(creatorStatuses, status)
 		}
+	}
+	// Opt-in table rules narrow who deletes; they never widen it.
+	if p.Delete && !a.Admin && (a.Locked || a.DeleteAdminsOnly && !a.DeleteRole) {
+		p.Delete = false
 	}
 	return p
 }

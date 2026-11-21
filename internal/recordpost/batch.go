@@ -188,7 +188,14 @@ func (ps *Poster) post(ctx context.Context, tp *tablePosting, recs []postingReco
 				continue
 			}
 			members := m.members(rec.data, tp.period)
-			g, decided := ps.guard(ctx, tp, i, firstNonEmpty(rec.creator, userID), members, rec.id)
+			// A record posts within its creator's access — in an open table
+			// (record_scope "open", migration 193) within the access of the
+			// person whose save posts it, as the save itself was checked.
+			guardUser := firstNonEmpty(rec.creator, userID)
+			if tp.form.IsOpen() && userID != "" {
+				guardUser = userID
+			}
+			g, decided := ps.guard(ctx, tp, i, guardUser, members, rec.id)
 			switch {
 			case !decided:
 				tp.skipped["a check kept failing; try again"]++

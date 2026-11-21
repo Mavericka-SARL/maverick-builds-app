@@ -1390,7 +1390,7 @@ export interface FormField {
   label: string;
   /** autocode: a code the server gives each new record; status: the records'
       status (draft, submitted, approved, rejected), set by a workflow. */
-  type: "text" | "longtext" | "url" | "number" | "select" | "date" | "boolean" | "dimension" | "metric" | "autocode" | "status";
+  type: "text" | "longtext" | "url" | "number" | "select" | "date" | "boolean" | "dimension" | "metric" | "autocode" | "status" | "person";
   required: boolean;
   options?: string[];
   // dimension type
@@ -1427,6 +1427,41 @@ export interface FormField {
   deadline?: boolean;
   done_field?: string;
   done_values?: string[];
+  /** A select or dimension field's moves once set: from any of from to any of to, by the holders of roles (none: anyone who may change the record). */
+  transitions?: FieldTransition[];
+  /** Values of this field in which the record is read-only: only this field moves. */
+  locks_in?: string[];
+  /** Required while the record meets the condition (a resolution once Resolved). */
+  required_when?: FieldCondition;
+  /** A date the server sets to the day the record comes to meet the condition. */
+  stamp_when?: FieldCondition;
+  /** A boolean in a table keeping a dimension: unticked, the record's member is inactive (not offered for new choices). */
+  active_flag?: boolean;
+  /** A person field: the roles whose holders it may name (none: anyone who uses the application). */
+  roles?: string[];
+  /** A person field: tell the person a save names, in their notifications; a dimension field: the person the chosen record names in its person field. */
+  notify?: boolean;
+}
+
+/** GET /api/forms/{id}/choices. */
+export interface RecordChoices {
+  people: Record<string, { id: string; name: string }[]>;
+  named: Record<string, string>;
+  inactive: Record<string, string[]>;
+}
+
+/** A move a field's value may make. */
+export interface FieldTransition {
+  from: string[];
+  to: string[];
+  roles?: string[];
+}
+
+/** A condition on another field of the record: it holds one of is, or none of is_not. */
+export interface FieldCondition {
+  field: string;
+  is?: string[];
+  is_not?: string[];
 }
 
 /** Who may change and delete a table's records. */
@@ -1452,6 +1487,13 @@ export interface FormDef {
   edit_access?: EditAccess;
   /** Who may add records, by role name; none: anyone who opens the application. */
   create_roles?: string[];
+  /** "admins": only administrators, and editors holding one of delete_roles, delete records; absent: whoever may change a record. */
+  delete_access?: "" | "admins";
+  delete_roles?: string[];
+  /** "open": everyone who opens the table sees every record, and a save is checked against the saver's access; "" (default): members' access rules narrow the records. */
+  record_scope?: "" | "open";
+  /** What a file row naming the auto code does: "refuse" or "update"; "" — a table made before the choice — ignores it and adds a record. */
+  existing_codes?: "" | "refuse" | "update";
   created_at: string;
   /** Served by GET /api/forms; absent from an older server, which the UI then treats as no permission. */
   permissions?: FormPermissions;
@@ -1487,6 +1529,10 @@ export interface FormRecordPermissions {
   delete: boolean;
   /** Statuses the caller may move the record to; empty when none. */
   set_status: string[];
+  /** For each field with transitions holding a value, the values the caller may move it to. */
+  moves?: Record<string, string[]>;
+  /** The field whose value makes the record read-only: only it may change. */
+  locked_by?: string;
 }
 
 export interface FormRecord {
@@ -1538,6 +1584,11 @@ export interface TableSettings {
   edit_access?: EditAccess;
   /** The roles whose people may add records; [] for anyone who opens the application. */
   create_roles?: string[];
+  /** "admins": only administrators (and editors holding delete_roles) delete records; "": whoever may change one. */
+  delete_access?: "" | "admins";
+  delete_roles?: string[];
+  record_scope?: "" | "open";
+  existing_codes?: "refuse" | "update";
 }
 
 /** How many records of a table a delete touches through one of its fields. */
@@ -3197,8 +3248,9 @@ export const api = {
   // status field, a record without one.
   createRecord: (formId: string, data: Record<string, unknown>, revisionId?: string, status?: string) =>
     apiFetch<FormRecord>(`/api/forms/${formId}/records`, { method: "POST", body: JSON.stringify({ data, revision_id: revisionId, status }) }),
-  updateRecord: (recordId: string, change: FormRecordChange) =>
-    apiFetch<{ status: string }>(`/api/records/${recordId}`, { method: "PUT", body: JSON.stringify({ data: change.data, status: change.status }) }),
+  /** expectedUpdatedAt (the record's updated_at as read): a record someone changed since is not written over (409). */
+  updateRecord: (recordId: string, change: FormRecordChange, expectedUpdatedAt?: string) =>
+    apiFetch<{ status: string; record?: FormRecord }>(`/api/records/${recordId}`, { method: "PUT", body: JSON.stringify({ data: change.data, status: change.status, expected_updated_at: expectedUpdatedAt }) }),
   /** Copies of records with a date field moved (POST /api/forms/{id}/records/copy). */
   copyRecords: (formId: string, recordIds: string[], field: string, value: string) =>
     apiFetch<{ status: string; copied: number }>(`/api/forms/${formId}/records/copy`, { method: "POST", body: JSON.stringify({ record_ids: recordIds, field, value }) }),
@@ -3215,6 +3267,8 @@ export const api = {
   /** A board's columns for the viewer: the choices of a select field, or the leaf members of a dimension field in order. */
   boardColumns: (formId: string, field: string, colorProperty?: string) =>
     apiFetch<{ columns: BoardColumn[] }>(`/api/forms/${formId}/board-columns?field=${encodeURIComponent(field)}${colorProperty ? `&color_property=${encodeURIComponent(colorProperty)}` : ""}`),
+  /** What a record form offers beyond its fields: each person field's people (names only), the names of the people records name, and the members each dimension field no longer offers. */
+  recordChoices: (formId: string) => apiFetch<RecordChoices>(`/api/forms/${formId}/choices`),
   /** The changes of a record's history fields, oldest first. */
   recordHistory: (recordId: string) => apiFetch<{ history: RecordHistoryEntry[] }>(`/api/records/${recordId}/history`),
 

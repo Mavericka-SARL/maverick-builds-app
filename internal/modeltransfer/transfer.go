@@ -29,6 +29,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 )
 
 const (
@@ -40,8 +41,16 @@ const (
 	// (Package.upgrade). Version 3 (total rules, migration 174): a
 	// dimension's agg_rule is how its members total, and a metric carries
 	// its own rules by dimension; before it a dimension's agg_rule meant
-	// nothing, and imports as sum.
-	PackageVersion = 3
+	// nothing, and imports as sum. Version 4 (field rules, person fields,
+	// table delete and record scope, migrations 192–193): written only by an
+	// export that uses them (Package.MinimumVersion), so an engine that would
+	// import the tables without their rules refuses the file instead;
+	// anything else is still written as version 3 (Package.MinimumVersion).
+	PackageVersion = 4
+	// BaseVersion is what a package using nothing of version 4 is written
+	// as — and what the built-in starter packages say, so their content
+	// hash (startersync) does not change with the version count.
+	BaseVersion = 3
 	// OldestPackageVersion is the oldest version an import takes.
 	OldestPackageVersion = 1
 	// FactsPolicy documents, as an explicit and inspectable field rather
@@ -262,6 +271,14 @@ type Form struct {
 	EditAccess          string `json:"edit_access,omitempty"`
 	// CreateRoles: who may add records, by role name (none: anyone).
 	CreateRoles []string `json:"create_roles,omitempty"`
+	// DeleteAccess "admins": only administrators, and editors holding one
+	// of DeleteRoles, delete records (migration 192). Absent: as before.
+	DeleteAccess string   `json:"delete_access,omitempty"`
+	DeleteRoles  []string `json:"delete_roles,omitempty"`
+	// RecordScope "open" and ExistingCodes "refuse"/"update" (migration 193).
+	// Absent: as a table made before it.
+	RecordScope   string `json:"record_scope,omitempty"`
+	ExistingCodes string `json:"existing_codes,omitempty"`
 }
 
 type FormRecord struct {
@@ -819,7 +836,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only,
 		       COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''),
-		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles, member_label_with_code
+		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles, member_label_with_code,
+		       delete_access, delete_roles, record_scope, existing_codes
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -827,7 +845,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.MemberLabelWithCode); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1061,6 +1079,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	if err := resolveSiblingRefs(ctx, q, pkg, modelID, revisionID); err != nil {
 		return nil, err
 	}
+	pkg.Version = pkg.MinimumVersion()
 	return pkg, nil
 }
 
@@ -2386,11 +2405,14 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			labelField, rootLabel = "", ""
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb), $12)
+			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code,
+			                            delete_access, delete_roles, record_scope, existing_codes)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb), $12,
+			        $13, COALESCE($14::jsonb, '[]'::jsonb), $15, $16)
 			RETURNING id::text`,
 			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel, rolesArg(f.CreateRoles),
-			f.MemberLabelWithCode && keeps != "").Scan(&newID); err != nil {
+			f.MemberLabelWithCode && keeps != "", packageDeleteAccess(f.DeleteAccess), rolesArg(f.DeleteRoles),
+			packageChoice(f.RecordScope, "open"), packageChoice(f.ExistingCodes, "refuse", "update")).Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -2408,6 +2430,9 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			fid, jsonArg(rec.Data), rec.Status, importerID); err != nil {
 			return "", fmt.Errorf("form record: %w", err)
 		}
+	}
+	if err = dropForeignPeople(ctx, tx, modelID, revisionID); err != nil {
+		return "", err
 	}
 	// A kept dimension's members are its table's records: a package without
 	// the records (definitions only) leaves the dimension without members
@@ -2798,4 +2823,93 @@ func rolesArg(roles []string) any {
 	}
 	b, _ := json.Marshal(roles)
 	return string(b)
+}
+
+// packageDeleteAccess is a package's delete_access as the table takes it:
+// "admins", or the rule as before for anything else.
+func packageDeleteAccess(v string) string {
+	if strings.TrimSpace(v) == "admins" {
+		return "admins"
+	}
+	return ""
+}
+
+// dropForeignPeople empties, in the records of revisionID's tables, each
+// person field naming nobody who reaches the model's application: a
+// package carries the ids of the people of the application it was made
+// in, which name nobody in another one (2026-11-20). In the application
+// it came from they still name the same people, and stay.
+func dropForeignPeople(ctx context.Context, tx pgx.Tx, modelID, revisionID string) error {
+	rows, err := tx.Query(ctx, `
+		SELECT fd.id::text, f->>'name' FROM model.form_def fd, jsonb_array_elements(COALESCE(fd.fields, '[]'::jsonb)) f
+		WHERE fd.model_id = $1::uuid AND fd.revision_id = $2::uuid AND f->>'type' = 'person'`, modelID, revisionID)
+	if err != nil {
+		return err
+	}
+	type personField struct{ formID, name string }
+	var fields []personField
+	for rows.Next() {
+		var pf personField
+		if err := rows.Scan(&pf.formID, &pf.name); err != nil {
+			rows.Close()
+			return err
+		}
+		fields = append(fields, pf)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, pf := range fields {
+		if _, err := tx.Exec(ctx, `
+			UPDATE runtime.form_record r SET data = r.data - $2::text
+			FROM core.model m
+			WHERE r.form_id = $1::uuid AND m.id = $3::uuid AND r.data ? $2::text
+			  AND NOT CASE WHEN COALESCE(r.data->>$2::text, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+			               THEN `+assignee.SQL("m.application_id", "'[]'::jsonb", "(r.data->>$2::text)::uuid")+`
+			               ELSE false END`, pf.formID, pf.name, modelID); err != nil {
+			return fmt.Errorf("person field %s: %w", pf.name, err)
+		}
+	}
+	return nil
+}
+
+// packageChoice is a package's value of a table setting as the table takes
+// it: one of allowed, or "" (the setting as before it existed).
+func packageChoice(v string, allowed ...string) string {
+	v = strings.TrimSpace(v)
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return ""
+}
+
+// MinimumVersion is the oldest package version that carries p whole: 4 when a
+// table uses a field rule, a person field, delete_access or an open
+// record_scope (an engine before them would import the table and drop its
+// rules), else 3. existing_codes does not count: an engine without it reads
+// a file row's code as it always did.
+func (p *Package) MinimumVersion() int {
+	for _, f := range p.Forms {
+		if f.DeleteAccess != "" || len(f.DeleteRoles) > 0 || f.RecordScope != "" {
+			return 4
+		}
+		var fields []map[string]json.RawMessage
+		if json.Unmarshal(f.Fields, &fields) != nil {
+			continue
+		}
+		for _, fd := range fields {
+			for _, k := range []string{"transitions", "locks_in", "required_when", "stamp_when", "active_flag", "roles", "notify"} {
+				if v, ok := fd[k]; ok && len(v) > 0 && string(v) != "null" && string(v) != "false" && string(v) != "[]" {
+					return 4
+				}
+			}
+			if string(fd["type"]) == `"person"` {
+				return 4
+			}
+		}
+	}
+	return BaseVersion
 }

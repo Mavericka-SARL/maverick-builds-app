@@ -950,10 +950,10 @@ function MapColumnsStep({
           <tbody>
             {mappings.map(m => (
               <tr key={m.sourceCol}>
-                <td className="mvx-admin-mono" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>
+                <td className="mvx-admin-mono" style={{ maxWidth: 200, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                   {m.sourceCol}
                 </td>
-                <td className="mvx-admin-mono mvx-admin-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>
+                <td className="mvx-admin-mono mvx-admin-muted" style={{ maxWidth: 240, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                   {sampleValues(m.sourceCol) || "—"}
                 </td>
                 <td>
@@ -2063,7 +2063,7 @@ function SavedIntegrationsList({
             </div>
             {historyId === d.id && <IntegrationRunHistory integrationId={d.id} />}
             {d.type === "google_sheets" && d.config?.sheet_url && (
-              <div className="mvx-admin-muted mvx-admin-mono" style={{ fontSize: 11, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div className="mvx-admin-muted mvx-admin-mono" style={{ fontSize: 11, marginTop: 6, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                 {d.config.sheet_url}
               </div>
             )}
@@ -2154,7 +2154,7 @@ function IntegrationRunHistory({ integrationId }: { integrationId: string }) {
         <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "4px 0", borderTop: "1px solid var(--color-border)" }}>
           <StatusBadge tone={r.status === "success" ? "success" : "danger"}>{r.status}</StatusBadge>
           <span>{r.rows_imported} row<Txt>{r.rows_imported !== 1 ? "s" : ""}</Txt><Txt>{r.error_rows > 0 ? ` · ${r.error_rows} failed` : ""}</Txt></span>
-          {r.message && <span className="mvx-admin-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{r.message}</span>}
+          {r.message && <span className="mvx-admin-muted" style={{ maxWidth: 320, whiteSpace: "normal", overflowWrap: "anywhere" }}>{r.message}</span>}
           <span className="mvx-admin-muted" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
             <Txt>{r.run_by && `${r.run_by} · `}</Txt><Txt>{fmtDate(r.created_at)}</Txt>
           </span>

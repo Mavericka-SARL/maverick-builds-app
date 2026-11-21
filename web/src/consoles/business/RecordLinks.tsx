@@ -12,9 +12,10 @@ import { isoToLocal } from "../dateSerial";
 import { FormFieldInput, RecordStatusBadge } from "./RecordFieldInput";
 import { canCreateRecords, createStatusesOf, createStatusFor } from "./formPermissions";
 import {
-  defaultsOf, displayValue, editableFields, isDueToday, isOverdue, keeperOf, memberLabels, pairedField, postsMember,
-  inSentence, localDateTime, recordTitle, singular, statusLabel,
+  conditionWords, defaultsOf, displayValue, editableFields, isDueToday, isOverdue, keeperOf, memberLabels, pairedField, postsMember,
+  inSentence, localDateTime, recordTitle, requiredNow, singular, statusLabel,
 } from "./recordList";
+import { useRecordChoices } from "./useRecordChoices";
 
 /** How one field of a record reads: a link opens in a new tab; a deadline that has passed says overdue. */
 export function RecordFieldValue({ f, data, dims, metrics, onOpenMember }: {
@@ -58,7 +59,7 @@ export function RecordFieldValue({ f, data, dims, metrics, onOpenMember }: {
  * (an account typed in the deal's form becomes a record of Accounts, and is
  * picked).
  */
-export function RecordFields({ form, forms, draft, setDraft, dims, metrics, revisionId, readOnlyOut }: {
+export function RecordFields({ form, forms, draft, setDraft, dims, metrics, revisionId, readOnlyOut, record }: {
   form: FormDef;
   forms: FormDef[];
   draft: Record<string, unknown>;
@@ -67,20 +68,44 @@ export function RecordFields({ form, forms, draft, setDraft, dims, metrics, revi
   metrics: Metric[];
   revisionId: string;
   readOnlyOut?: (f: FormField) => boolean;
+  /** The record being changed (none for a new one): its moves, lock and saved values. */
+  record?: FormRecord | null;
 }) {
+  const dateFormat = useDateFormat();
   const [creating, setCreating] = useState<string | null>(null);
+  const choices = useRecordChoices(form, forms);
+  const lockedBy = record?.permissions?.locked_by;
+  const lockField = lockedBy ? form.fields.find(x => x.name === lockedBy) : undefined;
   return (
     <>
+      {lockField && (
+        <InlineAlert tone="info">
+          Read-only while its {lockField.label || lockField.name} is {String(record?.data[lockField.name] ?? "")}: only {lockField.label || lockField.name} may change.
+        </InlineAlert>
+      )}
       {editableFields(form).map((f) => {
         const keeper = keeperOf(forms, f);
         const canAdd = !!keeper && keeper.id !== form.id && canCreateRecords(keeper);
         const pair = pairedField(form, f);
         const pairFilled = !!pair && draft[pair.name] !== undefined && draft[pair.name] !== "" && draft[pair.name] !== null;
+        const saved = record?.data[f.name];
+        // A field with transitions moves from its saved value only as the server allows.
+        const moves = f.transitions?.length && record && saved !== undefined && saved !== null && saved !== ""
+          ? (record.permissions?.moves?.[f.name] ?? []) : undefined;
+        const stamped = !!f.stamp_when;
+        const readOnly = stamped || (!!lockedBy && f.name !== lockedBy);
+        const readOnlyText = stamped && (draft[f.name] === undefined || draft[f.name] === "" || draft[f.name] === null)
+          ? `Set when ${conditionWords(form, f.stamp_when!)}`
+          : displayValue(f, draft[f.name], dims, metrics, dateFormat);
+        const required = !readOnly && (requiredNow(f, draft) || pairFilled) && f.type !== "autocode";
         return (
           <React.Fragment key={f.name}>
-            <Field label={f.label || f.name} required={(f.required || pairFilled) && f.type !== "autocode"}
-              description={pair ? `Filled in together with ${pair.label || pair.name}` : undefined}>
+            <Field label={f.label || f.name} required={required}
+              description={pair ? `Filled in together with ${pair.label || pair.name}`
+                : f.required_when && !f.required ? `Required when ${conditionWords(form, f.required_when)}` : undefined}>
               <FormFieldInput f={f} value={draft[f.name]} onChange={v => setDraft(d => ({ ...d, [f.name]: v }))} dims={dims} metrics={metrics}
+                readOnly={readOnly} readOnlyText={readOnlyText} saved={saved} moves={moves}
+                people={choices?.people[f.name]} named={choices?.named} inactive={choices?.inactive[f.name]}
                 readOnlyMembersOut={readOnlyOut?.(f)}
                 onCreateLinked={canAdd ? () => setCreating(c => (c === f.name ? null : f.name)) : undefined}
                 linkedLabel={keeper ? singular(keeper.label) : undefined} />
@@ -219,7 +244,7 @@ export function RelatedRecordsSection({ form, record, forms, dims, metrics, onOp
                         tabIndex={0} onKeyDown={e => { if (e.key === "Enter") onOpen(table, r); }}
                         title={`Open ${recordTitle(table, r)}`}>
                         {shown.map(f => (
-                          <td key={f.name} style={f.type === "longtext" ? { maxWidth: 280, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } : undefined}>
+                          <td key={f.name} style={f.type === "longtext" ? { minWidth: 200, maxWidth: 420, whiteSpace: "pre-wrap", overflowWrap: "anywhere" } : undefined}>
                             <RecordFieldValue form={table} f={f} data={r.data} dims={dims} metrics={metrics} />
                           </td>
                         ))}
@@ -428,11 +453,14 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
   const canEdit = isNew ? canCreateRecords(form) : !!record?.permissions?.edit;
   const [editing, setEditing] = useState(isNew);
   const [draft, setDraft] = useState<Record<string, unknown>>(() => (record ? { ...record.data } : { ...defaultsOf(form), ...(initialData ?? {}) }));
+  // When the draft was read: a save is not written over someone's change since.
+  const [readAt, setReadAt] = useState<string | undefined>(record?.updated_at);
   const [statusPick, setStatusPick] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { data: dimsRaw = [] } = useQuery({ queryKey: ["dimensions"], queryFn: api.getDimensions });
   const { data: metricsRaw = [] } = useQuery({ queryKey: ["metrics", revisionId], queryFn: () => api.getMetrics(revisionId), enabled: !!revisionId });
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  useRecordChoices(form, forms); // a person field reads by name
   const dims = dimsRaw as DevDimension[];
   const metrics = metricsRaw as Metric[];
   const hasStatus = !!statusFieldOf(form);
@@ -443,7 +471,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
       if (isNew) {
         await api.createRecord(form.id, draft, revisionId || undefined, hasStatus ? createStatusFor(form, statusPick) : undefined);
       } else {
-        await api.updateRecord(record!.id, { data: draft, status: statusPick && statusPick !== record!.status ? statusPick : undefined });
+        await api.updateRecord(record!.id, { data: draft, status: statusPick && statusPick !== record!.status ? statusPick : undefined }, readAt);
       }
     },
     onSuccess: () => {
@@ -474,6 +502,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
   const details = editing && canEdit ? (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <RecordFields form={form} forms={forms} draft={draft} setDraft={setDraft} dims={dims} metrics={metrics} revisionId={revisionId}
+        record={record}
         readOnlyOut={f => postsMember(form, f) && (isNew || (!!me && record?.created_by === me.user_id))} />
       {hasStatus && isNew && createStatuses.length > 1 && (
         <Field label={statusFieldOf(form)?.label || "Status"}>
@@ -509,7 +538,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
       </dl>
       {hasStatus && <RecordStatusBadge status={record.status} />}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {canEdit && <Button variant="primary" leadingIcon={<Pencil size={13} />} onClick={() => { setDraft({ ...record.data }); setEditing(true); }}>Edit</Button>}
+        {canEdit && <Button variant="primary" leadingIcon={<Pencil size={13} />} onClick={() => { setDraft({ ...record.data }); setReadAt(record.updated_at); setEditing(true); }}>Edit</Button>}
         <span style={{ flex: 1 }} />
         {record.permissions?.delete && (
           <DeleteRecordButton record={record} withPlan={!!form.keeps_dimension_id} variant="button" onDeleted={onDone} onError={setError} />

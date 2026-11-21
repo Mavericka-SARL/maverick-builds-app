@@ -159,7 +159,7 @@ func DeveloperGuide() modeltransfer.Package {
 	}
 
 	return modeltransfer.Package{
-		Format: modeltransfer.PackageFormat, Version: modeltransfer.PackageVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Format: modeltransfer.PackageFormat, Version: modeltransfer.BaseVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		ModelName: DeveloperGuideName, StorageType: "oltp", RevisionName: RevisionName, IncludeData: true,
 		Dimensions: []modeltransfer.Dimension{product, period}, Metrics: metrics, Dependencies: deps,
 		Grids: []modeltransfer.Grid{grid},

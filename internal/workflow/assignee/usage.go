@@ -105,7 +105,9 @@ func Usage(ctx context.Context, db dbx.DB, wsID string, roleIDs ...string) (map[
 		  UNION
 		    SELECT r.id, fd.model_id
 		    FROM roles r
-		    JOIN model.form_def fd ON jsonb_typeof(fd.create_roles) = 'array' AND fd.create_roles ? r.name
+		    JOIN model.form_def fd ON (jsonb_typeof(fd.create_roles) = 'array' AND fd.create_roles ? r.name
+		                            OR jsonb_typeof(fd.delete_roles) = 'array' AND fd.delete_roles ? r.name
+		                            OR `+FieldsNameRole("fd.fields", "r.name")+`)
 		    WHERE fd.model_id IN (SELECT model_id FROM reach)
 		  UNION
 		    SELECT r.id, dd.model_id

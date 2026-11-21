@@ -59,6 +59,11 @@ type formRecordScope struct {
 	// parents: the table's belonging fields and the parents read so far
 	// (record_parent_status.go); nil until something reads them.
 	parents *parentCache
+	// heldRoles: which of the roles the table's transitions name the caller
+	// holds; deleteRole: the caller holds one of its delete roles. Read only
+	// for a table using them, never for an administrator (tableScope).
+	heldRoles  map[string]bool
+	deleteRole bool
 }
 
 // resolveFormRecordScope decides reach and admin for act on formID. A form
@@ -114,15 +119,42 @@ func (h *handler) tableScope(ctx context.Context, s formRecordScope) (formRecord
 	if !s.reach || s.form == nil {
 		return s, nil
 	}
-	if len(s.form.CreateRoles) > 0 && !s.admin {
-		roles, _ := json.Marshal(s.form.CreateRoles)
+	holdsAny := func(names []string) (bool, error) {
+		roles, _ := json.Marshal(names)
 		var holds bool
-		if err := h.db.QueryRow(ctx, `SELECT `+assignee.SQL("$1::uuid", "$2::jsonb", "$3::uuid"), s.appID, string(roles), s.userID).Scan(&holds); err != nil {
+		err := h.db.QueryRow(ctx, `SELECT `+assignee.SQL("$1::uuid", "$2::jsonb", "$3::uuid"), s.appID, string(roles), s.userID).Scan(&holds)
+		return holds, err
+	}
+	if len(s.form.CreateRoles) > 0 && !s.admin {
+		holds, err := holdsAny(s.form.CreateRoles)
+		if err != nil {
 			return s, fmt.Errorf("resolve who may add records: %w", err)
 		}
 		s.noAdd = !holds
 	}
-	if s.form.EveryoneEdits() && !s.admin {
+	// The table's opt-in rules (crudapp/field_rules.go, delete_access): the
+	// roles they name, read only when it uses them.
+	s.heldRoles, s.deleteRole = nil, false
+	if !s.admin {
+		for _, r := range s.form.TransitionRoles() {
+			holds, err := holdsAny([]string{r})
+			if err != nil {
+				return s, fmt.Errorf("resolve who makes a table's moves: %w", err)
+			}
+			if s.heldRoles == nil {
+				s.heldRoles = map[string]bool{}
+			}
+			s.heldRoles[r] = holds
+		}
+		if s.form.DeleteAccess == crudapp.DeleteAdmins && len(s.form.DeleteRoles) > 0 {
+			holds, err := holdsAny(s.form.DeleteRoles)
+			if err != nil {
+				return s, fmt.Errorf("resolve who may delete records: %w", err)
+			}
+			s.deleteRole = holds
+		}
+	}
+	if (s.form.EveryoneEdits() || s.form.IsOpen()) && !s.admin {
 		var err error
 		if s.view, err = h.accessViewFor(ctx, s.userID, s.form); err != nil {
 			return s, err
@@ -213,13 +245,30 @@ func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 		Everyone:  s.everyoneEdits(),
 		NotEditor: s.notEditor,
 	}
-	if a.Everyone && rec != nil {
+	if (a.Everyone || s.form != nil && s.form.IsOpen()) && rec != nil {
 		a.ReadOnly = s.readOnlyMember(rec.Data) != ""
 	}
 	if rec != nil {
 		a.ParentDecided = s.parentDecidedCached(rec.Data)
+		a.Locked = s.form != nil && s.form.LockingField(rec.Data) != nil
 	}
+	a.DeleteAdminsOnly = s.form != nil && s.form.DeleteAccess == crudapp.DeleteAdmins
+	a.DeleteRole = s.deleteRole
 	return a
+}
+
+// holds reports whether the scope's caller holds one of roles: always for
+// none, and for an administrator.
+func (s formRecordScope) holds(roles []string) bool {
+	if len(roles) == 0 || s.admin {
+		return true
+	}
+	for _, r := range roles {
+		if s.heldRoles[r] {
+			return true
+		}
+	}
+	return false
 }
 
 // createAccess is who the scope's caller is to a record they are creating.
@@ -235,7 +284,7 @@ func (s formRecordScope) everyoneEdits() bool { return s.form != nil && s.form.E
 // for the scope's caller, in a table everyone edits ("" when none is, and
 // always for an administrator).
 func (s formRecordScope) readOnlyMember(data map[string]any) string {
-	if s.view == nil || s.admin || !s.everyoneEdits() {
+	if s.view == nil || s.admin || !s.everyoneEdits() && !s.form.IsOpen() {
 		return ""
 	}
 	return s.view.ReadOnlyMember(s.form, data)
@@ -276,6 +325,25 @@ func (s formRecordScope) newRecordStatus() string {
 func (s formRecordScope) permit(rec *crudapp.FormRecord) crudapp.RecordAccess {
 	a := s.access(rec)
 	p := a.Permissions(rec.Status)
+	if s.form != nil {
+		if lock := s.form.LockingField(rec.Data); lock != nil && p.Edit {
+			p.LockedBy = lock.Name
+		}
+		for _, f := range s.form.Fields {
+			from := crudapp.ValueText(rec.Data[f.Name])
+			if !f.HasTransitions() || from == "" {
+				continue
+			}
+			if p.Moves == nil {
+				p.Moves = map[string][]string{}
+			}
+			moves := []string{}
+			if p.Edit {
+				moves = append(moves, f.MovesFrom(from, s.holds)...)
+			}
+			p.Moves[f.Name] = moves
+		}
+	}
 	rec.Permissions = &p
 	return a
 }

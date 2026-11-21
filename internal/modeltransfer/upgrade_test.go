@@ -69,3 +69,25 @@ func TestVersion1TablesKeepTheirStatus(t *testing.T) {
 		t.Errorf("a package naming no version was upgraded: %s", unversioned.Forms[0].Fields)
 	}
 }
+
+// An export writes version 4 only when a table uses what an engine before
+// migrations 192–193 would drop on import (field rules, person fields, the
+// delete and record-scope settings); anything else stays version 3, which
+// those engines still take. A table's existing_codes alone does not count.
+func TestMinimumVersion(t *testing.T) {
+	plain := Package{Forms: []Form{{Name: "a", ExistingCodes: "refuse", Fields: json.RawMessage(`[{"name":"x","type":"select","options":["a"],"history":true}]`)}}}
+	if v := plain.MinimumVersion(); v != 3 {
+		t.Errorf("a package without the new options = version %d, want 3", v)
+	}
+	for name, f := range map[string]Form{
+		"transitions":  {Fields: json.RawMessage(`[{"name":"s","type":"select","transitions":[{"from":["a"],"to":["b"]}]}]`)},
+		"stamp_when":   {Fields: json.RawMessage(`[{"name":"d","type":"date","stamp_when":{"field":"s","is":["b"]}}]`)},
+		"person":       {Fields: json.RawMessage(`[{"name":"p","type":"person"}]`)},
+		"record_scope": {RecordScope: "open", Fields: json.RawMessage(`[]`)},
+		"delete":       {DeleteAccess: "admins", Fields: json.RawMessage(`[]`)},
+	} {
+		if v := (&Package{Forms: []Form{f}}).MinimumVersion(); v != 4 {
+			t.Errorf("%s: version %d, want 4", name, v)
+		}
+	}
+}

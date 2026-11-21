@@ -4,7 +4,7 @@
 // records query (POST /api/forms/{id}/records/query), so search, filters,
 // sort and pages cover every record the person may see, not one page.
 import { shownDecimals } from "../shownDecimals";
-import type { DevDimension, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
+import type { DevDimension, FieldCondition, FormDef, FormField, FormRecord, Metric, RecordFilter, RecordsQuery } from "../../api/client";
 import { localToday, statusFieldOf } from "../../api/client";
 import { formatIsoDate, isoToLocal } from "../dateSerial";
 import { selectionScope, type ScopeDim } from "../selectionScope";
@@ -113,10 +113,20 @@ export function memberLabels(dims: DevDimension[], dimensionId?: string): Map<st
   return new Map((dim?.members ?? []).map(m => [m.code, m.label || m.code]));
 }
 
+/**
+ * The names of the people person fields name, by id, as the tables' choices
+ * served them (useRecordChoices fills it): a list reads a person by name.
+ */
+const personNames = new Map<string, string>();
+export function rememberPeople(named: Record<string, string>) {
+  for (const [id, name] of Object.entries(named)) personNames.set(id, name);
+}
+
 /** How a stored value reads in the list: a member's or metric's name, Yes/No, a grouped number. */
 export function displayValue(f: FormField | undefined, value: unknown, dims: DevDimension[], metrics: Metric[], dateFormat = ""): string {
   if (value === null || value === undefined || value === "") return "—";
   if (!f) return String(value);
+  if (f.type === "person") return personNames.get(String(value)) ?? "…";
   if (f.type === "dimension") return memberLabels(dims, f.dimension_id).get(String(value)) ?? String(value);
   if (f.type === "metric" && !f.metric_id) {
     const m = metrics.find(x => x.name === value || x.label === value);
@@ -320,4 +330,27 @@ export function localDateTime(ts: string, dateFormat = ""): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   return `${localDate(ts, dateFormat)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Whether data meets a field rule's condition (as the server's RowFilterMatches). */
+export function conditionMet(c: FieldCondition | undefined, data: Record<string, unknown>): boolean {
+  if (!c) return false;
+  const raw = data[c.field];
+  const v = raw === null || raw === undefined ? "" : String(raw).trim().toLowerCase();
+  const has = (list?: string[]) => (list ?? []).some(x => x.trim().toLowerCase() === v);
+  if (c.is?.length && !has(c.is)) return false;
+  if (c.is_not?.length && has(c.is_not)) return false;
+  return true;
+}
+
+/** Whether f must be filled in for a record holding data: required, or required in the state it is in. */
+export function requiredNow(f: FormField, data: Record<string, unknown>): boolean {
+  return f.required || conditionMet(f.required_when, data);
+}
+
+/** A condition as words: "Status is Resolved or Closed". */
+export function conditionWords(form: FormDef, c: FieldCondition): string {
+  const other = form.fields.find(x => x.name === c.field);
+  const label = other?.label || c.field;
+  return c.is?.length ? `${label} is ${c.is.join(" or ")}` : `${label} is not ${(c.is_not ?? []).join(" or ")}`;
 }

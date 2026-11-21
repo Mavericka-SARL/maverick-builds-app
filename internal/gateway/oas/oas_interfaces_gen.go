@@ -413,6 +413,10 @@ type GetNotificationSettingsRes interface {
 	getNotificationSettingsRes()
 }
 
+type GetRecordChoicesRes interface {
+	getRecordChoicesRes()
+}
+
 type GetRecordDeletePlanRes interface {
 	getRecordDeletePlanRes()
 }

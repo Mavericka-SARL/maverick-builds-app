@@ -153,7 +153,7 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			}
 			return strings.TrimPrefix(msg, "forbidden: ")
 		},
-		Form: form, CreatorID: act.UserID, Header: header, Rows: rawRows,
+		Form: form, CreatorID: act.UserID, Admin: scope.admin, Header: header, Rows: rawRows,
 		NewStatus: scope.newRecordStatus(),
 		StatusRefusal: func(status string) string {
 			if scope.noAdd {

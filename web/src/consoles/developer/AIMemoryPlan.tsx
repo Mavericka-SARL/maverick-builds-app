@@ -120,7 +120,7 @@ export function AttachPlanPanel({ sessionId, hasPlan, busy, onAttach, onClose }:
           {plans.map(p => (
             <li key={`${p.session_id}:${p.index}`} style={{ display: "flex", gap: 10, alignItems: "center", padding: "4px 0", borderTop: "1px solid var(--color-border)" }}>
               <span style={{ flex: 1, minWidth: 0 }} title={p.goal}>
-                <strong style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                <strong style={{ overflowWrap: "anywhere" }}>
                   <Txt>{p.goal || "(no goal)"}</Txt>
                 </strong>
                 <span className="mvx-admin-muted">

@@ -13,6 +13,7 @@ import { AppsTab } from "./AppsTab";
 import { SELECTED_APP_KEY, useSelectModel } from "./modelSelection";
 import { api } from "../../api/client";
 import { useModelLabel } from "./modelLabel";
+import { NotifiedRecord } from "./NotifiedRecord";
 
 // ── Section ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ const SECTION: SectionId = "business";
  */
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
+  // A record a notification names, opened over the page showing.
+  const [notifiedRecordId, setNotifiedRecordId] = useState<string | null>(null);
   const qc = useQueryClient();
   const { data: ctx, isLoading, error } = useDemo(undefined, { enabled });
   const modelLabel = useModelLabel(ctx, enabled);
@@ -78,6 +81,10 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
       { id: "revision", label: "Revision", value: ctx.revision, tone: "live" as const },
     ] : [],
     onNotificationNavigate: (resourceType, resourceId) => {
+      if (resourceType === "form_record") {
+        setNotifiedRecordId(resourceId);
+        return true;
+      }
       if (resourceType !== "workflow_instance") return false;
       openInstance(resourceId);
       return true;
@@ -108,6 +115,9 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
             />
           )}
           {local === "models" && <AppsTab />}
+          {notifiedRecordId && ctx && (
+            <NotifiedRecord recordId={notifiedRecordId} revisionId={ctx.revision_id} onClose={() => setNotifiedRecordId(null)} />
+          )}
         </PageLayout>
       );
     },

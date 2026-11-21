@@ -144,7 +144,7 @@ function DevModelRevisions({
                     <Button size="sm" onClick={() => setRenaming(null)}>Cancel</Button>
                   </div>
                 ) : (
-                  <div className="mvx-admin-revision__name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div className="mvx-admin-revision__name" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>
                     {s.name}
                   </div>
                 )}

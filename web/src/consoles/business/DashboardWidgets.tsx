@@ -600,7 +600,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
       )}
       <div className="mvx-kpi__body">
         {metric && (
-          <span className="mvx-kpi__label">
+          <span className="mvx-kpi__label" title={title ?? `${metric.label || metric.name}${scopeLabel ? ` · ${scopeLabel}` : ""}`}>
             {title ?? <>{metric.label || metric.name}{scopeLabel && <span className="mvx-kpi__scope"> · {scopeLabel}</span>}</>}
           </span>
         )}

@@ -11,6 +11,7 @@ import { RecordStatusBadge } from "./RecordFieldInput";
 import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
 import { DeleteRecordButton, RecordDialog, RecordFields, RecordFieldValue } from "./RecordLinks";
+import { useRecordChoices } from "./useRecordChoices";
 
 const PAGE = 50;
 
@@ -155,7 +156,9 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   const [newStatusPick, setNewStatusPick] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<SyncMessage | null>(null);
   // The record being edited, with its status when the editor opened.
-  const [editing, setEditing] = useState<{ id: string; openedStatus: string } | null>(null);
+  // readAt: the record's updated_at when its editor opened — a save is not
+  // written over someone's change since (409).
+  const [editing, setEditing] = useState<{ id: string; openedStatus: string; readAt?: string } | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   // The status the user picked, with the status it was picked from; null
   // until they pick one. A pick made from a status the record no longer has
@@ -193,6 +196,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   const forms = formsRaw as FormDef[];
   // Who is working: a record of their own posts within their access.
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  useRecordChoices(form, forms); // a person field reads by name
   const dims = dimsRaw as DevDimension[];
   const { data: metricsRaw = [] } = useQuery({
     queryKey: ["metrics", revisionId],
@@ -255,7 +259,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
   const saveEdit = useMutation({
     // The status goes only when the user picked one: otherwise the server
     // keeps the record's status as it has it.
-    mutationFn: () => api.updateRecord(editingRecord!.id, { status: pickedStatus, data: editDraft }),
+    mutationFn: () => api.updateRecord(editingRecord!.id, { status: pickedStatus, data: editDraft }, editing?.readAt),
     onSuccess: () => {
       closeEditor();
       qc.invalidateQueries({ queryKey: ["records"] });
@@ -603,7 +607,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                               if (isEditing) {
                                 closeEditor();
                               } else {
-                                setEditing({ id: rec.id, openedStatus: rec.status });
+                                setEditing({ id: rec.id, openedStatus: rec.status, readAt: rec.updated_at });
                                 setEditDraft({ ...rec.data });
                                 setEditStatusPick(null);
                                 setEditNotice(null);
@@ -665,6 +669,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
               </InlineAlert>
             )}
             <RecordFields form={form} forms={forms} draft={editDraft} setDraft={setEditDraft} dims={dims} metrics={metrics} revisionId={revisionId}
+              record={editingRecord}
               readOnlyOut={f => postsMember(form, f) && !!me && editingRecord.created_by === me.user_id} />
             {editStatusOptions.options.length > 0 && (
               <Field label={statusFieldOf(form)?.label || "Status"}>

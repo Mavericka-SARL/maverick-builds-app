@@ -985,7 +985,7 @@ function TaskPlanCard({ plan, onReview }: { plan: AITaskPlan; onReview: () => vo
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label={open ? "Collapse the plan" : "Expand the plan"}
         title={plan.goal}
         style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--color-text)",
-          textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere" }}>
         <span aria-hidden style={{ display: "inline-block", width: 14 }}>{open ? "▾" : "▸"}</span>
         <Txt>{`Plan: ${done} of ${plan.stages.length} stages done — ${plan.goal}`}</Txt>
       </button>
@@ -1814,7 +1814,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
                 className={["mvx-sidebar-nav__item", s.id === sessionId ? "mvx-sidebar-nav__item--active" : ""].filter(Boolean).join(" ")}
                 style={{ width: "100%", paddingRight: 52, display: "block", textAlign: "left" }}
               >
-                <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>
                   {s.title || "Session"}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--color-text-subtle)", marginTop: 1 }}>
@@ -1871,7 +1871,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             {showDeleted && deletedSessions.map(s => (
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 4px 4px 8px" }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || "Session"}</div>
+                  <div style={{ fontSize: 12, whiteSpace: "normal", overflowWrap: "anywhere" }}>{s.title || "Session"}</div>
                   <div style={{ fontSize: 10, color: "var(--color-text-subtle)" }}>
                     {`deleted ${s.deleted_at ? new Date(s.deleted_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : ""}`}
                   </div>
@@ -2170,7 +2170,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               onPaste={onPasteMessage}
-              placeholder={sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
+              placeholder={sessionId ? "Ask a question or say what to build… (Enter to send, Shift+Enter for a new line)" : "Start a new session to begin chatting"}
               disabled={thinking}
               rows={2}
               style={{ flex: 1, resize: "none" }}

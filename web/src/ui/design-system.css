@@ -622,9 +622,10 @@
 }
 
 .mvx-hier-select__trigger-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Never cut (owner, 2026-11-21): a long label wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .mvx-hier-select__popover {
@@ -657,9 +658,9 @@
   font-size: 13px;
   color: var(--color-text);
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never cut (owner, 2026-11-21): a long label wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mvx-hier-select__option:hover {
@@ -926,9 +927,9 @@
   font-size: 16px;
   font-weight: 800;
   line-height: var(--line-height-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never cut (owner, 2026-11-21): a long label wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* The product's own wordmark (branding/ProductMark), drawn in the sidebar's
@@ -1071,9 +1072,9 @@
 .mvx-sidebar-nav__label {
   min-width: 0;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Never cut (owner, 2026-11-21): a long label wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mvx-context-bar {
@@ -1240,8 +1241,9 @@
 
 .mvx-filter-chip__label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never cut (owner, 2026-11-21): a long label wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mvx-filter-chip--active {
@@ -1562,9 +1564,9 @@
 .mvx-admin-object__title {
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never cut (owner, 2026-11-21): a long name wraps. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mvx-admin-object__name {
@@ -1573,9 +1575,12 @@
   color: var(--color-text);
 }
 
+/* The line under a title wraps where the title is cut (2026-11-20: at a
+   narrow width "submitted by …" lost the submitter's name). */
 .mvx-admin-object__meta {
   font-size: var(--font-size-body-sm);
   color: var(--color-text-muted);
+  white-space: normal;
 }
 
 /* A tenant's storage against its plan's limit (tenant card). */
@@ -2039,11 +2044,11 @@
   /* The title carries the tile's unit ("Dispatched, t"): readable (4.8:1)
      and as written — capitals turned the unit t into T. */
   color: var(--color-text-quiet);
-  /* One line: "Attainment Pct" wrapped into three lines in a narrow tile. */
   max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never cut (owner, 2026-11-21): a title too long for the tile wraps
+     between words rather than losing its end (it once cut the unit). */
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .mvx-kpi__scope {
@@ -2207,10 +2212,18 @@
 tr:hover .mvx-member-label__actions,
 .mvx-member-label__actions:focus-within { opacity: 1; }
 
-/* A text cell: a note, typed. */
+/* A text cell: a note, typed — a box as tall as its text, wrapping at the
+   cell's width, so the whole note shows (owner, 2026-11-21). */
 .mvx-cell-input--text {
-  width: 200px;
+  display: block;
+  width: 100%;
+  min-width: 190px;
   text-align: left;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 /* A date cell: as wide as the browser's date format and its calendar button
@@ -2696,19 +2709,24 @@ td[data-sel] .mvx-cell-input { background: transparent; }
   text-align: right;
 }
 
+/* The step's name keeps room to read (16em, or 45% of a narrow row) when a
+   long comment beside it wraps. */
 .mvx-wf-step__name {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: min(16em, 45%);
   color: var(--color-text);
 }
 
+/* A decision's comment: wrapped in the row's free width, never cut
+   (2026-11-20: a 200px "…" hid what the approver wrote, with no tooltip). */
 .mvx-wf-step__comment {
   color: var(--color-text-muted);
   font-style: italic;
   font-size: var(--font-size-body-sm);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .mvx-wf-pending {
@@ -3016,7 +3034,7 @@ td[data-sel] .mvx-cell-input { background: transparent; }
   display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--color-border);
   font-size: 13px;
 }
-.mvx-board__column-title { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mvx-board__column-title { font-weight: 600; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; /* never cut */ }
 .mvx-board__column-count {
   font-size: 11px; padding: 1px 7px; border-radius: var(--radius-pill);
   background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-muted);

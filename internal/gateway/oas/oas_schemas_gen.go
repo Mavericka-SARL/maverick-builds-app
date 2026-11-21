@@ -11952,6 +11952,7 @@ func (*Error) getDemoRes()                     {}
 func (*Error) getFormRecordRes()               {}
 func (*Error) getIntegrationRes()              {}
 func (*Error) getIntegrationRunRes()           {}
+func (*Error) getRecordChoicesRes()            {}
 func (*Error) getRecordDeletePlanRes()         {}
 func (*Error) getRecordHistoryRes()            {}
 func (*Error) getRelatedRecordsRes()           {}
@@ -12902,6 +12903,45 @@ func (s *ExtractFormulaRefsOK) SetError(val OptString) {
 	s.Error = val
 }
 
+// A condition on another field of the record (required_when; a date's stamp_when, set by the server
+// to the day the record comes to meet it).
+// Ref: #/components/schemas/FieldCondition
+type FieldCondition struct {
+	Field string   `json:"field"`
+	Is    []string `json:"is"`
+	IsNot []string `json:"is_not"`
+}
+
+// GetField returns the value of Field.
+func (s *FieldCondition) GetField() string {
+	return s.Field
+}
+
+// GetIs returns the value of Is.
+func (s *FieldCondition) GetIs() []string {
+	return s.Is
+}
+
+// GetIsNot returns the value of IsNot.
+func (s *FieldCondition) GetIsNot() []string {
+	return s.IsNot
+}
+
+// SetField sets the value of Field.
+func (s *FieldCondition) SetField(val string) {
+	s.Field = val
+}
+
+// SetIs sets the value of Is.
+func (s *FieldCondition) SetIs(val []string) {
+	s.Is = val
+}
+
+// SetIsNot sets the value of IsNot.
+func (s *FieldCondition) SetIsNot(val []string) {
+	s.IsNot = val
+}
+
 type FillSampleValuesBadRequest Error
 
 func (*FillSampleValuesBadRequest) fillSampleValuesRes() {}
@@ -13456,6 +13496,22 @@ type FormField struct {
 	Deadline   OptBool   `json:"deadline"`
 	DoneField  OptString `json:"done_field"`
 	DoneValues []string  `json:"done_values"`
+	// A select or dimension field's moves once a record holds a value: a save changing it must make one
+	// (400 otherwise); a move naming roles is made by their holders and the application's administrators.
+	//  None: any value follows any.
+	Transitions []FormFieldTransitionsItem `json:"transitions"`
+	// Values of this select or dimension field in which the record is read-only: only this field moves.
+	LocksIn      []string          `json:"locks_in"`
+	RequiredWhen OptFieldCondition `json:"required_when"`
+	StampWhen    OptFieldCondition `json:"stamp_when"`
+	// A boolean of a table keeping a dimension: unticked, the record's member is offered for no new
+	// choice.
+	ActiveFlag OptBool `json:"active_flag"`
+	// A person field: the roles whose holders it may name (none: anyone who reaches the application).
+	Roles []string `json:"roles"`
+	// A person field: tell the person a save names; a dimension field: the person the named record names
+	// in its person field.
+	Notify OptBool `json:"notify"`
 }
 
 // GetName returns the value of Name.
@@ -13578,6 +13634,41 @@ func (s *FormField) GetDoneValues() []string {
 	return s.DoneValues
 }
 
+// GetTransitions returns the value of Transitions.
+func (s *FormField) GetTransitions() []FormFieldTransitionsItem {
+	return s.Transitions
+}
+
+// GetLocksIn returns the value of LocksIn.
+func (s *FormField) GetLocksIn() []string {
+	return s.LocksIn
+}
+
+// GetRequiredWhen returns the value of RequiredWhen.
+func (s *FormField) GetRequiredWhen() OptFieldCondition {
+	return s.RequiredWhen
+}
+
+// GetStampWhen returns the value of StampWhen.
+func (s *FormField) GetStampWhen() OptFieldCondition {
+	return s.StampWhen
+}
+
+// GetActiveFlag returns the value of ActiveFlag.
+func (s *FormField) GetActiveFlag() OptBool {
+	return s.ActiveFlag
+}
+
+// GetRoles returns the value of Roles.
+func (s *FormField) GetRoles() []string {
+	return s.Roles
+}
+
+// GetNotify returns the value of Notify.
+func (s *FormField) GetNotify() OptBool {
+	return s.Notify
+}
+
 // SetName sets the value of Name.
 func (s *FormField) SetName(val string) {
 	s.Name = val
@@ -13698,6 +13789,41 @@ func (s *FormField) SetDoneValues(val []string) {
 	s.DoneValues = val
 }
 
+// SetTransitions sets the value of Transitions.
+func (s *FormField) SetTransitions(val []FormFieldTransitionsItem) {
+	s.Transitions = val
+}
+
+// SetLocksIn sets the value of LocksIn.
+func (s *FormField) SetLocksIn(val []string) {
+	s.LocksIn = val
+}
+
+// SetRequiredWhen sets the value of RequiredWhen.
+func (s *FormField) SetRequiredWhen(val OptFieldCondition) {
+	s.RequiredWhen = val
+}
+
+// SetStampWhen sets the value of StampWhen.
+func (s *FormField) SetStampWhen(val OptFieldCondition) {
+	s.StampWhen = val
+}
+
+// SetActiveFlag sets the value of ActiveFlag.
+func (s *FormField) SetActiveFlag(val OptBool) {
+	s.ActiveFlag = val
+}
+
+// SetRoles sets the value of Roles.
+func (s *FormField) SetRoles(val []string) {
+	s.Roles = val
+}
+
+// SetNotify sets the value of Notify.
+func (s *FormField) SetNotify(val OptBool) {
+	s.Notify = val
+}
+
 // A number field shown as money.
 type FormFieldFormat string
 
@@ -13783,6 +13909,42 @@ func (s *FormFieldOnDelete) UnmarshalText(data []byte) error {
 	}
 }
 
+type FormFieldTransitionsItem struct {
+	From  []string `json:"from"`
+	To    []string `json:"to"`
+	Roles []string `json:"roles"`
+}
+
+// GetFrom returns the value of From.
+func (s *FormFieldTransitionsItem) GetFrom() []string {
+	return s.From
+}
+
+// GetTo returns the value of To.
+func (s *FormFieldTransitionsItem) GetTo() []string {
+	return s.To
+}
+
+// GetRoles returns the value of Roles.
+func (s *FormFieldTransitionsItem) GetRoles() []string {
+	return s.Roles
+}
+
+// SetFrom sets the value of From.
+func (s *FormFieldTransitionsItem) SetFrom(val []string) {
+	s.From = val
+}
+
+// SetTo sets the value of To.
+func (s *FormFieldTransitionsItem) SetTo(val []string) {
+	s.To = val
+}
+
+// SetRoles sets the value of Roles.
+func (s *FormFieldTransitionsItem) SetRoles(val []string) {
+	s.Roles = val
+}
+
 type FormFieldType string
 
 const (
@@ -13797,6 +13959,7 @@ const (
 	FormFieldTypeMetric    FormFieldType = "metric"
 	FormFieldTypeAutocode  FormFieldType = "autocode"
 	FormFieldTypeStatus    FormFieldType = "status"
+	FormFieldTypePerson    FormFieldType = "person"
 )
 
 // AllValues returns all FormFieldType values.
@@ -13813,6 +13976,7 @@ func (FormFieldType) AllValues() []FormFieldType {
 		FormFieldTypeMetric,
 		FormFieldTypeAutocode,
 		FormFieldTypeStatus,
+		FormFieldTypePerson,
 	}
 }
 
@@ -13840,6 +14004,8 @@ func (s FormFieldType) MarshalText() ([]byte, error) {
 	case FormFieldTypeAutocode:
 		return []byte(s), nil
 	case FormFieldTypeStatus:
+		return []byte(s), nil
+	case FormFieldTypePerson:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -13881,6 +14047,9 @@ func (s *FormFieldType) UnmarshalText(data []byte) error {
 		return nil
 	case FormFieldTypeStatus:
 		*s = FormFieldTypeStatus
+		return nil
+	case FormFieldTypePerson:
+		*s = FormFieldTypePerson
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
@@ -16021,6 +16190,102 @@ func (*GetMeUnauthorized) getMeRes() {}
 type GetNotificationSettingsForbidden struct{}
 
 func (*GetNotificationSettingsForbidden) getNotificationSettingsRes() {}
+
+type GetRecordChoicesOK struct {
+	People   GetRecordChoicesOKPeople   `json:"people"`
+	Named    GetRecordChoicesOKNamed    `json:"named"`
+	Inactive GetRecordChoicesOKInactive `json:"inactive"`
+}
+
+// GetPeople returns the value of People.
+func (s *GetRecordChoicesOK) GetPeople() GetRecordChoicesOKPeople {
+	return s.People
+}
+
+// GetNamed returns the value of Named.
+func (s *GetRecordChoicesOK) GetNamed() GetRecordChoicesOKNamed {
+	return s.Named
+}
+
+// GetInactive returns the value of Inactive.
+func (s *GetRecordChoicesOK) GetInactive() GetRecordChoicesOKInactive {
+	return s.Inactive
+}
+
+// SetPeople sets the value of People.
+func (s *GetRecordChoicesOK) SetPeople(val GetRecordChoicesOKPeople) {
+	s.People = val
+}
+
+// SetNamed sets the value of Named.
+func (s *GetRecordChoicesOK) SetNamed(val GetRecordChoicesOKNamed) {
+	s.Named = val
+}
+
+// SetInactive sets the value of Inactive.
+func (s *GetRecordChoicesOK) SetInactive(val GetRecordChoicesOKInactive) {
+	s.Inactive = val
+}
+
+func (*GetRecordChoicesOK) getRecordChoicesRes() {}
+
+type GetRecordChoicesOKInactive map[string][]string
+
+func (s *GetRecordChoicesOKInactive) init() GetRecordChoicesOKInactive {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetRecordChoicesOKNamed map[string]string
+
+func (s *GetRecordChoicesOKNamed) init() GetRecordChoicesOKNamed {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetRecordChoicesOKPeople map[string][]GetRecordChoicesOKPeopleItemItem
+
+func (s *GetRecordChoicesOKPeople) init() GetRecordChoicesOKPeople {
+	m := *s
+	if m == nil {
+		m = map[string][]GetRecordChoicesOKPeopleItemItem{}
+		*s = m
+	}
+	return m
+}
+
+type GetRecordChoicesOKPeopleItemItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// GetID returns the value of ID.
+func (s *GetRecordChoicesOKPeopleItemItem) GetID() string {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetRecordChoicesOKPeopleItemItem) GetName() string {
+	return s.Name
+}
+
+// SetID sets the value of ID.
+func (s *GetRecordChoicesOKPeopleItemItem) SetID(val string) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetRecordChoicesOKPeopleItemItem) SetName(val string) {
+	s.Name = val
+}
 
 type GetRecordHistoryOK struct {
 	History []GetRecordHistoryOKHistoryItem `json:"history"`
@@ -27252,6 +27517,52 @@ func (o OptExportSpecMetricDisplay) Or(d ExportSpecMetricDisplay) ExportSpecMetr
 	return d
 }
 
+// NewOptFieldCondition returns new OptFieldCondition with value set to v.
+func NewOptFieldCondition(v FieldCondition) OptFieldCondition {
+	return OptFieldCondition{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFieldCondition is optional FieldCondition.
+type OptFieldCondition struct {
+	Value FieldCondition
+	Set   bool
+}
+
+// IsSet returns true if OptFieldCondition was set.
+func (o OptFieldCondition) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFieldCondition) Reset() {
+	var v FieldCondition
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFieldCondition) SetTo(v FieldCondition) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFieldCondition) Get() (v FieldCondition, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFieldCondition) Or(d FieldCondition) FieldCondition {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptFillSampleValuesReqFormat returns new OptFillSampleValuesReqFormat with value set to v.
 func NewOptFillSampleValuesReqFormat(v FillSampleValuesReqFormat) OptFillSampleValuesReqFormat {
 	return OptFillSampleValuesReqFormat{
@@ -30624,6 +30935,52 @@ func (o OptProtoTimestamp) Get() (v ProtoTimestamp, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptProtoTimestamp) Or(d ProtoTimestamp) ProtoTimestamp {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptRecordPermissionsMoves returns new OptRecordPermissionsMoves with value set to v.
+func NewOptRecordPermissionsMoves(v RecordPermissionsMoves) OptRecordPermissionsMoves {
+	return OptRecordPermissionsMoves{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRecordPermissionsMoves is optional RecordPermissionsMoves.
+type OptRecordPermissionsMoves struct {
+	Value RecordPermissionsMoves
+	Set   bool
+}
+
+// IsSet returns true if OptRecordPermissionsMoves was set.
+func (o OptRecordPermissionsMoves) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRecordPermissionsMoves) Reset() {
+	var v RecordPermissionsMoves
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRecordPermissionsMoves) SetTo(v RecordPermissionsMoves) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRecordPermissionsMoves) Get() (v RecordPermissionsMoves, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRecordPermissionsMoves) Or(d RecordPermissionsMoves) RecordPermissionsMoves {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -34097,6 +34454,10 @@ type RecordPermissions struct {
 	Delete bool `json:"delete"`
 	// The statuses the caller may move the record to; never its current status; empty when none.
 	SetStatus []RecordPermissionsSetStatusItem `json:"set_status"`
+	// For each field with transitions holding a value, the values the caller may move it to.
+	Moves OptRecordPermissionsMoves `json:"moves"`
+	// The field whose value makes the record read-only (locks_in); only it may change.
+	LockedBy OptString `json:"locked_by"`
 }
 
 // GetEdit returns the value of Edit.
@@ -34114,6 +34475,16 @@ func (s *RecordPermissions) GetSetStatus() []RecordPermissionsSetStatusItem {
 	return s.SetStatus
 }
 
+// GetMoves returns the value of Moves.
+func (s *RecordPermissions) GetMoves() OptRecordPermissionsMoves {
+	return s.Moves
+}
+
+// GetLockedBy returns the value of LockedBy.
+func (s *RecordPermissions) GetLockedBy() OptString {
+	return s.LockedBy
+}
+
 // SetEdit sets the value of Edit.
 func (s *RecordPermissions) SetEdit(val bool) {
 	s.Edit = val
@@ -34127,6 +34498,28 @@ func (s *RecordPermissions) SetDelete(val bool) {
 // SetSetStatus sets the value of SetStatus.
 func (s *RecordPermissions) SetSetStatus(val []RecordPermissionsSetStatusItem) {
 	s.SetStatus = val
+}
+
+// SetMoves sets the value of Moves.
+func (s *RecordPermissions) SetMoves(val OptRecordPermissionsMoves) {
+	s.Moves = val
+}
+
+// SetLockedBy sets the value of LockedBy.
+func (s *RecordPermissions) SetLockedBy(val OptString) {
+	s.LockedBy = val
+}
+
+// For each field with transitions holding a value, the values the caller may move it to.
+type RecordPermissionsMoves map[string][]string
+
+func (s *RecordPermissionsMoves) init() RecordPermissionsMoves {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
 }
 
 type RecordPermissionsSetStatusItem string
@@ -41001,6 +41394,9 @@ type UpdateRecordRequest struct {
 	// Check the change as a save would (access, status, field values, a decided parent) and write
 	// nothing; 200 answers status "valid" with the record as it would be saved.
 	DryRun OptBool `json:"dry_run"`
+	// The record's updated_at as the caller read it. A record someone changed since is not written over
+	// (409). Omitted, the save is checked as before.
+	ExpectedUpdatedAt OptDateTime `json:"expected_updated_at"`
 }
 
 // GetData returns the value of Data.
@@ -41023,6 +41419,11 @@ func (s *UpdateRecordRequest) GetDryRun() OptBool {
 	return s.DryRun
 }
 
+// GetExpectedUpdatedAt returns the value of ExpectedUpdatedAt.
+func (s *UpdateRecordRequest) GetExpectedUpdatedAt() OptDateTime {
+	return s.ExpectedUpdatedAt
+}
+
 // SetData sets the value of Data.
 func (s *UpdateRecordRequest) SetData(val OptUpdateRecordRequestData) {
 	s.Data = val
@@ -41041,6 +41442,11 @@ func (s *UpdateRecordRequest) SetStatus(val OptUpdateRecordRequestStatus) {
 // SetDryRun sets the value of DryRun.
 func (s *UpdateRecordRequest) SetDryRun(val OptBool) {
 	s.DryRun = val
+}
+
+// SetExpectedUpdatedAt sets the value of ExpectedUpdatedAt.
+func (s *UpdateRecordRequest) SetExpectedUpdatedAt(val OptDateTime) {
+	s.ExpectedUpdatedAt = val
 }
 
 // The record's new fields, every one (a field left out is emptied); omitted, the record keeps its

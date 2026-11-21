@@ -136,6 +136,30 @@ func DecidingRun(ctx context.Context) string {
 	return id
 }
 
+type rebuiltPostingsKey struct{}
+
+// WithRebuiltPostings marks ctx as rebuilding the postings of a revision
+// made wholesale — imported from a package, or copied from another
+// revision — which arrives with its records and the totals they posted but
+// not the postings (recordpost.RebuildPostings). The totals already hold
+// what those records post, and the approvals that came with them (carried
+// by the package, or following the copied revision) lock some of those very
+// cells; their locks do not refuse the postings that put the values there.
+// They used to: a record approved into a locked cell — a deferral request
+// approved into its payment — got no posting, and the first later change to
+// its table (a save, a Sync) rebuilt the cell without it, so the approved
+// value vanished from a locked cell (2026-11-21, 13-week cash flow
+// publication). Access rules still apply.
+func WithRebuiltPostings(ctx context.Context) context.Context {
+	return context.WithValue(ctx, rebuiltPostingsKey{}, true)
+}
+
+// RebuiltPostings is true for ctx marked by WithRebuiltPostings.
+func RebuiltPostings(ctx context.Context) bool {
+	v, _ := ctx.Value(rebuiltPostingsKey{}).(bool)
+	return v
+}
+
 // loadWorkflowLocks reads the workflow instances of modelID's application,
 // newest first, as locks — but for the run ctx is deciding for
 // (WithDecidingRun).

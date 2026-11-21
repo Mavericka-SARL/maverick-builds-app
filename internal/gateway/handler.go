@@ -768,6 +768,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/records/{id}/delete-plan", "any", cors(h.recordDeletePlan))
 	register("GET", "/api/records/{id}/history", "any", cors(h.recordHistory))
 	register("GET", "/api/forms/{id}/board-columns", "any", cors(h.recordBoardColumns))
+	register("GET", "/api/forms/{id}/choices", "any", cors(h.recordChoices))
 	// Rule *management* is developer-only, matching the Developer
 	// Console's own AutomationTab.tsx (never referenced from any business
 	// console) and the CategoryModelChange audit category these events
@@ -5407,7 +5408,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		),
 		new_forms AS (
 			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code)
+				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes)
 			SELECT f.model_id, f.name, f.label,
 				COALESCE((
 					SELECT jsonb_agg(
@@ -5419,7 +5420,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				), '[]'::jsonb),
 				$2::uuid, f.own_records_only,
 				f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-				f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code
+				f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes
 			FROM model.form_def f
 			WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 			RETURNING id AS new_id, name
@@ -12114,6 +12115,7 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			// Apply form-metric mappings (status-based posting rules).
 			go func() { _ = h.applyFormMappings(bgCtx, rec.ID, formID, rec.Status, body.Data, userID) }()
 			h.dispatchRecordCreated(ctx, appID, revisionID, formID, rec.ID, rec.Status, userID)
+			h.notifyNamedPeople(ctx, scope, rec.ID, nil, body.Data, act.UserID)
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormRecordCreated,
 				ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -12327,6 +12329,10 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			Status string `json:"status"`
 			// DryRun checks the change and writes nothing.
 			DryRun bool `json:"dry_run"`
+			// ExpectedUpdatedAt, when sent, is the record's updated_at as the
+			// caller read it: a record changed since is not written over
+			// (409). Omitted, the save is checked as before.
+			ExpectedUpdatedAt string `json:"expected_updated_at"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -12340,6 +12346,19 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			jsonRecordErr(w, err, "record")
 			return
+		}
+		var readAt *time.Time
+		if body.ExpectedUpdatedAt != "" {
+			t, err := time.Parse(time.RFC3339Nano, body.ExpectedUpdatedAt)
+			if err != nil {
+				jsonErr(w, fmt.Errorf("expected_updated_at is a time (RFC 3339), not %q", body.ExpectedUpdatedAt), http.StatusBadRequest)
+				return
+			}
+			if !t.Equal(rec.UpdatedAt) {
+				jsonErr(w, errRecordChangedSince, http.StatusConflict)
+				return
+			}
+			readAt = &t
 		}
 		via, chat := delegatedWrite(ctx)
 		if chat {
@@ -12427,7 +12446,12 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		keptChanged := false
-		if err := store.UpdateRecordThen(ctx, recordID, oldStatus, newStatus, data, recordSavedHook(scope.form, recordID, rec.Data, data, act.UserID, &keptChanged)); errors.Is(err, crudapp.ErrRecordChanged) {
+		updatedAt, err := store.UpdateRecordSince(ctx, recordID, oldStatus, readAt, newStatus, data, recordSavedHook(scope.form, recordID, rec.Data, data, act.UserID, &keptChanged))
+		if errors.Is(err, crudapp.ErrRecordChanged) {
+			if readAt != nil {
+				jsonErr(w, errRecordChangedSince, http.StatusConflict)
+				return
+			}
 			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
 			return
 		} else if err != nil {
@@ -12469,7 +12493,8 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if decidedParent != nil {
 			h.reopenParents(ctx, &scope, act, rec.Data, data)
 		}
-		rec.Data, rec.Status = data, newStatus
+		h.notifyNamedPeople(ctx, scope, recordID, rec.Data, data, act.UserID)
+		rec.Data, rec.Status, rec.UpdatedAt = data, newStatus, updatedAt
 		scope.permit(rec)
 		jsonOK(w, map[string]any{"status": "ok", "record": rec})
 

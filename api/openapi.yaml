@@ -2558,7 +2558,7 @@ components:
       properties:
         name:            { type: string }
         label:           { type: string }
-        type:            { type: string, enum: [text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status] }
+        type:            { type: string, enum: [text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status, person] }
         required:        { type: boolean }
         options:         { type: array, items: { type: string } }
         dimension_id:    { type: string, format: uuid, description: "Set when type=dimension" }
@@ -2580,6 +2580,31 @@ components:
         deadline:        { type: boolean, description: "A date field shown as overdue once past, unless done_field holds one of done_values" }
         done_field:      { type: string }
         done_values:     { type: array, items: { type: string } }
+        transitions:
+          type: array
+          description: "A select or dimension field's moves once a record holds a value: a save changing it must make one (400 otherwise); a move naming roles is made by their holders and the application's administrators. None: any value follows any."
+          items:
+            type: object
+            required: [from, to]
+            properties:
+              from:  { type: array, items: { type: string } }
+              to:    { type: array, items: { type: string } }
+              roles: { type: array, items: { type: string } }
+        locks_in:      { type: array, items: { type: string }, description: "Values of this select or dimension field in which the record is read-only: only this field moves" }
+        required_when: { $ref: "#/components/schemas/FieldCondition" }
+        stamp_when:    { $ref: "#/components/schemas/FieldCondition" }
+        active_flag:   { type: boolean, description: "A boolean of a table keeping a dimension: unticked, the record's member is offered for no new choice" }
+        roles:         { type: array, items: { type: string }, description: "A person field: the roles whose holders it may name (none: anyone who reaches the application)" }
+        notify:        { type: boolean, description: "A person field: tell the person a save names; a dimension field: the person the named record names in its person field" }
+
+    FieldCondition:
+      type: object
+      description: "A condition on another field of the record (required_when; a date's stamp_when, set by the server to the day the record comes to meet it)."
+      required: [field]
+      properties:
+        field:  { type: string }
+        is:     { type: array, items: { type: string } }
+        is_not: { type: array, items: { type: string } }
 
     FormDef:
       type: object
@@ -2713,6 +2738,11 @@ components:
           type: array
           description: The statuses the caller may move the record to; never its current status; empty when none.
           items: { type: string, enum: [draft, submitted, approved, rejected] }
+        moves:
+          type: object
+          description: For each field with transitions holding a value, the values the caller may move it to.
+          additionalProperties: { type: array, items: { type: string } }
+        locked_by: { type: string, description: The field whose value makes the record read-only (locks_in); only it may change. }
 
     CreateRecordRequest:
       type: object
@@ -2745,6 +2775,10 @@ components:
         dry_run:
           type: boolean
           description: Check the change as a save would (access, status, field values, a decided parent) and write nothing; 200 answers status "valid" with the record as it would be saved.
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: The record's updated_at as the caller read it. A record someone changed since is not written over (409). Omitted, the save is checked as before.
 
     RecordsQuery:
       type: object
@@ -11306,6 +11340,50 @@ paths:
                         color:     { type: string }
                         read_only: { type: boolean }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/forms/{id}/choices:
+    get:
+      operationId: getRecordChoices
+      tags: [Records]
+      summary: What a record form offers beyond the table's fields
+      description: >-
+        For each person field, the people it may name — names only, never e-mail addresses: the holders of the
+        field's roles, or everyone who reaches the application; the names of every person the table's records
+        name; and for each dimension field, the members its keeping table marks inactive (offered for no new
+        choice). Empty for a table with neither.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The choices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [people, named, inactive]
+                properties:
+                  people:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, name]
+                        properties:
+                          id:   { type: string }
+                          name: { type: string }
+                  named:
+                    type: object
+                    additionalProperties: { type: string }
+                  inactive:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items: { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/automation/rules:

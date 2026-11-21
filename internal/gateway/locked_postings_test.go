@@ -199,3 +199,142 @@ func TestValuesPostedIntoALockedPeriodStay(t *testing.T) {
 	}
 	call("DELETE", "/api/developer/form-integrations/"+mapping, dev, nil)
 }
+
+// A model package carries its records and the approvals that locked values,
+// but not the records' postings: the import posts the records again. A
+// record approved into a cell its approval locks — a deferral request
+// approved into its payment — used to be refused that posting by the very
+// approval the package carried, so the first later change to its table
+// rebuilt the cell without it and the approved value vanished from a locked
+// cell (2026-11-21, 13-week cash flow publication).
+func TestImportedApprovedPostingsStay(t *testing.T) {
+	f := setupRollupFixture(t)
+	ctx := context.Background()
+	const dev, creator = "rollup-test-approver", "rollup-test-manager"
+	call := func(method, path, persona string, body any) map[string]any {
+		t.Helper()
+		status, out := f.do(t, method, path, persona, body)
+		if status != http.StatusOK {
+			t.Fatalf("%s %s as %s: %d %v", method, path, persona, status, out)
+		}
+		return out
+	}
+	table := call("POST", "/api/forms?revision_id="+f.workingRevID, dev, map[string]any{
+		"name": "claims_t", "label": "Claims",
+		"fields": []map[string]any{
+			{"name": "staff", "label": "Staff", "type": "dimension", "dimension_id": f.staffDimID, "required": true},
+			{"name": "amt", "label": "Amount", "type": "number"},
+			{"name": "status", "label": "Status", "type": "status"},
+		},
+	})["id"].(string)
+	call("POST", "/api/developer/form-integrations", dev, map[string]any{
+		"form_id": table, "grid_id": f.gridStaffID, "name": "claims", "source_field": "amt", "target_metric_id": f.amountMetricID,
+		"aggregation": "sum", "posting_statuses": []string{"approved"},
+		"dimension_mappings": map[string]string{f.staffDimID: "staff"},
+	})
+	for staff, amt := range map[string]float64{"STAFF_A1": 5, "STAFF_A2": 3} {
+		id := call("POST", "/api/forms/"+table+"/records", creator, map[string]any{"data": map[string]any{"staff": staff, "amt": amt}})["id"].(string)
+		call("PUT", "/api/records/"+id, dev, map[string]any{"status": "approved"})
+	}
+	time.Sleep(1500 * time.Millisecond) // the postings run in the background
+
+	// A1 is approved and locked.
+	ws := workflow.NewStore(f.pool)
+	def, err := ws.CreateWorkflowDefFull(ctx, f.appID, f.workingRevID, "Staff sign-off", "", "manual", f.approverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, _ := json.Marshal([]map[string]any{{"id": "r", "name": "Sign off", "type": "approval", "assignee_roles": []string{"business_admin"}}})
+	schema, _ := json.Marshal([]map[string]any{{"key": "staff", "label": "Staff", "data_type": "Dimension member", "dimension_id": f.staffDimID, "required": true}})
+	if _, err := ws.UpdateWorkflowDefFull(ctx, def.ID, def.Name, def.Description, def.TriggerEvent, "none", f.approverID, steps, schema, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.PublishWorkflowDef(ctx, def.ID, f.approverID); err != nil {
+		t.Fatal(err)
+	}
+	rule, err := ws.CreateAutomationRule(ctx, f.appID, f.workingRevID, "Start", "", "manual", "", def.ID, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := ws.TriggerRule(ctx, rule.ID, f.approverID, map[string]string{"staff": "STAFF_A1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var step string
+	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM workflow.workflow_step WHERE instance_id = $1::uuid`, run.InstanceID).Scan(&step); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.CompleteStep(ctx, step, f.approverID, "approve", "signed off"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exported and imported by a tenant admin, A1's approval comes along.
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id)
+		SELECT $1::uuid, 'tenant_admin', workspace_id FROM core.application WHERE id = $2::uuid`, f.approverID, f.appID); err != nil {
+		t.Fatal(err)
+	}
+	pkg := call("GET", "/api/admin/models/"+f.modelID+"/export?revision_id="+f.workingRevID, dev, nil)
+	if locks, _ := pkg["approved_locks"].([]any); len(locks) != 1 {
+		t.Fatalf("approved locks in the package: %v; want A1's", pkg["approved_locks"])
+	}
+	imp := call("POST", "/api/admin/models/import", dev, map[string]any{"application_id": f.appID, "model_name": "Imported", "package": pkg})
+	rev, _ := imp["revision_id"].(string)
+	var newTable, staffDim string
+	if err := f.pool.QueryRow(ctx, `SELECT fd.id::text, d.id::text FROM model.form_def fd
+		JOIN model.dimension_def d ON d.revision_id = fd.revision_id AND d.name = (SELECT name FROM model.dimension_def WHERE id = $2::uuid)
+		WHERE fd.revision_id = $1::uuid AND fd.name = 'claims_t'`, rev, f.staffDimID).Scan(&newTable, &staffDim); err != nil {
+		t.Fatalf("imported table: %v", err)
+	}
+	var postings int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record_posting p JOIN runtime.form_record r ON r.id = p.form_record_id
+		WHERE r.form_id = $1::uuid AND r.data->>'staff' = 'STAFF_A1'`, newTable).Scan(&postings); err != nil || postings != 1 {
+		t.Fatalf("postings of the imported A1 claim: %d (%v); want 1", postings, err)
+	}
+
+	// A change to another record of the table keeps A1's approved value.
+	var a2 string
+	if err := f.pool.QueryRow(ctx, `SELECT id::text FROM runtime.form_record WHERE form_id = $1::uuid AND data->>'staff' = 'STAFF_A2'`, newTable).Scan(&a2); err != nil {
+		t.Fatal(err)
+	}
+	call("PUT", "/api/records/"+a2, dev, map[string]any{"data": map[string]any{"staff": "STAFF_A2", "amt": 4}})
+	at := func(staff string, want float64) float64 {
+		t.Helper()
+		var v float64
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if err := f.pool.QueryRow(ctx, `SELECT COALESCE(sum(fi.value), 0) FROM runtime.fact_input fi
+				JOIN model.form_metric_mapping m ON m.id = fi.source_ref
+				WHERE m.form_id = $1::uuid AND fi.dim_members->>$2 = $3`, newTable, staffDim, staff).Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			if v == want || time.Now().After(deadline) {
+				return v
+			}
+		}
+	}
+	if v := at("STAFF_A2", 4); v != 4 {
+		t.Fatalf("imported A2 after its claim changed: %v; want 4", v)
+	}
+	if v := at("STAFF_A1", 5); v != 5 {
+		t.Fatalf("imported A1 after A2's claim changed: %v; want its approved 5 kept", v)
+	}
+
+	// A revision copied from it rebuilds its postings the same way: the lock
+	// follows the copy, and a Sync there keeps A1's approved value.
+	imported, _ := imp["model_id"].(string)
+	cp := call("POST", "/api/developer/revisions", dev, map[string]any{"model_id": imported, "name": "Copy"})
+	copyRev, _ := cp["id"].(string)
+	if err := f.pool.QueryRow(ctx, `SELECT fd.id::text, d.id::text FROM model.form_def fd
+		JOIN model.dimension_def d ON d.revision_id = fd.revision_id AND d.name = (SELECT name FROM model.dimension_def WHERE id = $2::uuid)
+		WHERE fd.revision_id = $1::uuid AND fd.name = 'claims_t'`, copyRev, f.staffDimID).Scan(&newTable, &staffDim); err != nil {
+		t.Fatalf("copied table: %v", err)
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record_posting p JOIN runtime.form_record r ON r.id = p.form_record_id
+		WHERE p.revision_id = $1::uuid AND r.data->>'staff' = 'STAFF_A1'`, copyRev).Scan(&postings); err != nil || postings != 1 {
+		t.Fatalf("postings of A1's claim in the copied revision: %d (%v); want 1", postings, err)
+	}
+	f.do(t, "POST", "/api/forms/"+newTable+"/sync", dev, nil) // partial: A1 is locked
+	time.Sleep(1500 * time.Millisecond)
+	if v := at("STAFF_A1", 5); v != 5 {
+		t.Fatalf("copied A1 after a Sync: %v; want its approved 5 kept", v)
+	}
+}

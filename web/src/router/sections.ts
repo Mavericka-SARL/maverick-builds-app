@@ -94,6 +94,9 @@ const MERGED_TABS: Record<string, string> = {
   "business:history": "business:workflow/history",
   "business-admin:inbox": "business-admin:workflow",
   "business-admin:history": "business-admin:workflow/history",
+  // Owner, 2026-11-20: Copy values and Freeze values merged into Manage values.
+  "business-admin:copy": "business-admin:values",
+  "business-admin:freeze": "business-admin:values/freeze",
 };
 
 /** The tab a section opens on when it is the landing one. */

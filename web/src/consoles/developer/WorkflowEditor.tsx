@@ -237,7 +237,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
         <div style={{ width: 1, height: 20, background: "var(--color-border)" }} />
         {/* The name is edited in Properties; a second input here was the
             same field twice (constructor audit, 2026-09-10). */}
-        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text)", minWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={effective.name}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text)", minWidth: 200, whiteSpace: "normal", overflowWrap: "anywhere" }} title={effective.name}>
           {effective.name || "Untitled workflow"}
         </span>
         <StatusBadge status={effective.status} />
@@ -487,7 +487,7 @@ function StepListItem({ step, index, total, selected, onSelect, onMoveUp, onMove
       <span style={{ fontSize: 11, color: "var(--color-disabled)", width: 16, flexShrink: 0, textAlign: "center" }}>{index + 1}</span>
       <StepTypeIcon type={step.type} size={14} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.name}</div>
+        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text)", whiteSpace: "normal", overflowWrap: "anywhere" }}>{step.name}</div>
         <div style={{ fontSize: 11, color: "var(--color-disabled)" }}>{STEP_TYPE_LABELS[step.type]}</div>
       </div>
       {hover && (

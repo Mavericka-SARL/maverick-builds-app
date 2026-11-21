@@ -1352,6 +1352,18 @@ func (UnimplementedHandler) GetNotificationSettings(ctx context.Context) (r GetN
 	return r, ht.ErrNotImplemented
 }
 
+// GetRecordChoices implements getRecordChoices operation.
+//
+// For each person field, the people it may name — names only, never e-mail addresses: the holders
+// of the field's roles, or everyone who reaches the application; the names of every person the
+// table's records name; and for each dimension field, the members its keeping table marks inactive
+// (offered for no new choice). Empty for a table with neither.
+//
+// GET /api/forms/{id}/choices
+func (UnimplementedHandler) GetRecordChoices(ctx context.Context, params GetRecordChoicesParams) (r GetRecordChoicesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetRecordDeletePlan implements getRecordDeletePlan operation.
 //
 // What deleting a record would do — refused, or the records deleted and cleared with it.

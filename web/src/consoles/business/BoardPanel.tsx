@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { Button, FilterBar, FilterBarGroup, FilterChip, InlineAlert, LoadingState, SearchInput, Select, Txt } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
+import { useRecordChoices } from "./useRecordChoices";
 import { canCreateRecords } from "./formPermissions";
 import { describeFilter, displayValue, listColumns, listQuery, newRecordLabel, recordTitle } from "./recordList";
 import { FilterBuilder } from "./FormPanel";
@@ -68,6 +69,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
   const metrics = metricsRaw as Metric[];
   const { data: formsRaw = [] } = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId || undefined) });
   const forms = formsRaw as FormDef[];
+  useRecordChoices(form, forms); // a person field reads by name
 
   const { data: colData, error: colError } = useQuery({
     queryKey: ["records", "board-columns", form.id, settings.column_field, settings.color_property ?? ""],
@@ -120,7 +122,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
   ].filter(c => !settings.hide_empty || (totalsBy.get(c.key)?.count ?? 0) > 0);
 
   const move = useMutation({
-    mutationFn: ({ rec, to }: { rec: FormRecord; to: string }) => api.updateRecord(rec.id, { data: { ...rec.data, [settings.column_field]: to } }),
+    mutationFn: ({ rec, to }: { rec: FormRecord; to: string }) => api.updateRecord(rec.id, { data: { ...rec.data, [settings.column_field]: to } }, rec.updated_at),
     onMutate: ({ rec, to }) => {
       setMoveError(null);
       // The card moves at once; a refusal puts it back.
@@ -134,7 +136,20 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
     },
   });
 
-  const canMoveInto = (col: BoardColumn) => col.key !== NONE && !col.read_only;
+  // A field with transitions moves a card only where the server allows it
+  // (permissions.moves); a record locked by another field does not move.
+  const [dragging, setDragging] = useState<FormRecord | null>(null);
+  const movesOf = (rec: FormRecord) => rec.permissions?.moves?.[settings.column_field];
+  const cardMovable = (rec: FormRecord) => {
+    const lockedBy = rec.permissions?.locked_by;
+    const moves = movesOf(rec);
+    return !!rec.permissions?.edit && (!lockedBy || lockedBy === settings.column_field) && (moves === undefined || moves.length > 0);
+  };
+  const canMoveInto = (col: BoardColumn, rec: FormRecord | null = dragging) => {
+    if (col.key === NONE || col.read_only) return false;
+    const moves = rec ? movesOf(rec) : undefined;
+    return moves === undefined || moves.includes(col.key) || String(rec?.data[settings.column_field] ?? "") === col.key;
+  };
   const moveTo = (rec: FormRecord, to: string) => {
     if (String(rec.data[settings.column_field] ?? "") === to) return;
     move.mutate({ rec, to });
@@ -227,7 +242,8 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                   setDragOver(null);
                   const id = e.dataTransfer.getData("text/plain");
                   const rec = records.find(r => r.id === id);
-                  if (rec && canMoveInto(col)) moveTo(rec, col.key);
+                  setDragging(null);
+                  if (rec && canMoveInto(col, rec)) moveTo(rec, col.key);
                 }}>
                 <header className="mvx-board__column-head">
                   <span className="mvx-board__column-title">
@@ -236,7 +252,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                   </span>
                   <span className="mvx-board__column-count" aria-label={`${t?.count ?? 0} records`}>{t?.count ?? 0}</span>
                   {sumField && <span className="mvx-board__column-sum" title={`${sumField.label} total: ${fullSum(t?.sum ?? 0)}`}>{fmtSum(t?.sum ?? 0)}</span>}
-                  {canCreate && canMoveInto(col) && (
+                  {canCreate && canMoveInto(col, null) && (
                     <button type="button" className="mvx-board__add" aria-label={`New card in ${col.label}`} onClick={() => setCreatingIn(col.key)}>
                       <PlusIcon size={13} aria-hidden="true" />
                     </button>
@@ -244,12 +260,13 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                 </header>
                 <div className="mvx-board__cards">
                   {cards.map(rec => {
-                    const movable = !!rec.permissions?.edit;
+                    const movable = cardMovable(rec);
                     const cardTitle = titleField ? displayValue(titleField, rec.data[titleField.name], dims, metrics, dateFormat) : recordTitle(form, rec);
                     return (
                       <article key={rec.id} className="mvx-board__card" draggable={movable}
                         aria-label={cardTitle}
-                        onDragStart={e => { e.dataTransfer.setData("text/plain", rec.id); e.dataTransfer.effectAllowed = "move"; }}
+                        onDragStart={e => { e.dataTransfer.setData("text/plain", rec.id); e.dataTransfer.effectAllowed = "move"; setDragging(rec); }}
+                        onDragEnd={() => setDragging(null)}
                         onClick={() => setOpened(rec)}
                         onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) setOpened(rec); }}
                         tabIndex={0}>
@@ -267,7 +284,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                             {!columns.some(c => c.key === String(rec.data[settings.column_field] ?? "")) && (
                               <option value={String(rec.data[settings.column_field] ?? "")} disabled>{col.label}</option>
                             )}
-                            {columns.map(c => <option key={c.key} value={c.key} disabled={!canMoveInto(c)}>{c.label}</option>)}
+                            {columns.map(c => <option key={c.key} value={c.key} disabled={!canMoveInto(c, rec)}>{c.label}</option>)}
                           </Select>
                         )}
                       </article>

@@ -438,7 +438,7 @@ func TestPackagesCarryTheirGuides(t *testing.T) {
 		}
 		names[pkg.ModelName] = true
 		t.Run(pkg.ModelName, func(t *testing.T) {
-			if pkg.Format != modeltransfer.PackageFormat || pkg.Version != modeltransfer.PackageVersion || !pkg.IncludeData || pkg.RevisionName != RevisionName {
+			if pkg.Format != modeltransfer.PackageFormat || pkg.Version != pkg.MinimumVersion() || !pkg.IncludeData || pkg.RevisionName != RevisionName {
 				t.Errorf("package header = %s %d data=%t revision %q", pkg.Format, pkg.Version, pkg.IncludeData, pkg.RevisionName)
 			}
 			checkPages(t, pkg)

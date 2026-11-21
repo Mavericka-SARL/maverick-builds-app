@@ -24,7 +24,7 @@ const TenantAdminGuideName = "Tenant admin guide"
 // the guides never collide.
 func TenantAdminGuide() modeltransfer.Package {
 	return modeltransfer.Package{
-		Format: modeltransfer.PackageFormat, Version: modeltransfer.PackageVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Format: modeltransfer.PackageFormat, Version: modeltransfer.BaseVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		ModelName: TenantAdminGuideName, StorageType: "oltp", RevisionName: RevisionName, IncludeData: true,
 		Dimensions: []modeltransfer.Dimension{taStepDimension()},
 		Metrics: []modeltransfer.Metric{

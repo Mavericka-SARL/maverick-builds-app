@@ -4,6 +4,7 @@ import { Trash2, Plus, Pencil, Check, ArrowUp, ArrowDown, SlidersHorizontal } fr
 import { api, type FormField, type DevDimension, type DevMetric, type FormDef, type EditAccess, type TableSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { RolePicker } from "./RolePicker";
+import { FieldRules } from "./FieldRules";
 import { TextInput, NumberInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, SearchInput, useConfirm, Txt } from "../../ui";
 
 const blankField = (): FormField => ({ name: "", label: "", type: "text", required: false });
@@ -27,6 +28,7 @@ function FieldTypeSelect({ value, onChange, dims, statusTaken }: {
       <option value="boolean">Boolean</option>
       <option value="metric">Metric</option>
       <option value="autocode">Auto code</option>
+      <option value="person">Person</option>
       {/* A table has at most one status field. */}
       <option value="status" disabled={statusTaken && value !== "status"}>Status</option>
       {dims.length > 0 && (
@@ -39,19 +41,21 @@ function FieldTypeSelect({ value, onChange, dims, statusTaken }: {
 }
 
 /** A field's options beyond its type: default, pairing, visibility, history, and per type money, deadline or delete rule. */
-function FieldOptions({ f, fields, onUpdate, keeper }: {
+function FieldOptions({ f, fields, onUpdate, keeper, applicationId }: {
   f: FormField;
   fields: FormField[];
   onUpdate: (patch: Partial<FormField>) => void;
   /** The table keeping the dimension a dimension field names, when one does. */
   keeper?: FormDef;
+  /** The application, whose roles moves and person fields name. */
+  applicationId?: string;
 }) {
   const serverFilled = f.type === "autocode" || f.type === "status";
   const others = fields.filter(o => o !== f && o.name && o.type !== "autocode" && o.type !== "status");
   const row = { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" as const, fontSize: 12 };
   return (
     <div className="mvx-panel" style={{ marginLeft: 148, marginTop: 6, padding: 10, display: "flex", flexDirection: "column", gap: 8 }} role="group" aria-label={`Options of ${f.label || f.name || "field"}`}>
-      {!serverFilled && f.type !== "metric" && (
+      {!serverFilled && f.type !== "metric" && f.type !== "person" && !f.stamp_when && (
         <div style={row}>
           <span className="mvx-admin-muted">Default:</span>
           {f.type === "boolean" ? (
@@ -135,13 +139,15 @@ function FieldOptions({ f, fields, onUpdate, keeper }: {
           </Select>
         </div>
       )}
+      <FieldRules f={f} fields={fields} applicationId={applicationId} onUpdate={onUpdate} />
     </div>
   );
 }
 
 function FormFieldsEditor({
-  fields, onChange, dims, metrics, forms = [],
+  fields, onChange, dims, metrics, forms = [], applicationId,
 }: {
+  applicationId?: string;
   fields: FormField[];
   onChange: (f: FormField[]) => void;
   dims: DevDimension[];
@@ -167,7 +173,8 @@ function FormFieldsEditor({
     <>
       {fields.map((f, i) => {
         const typeValue = f.type === "dimension" ? (f.dimension_id ?? "") : f.type;
-        const reset = { dimension_id: undefined, metric_id: undefined, allowed_members: undefined, value_field: undefined, code_prefix: undefined, code_digits: undefined };
+        const reset = { dimension_id: undefined, metric_id: undefined, allowed_members: undefined, value_field: undefined, code_prefix: undefined, code_digits: undefined,
+          transitions: undefined, locks_in: undefined, stamp_when: undefined, active_flag: undefined, roles: undefined, notify: undefined };
 
         const handleTypeChange = (val: string) => {
           if (dims.some(d => d.id === val))
@@ -214,7 +221,7 @@ function FormFieldsEditor({
               </IconButton>
             </div>
             {optionsOpen.has(i) && (
-              <FieldOptions f={f} fields={fields} onUpdate={patch => update(i, patch)}
+              <FieldOptions f={f} fields={fields} onUpdate={patch => update(i, patch)} applicationId={applicationId}
                 keeper={f.type === "dimension" ? forms.find(t => t.keeps_dimension_id === f.dimension_id) : undefined} />
             )}
             {f.type === "autocode" && (
@@ -363,6 +370,10 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [editOwnOnly, setEditOwnOnly] = useState(false);
   const [editEditAccess, setEditEditAccess] = useState<EditAccess>("creator");
   const [editCreateRoles, setEditCreateRoles] = useState<string[]>([]);
+  const [editDeleteAdmins, setEditDeleteAdmins] = useState(false);
+  const [editDeleteRoles, setEditDeleteRoles] = useState<string[]>([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editCodes, setEditCodes] = useState<"" | "refuse" | "update">("");
   const { data: demoCtx } = useDemo(revisionId, { staleTime: 60_000 });
   const [editKeeps, setEditKeeps] = useState("");
   const [editLabelField, setEditLabelField] = useState("");
@@ -422,6 +433,10 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
     const out: TableSettings = {};
     if (editEditAccess !== (t?.edit_access ?? "creator")) out.edit_access = editEditAccess;
     if (editCreateRoles.join("\u0000") !== (t?.create_roles ?? []).join("\u0000")) out.create_roles = editCreateRoles;
+    if (editDeleteAdmins !== (t?.delete_access === "admins")) out.delete_access = editDeleteAdmins ? "admins" : "";
+    if (editDeleteRoles.join("\u0000") !== (t?.delete_roles ?? []).join("\u0000")) out.delete_roles = editDeleteRoles;
+    if (editOpen !== (t?.record_scope === "open")) out.record_scope = editOpen ? "open" : "";
+    if (editCodes && editCodes !== (t?.existing_codes ?? "")) out.existing_codes = editCodes;
     if (editKeeps !== (t?.keeps_dimension_id ?? "") || editLabelField !== (t?.member_label_field ?? "") || editRootLabel.trim() !== (t?.member_root_label ?? "")) {
       out.keeps_dimension_id = editKeeps;
       out.member_label_field = editKeeps ? editLabelField : "";
@@ -432,7 +447,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   };
   const startEdit = (f: FormDef) => {
     setEditId(f.id); setEditName(f.name); setEditLabel(f.label); setEditFields([...(f.fields ?? [])]); setEditOwnOnly(!!f.own_records_only);
-    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? ""); setEditWithCode(!!f.member_label_with_code);
+    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditDeleteAdmins(f.delete_access === "admins"); setEditDeleteRoles(f.delete_roles ?? []); setEditOpen(f.record_scope === "open"); setEditCodes(f.existing_codes ?? ""); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? ""); setEditWithCode(!!f.member_label_with_code);
   };
   const editing = (forms as FormDef[]).find(f => f.id === editId);
   // Removing the status field makes every record count; adding one makes new records wait for approval.
@@ -486,7 +501,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
             </Field>
           </div>
           <div className="mvx-admin-revisions__label" style={{ marginBottom: 10 }}>Fields</div>
-          <FormFieldsEditor fields={newFields} onChange={setNewFields} dims={dims} metrics={formMetrics} forms={forms as FormDef[]} />
+          <FormFieldsEditor fields={newFields} onChange={setNewFields} dims={dims} metrics={formMetrics} forms={forms as FormDef[]} applicationId={demoCtx?.app_id} />
           <div style={{ marginBottom: 16 }}>
             <Checkbox checked={newOwnOnly} onChange={e => setNewOwnOnly(e.target.checked)} label="Each person sees only their own records" />
             <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0 24px" }}>{ownRecordsHint}</p>
@@ -523,7 +538,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
                     </Field>
                   </div>
                   <div className="mvx-admin-revisions__label">Fields</div>
-                  <FormFieldsEditor fields={editFields} onChange={setEditFields} dims={dims} metrics={formMetrics} forms={forms as FormDef[]} />
+                  <FormFieldsEditor fields={editFields} onChange={setEditFields} dims={dims} metrics={formMetrics} forms={forms as FormDef[]} applicationId={demoCtx?.app_id} />
                   <div>
                     <Checkbox checked={editOwnOnly} onChange={e => setEditOwnOnly(e.target.checked)} label="Each person sees only their own records" />
                     <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0 24px" }}>{ownRecordsHint}</p>
@@ -534,6 +549,39 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
                       Tick roles when a new record adds something others plan on, such as a plant or an account.
                     </p>
                     {demoCtx?.app_id && <RolePicker applicationId={demoCtx.app_id} value={editCreateRoles} onChange={setEditCreateRoles} />}
+                  </Field>
+                  <Field label="Who sees records"
+                    description={editOpen
+                      ? "Everyone who opens the table sees every record. A save is checked against the access of the person saving it: a manager hands a ticket an agent logged to another team; a record naming a member hidden from a person is theirs to read, not to change."
+                      : "Access rules on members narrow the records: a record naming a member hidden from a person is hidden from them, and a record posts within its creator's access."}>
+                    <Select value={editOpen ? "open" : ""} onChange={e => setEditOpen(e.target.value === "open")} style={{ width: 420 }} aria-label="Who sees records">
+                      <option value="">Scoped by access rules on members (the default)</option>
+                      <option value="open">Everyone who opens the table sees every record</option>
+                    </Select>
+                  </Field>
+                  {editFields.some(ff => ff.type === "autocode") && (
+                    <Field label="A file row naming a record's code"
+                      description={editCodes === "update" ? "Updates the record holding that code (a code no record holds is refused); an empty code adds a record."
+                        : editCodes === "refuse" ? "Is refused: a file adds records with empty codes, so loading it twice cannot add them twice."
+                        : "Not chosen yet (a table made before the choice): the code is ignored and the row adds a record — loading a file twice adds its records twice. Choose one."}>
+                      <Select value={editCodes} onChange={e => setEditCodes(e.target.value as "refuse" | "update")} style={{ width: 420 }} aria-label="A file row naming a record's code">
+                        {editCodes === "" && <option value="">— choose —</option>}
+                        <option value="refuse">Refuse the row</option>
+                        <option value="update">Update the record holding the code</option>
+                      </Select>
+                    </Field>
+                  )}
+                  <Field label="Who may delete records">
+                    <Checkbox checked={editDeleteAdmins} onChange={e => setEditDeleteAdmins(e.target.checked)}
+                      label="Only the application's administrators (and the roles ticked below) — records are kept, closed rather than deleted" />
+                    {editDeleteAdmins && demoCtx?.app_id && (
+                      <>
+                        <p className="mvx-admin-muted" style={{ margin: "6px 0", fontSize: 12 }}>
+                          Ticked roles may delete the records they may change. Unticked: whoever may change a record deletes it, as before.
+                        </p>
+                        <RolePicker applicationId={demoCtx.app_id} value={editDeleteRoles} onChange={setEditDeleteRoles} />
+                      </>
+                    )}
                   </Field>
                   <TableSettingsEditor editAccess={editEditAccess} onEditAccess={setEditEditAccess} keeps={editKeeps} onKeeps={setEditKeeps}
                     labelField={editLabelField} onLabelField={setEditLabelField} rootLabel={editRootLabel} onRootLabel={setEditRootLabel} withCode={editWithCode} onWithCode={setEditWithCode} fields={editFields} dims={dims} forms={forms as FormDef[]} selfId={f.id} />

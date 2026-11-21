@@ -81,6 +81,50 @@ type FormField struct {
 	Deadline   bool     `json:"deadline,omitempty"`
 	DoneField  string   `json:"done_field,omitempty"`
 	DoneValues []string `json:"done_values,omitempty"`
+
+	// The options below are opt-in rules (2026-11-20, help desk): a field
+	// without them behaves as before they existed.
+
+	// Transitions, on a select or dimension field, are the moves its value
+	// may make once a record holds one (a ticket's status New → Open →
+	// Resolved → Closed): a save that changes it must make one of them. A
+	// move naming Roles is made by the holders of one of those roles and by
+	// the application's administrators. None: any value may follow any.
+	Transitions []Transition `json:"transitions,omitempty"`
+	// LocksIn, on a select or dimension field, are its values in which the
+	// record is read-only: a save may change this field alone (by its
+	// transitions), as a closed ticket is reopened rather than edited.
+	LocksIn []string `json:"locks_in,omitempty"`
+	// RequiredWhen makes the field required while the record meets the
+	// condition (a resolution summary once the status is Resolved).
+	RequiredWhen *RowCondition `json:"required_when,omitempty"`
+	// StampWhen, on a date field, sets it to the day of the save that
+	// brings the record to meet the condition (the day a ticket is
+	// resolved). The server keeps it: a save does not change it, except a
+	// new record arriving with one (records loaded from elsewhere keep
+	// their dates).
+	StampWhen *RowCondition `json:"stamp_when,omitempty"`
+	// ActiveFlag marks a boolean field of a table keeping a dimension as
+	// whether its record's member is active: a member whose record has it
+	// unticked stays on the records naming it, and is offered for no new
+	// choice.
+	ActiveFlag bool `json:"active_flag,omitempty"`
+	// Roles, on a person field, are the roles whose holders may be chosen
+	// (none: anyone who reaches the application). Notify tells the person a
+	// save names in it, in the console's notifications — on a dimension
+	// field naming a member a table keeps, the person that member's record
+	// names in its person field (a ticket's assignee is an agent record).
+	Roles  []string `json:"roles,omitempty"`
+	Notify bool     `json:"notify,omitempty"`
+}
+
+// Transition is a move a field's value may make: from any value of From
+// to any value of To, by the holders of Roles (none: by anyone who may
+// change the record).
+type Transition struct {
+	From  []string `json:"from"`
+	To    []string `json:"to"`
+	Roles []string `json:"roles,omitempty"`
 }
 
 // Delete rules of a dimension field naming a kept dimension's member.
@@ -103,6 +147,29 @@ const (
 	EditCreator  = "creator"
 	EditEveryone = "everyone"
 )
+
+// Who may delete a table's records (model.form_def.delete_access).
+const (
+	DeleteEditors = ""
+	DeleteAdmins  = "admins"
+)
+
+// Who sees a table's records (model.form_def.record_scope).
+const (
+	ScopeByAccess = ""
+	ScopeOpen     = "open"
+)
+
+// What a file row naming an auto code does (model.form_def.existing_codes).
+const (
+	CodesIgnored = ""
+	CodesRefuse  = "refuse"
+	CodesUpdate  = "update"
+)
+
+// IsOpen reports whether everyone who opens the table sees every record,
+// and saves post within the access of the person saving.
+func (f *FormDef) IsOpen() bool { return f != nil && f.RecordScope == ScopeOpen }
 
 // Field types the server gives values to rather than the person saving a
 // record: an autocode field's code, and a status field's status (which
@@ -142,8 +209,25 @@ type FormDef struct {
 	// CreateRoles names who may add records, as a workflow's start roles
 	// do; none: anyone who reaches the application. Its administrators
 	// always may (migration 157).
-	CreateRoles []string  `json:"create_roles"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreateRoles []string `json:"create_roles"`
+	// DeleteAccess is who may delete the table's records: DeleteEditors
+	// (whoever may change a record, as before migration 192) or
+	// DeleteAdmins (the application's administrators, and those who may
+	// change a record and hold one of DeleteRoles).
+	DeleteAccess string   `json:"delete_access,omitempty"`
+	DeleteRoles  []string `json:"delete_roles,omitempty"`
+	// RecordScope is who sees the table's records (migration 193):
+	// ScopeByAccess (members' access rules narrow them, and a record posts
+	// within its creator's access) or ScopeOpen (everyone who opens the
+	// table sees every record, and a save posts within the access of the
+	// person saving it).
+	RecordScope string `json:"record_scope,omitempty"`
+	// ExistingCodes is what a file row giving the table's auto code a value
+	// does: CodesRefuse (refused) or CodesUpdate (updates the record holding
+	// it); "" — a table made before migration 193 — ignores the value and
+	// adds a record, as such tables always did.
+	ExistingCodes string    `json:"existing_codes,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 	// ModelKeeps: some table of the table's model keeps a dimension, so its
 	// dimension fields may link to records (read with the table, so a model
 	// without any pays nothing to find that out).
@@ -310,24 +394,26 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 
 	var id string
 	var createdAt time.Time
+	var existingCodes string
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
-		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5)
+		INSERT INTO model.form_def (model_id, revision_id, name, label, fields, existing_codes)
+		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, 'refuse')
 		ON CONFLICT (model_id, revision_id, name) DO UPDATE SET label = EXCLUDED.label, fields = EXCLUDED.fields
-		RETURNING id::text, created_at
-	`, modelID, revisionID, name, label, fieldsJSON).Scan(&id, &createdAt)
+		RETURNING id::text, created_at, existing_codes
+	`, modelID, revisionID, name, label, fieldsJSON).Scan(&id, &createdAt, &existingCodes)
 	if err != nil {
 		return nil, fmt.Errorf("create form: %w", err)
 	}
 
 	return &FormDef{
-		ID:         id,
-		ModelID:    modelID,
-		Name:       name,
-		Label:      label,
-		Fields:     fields,
-		EditAccess: EditCreator,
-		CreatedAt:  createdAt,
+		ID:            id,
+		ModelID:       modelID,
+		Name:          name,
+		Label:         label,
+		Fields:        fields,
+		EditAccess:    EditCreator,
+		ExistingCodes: existingCodes,
+		CreatedAt:     createdAt,
 	}, nil
 }
 
@@ -335,7 +421,7 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 const formDefColumns = `id::text, model_id::text, name, label, fields, own_records_only,
 	COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''), edit_access, create_roles, created_at,
 	EXISTS (SELECT 1 FROM model.form_def k WHERE k.model_id = form_def.model_id AND k.keeps_dimension_id IS NOT NULL),
-	member_label_with_code`
+	member_label_with_code, delete_access, delete_roles, record_scope, existing_codes`
 
 func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var f FormDef
@@ -344,7 +430,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	err := s.db.QueryRow(ctx, `
 		SELECT `+formDefColumns+`
 		FROM model.form_def WHERE id = $1::uuid
-	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode)
+	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("form %s not found", formID)
 	}
@@ -375,7 +461,7 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	for rows.Next() {
 		var f FormDef
 		var fieldsJSON []byte
-		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode); err != nil {
+		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fieldsJSON, &f.Fields)
@@ -788,40 +874,53 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 // same transaction once the record is saved: what fails in it undoes the
 // save (the member a record of a table keeping a dimension is, its history).
 func (s *Store) UpdateRecordThen(ctx context.Context, recordID, fromStatus, status string, data map[string]any, then func(ctx context.Context, tx dbx.DB) error) error {
+	_, err := s.UpdateRecordSince(ctx, recordID, fromStatus, nil, status, data, then)
+	return err
+}
+
+// UpdateRecordSince is UpdateRecordThen that, given readAt, also writes
+// only while the record is unchanged since it was read: its updated_at is
+// still readAt (ErrRecordChanged otherwise). A save that sends the time it
+// read the record at is not written over someone else's change in between.
+// It returns the record's new updated_at, what the next such save sends.
+func (s *Store) UpdateRecordSince(ctx context.Context, recordID, fromStatus string, readAt *time.Time, status string, data map[string]any, then func(ctx context.Context, tx dbx.DB) error) (time.Time, error) {
+	var updatedAt time.Time
 	if data == nil {
 		data = map[string]any{}
 	}
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return updatedAt, err
 	}
 	db := s.db
 	var tx pgx.Tx
 	if then != nil {
 		if tx, err = s.db.Begin(ctx); err != nil {
-			return err
+			return updatedAt, err
 		}
 		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 		db = tx
 	}
-	tag, err := db.Exec(ctx, `
+	err = db.QueryRow(ctx, `
 		UPDATE runtime.form_record
 		SET data = $2, status = NULLIF($3,'')::runtime.record_status, updated_at = now()
 		WHERE id = $1::uuid AND status IS NOT DISTINCT FROM NULLIF($4,'')::runtime.record_status
-	`, recordID, dataJSON, status, fromStatus)
-	if err != nil {
-		return fmt.Errorf("update record: %w", err)
+		  AND ($5::timestamptz IS NULL OR updated_at = $5::timestamptz)
+		RETURNING updated_at
+	`, recordID, dataJSON, status, fromStatus, readAt).Scan(&updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return updatedAt, ErrRecordChanged
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrRecordChanged
+	if err != nil {
+		return updatedAt, fmt.Errorf("update record: %w", err)
 	}
 	if then == nil {
-		return nil
+		return updatedAt, nil
 	}
 	if err := then(ctx, tx); err != nil {
-		return err
+		return updatedAt, err
 	}
-	return tx.Commit(ctx)
+	return updatedAt, tx.Commit(ctx)
 }
 
 // DeleteRecordFrom deletes a record only while it is still in fromStatus

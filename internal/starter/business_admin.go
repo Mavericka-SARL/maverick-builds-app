@@ -87,7 +87,7 @@ func BusinessAdminGuide() modeltransfer.Package {
 	}
 
 	return modeltransfer.Package{
-		Format: modeltransfer.PackageFormat, Version: modeltransfer.PackageVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Format: modeltransfer.PackageFormat, Version: modeltransfer.BaseVersion, ExportedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		ModelName: BusinessAdminGuideName, StorageType: "oltp", RevisionName: RevisionName, IncludeData: true,
 		Dimensions: []modeltransfer.Dimension{office}, Metrics: metrics, Dependencies: deps,
 		Grids: []modeltransfer.Grid{grid},
@@ -160,7 +160,7 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 - **Workflow** — every request of the application, with every decision and comment; where you unstick one, or reopen an approved one, with a reason
 - **Roles** — groups of people, and which dashboards each group may open
 - **Access Rules** — per person or per role, which numbers they may change, only read, or not see
-- **Copy values** — write one member's values into another, such as the plan into the budget, before you lock it
+- **Manage values** — copy one member's values into another, such as the plan into the budget, or freeze numbers as they are now
 - **Models** — which model you are working in, and which revision of it is live`, 348),
 
 		baText(`## Three layers decide what someone can do

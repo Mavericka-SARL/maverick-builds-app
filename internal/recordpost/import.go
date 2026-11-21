@@ -28,8 +28,11 @@ type ImportRequest struct {
 	// principal a connector run runs as. Its access decides where the
 	// records may post.
 	CreatorID string
-	Header    []string
-	Rows      []importpkg.RawRow
+	// Admin: the creator administers the table's application, so the rows
+	// may make the moves a field's transitions keep for some roles.
+	Admin  bool
+	Header []string
+	Rows   []importpkg.RawRow
 	// NewStatus is the status a record starts in when its row names none: a
 	// draft in a table with a status field, none otherwise.
 	NewStatus string
@@ -204,6 +207,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		if view, err = ps.AccessViewFor(ctx, req.CreatorID, form); err != nil {
 			return res, err
 		}
+		view.SetAdmin(req.Admin)
 	}
 	type stagedRecord struct {
 		data   map[string]any
@@ -221,6 +225,22 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	// its accounts and sellers. Each such load used to be refused whole
 	// ("is taken") although a kept dimension's records are documented as
 	// added and updated by their code (2026-11-16).
+	// A file naming values for the table's auto code in a plain load (no
+	// replace_by, no match_by) does what the table says (existing_codes,
+	// migration 193): "update" updates the records holding them, as
+	// match_by would; "refuse" refuses each such row — loading a file twice
+	// used to add every record twice. A table made before it ("") ignores
+	// the values, as it always did.
+	var refuseCodes *crudapp.FormField
+	if auto := form.CodeField(); auto != nil && auto.Type == crudapp.FieldAutoCode && matchField == nil && replaceBy == nil &&
+		strings.TrimSpace(req.MatchBy) == "" && headerOf[auto.Name] != "" {
+		switch form.ExistingCodes {
+		case crudapp.CodesUpdate:
+			matchField = auto
+		case crudapp.CodesRefuse:
+			refuseCodes = auto
+		}
+	}
 	var matches *recordMatches
 	if matchField != nil {
 		if matches, err = recordsByMatch(ctx, ps.db(ctx), form.ID, matchField); err != nil {
@@ -255,6 +275,15 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				continue
 			}
 			target = t
+		}
+		if refuseCodes != nil {
+			if code := strings.TrimSpace(row.Cells[headerOf[refuseCodes.Name]]); code != "" {
+				label := firstNonEmpty(refuseCodes.Label, refuseCodes.Name)
+				errs = append(errs, RowError{Row: row.RowNumber, Column: headerOf[refuseCodes.Name], Message: fmt.Sprintf(
+					"%s %q: %s numbers its new records itself, so leave %s empty to add a record (this table refuses a file row naming one; its developer can make such rows update their records instead)",
+					label, code, form.Label, label)})
+				continue
+			}
 		}
 		data := map[string]any{}
 		if target != nil {

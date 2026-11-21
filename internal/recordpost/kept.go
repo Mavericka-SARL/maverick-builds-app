@@ -439,6 +439,18 @@ type TableSettings struct {
 	// CreateRoles: the roles whose people may add records; empty, anyone
 	// who reaches the application (migration 157).
 	CreateRoles *[]string `json:"create_roles"`
+	// DeleteAccess: "" (whoever may change a record deletes it) or "admins"
+	// (the application's administrators, and editors holding one of
+	// DeleteRoles) (migration 192).
+	DeleteAccess *string   `json:"delete_access"`
+	DeleteRoles  *[]string `json:"delete_roles"`
+	// RecordScope: "" (members' access rules narrow who sees records; a
+	// record posts within its creator's access) or "open" (everyone who
+	// opens the table sees every record; a save posts within the saver's).
+	RecordScope *string `json:"record_scope"`
+	// ExistingCodes: what a file row giving the auto code a value does —
+	// "refuse" or "update" (migration 193).
+	ExistingCodes *string `json:"existing_codes"`
 }
 
 // SettingError is a table setting refused: Status is the HTTP status it
@@ -474,6 +486,44 @@ func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef,
 			return 0, err
 		}
 		form.EditAccess = *s.EditAccess
+	}
+	if s.DeleteAccess != nil {
+		access := strings.TrimSpace(*s.DeleteAccess)
+		if access != crudapp.DeleteEditors && access != crudapp.DeleteAdmins {
+			return 0, settingErr(400, "delete_access is %q (whoever may change a record) or %q, not %q", crudapp.DeleteEditors, crudapp.DeleteAdmins, access)
+		}
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET delete_access=$2 WHERE id=$1::uuid`, form.ID, access); err != nil {
+			return 0, err
+		}
+		form.DeleteAccess = access
+	}
+	if s.RecordScope != nil {
+		scope := strings.TrimSpace(*s.RecordScope)
+		if scope != crudapp.ScopeByAccess && scope != crudapp.ScopeOpen {
+			return 0, settingErr(400, "record_scope is %q (members' access rules narrow who sees records) or %q, not %q", crudapp.ScopeByAccess, crudapp.ScopeOpen, scope)
+		}
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET record_scope=$2 WHERE id=$1::uuid`, form.ID, scope); err != nil {
+			return 0, err
+		}
+		form.RecordScope = scope
+	}
+	if s.ExistingCodes != nil {
+		codes := strings.TrimSpace(*s.ExistingCodes)
+		if codes != crudapp.CodesRefuse && codes != crudapp.CodesUpdate {
+			return 0, settingErr(400, "existing_codes is %q or %q, not %q", crudapp.CodesRefuse, crudapp.CodesUpdate, codes)
+		}
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET existing_codes=$2 WHERE id=$1::uuid`, form.ID, codes); err != nil {
+			return 0, err
+		}
+		form.ExistingCodes = codes
+	}
+	if s.DeleteRoles != nil {
+		roles := cleanRoleNames(*s.DeleteRoles)
+		raw, _ := json.Marshal(roles)
+		if _, err := db.Exec(ctx, `UPDATE model.form_def SET delete_roles=$2::jsonb WHERE id=$1::uuid`, form.ID, string(raw)); err != nil {
+			return 0, err
+		}
+		form.DeleteRoles = roles
 	}
 	if s.CreateRoles != nil {
 		roles := cleanRoleNames(*s.CreateRoles)
