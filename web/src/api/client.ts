@@ -358,9 +358,9 @@ export interface Branding {
 
 /** Product tier a deployment runs in (GET /api/license). */
 export type Edition = "community" | "commercial" | "enterprise";
-/** transition: the key expired less than 30 days ago; its features can be
- *  read, exported and switched off, not changed (pkg/license.StateTransition). */
-export type LicenseState = "community" | "active" | "transition" | "expired" | "invalid";
+/** expired: the key's period is over and the deployment runs the Community
+ *  Edition — at once, there is no transition period (owner, 2026-11-22). */
+export type LicenseState = "community" | "active" | "expired" | "invalid";
 export interface LicenseFeature {
   key: string;
   name: string;
@@ -403,6 +403,8 @@ export interface PlanDef {
   dormant_delete_days: number;
   sort_order: number;
   updated_at?: string;
+  /** The edition a new tenant starts on when none is chosen (plan.DefaultKey). */
+  default?: boolean;
 }
 
 /** One dedicated tenant's use (GET /api/admin/dormancy). */
@@ -515,7 +517,8 @@ export interface LicenseInfo {
   state: LicenseState;
   features: string[];
   catalog: LicenseFeature[];
-  source: "env" | "file" | "none";
+  /** Where the key came from: the server's configuration, the console (Platform › License), or none. */
+  source: "env" | "file" | "console" | "none";
   license_id?: string;
   customer?: string;
   contact?: string;
@@ -529,8 +532,6 @@ export interface LicenseInfo {
   expires_at?: string;
   /** An active key within 30 days of expiry. */
   renewal_due?: boolean;
-  /** End of the read-and-export period after expiry. */
-  transition_ends_at?: string;
   error?: string;
 }
 
@@ -2718,6 +2719,11 @@ export function setScopedTenant(tenantId: string) {
   scopedTenantId = tenantId;
 }
 
+/** The tenant the platform console's settings tabs act on ("" = none chosen). */
+export function scopedTenant(): string {
+  return scopedTenantId;
+}
+
 function tenantHeader(): Record<string, string> {
   const id = actingTenantId || scopedTenantId;
   return id ? { "X-Tenant-Id": id } : {};
@@ -3108,6 +3114,10 @@ export const api = {
     apiFetch<PlanDef>(`/api/admin/plans/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(body) }),
   adminDormancy: () => apiFetch<DormancyRow[]>("/api/admin/dormancy"),
   getLicense: () => apiFetch<LicenseInfo>("/api/license"),
+  /** Install a pasted license key (platform administrators); it is in force at once. */
+  installLicense: (key: string) => apiFetch<LicenseInfo>("/api/admin/license", { method: "PUT", body: JSON.stringify({ key }) }),
+  /** Remove the key installed in the console: the deployment runs the Community Edition. */
+  removeLicense: () => apiFetch<LicenseInfo>("/api/admin/license", { method: "DELETE" }),
   getConnectorSettings: () => apiFetch<ConnectorSettings>("/api/admin/connector-settings"),
   updateConnectorSettings: (body: { chat_writes: boolean }) =>
     apiFetch<ConnectorSettings>("/api/admin/connector-settings", { method: "PUT", body: JSON.stringify(body) }),

@@ -196,7 +196,7 @@ type tenantAIKeyResult struct {
 }
 
 func (h *handler) tenantAIKey(ctx context.Context, customerID string) tenantAIKeyResult {
-	if h.lic == nil || !h.lic.Usable(license.FeatureTenantAIKeys) || customerID == "" {
+	if h.lic == nil || !h.lic.Has(license.FeatureTenantAIKeys) || customerID == "" {
 		return tenantAIKeyResult{}
 	}
 	provider, model, key, enforced, deployment, err := aikeys.NewStore(h.db.For(ctx)).ResolveSource(ctx, customerID)

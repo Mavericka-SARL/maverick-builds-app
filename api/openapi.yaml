@@ -459,21 +459,20 @@ components:
       description: >-
         The license in force, as pkg/license.Status renders it. edition is the
         EFFECTIVE edition — community whenever no key is configured, the key
-        is invalid, or its transition period after expiry has ended; during
-        the transition (state transition) it is the key's, and its features
-        can be read, exported and switched off but not changed. The key's own
-        details are still reported so the console can say what ran out.
+        is invalid, or it has expired (there is no transition period after
+        expiry). The key's own details are still reported so the console can
+        say what ran out.
       required: [edition, state, features, catalog, source]
       properties:
         edition: { type: string, enum: [community, commercial, enterprise] }
-        state: { type: string, enum: [community, active, transition, expired, invalid] }
+        state: { type: string, enum: [community, active, expired, invalid] }
         features:
           type: array
           items: { type: string }
         catalog:
           type: array
           items: { $ref: "#/components/schemas/LicenseFeature" }
-        source: { type: string, enum: [env, file, none] }
+        source: { type: string, enum: [env, file, console, none] }
         license_id: { type: string }
         customer: { type: string }
         contact: { type: string }
@@ -484,7 +483,6 @@ components:
         issued_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         renewal_due: { type: boolean, description: "An active key within 30 days of expiry" }
-        transition_ends_at: { type: string, format: date-time, description: "End of the read-and-export period after expiry" }
         error: { type: string }
 
     LicenseFeature:
@@ -4195,6 +4193,42 @@ paths:
         "400": { description: Invalid edition }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: No edition with that key }
+
+  /api/admin/license:
+    put:
+      operationId: installLicense
+      tags: [Admin]
+      summary: Install a license key pasted under Platform › License (platform_admin). Verified against the compiled-in keys, stored encrypted on the control plane and in force at once, on every replica within a minute; replaces a key installed earlier. 400 for a key that is not genuine or has expired, 409 while the server's configuration names the key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string, description: "The key as issued: one line starting MVX1." }
+      responses:
+        "200":
+          description: The license status now in force
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicenseInfo" }
+        "400": { description: Not a genuine key, or an expired one }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: The server's configuration names the key; it is changed there }
+    delete:
+      operationId: removeLicense
+      tags: [Admin]
+      summary: Remove the license key installed in the console (platform_admin); the deployment runs the Community Edition at once. 409 while the server's configuration names the key
+      responses:
+        "200":
+          description: The license status now in force
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicenseInfo" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: The server's configuration names the key; it is changed there }
 
   /api/apps:
     get:

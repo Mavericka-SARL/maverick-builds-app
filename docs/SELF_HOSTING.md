@@ -241,7 +241,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.11.21.1          # a release: the newest is on the Releases page
+git checkout 2026.11.22          # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -338,7 +338,7 @@ checked out:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.11.21.1
+MAVERICKS_RELEASE=2026.11.22
 ```
 
 To run changes of your own instead, remove both lines and build from
@@ -443,10 +443,11 @@ no separate **Tenant admin** group beside it.
 A self-hosted deployment starts where a sign-up on the hosted Playground
 does, without the Playground's 100 MB limit. As the platform administrator:
 
-1. **Applications › New tenant** — name your organisation. The list beside
-   the name is the tenant's edition, which decides only how much the tenant
-   may use, not what your deployment is licensed for; any choice works (see
-   the limits below). Leave both boxes ticked:
+1. **Applications › New tenant** — name your organisation. Without a
+   licence key there is no edition to choose: the deployment runs the
+   Community Edition, and so does every tenant in it. With a key, the tenant
+   starts on the key's edition, and the list beside the name offers the
+   editions below it too. Leave both boxes ticked:
    - **Getting started application** — the *Learn the platform* tour and a
      guide for each role (developer, business administrator, tenant
      administrator), the same as every Playground workspace gets. New
@@ -461,7 +462,9 @@ does, without the Playground's 100 MB limit. As the platform administrator:
    No edition carries a limit here — the Community Edition's 100 MB is the
    Playground's alone, and the gateway takes it off at start-up anywhere
    else. To set limits of your own, edit an edition under **Platform ›
-   Editions**.
+   Editions**. A tenant created on an earlier release, when any edition
+   could be picked, is moved to your deployment's edition when the gateway
+   starts.
 2. **Users › Invite user** — e-mail, name and a role, e.g. `developer`. The
    person receives an e-mail with a link to set their password; the link is
    valid for three days. Business roles are also given a workspace. To
@@ -580,7 +583,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.11.21.1
+git fetch --tags && git checkout <new release>       # e.g. 2026.11.22
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -640,9 +643,14 @@ reclaim the space.
 Edit `.env`, then `docker compose up -d`: Compose recreates exactly the
 containers whose settings changed.
 
-- **A license key** for the Commercial or Enterprise Edition goes in
-  `MAVERICKS_LICENSE_KEY`. **Platform › License** in the console shows the
-  edition it unlocked.
+- **A license key** for the Commercial or Enterprise Edition is pasted
+  under **Platform › License** in the console (in force at once), or set in
+  `MAVERICKS_LICENSE_KEY` here, which wins over the console. **Platform ›
+  License** shows the edition it unlocked. How to get a key, check it took, and what changes
+  afterwards (tenant editions, your own logo under **Tenant admin ›
+  Branding**, renewal) is in
+  [Getting a Commercial or Enterprise key](LICENSING.md#getting-a-commercial-or-enterprise-key)
+  and [Applying a key to a deployment](LICENSING.md#applying-a-key-to-a-deployment).
 - **The AI assistant** uses each user's own provider key, stored in the
   console. A deployment-wide key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …)
   is used by everyone who has not stored one ([AI_KEYS.md](AI_KEYS.md)).
@@ -810,7 +818,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.11.21.1`; set the release you deploy, or, if you built your
+   release `2026.11.22`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -1009,7 +1017,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.21.1     # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.11.22     # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

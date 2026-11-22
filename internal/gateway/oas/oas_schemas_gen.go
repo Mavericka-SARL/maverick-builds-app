@@ -12003,6 +12003,7 @@ func (*Error) getWorkflowStatusRes()            {}
 func (*Error) grantAdminUserAppAccessRes()      {}
 func (*Error) grantAdminUserModelAccessRes()    {}
 func (*Error) importDimensionMembersRes()       {}
+func (*Error) installLicenseRes()               {}
 func (*Error) listAiConversionsRes()            {}
 func (*Error) listAiProposalsRes()              {}
 func (*Error) listAuditEventsRes()              {}
@@ -12032,6 +12033,7 @@ func (*Error) putReconciliationMapRes()         {}
 func (*Error) putReconciliationWorkbookRes()    {}
 func (*Error) removeAdminUserRoleRes()          {}
 func (*Error) removeGridDimensionRes()          {}
+func (*Error) removeLicenseRes()                {}
 func (*Error) restoreWorkflowRes()              {}
 func (*Error) revokeAdminUserAppAccessRes()     {}
 func (*Error) revokeAdminUserModelAccessRes()   {}
@@ -21100,6 +21102,31 @@ func (s *InputRules) SetWhole(val OptBool) {
 	s.Whole = val
 }
 
+// InstallLicenseBadRequest is response for InstallLicense operation.
+type InstallLicenseBadRequest struct{}
+
+func (*InstallLicenseBadRequest) installLicenseRes() {}
+
+// InstallLicenseConflict is response for InstallLicense operation.
+type InstallLicenseConflict struct{}
+
+func (*InstallLicenseConflict) installLicenseRes() {}
+
+type InstallLicenseReq struct {
+	// The key as issued: one line starting MVX1.
+	Key string `json:"key"`
+}
+
+// GetKey returns the value of Key.
+func (s *InstallLicenseReq) GetKey() string {
+	return s.Key
+}
+
+// SetKey sets the value of Key.
+func (s *InstallLicenseReq) SetKey(val string) {
+	s.Key = val
+}
+
 // Ref: #/components/schemas/IntegrationDef
 type IntegrationDef struct {
 	ID         uuid.UUID            `json:"id"`
@@ -21590,10 +21617,9 @@ func (s *LicenseFeatureMinEdition) UnmarshalText(data []byte) error {
 }
 
 // The license in force, as pkg/license.Status renders it. edition is the EFFECTIVE edition —
-// community whenever no key is configured, the key is invalid, or its transition period after expiry
-// has ended; during the transition (state transition) it is the key's, and its features can be read,
-// exported and switched off but not changed. The key's own details are still reported so the console
-// can say what ran out.
+// community whenever no key is configured, the key is invalid, or it has expired (there is no
+// transition period after expiry). The key's own details are still reported so the console can say
+// what ran out.
 // Ref: #/components/schemas/LicenseInfo
 type LicenseInfo struct {
 	Edition   LicenseInfoEdition `json:"edition"`
@@ -21615,10 +21641,8 @@ type LicenseInfo struct {
 	IssuedAt   OptDateTime `json:"issued_at"`
 	ExpiresAt  OptDateTime `json:"expires_at"`
 	// An active key within 30 days of expiry.
-	RenewalDue OptBool `json:"renewal_due"`
-	// End of the read-and-export period after expiry.
-	TransitionEndsAt OptDateTime `json:"transition_ends_at"`
-	Error            OptString   `json:"error"`
+	RenewalDue OptBool   `json:"renewal_due"`
+	Error      OptString `json:"error"`
 }
 
 // GetEdition returns the value of Edition.
@@ -21694,11 +21718,6 @@ func (s *LicenseInfo) GetExpiresAt() OptDateTime {
 // GetRenewalDue returns the value of RenewalDue.
 func (s *LicenseInfo) GetRenewalDue() OptBool {
 	return s.RenewalDue
-}
-
-// GetTransitionEndsAt returns the value of TransitionEndsAt.
-func (s *LicenseInfo) GetTransitionEndsAt() OptDateTime {
-	return s.TransitionEndsAt
 }
 
 // GetError returns the value of Error.
@@ -21781,17 +21800,14 @@ func (s *LicenseInfo) SetRenewalDue(val OptBool) {
 	s.RenewalDue = val
 }
 
-// SetTransitionEndsAt sets the value of TransitionEndsAt.
-func (s *LicenseInfo) SetTransitionEndsAt(val OptDateTime) {
-	s.TransitionEndsAt = val
-}
-
 // SetError sets the value of Error.
 func (s *LicenseInfo) SetError(val OptString) {
 	s.Error = val
 }
 
-func (*LicenseInfo) getLicenseRes() {}
+func (*LicenseInfo) getLicenseRes()     {}
+func (*LicenseInfo) installLicenseRes() {}
+func (*LicenseInfo) removeLicenseRes()  {}
 
 type LicenseInfoEdition string
 
@@ -21844,9 +21860,10 @@ func (s *LicenseInfoEdition) UnmarshalText(data []byte) error {
 type LicenseInfoSource string
 
 const (
-	LicenseInfoSourceEnv  LicenseInfoSource = "env"
-	LicenseInfoSourceFile LicenseInfoSource = "file"
-	LicenseInfoSourceNone LicenseInfoSource = "none"
+	LicenseInfoSourceEnv     LicenseInfoSource = "env"
+	LicenseInfoSourceFile    LicenseInfoSource = "file"
+	LicenseInfoSourceConsole LicenseInfoSource = "console"
+	LicenseInfoSourceNone    LicenseInfoSource = "none"
 )
 
 // AllValues returns all LicenseInfoSource values.
@@ -21854,6 +21871,7 @@ func (LicenseInfoSource) AllValues() []LicenseInfoSource {
 	return []LicenseInfoSource{
 		LicenseInfoSourceEnv,
 		LicenseInfoSourceFile,
+		LicenseInfoSourceConsole,
 		LicenseInfoSourceNone,
 	}
 }
@@ -21864,6 +21882,8 @@ func (s LicenseInfoSource) MarshalText() ([]byte, error) {
 	case LicenseInfoSourceEnv:
 		return []byte(s), nil
 	case LicenseInfoSourceFile:
+		return []byte(s), nil
+	case LicenseInfoSourceConsole:
 		return []byte(s), nil
 	case LicenseInfoSourceNone:
 		return []byte(s), nil
@@ -21881,6 +21901,9 @@ func (s *LicenseInfoSource) UnmarshalText(data []byte) error {
 	case LicenseInfoSourceFile:
 		*s = LicenseInfoSourceFile
 		return nil
+	case LicenseInfoSourceConsole:
+		*s = LicenseInfoSourceConsole
+		return nil
 	case LicenseInfoSourceNone:
 		*s = LicenseInfoSourceNone
 		return nil
@@ -21892,11 +21915,10 @@ func (s *LicenseInfoSource) UnmarshalText(data []byte) error {
 type LicenseInfoState string
 
 const (
-	LicenseInfoStateCommunity  LicenseInfoState = "community"
-	LicenseInfoStateActive     LicenseInfoState = "active"
-	LicenseInfoStateTransition LicenseInfoState = "transition"
-	LicenseInfoStateExpired    LicenseInfoState = "expired"
-	LicenseInfoStateInvalid    LicenseInfoState = "invalid"
+	LicenseInfoStateCommunity LicenseInfoState = "community"
+	LicenseInfoStateActive    LicenseInfoState = "active"
+	LicenseInfoStateExpired   LicenseInfoState = "expired"
+	LicenseInfoStateInvalid   LicenseInfoState = "invalid"
 )
 
 // AllValues returns all LicenseInfoState values.
@@ -21904,7 +21926,6 @@ func (LicenseInfoState) AllValues() []LicenseInfoState {
 	return []LicenseInfoState{
 		LicenseInfoStateCommunity,
 		LicenseInfoStateActive,
-		LicenseInfoStateTransition,
 		LicenseInfoStateExpired,
 		LicenseInfoStateInvalid,
 	}
@@ -21916,8 +21937,6 @@ func (s LicenseInfoState) MarshalText() ([]byte, error) {
 	case LicenseInfoStateCommunity:
 		return []byte(s), nil
 	case LicenseInfoStateActive:
-		return []byte(s), nil
-	case LicenseInfoStateTransition:
 		return []byte(s), nil
 	case LicenseInfoStateExpired:
 		return []byte(s), nil
@@ -21936,9 +21955,6 @@ func (s *LicenseInfoState) UnmarshalText(data []byte) error {
 		return nil
 	case LicenseInfoStateActive:
 		*s = LicenseInfoStateActive
-		return nil
-	case LicenseInfoStateTransition:
-		*s = LicenseInfoStateTransition
 		return nil
 	case LicenseInfoStateExpired:
 		*s = LicenseInfoStateExpired
@@ -36819,6 +36835,11 @@ func (s *RemoveGridMetricOK) GetStatus() OptString {
 func (s *RemoveGridMetricOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+// RemoveLicenseConflict is response for RemoveLicense operation.
+type RemoveLicenseConflict struct{}
+
+func (*RemoveLicenseConflict) removeLicenseRes() {}
 
 // RemoveSsoForbidden is response for RemoveSso operation.
 type RemoveSsoForbidden struct{}

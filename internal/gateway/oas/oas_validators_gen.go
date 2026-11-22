@@ -6766,6 +6766,8 @@ func (s LicenseInfoSource) Validate() error {
 		return nil
 	case "file":
 		return nil
+	case "console":
+		return nil
 	case "none":
 		return nil
 	default:
@@ -6778,8 +6780,6 @@ func (s LicenseInfoState) Validate() error {
 	case "community":
 		return nil
 	case "active":
-		return nil
-	case "transition":
 		return nil
 	case "expired":
 		return nil

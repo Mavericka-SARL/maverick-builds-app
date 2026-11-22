@@ -85,8 +85,23 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+// selfServicePlan is the edition sign-up assigns: the first self-service
+// one the deployment offers (plan.Offered), in the catalog's order.
 func (h *handler) selfServicePlan(ctx context.Context) (plan.Plan, bool, error) {
-	return plan.SelfService(ctx, h.db.Control())
+	p, ok, err := plan.SelfService(ctx, h.db.Control())
+	if err != nil || !ok || plan.Allowed(p.Key, h.signupCfg.Playground, h.lic.Edition()) {
+		return p, ok, err
+	}
+	plans, err := plan.List(ctx, h.db.Control())
+	if err != nil {
+		return plan.Plan{}, false, err
+	}
+	for _, q := range plan.Offered(plans, h.signupCfg.Playground, h.lic.Edition()) {
+		if q.SelfService {
+			return q, true, nil
+		}
+	}
+	return plan.Plan{}, false, nil
 }
 
 // signup serves POST /api/signup.

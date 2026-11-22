@@ -1707,6 +1707,18 @@ func (UnimplementedHandler) ImportUpload(ctx context.Context, req *ImportUploadR
 	return r, ht.ErrNotImplemented
 }
 
+// InstallLicense implements installLicense operation.
+//
+// Install a license key pasted under Platform › License (platform_admin). Verified against the
+// compiled-in keys, stored encrypted on the control plane and in force at once, on every replica
+// within a minute; replaces a key installed earlier. 400 for a key that is not genuine or has
+// expired, 409 while the server's configuration names the key.
+//
+// PUT /api/admin/license
+func (UnimplementedHandler) InstallLicense(ctx context.Context, req *InstallLicenseReq) (r InstallLicenseRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // IntegrationOAuthCallback implements integrationOAuthCallback operation.
 //
 // Where the provider sends the browser after consent (public: the person arrives with the state
@@ -2463,6 +2475,16 @@ func (UnimplementedHandler) RemoveGridDimension(ctx context.Context, params Remo
 //
 // DELETE /api/developer/grids/{id}/metrics/{metricId}
 func (UnimplementedHandler) RemoveGridMetric(ctx context.Context, params RemoveGridMetricParams) (r *RemoveGridMetricOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// RemoveLicense implements removeLicense operation.
+//
+// Remove the license key installed in the console (platform_admin); the deployment runs the
+// Community Edition at once. 409 while the server's configuration names the key.
+//
+// DELETE /api/admin/license
+func (UnimplementedHandler) RemoveLicense(ctx context.Context) (r RemoveLicenseRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

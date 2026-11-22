@@ -33,10 +33,10 @@ var enterpriseRoutePrefixes = []string{
 
 // TestPaidRoutesFollowTheLicence drives every paid route through the real
 // router as a platform administrator under three licences: community
-// refuses all of them with the licence message; a key in its transition
-// period still answers reads, exports and DELETE (switching a feature off)
-// but refuses every change; an active enterprise key refuses none of them on
-// licence grounds. Frontend gates are not enforcement — this is.
+// refuses all of them with the licence message; so does an enterprise key
+// the day after it expired — there is no transition period (owner,
+// 2026-11-22); an active enterprise key refuses none of them on licence
+// grounds. Frontend gates are not enforcement — this is.
 func TestPaidRoutesFollowTheLicence(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.New(t, migrationfs.FS, ".")
@@ -74,7 +74,7 @@ func TestPaidRoutesFollowTheLicence(t *testing.T) {
 	}
 	servers := map[string]*httptest.Server{
 		"community":  httptest.NewServer(NewHandler(logger.New("test"), pool, nil)),
-		"transition": httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{License: license.Static(claims(time.Now().Add(-24 * time.Hour)))})),
+		"expired":    httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{License: license.Static(claims(time.Now().Add(-24 * time.Hour)))})),
 		"enterprise": httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{License: license.Static(claims(time.Now().Add(365 * 24 * time.Hour)))})),
 	}
 	for _, s := range servers {
@@ -104,7 +104,7 @@ func TestPaidRoutesFollowTheLicence(t *testing.T) {
 		return resp.StatusCode, msg
 	}
 	licenceRefusal := func(code int, msg string) bool {
-		return code == http.StatusForbidden && (strings.Contains(msg, "edition") || strings.Contains(msg, "read and export only"))
+		return code == http.StatusForbidden && strings.Contains(msg, "edition")
 	}
 
 	for _, r := range routes {
@@ -112,15 +112,8 @@ func TestPaidRoutesFollowTheLicence(t *testing.T) {
 		if code, msg := call(servers["community"], r.Method, r.Pattern); code != http.StatusForbidden || !strings.Contains(msg, "edition") {
 			t.Errorf("community %s = %d %q, want the licence refusal", name, code, msg)
 		}
-		code, msg := call(servers["transition"], r.Method, r.Pattern)
-		readOrSwitchOff := r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodDelete
-		if readOrSwitchOff || strings.HasPrefix(r.Pattern, "/api/scim/v2") {
-			// SCIM provisioning keeps running: the bearer token decides.
-			if licenceRefusal(code, msg) {
-				t.Errorf("transition %s = %d %q, want it answered", name, code, msg)
-			}
-		} else if code != http.StatusForbidden || !strings.Contains(msg, "read and export only") {
-			t.Errorf("transition %s = %d %q, want the read-and-export refusal", name, code, msg)
+		if code, msg := call(servers["expired"], r.Method, r.Pattern); !licenceRefusal(code, msg) {
+			t.Errorf("expired %s = %d %q, want the licence refusal, as for community", name, code, msg)
 		}
 		if code, msg := call(servers["enterprise"], r.Method, r.Pattern); licenceRefusal(code, msg) {
 			t.Errorf("enterprise %s = %d %q, want no licence refusal", name, code, msg)

@@ -1222,6 +1222,15 @@ type Invoker interface {
 	//
 	// POST /api/import/upload
 	ImportUpload(ctx context.Context, request *ImportUploadRequest, params ImportUploadParams) (ImportUploadRes, error)
+	// InstallLicense invokes installLicense operation.
+	//
+	// Install a license key pasted under Platform › License (platform_admin). Verified against the
+	// compiled-in keys, stored encrypted on the control plane and in force at once, on every replica
+	// within a minute; replaces a key installed earlier. 400 for a key that is not genuine or has
+	// expired, 409 while the server's configuration names the key.
+	//
+	// PUT /api/admin/license
+	InstallLicense(ctx context.Context, request *InstallLicenseReq) (InstallLicenseRes, error)
 	// IntegrationOAuthCallback invokes integrationOAuthCallback operation.
 	//
 	// Where the provider sends the browser after consent (public: the person arrives with the state
@@ -1753,6 +1762,13 @@ type Invoker interface {
 	//
 	// DELETE /api/developer/grids/{id}/metrics/{metricId}
 	RemoveGridMetric(ctx context.Context, params RemoveGridMetricParams) (*RemoveGridMetricOK, error)
+	// RemoveLicense invokes removeLicense operation.
+	//
+	// Remove the license key installed in the console (platform_admin); the deployment runs the
+	// Community Edition at once. 409 while the server's configuration names the key.
+	//
+	// DELETE /api/admin/license
+	RemoveLicense(ctx context.Context) (RemoveLicenseRes, error)
 	// RemoveSso invokes removeSso operation.
 	//
 	// Remove the tenant's identity provider from Keycloak and clear the settings (administrators;
@@ -23209,6 +23225,119 @@ func (c *Client) sendImportUpload(ctx context.Context, request *ImportUploadRequ
 	return result, nil
 }
 
+// InstallLicense invokes installLicense operation.
+//
+// Install a license key pasted under Platform › License (platform_admin). Verified against the
+// compiled-in keys, stored encrypted on the control plane and in force at once, on every replica
+// within a minute; replaces a key installed earlier. 400 for a key that is not genuine or has
+// expired, 409 while the server's configuration names the key.
+//
+// PUT /api/admin/license
+func (c *Client) InstallLicense(ctx context.Context, request *InstallLicenseReq) (InstallLicenseRes, error) {
+	res, err := c.sendInstallLicense(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendInstallLicense(ctx context.Context, request *InstallLicenseReq) (res InstallLicenseRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("installLicense"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/admin/license"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, InstallLicenseOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/license"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeInstallLicenseRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, InstallLicenseOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeInstallLicenseResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // IntegrationOAuthCallback invokes integrationOAuthCallback operation.
 //
 // Where the provider sends the browser after consent (public: the person arrives with the state
@@ -32581,6 +32710,114 @@ func (c *Client) sendRemoveGridMetric(ctx context.Context, params RemoveGridMetr
 
 	stage = "DecodeResponse"
 	result, err := decodeRemoveGridMetricResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// RemoveLicense invokes removeLicense operation.
+//
+// Remove the license key installed in the console (platform_admin); the deployment runs the
+// Community Edition at once. 409 while the server's configuration names the key.
+//
+// DELETE /api/admin/license
+func (c *Client) RemoveLicense(ctx context.Context) (RemoveLicenseRes, error) {
+	res, err := c.sendRemoveLicense(ctx)
+	return res, err
+}
+
+func (c *Client) sendRemoveLicense(ctx context.Context) (res RemoveLicenseRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("removeLicense"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/admin/license"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RemoveLicenseOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/license"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RemoveLicenseOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRemoveLicenseResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

@@ -10,14 +10,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
 // createTenantRequest is POST /api/admin/tenants' body.
 type createTenantRequest struct {
 	Name string `json:"name"`
-	// Plan is the edition's key; absent means commercial, which carries no
-	// limits.
+	// Plan is the edition's key, one the deployment offers (plan.Allowed);
+	// absent means plan.DefaultKey — Community in the Playground, else the
+	// deployment's own edition.
 	Plan string `json:"plan"`
 	// GettingStarted installs the "Getting started" application, as
 	// sign-up does (installGettingStarted); absent means yes.
@@ -57,7 +59,10 @@ func (h *handler) joinNewTenantRefusal(a *actor) string {
 // it or none. status is the HTTP status of a failure.
 func (h *handler) createTenant(ctx context.Context, act *actor, body createTenantRequest) (out map[string]string, status int, err error) {
 	if body.Plan == "" {
-		body.Plan = "commercial"
+		body.Plan = plan.DefaultKey(h.signupCfg.Playground, h.lic.Edition())
+	}
+	if _, err := h.tenantEdition(ctx, body.Plan); err != nil {
+		return nil, http.StatusBadRequest, err
 	}
 	withStarters := body.GettingStarted == nil || *body.GettingStarted
 	if body.Join {

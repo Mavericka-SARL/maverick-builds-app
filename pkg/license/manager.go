@@ -2,6 +2,7 @@ package license
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,13 +18,10 @@ const (
 	StateCommunity State = "community"
 	// StateActive: a valid key is in force.
 	StateActive State = "active"
-	// StateTransition: a valid key has expired less than TransitionPeriod
-	// ago. Its enterprise features keep working as configured and can be read and
-	// exported, so a customer can renew or move off them, but nothing paid
-	// can be newly configured or changed.
-	StateTransition State = "transition"
-	// StateExpired: a valid key whose transition period has ended too; the
-	// deployment runs as community until a new key is installed.
+	// StateExpired: a valid key past its expiry date. The deployment runs
+	// as community from that moment, with no transition period (owner,
+	// 2026-11-22; until then 30 days of read-and-export followed expiry),
+	// until a new key is installed. Nothing is deleted.
 	StateExpired State = "expired"
 	// StateInvalid: a key was configured but could not be verified; the
 	// deployment runs as community and the reason is reported.
@@ -34,25 +32,21 @@ const (
 // RenewalDue, so the console warns while there is time to renew.
 const RenewalNotice = 30 * 24 * time.Hour
 
-// TransitionPeriod is how long after expiry a key stays in StateTransition.
-// It is a technical grace for export and migration, not a contractual
-// right; the paid agreement says what the customer may do in it.
-const TransitionPeriod = 30 * 24 * time.Hour
-
 // Status is what the gateway reports about the license in force. It is the
 // public shape of GET /api/license, so field names are part of the contract.
 type Status struct {
 	// Edition is the EFFECTIVE edition: community whenever the key is
-	// missing, invalid or expired; the key's own during its transition.
+	// missing, invalid or expired.
 	Edition Edition `json:"edition"`
 	State   State   `json:"state"`
 	// Features are the capabilities in force right now (empty for
-	// community). During the transition they work as configured and can be
-	// read and exported but not reconfigured; see Manager.Has and Usable.
+	// community, an expired key included); see Manager.Has.
 	Features []Feature `json:"features"`
 	// Catalog lists every gated feature so the console can show locked ones.
 	Catalog []Info `json:"catalog"`
-	// Source says where the key came from: "env", "file" or "none".
+	// Source says where the key came from: "env", "file", "console" (a
+	// platform administrator installed it under Platform › License) or
+	// "none".
 	Source string `json:"source"`
 	// The remaining fields describe the configured key, if any. They are
 	// filled for expired keys too, so the console can say what ran out.
@@ -68,9 +62,6 @@ type Status struct {
 	// RenewalDue is set while an active key is within RenewalNotice of
 	// its expiry.
 	RenewalDue bool `json:"renewal_due,omitempty"`
-	// TransitionEndsAt is when the read-and-export period after expiry
-	// ends (or ended), for transition and expired keys.
-	TransitionEndsAt *time.Time `json:"transition_ends_at,omitempty"`
 	// Error is the verification failure for StateInvalid.
 	Error string `json:"error,omitempty"`
 }
@@ -99,6 +90,10 @@ type Manager struct {
 	source string
 	claims *Claims
 	err    error
+	// keys verify a key installed later (Check); config is true when the
+	// server's configuration names a key, which then wins over the console.
+	keys   []ed25519.PublicKey
+	config bool
 }
 
 // Load reads the configured key once. It never fails: a missing key is the
@@ -109,8 +104,10 @@ func Load(opts Options) *Manager {
 		m.now = time.Now
 	}
 	keys, keysErr := verifierKeys(opts.PublicKey)
+	m.keys = keys
 
 	token := strings.TrimSpace(opts.Key)
+	m.config = token != "" || opts.File != ""
 	if token != "" {
 		m.source = "env"
 	} else if opts.File != "" {
@@ -145,7 +142,94 @@ func Load(opts Options) *Manager {
 
 // Static builds a Manager around already-verified claims (tests, tooling).
 func Static(claims *Claims) *Manager {
-	return &Manager{now: time.Now, source: "env", claims: claims}
+	return &Manager{now: time.Now, source: "env", claims: claims, config: true}
+}
+
+// ErrConfigured refuses a console install or removal while the server's
+// configuration names the key (MAVERICKS_LICENSE_KEY or _FILE): that one
+// wins, and is changed where it is set.
+var ErrConfigured = errors.New("this deployment's license key is set in the server's configuration (MAVERICKS_LICENSE_KEY or MAVERICKS_LICENSE_FILE); change it there, or remove that setting to install keys in the console")
+
+// FromConfig reports whether the server's configuration names the key.
+func (m *Manager) FromConfig() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config
+}
+
+// Verify checks a key's signature, format, edition and schedule against the
+// trusted keys, as Load does: what a key installed earlier is read back
+// with, expired or not, so its transition still runs.
+func (m *Manager) Verify(token string) (*Claims, error) {
+	if m == nil {
+		return nil, errors.New("no license manager")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, errors.New("paste the license key, the line that starts with MVX1")
+	}
+	claims, err := ParseAny(token, m.keys)
+	if err != nil {
+		return nil, err
+	}
+	if claims.NotYetValid(m.now()) {
+		return nil, fmt.Errorf("this license key is not valid before %s", claims.IssuedAt.UTC().Format("2006-01-02"))
+	}
+	return claims, nil
+}
+
+// Check is Verify for a key someone means to install now: one that has
+// already expired is refused too, since installing it would change nothing
+// a customer wants.
+func (m *Manager) Check(token string) (*Claims, error) {
+	claims, err := m.Verify(token)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Expired(m.now()) {
+		return nil, fmt.Errorf("this license key expired on %s; install the renewed key", claims.ExpiresAt.UTC().Format("2006-01-02"))
+	}
+	return claims, nil
+}
+
+// UseStored puts a key installed in the console in force (Check has
+// verified it), or with nil takes it away: the deployment runs the
+// Community Edition again. A key from the server's configuration wins over
+// both, so UseStored leaves it alone and says so.
+func (m *Manager) UseStored(claims *Claims) error {
+	if m == nil {
+		return errors.New("no license manager")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.config {
+		return ErrConfigured
+	}
+	m.err = nil
+	m.claims = claims
+	if claims == nil {
+		m.source = "none"
+	} else {
+		m.source = "console"
+	}
+	return nil
+}
+
+// Stored is the claims of the key installed in the console, nil when none
+// is (or the key in force came from the configuration).
+func (m *Manager) Stored() *Claims {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.source != "console" {
+		return nil
+	}
+	return m.claims
 }
 
 func verifierKeys(override string) ([]ed25519.PublicKey, error) {
@@ -165,7 +249,7 @@ func verifierKeys(override string) ([]ed25519.PublicKey, error) {
 }
 
 // Status evaluates expiry against the clock at call time, so a long-running
-// gateway moves through renewal, transition and community without a restart.
+// gateway moves through renewal and on to community without a restart.
 func (m *Manager) Status() Status {
 	st := Status{Edition: EditionCommunity, State: StateCommunity, Features: []Feature{}, Catalog: Catalog(), Source: "none"}
 	if m == nil {
@@ -192,17 +276,11 @@ func (m *Manager) Status() Status {
 	st.IssuedAt, st.ExpiresAt = &issued, &expires
 	now := m.now()
 	if c.Expired(now) {
-		ends := c.ExpiresAt.Add(TransitionPeriod)
-		st.TransitionEndsAt = &ends
-		if !now.Before(ends) {
-			st.State = StateExpired
-			return st
-		}
-		st.State = StateTransition
-	} else {
-		st.State = StateActive
-		st.RenewalDue = !now.Add(RenewalNotice).Before(c.ExpiresAt)
+		st.State = StateExpired
+		return st
 	}
+	st.State = StateActive
+	st.RenewalDue = !now.Add(RenewalNotice).Before(c.ExpiresAt)
 	st.Edition = c.Edition
 	st.Features = c.EffectiveFeatures()
 	return st
@@ -211,22 +289,11 @@ func (m *Manager) Status() Status {
 // Edition is the effective edition (see Status).
 func (m *Manager) Edition() Edition { return m.Status().Edition }
 
-// Has reports whether f is unlocked with full rights right now: a key in
-// force, not in its transition. It is the strict check — anything that
-// configures, changes or irreversibly acts on an enterprise feature uses it, so a
-// caller that forgets to choose fails closed.
+// Has reports whether the key in force unlocks f right now. An expired key
+// unlocks nothing: there is no transition period (owner, 2026-11-22).
 func (m *Manager) Has(f Feature) bool {
 	st := m.Status()
 	return st.State == StateActive && hasFeature(st.Features, f)
-}
-
-// Usable reports whether f may keep working as configured: Has, or the
-// key's transition period. Sign-in, branding, inherited settings and reads
-// and exports of an enterprise feature use it, so an expired key does not lock
-// people out or strand their data while they renew or migrate.
-func (m *Manager) Usable(f Feature) bool {
-	st := m.Status()
-	return (st.State == StateActive || st.State == StateTransition) && hasFeature(st.Features, f)
 }
 
 // Require returns nil when Has(f), else the error a gated route should
@@ -235,31 +302,7 @@ func (m *Manager) Require(f Feature) error {
 	if m.Has(f) {
 		return nil
 	}
-	return m.refusal(f)
-}
-
-// RequireUse returns nil when Usable(f), else the error a gated route
-// should answer with.
-func (m *Manager) RequireUse(f Feature) error {
-	if m.Usable(f) {
-		return nil
-	}
-	return m.refusal(f)
-}
-
-func (m *Manager) refusal(f Feature) error {
-	st := m.Status()
-	if st.State == StateTransition && hasFeature(st.Features, f) {
-		return TransitionError(f, *st.ExpiresAt, *st.TransitionEndsAt)
-	}
-	return UnavailableError(f, st.Edition)
-}
-
-// TransitionError explains why a change to an enterprise feature is refused while
-// its key is in the transition period.
-func TransitionError(f Feature, expired, ends time.Time) error {
-	return fmt.Errorf("%s is read and export only: the license key expired on %s, and until %s nothing paid can be changed; install a renewed key to change it",
-		Describe(f), expired.UTC().Format("2006-01-02"), ends.UTC().Format("2006-01-02"))
+	return UnavailableError(f, m.Status().Edition)
 }
 
 func hasFeature(fs []Feature, f Feature) bool {

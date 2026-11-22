@@ -181,38 +181,21 @@ func TestManagerStates(t *testing.T) {
 	t.Run("renewal is due within the notice period", func(t *testing.T) {
 		tok, _ := Sign(enterpriseClaims(now.Add(RenewalNotice-time.Hour)), priv)
 		st := Load(Options{Key: tok, PublicKey: pubB64, Now: clock}).Status()
-		if st.State != StateActive || !st.RenewalDue || st.TransitionEndsAt != nil {
+		if st.State != StateActive || !st.RenewalDue {
 			t.Fatalf("unexpected status %+v", st)
 		}
 	})
-	t.Run("a just-expired key is in transition: usable, not changeable", func(t *testing.T) {
+	t.Run("a key one minute past its expiry runs as community, at once", func(t *testing.T) {
+		// No transition period (owner, 2026-11-22): when a key's period is
+		// over, the deployment runs the Community Edition.
 		tok, _ := Sign(enterpriseClaims(now.Add(-time.Minute)), priv)
 		m := Load(Options{Key: tok, PublicKey: pubB64, Now: clock})
 		st := m.Status()
-		if st.State != StateTransition || st.Edition != EditionEnterprise || st.RenewalDue || st.TransitionEndsAt == nil ||
-			!st.TransitionEndsAt.Equal(st.ExpiresAt.Add(TransitionPeriod)) || len(st.Features) == 0 {
+		if st.State != StateExpired || st.Edition != EditionCommunity || st.Customer != "Acme Corp" || st.ExpiresAt == nil || st.RenewalDue || len(st.Features) != 0 {
 			t.Fatalf("unexpected status %+v", st)
 		}
-		if m.Has(FeatureSSO) || !m.Usable(FeatureSSO) {
-			t.Error("transition: Has must be false and Usable true")
-		}
-		if m.RequireUse(FeatureAuditExport) != nil {
-			t.Error("transition: reading an enterprise feature must be allowed")
-		}
-		err := m.Require(FeatureAuditExport)
-		if err == nil || !strings.Contains(err.Error(), "read and export only") || !strings.Contains(err.Error(), "Audit export") {
-			t.Errorf("transition Require = %v", err)
-		}
-	})
-	t.Run("after the transition the key drops to community and says so", func(t *testing.T) {
-		tok, _ := Sign(enterpriseClaims(now.Add(-TransitionPeriod-time.Minute)), priv)
-		m := Load(Options{Key: tok, PublicKey: pubB64, Now: clock})
-		st := m.Status()
-		if st.State != StateExpired || st.Edition != EditionCommunity || st.Customer != "Acme Corp" || st.ExpiresAt == nil || st.TransitionEndsAt == nil || len(st.Features) != 0 {
-			t.Fatalf("unexpected status %+v", st)
-		}
-		if m.Has(FeatureSSO) || m.Usable(FeatureSSO) {
-			t.Error("expired key must not unlock features")
+		if m.Has(FeatureSSO) || m.Has(FeatureAuditExport) {
+			t.Error("an expired key must not unlock features")
 		}
 		if err := m.Require(FeatureSSO); err == nil || !strings.Contains(err.Error(), "community edition") {
 			t.Errorf("expired Require = %v", err)
@@ -222,16 +205,12 @@ func TestManagerStates(t *testing.T) {
 		tick := now
 		tok, _ := Sign(enterpriseClaims(now.Add(time.Minute)), priv)
 		m := Load(Options{Key: tok, PublicKey: pubB64, Now: func() time.Time { return tick }})
-		if m.Status().State != StateActive {
+		if m.Status().State != StateActive || m.Edition() != EditionEnterprise {
 			t.Fatal("should be active before expiry")
 		}
 		tick = now.Add(2 * time.Minute)
-		if m.Status().State != StateTransition {
-			t.Fatal("should enter the transition without reloading")
-		}
-		tick = now.Add(TransitionPeriod + 2*time.Minute)
-		if m.Status().State != StateExpired {
-			t.Fatal("should flip to expired without reloading")
+		if m.Status().State != StateExpired || m.Edition() != EditionCommunity {
+			t.Fatal("should run as community the moment the key expires, without reloading")
 		}
 	})
 	t.Run("not yet valid", func(t *testing.T) {

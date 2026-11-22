@@ -37,8 +37,7 @@ export function useLicense(): LicenseInfo {
   return isLicenseInfo(data) ? data : COMMUNITY_LICENSE;
 }
 
-/** True when the license in force unlocks `feature` (a pkg/license key) —
- *  during a key's transition too, when it is read and export only. */
+/** True when the license in force unlocks `feature` (a pkg/license key). */
 export function useFeature(feature: string): boolean {
   return useLicense().features.includes(feature);
 }
@@ -47,5 +46,8 @@ export function useFeature(feature: string): boolean {
 export function licenseDate(iso?: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+  // A key's dates are days in UTC: it runs to the end of its expiry day, UTC
+  // (cmd/license sign -expires). In the viewer's own zone 23:59:59Z is the
+  // next day east of Greenwich, one day later than the order says.
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { timeZone: "UTC" });
 }

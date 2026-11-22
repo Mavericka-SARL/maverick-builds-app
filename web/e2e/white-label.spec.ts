@@ -56,3 +56,47 @@ test("commercial: the Branding tab edits the brand and previews derived colours"
   await expect(tab.getByTestId("brand-swatches").locator("span").nth(3)).toHaveAttribute("title", "#b91c1c");
   await expect(tab.getByRole("button", { name: "Remove branding" })).toBeVisible();
 });
+
+// Saving puts the brand in force at once for the tenant's own people — the
+// sidebar's logo and name too, not only the colours (found 2026-11-21 in the
+// Commercial key run: the logo waited for a reload). A platform
+// administrator editing another tenant's brand keeps their own look.
+const LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="32"><rect width="120" height="32" fill="#0f766e"/></svg>';
+async function echoSavedBrand(page: import("@playwright/test").Page) {
+  await page.route((url) => url.pathname === "/api/admin/branding", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    const body = route.request().postDataJSON();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...body, configured: true }) });
+  });
+}
+
+test("commercial: a tenant admin's saved logo and name replace the product mark at once", async ({ page }) => {
+  await mockApi(page, { license: commercialLicense });
+  await echoSavedBrand(page);
+  await loadAs(page, "tenant_admin");
+  await expect(page.locator(".mvx-app-shell__mark")).toBeVisible();
+  await page.getByRole("button", { name: "Branding", exact: true }).click();
+  const tab = page.getByTestId("branding");
+  await tab.getByLabel("Product name").fill("Acme Planning");
+  await tab.getByLabel("Logo file").setInputFiles({ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(LOGO_SVG) });
+  await tab.getByRole("button", { name: "Save branding" }).click();
+  await expect(page.getByTestId("brand-logo")).toBeVisible();
+  await expect(page.locator(".mvx-app-shell__mark")).toHaveCount(0);
+  await expect(page).toHaveTitle("Acme Planning");
+});
+
+test("commercial: a platform admin saving another tenant's brand keeps the product mark", async ({ page }) => {
+  await mockApi(page, { license: commercialLicense });
+  await echoSavedBrand(page);
+  await loadAs(page, "platform_admin");
+  await page.getByRole("button", { name: "Branding", exact: true }).click();
+  await chooseTenant(page);
+  const tab = page.getByTestId("branding");
+  await tab.getByLabel("Product name").fill("Acme Planning");
+  await tab.getByLabel("Logo file").setInputFiles({ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(LOGO_SVG) });
+  await tab.getByRole("button", { name: "Save branding" }).click();
+  await expect(tab.getByRole("button", { name: "Saved" })).toBeVisible();
+  await expect(page.getByTestId("brand-logo")).toHaveCount(0);
+  await expect(page.locator(".mvx-app-shell__mark")).toBeVisible();
+  await expect(page).toHaveTitle("maverickbuilds.app");
+});

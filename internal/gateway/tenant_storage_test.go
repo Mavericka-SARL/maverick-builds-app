@@ -11,9 +11,9 @@ import (
 )
 
 func TestTenantAdminSeesStorageSpace(t *testing.T) {
-	f := newDedicatedFixture(t, Deps{})
+	f := newDedicatedFixture(t, Deps{Signup: SignupConfig{Playground: true}})
 
-	acme, acmeWS, actx := f.tenant(t, "Acme")
+	acme, acmeWS, actx := f.tenantOn(t, "Acme", "enterprise")
 	f.seed(t, actx, "kc-ann", "ann@acme.test", "Ann", "tenant_admin", acmeWS)
 	ann := call{persona: "kc-ann"}
 

@@ -1,6 +1,6 @@
 # Editions and self-service sign-up
 
-> **Last verified:** 2026-10-11 (tests; migration 129: the Community note matches the licence)
+> **Last verified:** 2026-11-21 (tests: TestEditionsADeploymentOffers, TestCapTenants; a keyless deployment offers Community only)
 
 A tenant runs one **edition** — **Community**, **Commercial** or
 **Enterprise**. The edition says how much the tenant may use (limits) and
@@ -10,8 +10,8 @@ tenant — edit in the console, not constants in code: tuning the Community
 Edition is an edit, not a release.
 
 **Community** is where a self-service sign-up lands (in the Playground its
-one limit is 100 MB of data), **Commercial** is where a tenant an
-administrator creates starts, and **Enterprise** is the third.
+one limit is 100 MB of data), **Commercial** and **Enterprise**. Where a
+tenant an administrator creates starts is in the next paragraphs.
 
 The 100 MB is the Playground's (`PLAYGROUND=true`). Migrations seed it on
 every deployment, since a migration cannot tell which one is the Playground,
@@ -25,6 +25,30 @@ not an enterprise capability. The licence key (`docs/LICENSING.md`) decides the
 edition the *deployment* runs — Community, Commercial (white-labelling and the
 right to commercial use) or Enterprise, each key issued for an accepted order,
 which it names; a tenant's edition decides how much *that tenant* may use.
+
+Outside the Playground a tenant's edition is at most the deployment's
+(`plan.Allowed`, owner 2026-11-21): a deployment with no key runs the
+Community Edition and so do all its tenants, a Commercial key adds
+Commercial, an Enterprise key all three. `GET /api/admin/plans` lists only
+those, so **New tenant** has no edition to pick on a keyless deployment and
+**Change edition** is not there at all (owner 2026-11-22: changing an
+edition needs a key; `PATCH` refuses it with 400 outside the Playground);
+`POST /api/admin/tenants` and `PATCH /api/admin/tenants/{id}` refuse a higher
+edition with 400. A tenant created without naming one starts on the
+deployment's own edition — Community without a key, Commercial or Enterprise
+with one — and in the Playground on Community, as a sign-up does
+(`plan.DefaultKey`, owner 2026-11-21); `GET /api/admin/plans` marks that
+edition `"default": true` and the console preselects it. At
+start-up — unless the key cannot be verified, which is a setting to fix — the
+gateway moves tenants above the deployment's edition down to it
+(`plan.CapTenants`; in each tenant's own database too in dedicated mode). So
+does a running gateway whenever the edition in force drops: a key that
+expires (there is no transition period, owner 2026-11-22), or one removed
+under Platform › License or replaced by a lower one (`gateway.RunLicenseSync`
+within 30 seconds; the directory at once, each tenant's own database at the
+next start).
+The Playground keeps its whole catalog: there the editions are the hosted
+offering's tiers.
 
 The hosted **Playground** is the Community Edition Mavericka runs for the
 public: sign-up hands out the Community Edition, whose only limit is its size,

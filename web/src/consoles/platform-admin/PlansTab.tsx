@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type PlanDef, type PlanLimits } from "../../api/client";
-import { Button, Card, Checkbox, Field, InlineAlert, LoadingState, NumberInput, Textarea, TextInput } from "../../ui";
+import { Button, Card, Checkbox, Field, InlineAlert, LoadingState, NumberInput, Textarea, TextInput, Txt } from "../../ui";
 
 const LIMIT_FIELDS: { key: keyof PlanLimits; label: string }[] = [
   { key: "max_users", label: "Users" },
@@ -38,7 +38,7 @@ export function PlansTab() {
         Editions apply to every tenant of this deployment; each tenant runs one (Applications › tenant › Change edition). An
         edition bounds how much a tenant may use. A limit of 0 means unlimited. The first self-service edition is the one public
         sign-up assigns — Community. The edition the deployment itself runs is its licence key (Platform › License); a
-        tenant's edition bounds that tenant only.
+        tenant's edition bounds that tenant only.<Txt>{!playground && " Listed here are that edition and those below it: without a key, the Community Edition only."}</Txt>
       </p>
       {(data ?? []).map((p) => <PlanCard key={p.key} plan={p} playground={playground} />)}
     </div>

@@ -30,10 +30,9 @@ func (h *handler) licenseInfo(w http.ResponseWriter, r *http.Request) {
 //
 //	register("GET", "/api/audit/export", "admin", adm(h.requireFeature(license.FeatureAuditExport, h.auditExport)))
 //
-// During a key's transition period (license.StateTransition) the feature
-// can still be read, exported and switched off — see transitionAllowed —
-// but not configured or changed. The check runs per request, so a key that
-// expires while the gateway runs moves through both without a restart.
+// The check runs per request, so a key that expires while the gateway runs
+// locks the feature at that moment, without a restart; there is no
+// transition period (owner, 2026-11-22).
 func (h *handler) requireFeature(f license.Feature, fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := h.licenseGate(r.Method)(f); err != nil {
@@ -44,19 +43,9 @@ func (h *handler) requireFeature(f license.Feature, fn http.HandlerFunc) http.Ha
 	}
 }
 
-// transitionAllowed is what an enterprise feature still answers to while its key
-// is in the transition period: reads and exports (GET, HEAD), and DELETE,
-// which switches paid configuration off — an administrator moving off a
-// feature, or revoking a SCIM token, must not have to renew first.
-func transitionAllowed(method string) bool {
-	return method == http.MethodGet || method == http.MethodHead || method == http.MethodDelete
-}
-
-// licenseGate picks the licence check for a request method: RequireUse for
-// what the transition period allows, the strict Require for the rest.
-func (h *handler) licenseGate(method string) func(license.Feature) error {
-	if transitionAllowed(method) {
-		return h.lic.RequireUse
-	}
+// licenseGate is the licence check for a request method. Every method gets
+// the same strict check since the transition period went (owner,
+// 2026-11-22): an expired key unlocks nothing.
+func (h *handler) licenseGate(string) func(license.Feature) error {
 	return h.lic.Require
 }

@@ -21,8 +21,8 @@ import (
 // moving the workspace to an edition without a limit lifts the guard at
 // once.
 func TestStorageLimitRefusesTheWriteThatWouldCrossIt(t *testing.T) {
-	f := newDedicatedFixture(t, Deps{})
-	id, workspace, tctx := f.tenant(t, "Playground Co")
+	f := newDedicatedFixture(t, Deps{Signup: SignupConfig{Playground: true}})
+	id, workspace, tctx := f.tenantOn(t, "Playground Co", "enterprise")
 	pool, err := f.router.Pool(f.ctx, id)
 	if err != nil {
 		t.Fatal(err)

@@ -6024,6 +6024,51 @@ func encodeImportUploadResponse(response ImportUploadRes, w http.ResponseWriter,
 	}
 }
 
+func encodeInstallLicenseResponse(response InstallLicenseRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *LicenseInfo:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *InstallLicenseBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *Error:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *InstallLicenseConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeIntegrationOAuthCallbackResponse(response *IntegrationOAuthCallbackFound, w http.ResponseWriter, span trace.Span) error {
 	w.WriteHeader(302)
 	span.SetStatus(codes.Ok, http.StatusText(302))
@@ -8462,6 +8507,45 @@ func encodeRemoveGridMetricResponse(response *RemoveGridMetricOK, w http.Respons
 	}
 
 	return nil
+}
+
+func encodeRemoveLicenseResponse(response RemoveLicenseRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *LicenseInfo:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *Error:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *RemoveLicenseConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
 }
 
 func encodeRemoveSsoResponse(response RemoveSsoRes, w http.ResponseWriter, span trace.Span) error {

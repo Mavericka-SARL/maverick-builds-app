@@ -517,6 +517,10 @@ type ImportUploadRes interface {
 	importUploadRes()
 }
 
+type InstallLicenseRes interface {
+	installLicenseRes()
+}
+
 type IssueAdminUserTemporaryPasswordRes interface {
 	issueAdminUserTemporaryPasswordRes()
 }
@@ -719,6 +723,10 @@ type RemoveBrandingRes interface {
 
 type RemoveGridDimensionRes interface {
 	removeGridDimensionRes()
+}
+
+type RemoveLicenseRes interface {
+	removeLicenseRes()
 }
 
 type RemoveSsoRes interface {

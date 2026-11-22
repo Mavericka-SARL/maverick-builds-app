@@ -51687,6 +51687,102 @@ func (s *InputRules) UnmarshalJSON(data []byte) error {
 }
 
 // Encode implements json.Marshaler.
+func (s *InstallLicenseReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *InstallLicenseReq) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("key")
+		e.Str(s.Key)
+	}
+}
+
+var jsonFieldsNameOfInstallLicenseReq = [1]string{
+	0: "key",
+}
+
+// Decode decodes InstallLicenseReq from json.
+func (s *InstallLicenseReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode InstallLicenseReq to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "key":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.Key = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"key\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode InstallLicenseReq")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfInstallLicenseReq) {
+					name = jsonFieldsNameOfInstallLicenseReq[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *InstallLicenseReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *InstallLicenseReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
 func (s *IntegrationDef) Encode(e *jx.Encoder) {
 	e.ObjStart()
 	s.encodeFields(e)
@@ -52958,12 +53054,6 @@ func (s *LicenseInfo) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.TransitionEndsAt.Set {
-			e.FieldStart("transition_ends_at")
-			s.TransitionEndsAt.Encode(e, json.EncodeDateTime)
-		}
-	}
-	{
 		if s.Error.Set {
 			e.FieldStart("error")
 			s.Error.Encode(e)
@@ -52971,7 +53061,7 @@ func (s *LicenseInfo) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfLicenseInfo = [17]string{
+var jsonFieldsNameOfLicenseInfo = [16]string{
 	0:  "edition",
 	1:  "state",
 	2:  "features",
@@ -52987,8 +53077,7 @@ var jsonFieldsNameOfLicenseInfo = [17]string{
 	12: "issued_at",
 	13: "expires_at",
 	14: "renewal_due",
-	15: "transition_ends_at",
-	16: "error",
+	15: "error",
 }
 
 // Decode decodes LicenseInfo from json.
@@ -52996,7 +53085,7 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode LicenseInfo to nil")
 	}
-	var requiredBitSet [3]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -53168,16 +53257,6 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"renewal_due\"")
 			}
-		case "transition_ends_at":
-			if err := func() error {
-				s.TransitionEndsAt.Reset()
-				if err := s.TransitionEndsAt.Decode(d, json.DecodeDateTime); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"transition_ends_at\"")
-			}
 		case "error":
 			if err := func() error {
 				s.Error.Reset()
@@ -53197,9 +53276,8 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [3]uint8{
+	for i, mask := range [2]uint8{
 		0b00011111,
-		0b00000000,
 		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
@@ -53308,6 +53386,8 @@ func (s *LicenseInfoSource) Decode(d *jx.Decoder) error {
 		*s = LicenseInfoSourceEnv
 	case LicenseInfoSourceFile:
 		*s = LicenseInfoSourceFile
+	case LicenseInfoSourceConsole:
+		*s = LicenseInfoSourceConsole
 	case LicenseInfoSourceNone:
 		*s = LicenseInfoSourceNone
 	default:
@@ -53350,8 +53430,6 @@ func (s *LicenseInfoState) Decode(d *jx.Decoder) error {
 		*s = LicenseInfoStateCommunity
 	case LicenseInfoStateActive:
 		*s = LicenseInfoStateActive
-	case LicenseInfoStateTransition:
-		*s = LicenseInfoStateTransition
 	case LicenseInfoStateExpired:
 		*s = LicenseInfoStateExpired
 	case LicenseInfoStateInvalid:

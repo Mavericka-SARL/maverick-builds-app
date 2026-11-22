@@ -314,17 +314,21 @@ func main() {
 		log.Warn().Msg("MAVERICKS_LICENSE_PUBLIC_KEY is set but no longer read: license keys verify only against the keys compiled into this build")
 	}
 	lic := license.Load(license.Options{Key: c.LicenseKey, File: c.LicenseFile})
+	// A key a platform administrator installed under Platform › License is
+	// in force from the start, unless the configuration names one
+	// (gateway.ApplyStoredLicense); RunLicenseSync below keeps every replica
+	// on the installed key.
+	if _, err := gateway.ApplyStoredLicense(ctx, pool, lic); err != nil {
+		log.Error().Err(err).Msg("the license key installed in the console could not be read")
+	}
 	switch st := lic.Status(); st.State {
 	case license.StateActive:
 		ev := log.Info()
 		if st.RenewalDue {
 			ev = log.Warn()
 		}
-		ev.Str("edition", string(st.Edition)).Str("customer", st.Customer).Str("order", st.Order).Str("schedule", st.Schedule).
+		ev.Str("edition", string(st.Edition)).Str("source", st.Source).Str("customer", st.Customer).Str("order", st.Order).Str("schedule", st.Schedule).
 			Time("expires_at", *st.ExpiresAt).Bool("renewal_due", st.RenewalDue).Msg("license key accepted")
-	case license.StateTransition:
-		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Time("transition_ends_at", *st.TransitionEndsAt).
-			Msg("license key has EXPIRED — enterprise features are read and export only until the transition ends, then the community edition runs")
 	case license.StateExpired:
 		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Msg("license key has EXPIRED — running the community edition until a new key is installed")
 	case license.StateInvalid:
@@ -333,12 +337,35 @@ func main() {
 		log.Info().Msg("no license key configured — running the community edition")
 	}
 
+	// Outside the Playground a tenant's edition is at most the deployment's
+	// (plan.Allowed). Tenants above it — created when any edition could be
+	// picked, or under a key since taken away or expired — move down to it
+	// (owner, 2026-11-22: when a key's period is over, the deployment and
+	// every tenant run the Community Edition). Not for a key that cannot be
+	// verified: a broken setting is something to fix, not a reason to
+	// rewrite every tenant.
+	capEdition := ""
+	if st := lic.Status(); !c.Playground && st.State != license.StateInvalid {
+		capEdition = string(st.Edition)
+	}
+	capTenants := func(ctx context.Context, db plan.DB, directory bool, l zerolog.Logger) {
+		if capEdition == "" {
+			return
+		}
+		if moved, err := plan.CapTenants(ctx, db, license.Edition(capEdition), directory); err != nil {
+			l.Warn().Err(err).Msg("tenants above the deployment's edition were not moved to it")
+		} else if moved > 0 {
+			l.Info().Int64("tenants", moved).Str("edition", capEdition).Msg("tenants above the deployment's edition moved to it")
+		}
+	}
+	capTenants(ctx, pool, true, log)
+
 	// The deployment's own settings rows live on the control plane and are
 	// what a tenant without its own inherits — on an edition that includes
 	// them (docs/NOTIFICATIONS.md, migration 091). The resolvers are
 	// process-wide because the control plane is. Inheriting keeps working
 	// through a key's transition period: it is configured behaviour.
-	deploymentSettings := func() bool { return lic.Usable(license.FeatureDeploymentSettings) }
+	deploymentSettings := func() bool { return lic.Has(license.FeatureDeploymentSettings) }
 	notification.DeploymentDefaults = func(ctx context.Context) (notification.Settings, bool) {
 		if !deploymentSettings() {
 			return notification.Settings{}, false
@@ -412,6 +439,7 @@ func main() {
 	// idempotent regardless of how many instances poll for it at once (see
 	// internal/workflow/scheduler.go).
 	schedCtx, cancelScheduler := context.WithCancel(ctx)
+	go gateway.RunLicenseSync(schedCtx, pool, lic, c.Playground, gateway.LicenseSyncInterval, log.With().Str("job", "license-sync").Logger())
 	defer cancelScheduler()
 	// Tenants' identity providers follow the licence in Keycloak: switched
 	// off while single sign-on is not usable, back on when a key returns. At
@@ -421,10 +449,10 @@ func main() {
 			tick := time.NewTicker(15 * time.Minute)
 			defer tick.Stop()
 			for {
-				if n, err := sso.Reconcile(schedCtx, kc, lic.Usable(license.FeatureSSO)); err != nil {
+				if n, err := sso.Reconcile(schedCtx, kc, lic.Has(license.FeatureSSO)); err != nil {
 					log.Warn().Err(err).Msg("single sign-on providers could not be matched to the licence")
 				} else if n > 0 {
-					log.Info().Int("changed", n).Bool("sso_usable", lic.Usable(license.FeatureSSO)).
+					log.Info().Int("changed", n).Bool("sso_usable", lic.Has(license.FeatureSSO)).
 						Msg("single sign-on providers switched to follow the licence")
 				}
 				select {
@@ -454,7 +482,7 @@ func main() {
 			// A white-labelled tenant's mail carries its own name; on other
 			// editions the name is empty and the platform's own is used.
 			BrandName: func(ctx context.Context, recipientUserID string) string {
-				if !lic.Usable(license.FeatureWhiteLabel) {
+				if !lic.Has(license.FeatureWhiteLabel) {
 					return ""
 				}
 				return branding.EmailNameForUser(ctx, dbPool, recipientUserID)
@@ -464,7 +492,7 @@ func main() {
 		reminder := &notification.Reminder{Store: store, Log: blog, Gate: gate}
 		go reminder.Run(bgCtx, reminderInterval)
 		// Enterprise audit retention: sweeps only while the licence includes
-		// it with full rights (Has, not Usable) — deleting is irreversible,
+		// it (Has) — deleting is irreversible,
 		// so keeping events is the safe failure from the moment a key lapses.
 		go auditexport.RunRetention(bgCtx, dbPool, blog, auditRetentionInterval, func() bool { return lic.Has(license.FeatureAuditExport) })
 		// Plan limits: a tenant over its plan is marked read-only here,
@@ -485,6 +513,10 @@ func main() {
 		// Tenants that signed up earlier get the starter models they lack,
 		// and the current content of those they have (internal/startersync).
 		once(func() { startersync.Run(bgCtx, dbPool, blog) })
+		// A tenant with its own database holds its edition there too.
+		if customerID != "" {
+			once(func() { capTenants(bgCtx, dbPool, false, blog) })
+		}
 		go modelLinks.Run(bgCtx, dbPool, customerID, blog, id, gate)
 	}
 	if router != nil {

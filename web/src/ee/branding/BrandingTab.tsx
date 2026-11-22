@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Branding } from "../../api/client";
+import { api, scopedTenant, type Branding } from "../../api/client";
 import { FeatureGate } from "../../license/FeatureGate";
 import { brandTokens, useApplyBrand } from "../../branding/brand";
 import { Button, Card, Field, InlineAlert, LoadingState, TextInput, useConfirm } from "../../ui";
@@ -23,8 +23,10 @@ function readAsDataURL(file: File, limit: number): Promise<string> {
 /**
  * Admin › Branding: the tenant's own name, tagline, logo, favicon and colour
  * on the console, the name on its e-mail, and the host whose visitors see
- * this brand before they sign in. Saved branding applies to this console at
- * once. Commercial and enterprise; other editions see the gate.
+ * this brand before they sign in. Saved branding applies at once to the
+ * console of the tenant's own people (a platform administrator editing
+ * another tenant keeps their own look). Commercial and enterprise; other
+ * editions see the gate.
  */
 export function BrandingTab() {
   return (
@@ -44,10 +46,14 @@ function BrandingForm() {
   const [saved, setSaved] = useState(false);
   const form = draft ?? data ?? EMPTY;
 
+  // The brand edited is the viewer's own unless a platform administrator
+  // chose another tenant (Platform › Branding): only then is it left alone.
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  const ownTenant = !scopedTenant() || scopedTenant() === me?.customer_id;
   const onSettings = (next: Branding) => {
     qc.setQueryData(["branding"], next);
     setDraft(null);
-    apply({ product_name: next.product_name, tagline: next.tagline, logo_data_url: next.logo_data_url, favicon_data_url: next.favicon_data_url, brand_color: next.brand_color, configured: !!next.configured, source: "tenant" });
+    if (ownTenant) apply({ product_name: next.product_name, tagline: next.tagline, logo_data_url: next.logo_data_url, favicon_data_url: next.favicon_data_url, brand_color: next.brand_color, configured: !!next.configured, source: "tenant" });
   };
   const save = useMutation({ mutationFn: () => api.updateBranding(form), onSuccess: (n) => { onSettings(n); setSaved(true); setTimeout(() => setSaved(false), 2000); } });
   const remove = useMutation({ mutationFn: api.removeBranding, onSuccess: onSettings });

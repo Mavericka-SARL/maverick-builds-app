@@ -150,7 +150,7 @@ func (h *handler) dailyCallLimit(r *http.Request, act *actor) dailyLimit {
 	if s, err := h.aiChatStore(pctx).GetSettings(pctx, act.UserID); err == nil {
 		own = s.DailyCallLimit
 	}
-	if cid := h.requestCustomerID(ctx, r, act); cid != "" && h.lic != nil && h.lic.Usable(license.FeatureTenantAIKeys) {
+	if cid := h.requestCustomerID(ctx, r, act); cid != "" && h.lic != nil && h.lic.Has(license.FeatureTenantAIKeys) {
 		tenant, _ = aikeys.NewStore(h.db.For(ctx)).DailyCallLimit(ctx, cid)
 	}
 	serverPays := false
@@ -2245,7 +2245,7 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 	// letting the screen imply a personal key is required.
 	tenant := h.tenantAIKey(ctx, h.requestCustomerID(ctx, r, a))
 	var tenantLimit *int
-	if cid := h.requestCustomerID(ctx, r, a); cid != "" && h.lic != nil && h.lic.Usable(license.FeatureTenantAIKeys) {
+	if cid := h.requestCustomerID(ctx, r, a); cid != "" && h.lic != nil && h.lic.Has(license.FeatureTenantAIKeys) {
 		tenantLimit, _ = aikeys.NewStore(h.db.For(ctx)).DailyCallLimit(ctx, cid)
 	}
 	_, serverDaily := llmCallCaps()

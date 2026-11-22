@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
+	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
@@ -54,7 +56,9 @@ func TestPlanGuardAndLimits(t *testing.T) {
 	// The enforcer the sweep uses is the gateway's own, as in cmd/gateway:
 	// its verdict must not wait for a cache to expire.
 	enforcer := plan.NewEnforcer(pool)
-	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Plans: enforcer, Signup: SignupConfig{ContactURL: "https://example.test/pricing"}}))
+	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Plans: enforcer, Signup: SignupConfig{ContactURL: "https://example.test/pricing"},
+		// An Enterprise key, so every edition of the catalog is one a tenant can be on (plan.Allowed).
+		License: license.Static(&license.Claims{Edition: license.EditionEnterprise, IssuedAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(24 * time.Hour)})}))
 	t.Cleanup(srv.Close)
 
 	t.Run("over its limits: reads work, writes are refused with the reason, platform admin is exempt", func(t *testing.T) {

@@ -383,6 +383,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/me/api-tokens", "any", cors(h.createAPIToken))
 	register("DELETE", "/api/me/api-tokens/{id}", "any", cors(h.revokeAPIToken))
 	register("GET", "/api/license", "any", cors(h.licenseInfo))
+	// Installing a license key in the console (license_store.go).
+	register("PUT", "/api/admin/license", "admin", cors(h.adminLicense))
+	register("DELETE", "/api/admin/license", "admin", cors(h.adminLicense))
 	// Self-service sign-up (public; signup.go) and the plan catalog
 	// (plan.go). Both handlers guard themselves.
 	register("GET", "/api/signup/options", "public", cors(h.signupOptions))

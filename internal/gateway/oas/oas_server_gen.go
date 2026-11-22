@@ -1202,6 +1202,15 @@ type Handler interface {
 	//
 	// POST /api/import/upload
 	ImportUpload(ctx context.Context, req *ImportUploadRequest, params ImportUploadParams) (ImportUploadRes, error)
+	// InstallLicense implements installLicense operation.
+	//
+	// Install a license key pasted under Platform › License (platform_admin). Verified against the
+	// compiled-in keys, stored encrypted on the control plane and in force at once, on every replica
+	// within a minute; replaces a key installed earlier. 400 for a key that is not genuine or has
+	// expired, 409 while the server's configuration names the key.
+	//
+	// PUT /api/admin/license
+	InstallLicense(ctx context.Context, req *InstallLicenseReq) (InstallLicenseRes, error)
 	// IntegrationOAuthCallback implements integrationOAuthCallback operation.
 	//
 	// Where the provider sends the browser after consent (public: the person arrives with the state
@@ -1733,6 +1742,13 @@ type Handler interface {
 	//
 	// DELETE /api/developer/grids/{id}/metrics/{metricId}
 	RemoveGridMetric(ctx context.Context, params RemoveGridMetricParams) (*RemoveGridMetricOK, error)
+	// RemoveLicense implements removeLicense operation.
+	//
+	// Remove the license key installed in the console (platform_admin); the deployment runs the
+	// Community Edition at once. 409 while the server's configuration names the key.
+	//
+	// DELETE /api/admin/license
+	RemoveLicense(ctx context.Context) (RemoveLicenseRes, error)
 	// RemoveSso implements removeSso operation.
 	//
 	// Remove the tenant's identity provider from Keycloak and clear the settings (administrators;

@@ -460,10 +460,15 @@ function TenantPlanControls({ tenant }: { tenant: AdminTenant }) {
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans });
   const [open, setOpen] = useState(false);
   const [plan, setPlan] = useState(tenant.plan);
+  // Change edition is there only when there is a choice: in the Playground,
+  // or under a licence key. Without a key a deployment offers Community
+  // alone, and the gateway refuses the change (owner, 2026-11-22).
+  const noChoice = !plans || plans.length < 2;
   const save = useMutation({
     mutationFn: () => api.updateAdminTenant(tenant.id, plan !== tenant.plan ? { plan } : {}),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-tenants"] }); setOpen(false); },
   });
+  if (noChoice) return null;
   if (!open) {
     return (
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)} style={{ alignSelf: "flex-start" }} aria-label={`Change edition of ${tenant.name}`}>
@@ -638,7 +643,9 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const qc = useQueryClient();
   const [addTenant, setAddTenant] = useState(false);
   const [tenantName, setTenantName] = useState("");
-  const [tenantPlan, setTenantPlan] = useState("commercial");
+  // "" leaves the edition to the gateway: Community in the Playground, else
+  // the deployment's own edition (plan.DefaultKey), which the list marks.
+  const [tenantPlan, setTenantPlan] = useState("");
   // The "Getting started" application (the tour and one guide per role), as
   // every sign-up gets it.
   const [gettingStarted, setGettingStarted] = useState(true);
@@ -657,8 +664,12 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const [query, setQuery] = useState("");
   const matches = tenancyMatches(tenants, query);
   const shownTenants = matches ? tenants.filter(t => matches.has(`tenant:${t.id}`)) : tenants;
-  // The plans a new tenant can start on come from the catalog (Platform › Plans).
+  // The editions a new tenant can start on: those the deployment offers
+  // (GET /api/admin/plans). A deployment without a licence key offers the
+  // Community Edition only, so there is nothing to choose.
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans, enabled: isPlatformAdmin });
+  const choosePlan = (plans?.length ?? 0) > 1;
+  const defaultPlan = plans?.find(p => p.default)?.key ?? plans?.[0]?.key ?? "";
 
   const inv = () => invalidateTenancy(qc);
 
@@ -685,7 +696,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
         : res.admin?.temporary_password
           ? `${res.email} is the tenant's administrator. Temporary password (shown once): ${res.admin.temporary_password}`
           : res.admin ? `${res.email} is the tenant's administrator and was sent an invitation.` : "");
-      inv(); setAddTenant(false); setTenantName(""); setTenantPlan("commercial"); setGettingStarted(true);
+      inv(); setAddTenant(false); setTenantName(""); setTenantPlan(""); setGettingStarted(true);
       setFirstAdmin({ email: "", first_name: "", last_name: "" });
     },
   });
@@ -726,9 +737,11 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
             autoFocus
             onKeyDown={e => { if (e.key === "Enter" && tenantName) createTenant.mutate(); }}
           />
-          <Select value={tenantPlan} onChange={e => setTenantPlan(e.target.value)} style={{ width: 160 }} aria-label="Edition of the new tenant">
-            {(plans ?? [{ key: "commercial", name: "Commercial" }]).map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
-          </Select>
+          {choosePlan && (
+            <Select value={tenantPlan || defaultPlan} onChange={e => setTenantPlan(e.target.value)} style={{ width: 160 }} aria-label="Edition of the new tenant">
+              {plans!.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
+            </Select>
+          )}
           <Button
             variant="primary"
             onClick={() => createTenant.mutate()}

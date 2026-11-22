@@ -72,10 +72,6 @@ func (h *handler) settingsScopeFor(w http.ResponseWriter, r *http.Request, act *
 		return settingsScope{}, false
 	}
 	if !available {
-		if h.lic.Status().State == license.StateTransition && h.lic.Usable(license.FeatureDeploymentSettings) {
-			jsonErr(w, gate(license.FeatureDeploymentSettings), http.StatusForbidden)
-			return settingsScope{}, false
-		}
 		jsonErr(w, fmt.Errorf("deployment-wide settings are an enterprise capability (deployment_settings); name a tenant in the %s header to edit its own", tenantHeader), http.StatusForbidden)
 		return settingsScope{}, false
 	}

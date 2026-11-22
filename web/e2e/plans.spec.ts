@@ -5,7 +5,7 @@
  * trial: a plan bounds how much, never for how long.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi, loadAs, smallPlanState, overStoragePlanState, adminPlans } from "./mocks";
+import { mockApi, loadAs, smallPlanState, overStoragePlanState, adminPlans, adminTenants } from "./mocks";
 
 test("a Community workspace that has filled its space is read-only and told where to go, not to change edition", async ({ page }) => {
   await mockApi(page, { plan: overStoragePlanState() });
@@ -108,4 +108,58 @@ test("an edition without a storage limit shows the space used only", async ({ pa
   await mockApi(page, { plan: smallPlanState({ plan: adminPlans[3], storage_bytes: 3 * (1 << 20) }) });
   await loadAs(page, "tenant_admin");
   await expect(page.getByTestId("tenant-storage-tenant-1")).toHaveText("Storage: 3.0 MB used");
+});
+
+// A deployment without a licence key runs the Community Edition and offers
+// its tenants nothing else (GET /api/admin/plans lists Community only): New
+// tenant has no edition to pick and leaves it to the gateway, and no tenant
+// has "Change edition" — it needs a key (owner, 2026-11-21 and 11-22).
+test("platform admin: a deployment offering Community only has no edition to choose", async ({ page }) => {
+  await mockApi(page, { plans: [adminPlans[0]] });
+  let created: Record<string, unknown> | undefined;
+  await page.route((url) => url.pathname === "/api/admin/tenants", async (route) => {
+    if (route.request().method() === "POST") {
+      created = route.request().postDataJSON();
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "t-new", workspace_id: "ws-new" }) });
+    }
+    // Acme Corp is still on Enterprise; Self Co is on Community.
+    return route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify([...adminTenants, { ...adminTenants[0], id: "tenant-2", name: "Self Co", plan: "community", applications: [] }]) });
+  });
+  await loadAs(page, "platform_admin");
+  await page.getByRole("button", { name: "Applications", exact: true }).first().click();
+
+  await expect(page.getByText("Self Co")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Change edition of / })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New tenant" }).first().click();
+  await page.getByPlaceholder("Tenant name (e.g. Acme Corp)").fill("Northwind");
+  await expect(page.getByLabel("Edition of the new tenant")).toHaveCount(0);
+  const own = page.getByLabel("Make it my own, with every role");
+  if (await own.count()) await own.uncheck();
+  await page.getByRole("button", { name: "Create tenant" }).click();
+  await expect.poll(() => created?.plan).toBe("");
+});
+
+// With a key the list offers that edition and those below; the one the
+// gateway marks default (the key's own) is preselected.
+test("platform admin: with more than one edition offered, New tenant preselects the default and can pick another", async ({ page }) => {
+  await mockApi(page, { plans: adminPlans.map((p) => (p.key === "enterprise" ? { ...p, default: true } : p)) });
+  let created: Record<string, unknown> | undefined;
+  await page.route((url) => url.pathname === "/api/admin/tenants", (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    created = route.request().postDataJSON();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "t-new", workspace_id: "ws-new" }) });
+  });
+  await loadAs(page, "platform_admin");
+  await page.getByRole("button", { name: "Applications", exact: true }).first().click();
+  await page.getByRole("button", { name: "New tenant" }).first().click();
+  await page.getByPlaceholder("Tenant name (e.g. Acme Corp)").fill("Northwind");
+  const edition = page.getByLabel("Edition of the new tenant");
+  await expect(edition).toHaveValue("enterprise");
+  await edition.selectOption("commercial");
+  const own = page.getByLabel("Make it my own, with every role");
+  if (await own.count()) await own.uncheck();
+  await page.getByRole("button", { name: "Create tenant" }).click();
+  await expect.poll(() => created?.plan).toBe("commercial");
 });

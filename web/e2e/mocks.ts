@@ -254,7 +254,7 @@ const integrations = [
   { id: "int-1", name: "Import OPEX Data", type: "csv_import", target_type: "grid", target_id: "grid-1", config: { column_map: { Department: "department", Value: "value" } } },
 ];
 
-const adminTenants = [
+export const adminTenants = [
   {
     id: "tenant-1",
     name: "Acme Corp",

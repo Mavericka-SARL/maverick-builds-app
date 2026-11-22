@@ -69,6 +69,10 @@ const (
 	// to the plan catalog (internal/plan).
 	EventTenantSignedUp EventType = "tenant.signed_up"
 	EventPlanUpdated    EventType = "plan.updated"
+	// A license key a platform administrator installed or removed under
+	// Platform › License.
+	EventLicenseInstalled EventType = "license.installed"
+	EventLicenseRemoved   EventType = "license.removed"
 	// Outbound notification delivery: which channels a tenant sends on, and
 	// an administrator proving the relay works by mailing themselves.
 	EventNotificationSettingsUpdated EventType = "notification.settings_updated"

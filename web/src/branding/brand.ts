@@ -139,7 +139,13 @@ export async function fetchPublicBrand(): Promise<BrandView> {
   }
 }
 
-/** A tab that re-applies a brand after an admin edits it. */
+/**
+ * Puts a brand an admin just saved in force in this console: the sidebar's
+ * logo and name (BrandMark reads the context), the tab title, icon and
+ * colours (the provider applies them). Only for the viewer's own tenant: a
+ * platform administrator editing another tenant's brand keeps their own.
+ */
 export function useApplyBrand() {
-  return applyBrand;
+  const { setBrand } = useContext(BrandContext);
+  return setBrand;
 }

@@ -19,8 +19,8 @@ import (
 // PostgreSQL does not shrink when rows are deleted, so the figure did not
 // move.
 func TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit(t *testing.T) {
-	f := newDedicatedFixture(t, Deps{})
-	id, workspace, tctx := f.tenant(t, "Playground Co")
+	f := newDedicatedFixture(t, Deps{Signup: SignupConfig{Playground: true}})
+	id, workspace, tctx := f.tenantOn(t, "Playground Co", "enterprise")
 	pool, err := f.router.Pool(f.ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +80,8 @@ func TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit(t *testing.T) {
 
 // An edition without a storage limit shows the space given back too.
 func TestDeletingAModelLowersStorageInAnUnlimitedEdition(t *testing.T) {
-	f := newDedicatedFixture(t, Deps{})
-	id, workspace, tctx := f.tenant(t, "Enterprise Co") // enterprise: no storage limit
+	f := newDedicatedFixture(t, Deps{Signup: SignupConfig{Playground: true}})
+	id, workspace, tctx := f.tenantOn(t, "Enterprise Co", "enterprise") // no storage limit
 	pool, err := f.router.Pool(f.ctx, id)
 	if err != nil {
 		t.Fatal(err)

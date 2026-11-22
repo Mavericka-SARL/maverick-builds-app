@@ -68,10 +68,21 @@ func newDedicatedFixture(t *testing.T, deps Deps) *dedicatedFixture {
 // tenant creates a dedicated tenant as the platform admin does, and returns
 // its id, its workspace and a context routed to its database. It starts
 // empty — without the Getting started application, which tenant_create_test
-// covers — so a test sees only what it puts there.
+// covers — so a test sees only what it puts there. It names no edition: the
+// tenant starts on the deployment's default (plan.DefaultKey).
 func (f *dedicatedFixture) tenant(t *testing.T, name string) (id, workspace string, tctx context.Context) {
 	t.Helper()
-	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", map[string]any{"name": name, "plan": "enterprise", "getting_started": false})
+	return f.tenantOn(t, name, "")
+}
+
+// tenantOn is tenant on the named edition ("" for the deployment's default).
+func (f *dedicatedFixture) tenantOn(t *testing.T, name, edition string) (id, workspace string, tctx context.Context) {
+	t.Helper()
+	req := map[string]any{"name": name, "getting_started": false}
+	if edition != "" {
+		req["plan"] = edition
+	}
+	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", req)
 	var out struct {
 		ID          string `json:"id"`
 		WorkspaceID string `json:"workspace_id"`

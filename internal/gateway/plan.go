@@ -13,6 +13,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
@@ -264,8 +265,11 @@ type meResponse struct {
 
 // ── administration ───────────────────────────────────────────────────────────
 
-// adminPlans serves GET /api/admin/plans: the catalog, for the platform
-// administrator to edit and for a tenant admin to see what an upgrade is.
+// adminPlans serves GET /api/admin/plans: the editions a tenant of this
+// deployment can be on (plan.Offered), for the platform administrator to
+// edit and assign and for a tenant admin to see what an upgrade is. Outside
+// the Playground that is the licence's edition and those below it: a
+// deployment with no key lists the Community Edition only.
 func (h *handler) adminPlans(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireRole(w, r, "platform_admin", "tenant_admin"); !ok {
 		return
@@ -275,10 +279,38 @@ func (h *handler) adminPlans(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	if plans == nil {
-		plans = []plan.Plan{}
+	def := plan.DefaultKey(h.signupCfg.Playground, h.lic.Edition())
+	offered := plan.Offered(plans, h.signupCfg.Playground, h.lic.Edition())
+	out := make([]offeredPlan, len(offered))
+	for i, p := range offered {
+		out[i] = offeredPlan{Plan: p, Default: p.Key == def}
 	}
-	jsonOK(w, plans)
+	jsonOK(w, out)
+}
+
+// offeredPlan is one edition of GET /api/admin/plans. Default marks the one
+// a new tenant starts on when none is named (plan.DefaultKey), which the
+// console preselects.
+type offeredPlan struct {
+	plan.Plan
+	Default bool `json:"default,omitempty"`
+}
+
+// errEditionNeedsKey refuses a tenant's edition change on a deployment
+// without a license key (outside the Playground).
+var errEditionNeedsKey = errors.New("changing a tenant's edition needs a license key: without one the deployment and every tenant run the Community Edition; install a key under Platform › License")
+
+// tenantEdition checks that a tenant can be put on the edition key: one of
+// the catalog, and one this deployment offers (plan.Allowed).
+func (h *handler) tenantEdition(ctx context.Context, key string) (plan.Plan, error) {
+	p, err := plan.Get(ctx, h.db.Control(), key)
+	if err != nil {
+		return plan.Plan{}, err
+	}
+	if dep := h.lic.Edition(); !plan.Allowed(key, h.signupCfg.Playground, dep) {
+		return plan.Plan{}, plan.NotAllowedError(key, dep)
+	}
+	return p, nil
 }
 
 // adminPlanAction serves PUT /api/admin/plans/{key}: change a plan
@@ -338,7 +370,13 @@ func (h *handler) applyTenantPlan(ctx, tctx context.Context, customerID string, 
 	if planKey == nil || *planKey == cur.Plan {
 		return changed, nil
 	}
-	p, err := plan.Get(ctx, h.db.Control(), *planKey)
+	// Outside the Playground an edition is changed only under a license key
+	// (owner, 2026-11-22): without one every tenant runs the Community
+	// Edition and there is nothing to change it to.
+	if !h.signupCfg.Playground && h.lic.Edition() == license.EditionCommunity {
+		return nil, errEditionNeedsKey
+	}
+	p, err := h.tenantEdition(ctx, *planKey)
 	if err != nil {
 		return nil, err
 	}
