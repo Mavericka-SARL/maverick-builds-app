@@ -2757,7 +2757,38 @@ function noAnswer(res: Response): string {
     : "no details";
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): Promise<T> {
+// A read the gateway tags (an ETag: /api/grid) is kept here with its tag, so
+// the next poll of it sends the tag back (If-None-Match) and a 304 Not
+// Modified — nothing it depends on changed — returns the kept answer, the
+// same object, without the server working it out again. In memory only (the
+// gateway marks the answers no-store), newest last, at most 64.
+const revalidated = new Map<string, { tag: string; data: unknown }>();
+const REVALIDATED_MAX = 64;
+
+async function apiFetchRevalidated<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const key = JSON.stringify([path, tenantHeader(), localStorage.getItem("selected_app_id") ?? "", localStorage.getItem("selected_model_id") ?? ""]);
+  const held = revalidated.get(key);
+  let tag = "";
+  const data = await apiFetch<T>(
+    path,
+    { ...(signal ? { signal } : {}), ...(held ? { headers: { "If-None-Match": held.tag } } : {}) },
+    false,
+    { held, onTag: (t) => { tag = t; } },
+  );
+  revalidated.delete(key);
+  if (tag) {
+    revalidated.set(key, { tag, data });
+    if (revalidated.size > REVALIDATED_MAX) revalidated.delete(revalidated.keys().next().value as string);
+  }
+  return data;
+}
+
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+  retrying = false,
+  revalidate?: { held?: { tag: string; data: unknown }; onTag: (tag: string) => void },
+): Promise<T> {
   const appId = localStorage.getItem("selected_app_id") ?? "";
   const modelId = localStorage.getItem("selected_model_id") ?? "";
   // Read before anything is awaited: a caller may name the tenant only for
@@ -2779,6 +2810,10 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     throw new Error("Not changed: you chose to leave the live revision as it is. Make a new revision under Developer › Developer Models to build in.");
   }
   const res = await fetch(path, { ...init, headers });
+  if (res.status === 304 && revalidate?.held) {
+    revalidate.onTag(revalidate.held.tag);
+    return revalidate.held.data as T;
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: noAnswer(res) }));
     // A stale selected_app_id (e.g. after the database was reseeded) makes the
@@ -2804,6 +2839,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     // endpoint, not special-cased per response shape.
     throw Object.assign(new Error(`${res.status}: ${body.error ?? res.statusText}`), { status: res.status, body });
   }
+  revalidate?.onTag(res.headers.get("ETag") ?? "");
   return res.json() as Promise<T>;
 }
 
@@ -2964,14 +3000,19 @@ export const api = {
   // fields "totals" (with totalsOnly): only the totals and what qualifies them
   // (texts, withheld, recalc_pending) — metrics, dimensions and cells come
   // back empty. For a reader that has its metadata already (a KPI tile).
-  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; fields?: "totals"; scope?: Record<string, string>; signal?: AbortSignal }) => {
+  // metricIds (with totalsOnly, no grid): only these metrics' totals, and a
+  // scoped read works out only them and what they read.
+  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; fields?: "totals"; metricIds?: string[]; scope?: Record<string, string>; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ revision_id: revisionId });
     if (gridDefId) params.set("grid_def_id", gridDefId);
     if (opts?.metaOnly) params.set("meta_only", "1");
     if (opts?.totalsOnly) params.set("totals_only", "1");
     if (opts?.totalsOnly && opts?.fields) params.set("fields", opts.fields);
+    if (opts?.totalsOnly && opts?.metricIds?.length) params.set("metric_ids", opts.metricIds.join(","));
     if (opts?.scope && Object.keys(opts.scope).length > 0) params.set("scope", JSON.stringify(opts.scope));
-    return apiFetch<GridData>(`/api/grid?${params.toString()}`, opts?.signal ? { signal: opts.signal } : undefined);
+    // Polled every two seconds by grids and KPI tiles: an unchanged answer
+    // comes back as a 304 and is not worked out again (apiFetchRevalidated).
+    return apiFetchRevalidated<GridData>(`/api/grid?${params.toString()}`, opts?.signal);
   },
 
   // Exports this grid's raw input-metric values (one row per dimension-member

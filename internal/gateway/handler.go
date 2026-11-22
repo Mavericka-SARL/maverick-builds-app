@@ -3594,6 +3594,11 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("forbidden: model is outside your access scope"), http.StatusForbidden)
 		return
 	}
+	// A poll of a read whose data, code, reader and request are all as they
+	// were is answered 304 at once: no turn, no work (read_etag.go).
+	if h.answeredUnchanged(w, r, act, modelID) {
+		return
+	}
 	// Every read but metadata takes a turn of its tenant's (heavyTurn): a
 	// full read holds the grid's cells in memory, and a totals or scoped
 	// read (a dashboard's KPIs) works the calculated metrics out at the
@@ -4230,6 +4235,17 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// instead of the whole per-combo lattice.
 	totalsOnly := r.URL.Query().Get("totals_only") == "1"
 	fastTotals := !metaOnly && totalsOnly && len(scopePinned) == 0 && len(hiddenByDim) == 0
+	// metric_ids (with totals_only, a model-wide read): the metrics a KPI
+	// tile shows. The answer carries their totals alone, and a scoped read
+	// works out only them and what they read. Absent: every metric.
+	var askedMetrics []string
+	if totalsOnly && gridDefID == "" {
+		for _, id := range strings.Split(r.URL.Query().Get("metric_ids"), ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				askedMetrics = append(askedMetrics, id)
+			}
+		}
+	}
 
 	// Single-dimension slice fast path: a totals_only read pinning EXACTLY one
 	// dimension (no hidden members) can serve each calc metric's total from a
@@ -4668,8 +4684,17 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		for _, d := range allDims {
 			dimIDToName[d.ID] = d.Name
 		}
+		// Only the metrics the read answers for are worked out, with what
+		// they read: a grid's own, or the ones a KPI tile asked for
+		// (metric_ids). A whole-model read still works out every metric.
+		var only map[string]bool
+		if gridDefID != "" {
+			only = readsClosure(gridMetricIDs(metrics), allMetrics)
+		} else if len(askedMetrics) > 0 {
+			only = readsClosure(askedMetrics, allMetrics)
+		}
 		sr, sErr := h.loadScopedReads(ctx, modelID, revisionID, unfilteredDims, dimIDToName, allMetrics, revisionMetrics,
-			metricDims, hiddenByDim, scopePinned, scopeSubtrees)
+			metricDims, hiddenByDim, scopePinned, scopeSubtrees, only)
 		if sErr != nil {
 			jsonErr(w, sErr, http.StatusInternalServerError)
 			return
@@ -4739,6 +4764,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			addParentDimensionCells(dims, allDims, metrics, allMetrics, metricDims, hiddenByDim, scopePinned, cells)
 		}
 		withheld = keepGridMetrics(gridMetricSet(metrics), cells, texts, totals, withheld)
+	} else if len(askedMetrics) > 0 {
+		asked := make(map[string]bool, len(askedMetrics))
+		for _, id := range askedMetrics {
+			asked[id] = true
+		}
+		withheld = keepGridMetrics(asked, cells, texts, totals, withheld)
 	}
 
 	allDimNames := make(map[string]string, len(allDims))

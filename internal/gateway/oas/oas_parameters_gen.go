@@ -7645,6 +7645,15 @@ type GetGridParams struct {
 	// metrics, dimensions, departments and cells are empty (a KPI tile polling, its metadata read once
 	// with meta_only).
 	Fields OptGetGridFields `json:",omitempty,omitzero"`
+	// Comma-separated metric ids, with totals_only=1 and no grid_def_id: the answer carries these
+	// metrics' totals alone, and a scoped read works out only them and the metrics they read (a KPI
+	// tile). Absent: every metric.
+	MetricIds OptString `json:",omitempty,omitzero"`
+	// The ETag of an earlier answer to the same read. While nothing the answer depends on has changed
+	// (the model's data generation — a save in another model leaves it as it is — the reader, the
+	// request, the gateway's code, a ten-minute clock bucket), the read is answered 304 Not Modified
+	// without being worked out.
+	IfNoneMatch OptString `json:",omitempty,omitzero"`
 }
 
 func unpackGetGridParams(packed middleware.Parameters) (params GetGridParams) {
@@ -7702,11 +7711,30 @@ func unpackGetGridParams(packed middleware.Parameters) (params GetGridParams) {
 			params.Fields = v.(OptGetGridFields)
 		}
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "metric_ids",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.MetricIds = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "If-None-Match",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.IfNoneMatch = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeGetGridParams(args [0]string, argsEscaped bool, r *http.Request) (params GetGridParams, _ error) {
 	q := uri.NewQueryDecoder(r.URL.Query())
+	h := uri.NewHeaderDecoder(r.Header)
 	// Decode query: revision_id.
 	if err := func() error {
 		cfg := uri.QueryParameterDecodingConfig{
@@ -7995,6 +8023,86 @@ func decodeGetGridParams(args [0]string, argsEscaped bool, r *http.Request) (par
 		return params, &ogenerrors.DecodeParamError{
 			Name: "fields",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: metric_ids.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "metric_ids",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotMetricIdsVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotMetricIdsVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.MetricIds.SetTo(paramsDotMetricIdsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "metric_ids",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode header: If-None-Match.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "If-None-Match",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotIfNoneMatchVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotIfNoneMatchVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.IfNoneMatch.SetTo(paramsDotIfNoneMatchVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "If-None-Match",
+			In:   "header",
 			Err:  err,
 		}
 	}

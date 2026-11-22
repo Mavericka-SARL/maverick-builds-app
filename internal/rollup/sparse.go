@@ -72,7 +72,7 @@ func (v *virtualZeros) note() {
 //
 // Pass it only on the context of a call whose RawValue rec describes.
 func WithRecorded(ctx context.Context, rec Recorded) context.Context {
-	return context.WithValue(ctx, recordedKey{}, recordedCtx{rec: rec})
+	return context.WithValue(WithFactIndexes(ctx), recordedKey{}, recordedCtx{rec: rec})
 }
 
 // WithRecordedZeros is WithRecorded for a RawValue that answers a recorded
@@ -83,7 +83,7 @@ func WithRecorded(ctx context.Context, rec Recorded) context.Context {
 // a value, which every listening reader hears. Only a flat average, which
 // counts each distinct leaf with a value once, walks every coordinate.
 func WithRecordedZeros(ctx context.Context, rec Recorded) context.Context {
-	return context.WithValue(ctx, recordedKey{}, recordedCtx{rec: rec, elsewhere: elsewhereRecordedZero})
+	return context.WithValue(WithFactIndexes(ctx), recordedKey{}, recordedCtx{rec: rec, elsewhere: elsewhereRecordedZero})
 }
 
 // WithoutRecorded is ctx with no Recorded: the reads a RawValue makes of
@@ -100,7 +100,7 @@ func WithoutRecorded(ctx context.Context) context.Context {
 // (0, false, nil): a coordinate left out, not a 0 — a formula worked out at
 // each leaf that has no value where none of its inputs has one.
 func WithRecordedAbsent(ctx context.Context, rec Recorded) context.Context {
-	return context.WithValue(ctx, recordedKey{}, recordedCtx{rec: rec, elsewhere: elsewhereNoValue})
+	return context.WithValue(WithFactIndexes(ctx), recordedKey{}, recordedCtx{rec: rec, elsewhere: elsewhereNoValue})
 }
 
 func recordedFor(ctx context.Context, metricID string) (coords []map[string]string, known bool, at elsewhere, err error) {
@@ -306,6 +306,25 @@ func factlessChildren(
 	if err != nil || !known || at != elsewhereZero || !slices.Contains(metricDimIDs, dimID) {
 		return nil
 	}
+	if dims[dimID] != nil {
+		if idx := factIndexFor(ctx, dims, metricID, metricDimIDs, coords); idx != nil {
+			return idx.factless(dims, metricDimIDs, dimID, combo, children)
+		}
+	}
+	return factlessChildrenScan(coords, dims, metricDimIDs, dimID, combo, children)
+}
+
+// factlessChildrenScan is factlessChildren's answer worked out by visiting
+// every listed fact: what a read without an index of the facts (a member
+// chain too deep to index) still does, and what the index must agree with.
+func factlessChildrenScan(
+	coords []map[string]string,
+	dims map[string]*Dimension,
+	metricDimIDs []string,
+	dimID string,
+	combo map[string]string,
+	children []Member,
+) map[string]bool {
 	dim, parent := dims[dimID], combo[dimID]
 	covered := map[string]bool{}
 	for _, f := range coords {

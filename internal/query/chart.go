@@ -227,6 +227,9 @@ func (r *ChartResolver) Resolve(
 	runtimeContext map[string]string,
 	modelID, revisionID, gridDefID, userID string,
 ) (interface{}, error) {
+	// Each point of the chart reads the same facts: one index of each
+	// metric's facts serves them all (rollup.WithFactIndexes).
+	ctx = rollup.WithFactIndexes(ctx)
 	// A grid with no grid_metric rows of its own can mirror another grid's
 	// metrics (rollup_source_grid_id), rendering them via rollup.Resolve
 	// against its own dims instead of direct fact lookups. Only the

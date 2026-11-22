@@ -435,8 +435,9 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   // input AND calc metrics now — the server resolves the scoped total, fast
   // via a precomputed slice); "sync" follows the shared context once it has
   // seeded; "total" sends nothing (whole-model grand total, the '{}' fast
-  // path). Every mode reads totals_only and keys on (revision, scope) so KPIs
-  // sharing a scope dedup to a single fetch.
+  // path). Every mode reads totals_only and keys on (revision, scope,
+  // metric): two tiles of one metric and scope share a fetch, and each
+  // fetch works out its own metric only.
   const syncScoped = syncOn && Object.keys(context).length > 0;
   // "bar": the bar's member for each bar dimension this metric has; the
   // total over the rest. Without a bar (or none of its dimensions on the
@@ -465,10 +466,13 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
     : mode !== "sync" || kpiDims.length === 0 || syncScoped;
   const scopeKey = JSON.stringify(scope ?? {});
   const { data: grid } = useQuery({
-    queryKey: ["kpi-totals", ctx.revision_id, scopeKey],
+    queryKey: ["kpi-totals", ctx.revision_id, scopeKey, metricId],
     // fields "totals": the tile has its metadata (the meta query above) and
-    // polls this every two seconds, so only the totals travel.
-    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", ...(scope ? { scope } : {}), signal }),
+    // polls this every two seconds, so only the totals travel. metricIds:
+    // the server works out this tile's metric and what it reads, not every
+    // metric of the model — a scoped read of a 60-metric OPEX budget took
+    // over a second per tile (2026-11-22).
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", metricIds: [metricId], ...(scope ? { scope } : {}), signal }),
     enabled: valueReady,
     staleTime: 0,
     // Same cadence as the grid and chart widgets, so a change made elsewhere
@@ -501,8 +505,8 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   const compareOn = !!compare && !!metric?.dimension_ids?.includes(compare.dimension_id);
   const compareScope = compareOn ? { ...(scope ?? {}), [compare!.dimension_id]: compare!.member_code } : undefined;
   const { data: compareGrid } = useQuery({
-    queryKey: ["kpi-totals", ctx.revision_id, JSON.stringify(compareScope ?? {})],
-    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", scope: compareScope, signal }),
+    queryKey: ["kpi-totals", ctx.revision_id, JSON.stringify(compareScope ?? {}), metricId],
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, fields: "totals", metricIds: [metricId], scope: compareScope, signal }),
     enabled: valueReady && compareOn,
     staleTime: 0,
     refetchInterval: (q) => ((q.state.data as GridData | undefined)?.recalc_pending ? 250 : 2000),

@@ -4421,12 +4421,28 @@ paths:
           in: query
           description: '"totals" with totals_only=1 answers with the totals, texts, withheld and recalc_pending only; metrics, dimensions, departments and cells are empty (a KPI tile polling, its metadata read once with meta_only)'
           schema: { type: string, enum: ["totals"] }
+        - name: metric_ids
+          in: query
+          description: 'Comma-separated metric ids, with totals_only=1 and no grid_def_id: the answer carries these metrics'' totals alone, and a scoped read works out only them and the metrics they read (a KPI tile). Absent: every metric.'
+          schema: { type: string }
+        - name: If-None-Match
+          in: header
+          description: 'The ETag of an earlier answer to the same read. While nothing the answer depends on has changed (the model''s data generation — a save in another model leaves it as it is — the reader, the request, the gateway''s code, a ten-minute clock bucket), the read is answered 304 Not Modified without being worked out.'
+          schema: { type: string }
       responses:
         "200":
-          description: Grid data
+          description: Grid data, with an ETag naming what it depends on (Cache-Control private, no-store)
+          headers:
+            ETag:
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/GridData" }
+        "304":
+          description: Not modified — the answer named by If-None-Match still stands
+          headers:
+            ETag:
+              schema: { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 

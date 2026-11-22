@@ -23401,6 +23401,14 @@ func (s *Server) handleGetGridRequest(args [0]string, argsEscaped bool, w http.R
 					Name: "fields",
 					In:   "query",
 				}: params.Fields,
+				{
+					Name: "metric_ids",
+					In:   "query",
+				}: params.MetricIds,
+				{
+					Name: "If-None-Match",
+					In:   "header",
+				}: params.IfNoneMatch,
 			},
 			Raw: r,
 		}

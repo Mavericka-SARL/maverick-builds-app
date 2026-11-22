@@ -71,6 +71,15 @@ type scopedReads struct {
 	Pinned  map[string]string
 	Trimmed map[string]bool
 	Dims    map[string]*rollup.Dimension
+	// Only is the metrics the read answers for and every metric they read
+	// (readsClosure): the others are neither loaded nor worked out. nil
+	// works out every metric.
+	Only map[string]bool
+}
+
+// wanted reports whether the read works metricID out (Only).
+func (sr *scopedReads) wanted(metricID string) bool {
+	return sr == nil || sr.Only == nil || sr.Only[metricID]
 }
 
 // totalCombo is where a formula/rate total is evaluated: at the scope's
@@ -569,6 +578,9 @@ func scopeCalcCells(
 	scopedInputCells map[string]float64, // this request's already hidden-member-scoped `cells`, input-only at this point
 	sr *scopedReads, // served metrics, withheld decisions, member metadata (nil = none)
 ) (cells map[string]float64, totals map[string]float64, withheldKeys []string) {
+	// Every metric is read at every combination below: one index of each
+	// metric's facts serves them all (rollup.WithFactIndexes).
+	ctx = rollup.WithFactIndexes(ctx)
 	byName := make(map[string]metricRow, len(universe))
 	for _, m := range universe {
 		byName[m.Name] = m
@@ -668,7 +680,7 @@ func scopeCalcCells(
 	for _, m := range universe {
 		// A text calculation's cells are its stored texts (the grid's
 		// texts); a number evaluation of it would only fail.
-		if !m.IsInput && m.Formula != nil && *m.Formula != "" && m.Format != metricformula.FormatText {
+		if !m.IsInput && m.Formula != nil && *m.Formula != "" && m.Format != metricformula.FormatText && sr.wanted(m.ID) {
 			remaining = append(remaining, m)
 		}
 	}
@@ -1006,6 +1018,7 @@ func (h *handler) loadScopedReads(
 	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
 	allMetrics, revisionMetrics []metricRow, metricDims map[string][]string,
 	hiddenByDim map[string]map[string]bool, scopePinned map[string]string, scopeSubtrees map[string]map[string]bool,
+	only map[string]bool,
 ) (*scopedReads, error) {
 	store := calculation.NewStore(h.db.For(ctx))
 	schema, err := store.LoadDimensionSchema(ctx, modelID, revisionID)
@@ -1022,6 +1035,7 @@ func (h *handler) loadScopedReads(
 		Pinned:  scopePinned,
 		Trimmed: make(map[string]bool, len(scopeSubtrees)),
 		Dims:    unfiltered,
+		Only:    only,
 	}
 	for d := range scopeSubtrees {
 		sr.Trimmed[d] = true
@@ -1048,7 +1062,7 @@ func (h *handler) loadScopedReads(
 		byName[strings.ToLower(m.Name)] = m
 	}
 	for _, m := range allMetrics {
-		if m.IsInput || m.Formula == nil {
+		if m.IsInput || m.Formula == nil || !sr.wanted(m.ID) {
 			continue
 		}
 		if !readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames) && !sr.readsAcrossScope(m, byName, metricDims) {

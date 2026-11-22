@@ -16003,6 +16003,23 @@ type GetGridNotFound Error
 
 func (*GetGridNotFound) getGridRes() {}
 
+// GetGridNotModified is response for GetGrid operation.
+type GetGridNotModified struct {
+	ETag OptString
+}
+
+// GetETag returns the value of ETag.
+func (s *GetGridNotModified) GetETag() OptString {
+	return s.ETag
+}
+
+// SetETag sets the value of ETag.
+func (s *GetGridNotModified) SetETag(val OptString) {
+	s.ETag = val
+}
+
+func (*GetGridNotModified) getGridRes() {}
+
 type GetGridSeriesBadRequest Error
 
 func (*GetGridSeriesBadRequest) getGridSeriesRes() {}
@@ -18371,8 +18388,6 @@ func (s *GridData) SetRollupSourceGridID(val OptNilUUID) {
 	s.RollupSourceGridID = val
 }
 
-func (*GridData) getGridRes() {}
-
 // Composite key "metricId:code1[:code2...]" to value, where the codes are that metric's OWN grid
 // dimensions in order — not a single dimension code.
 type GridDataCells map[string]float64
@@ -18444,6 +18459,34 @@ func (s *GridDataDimensionsWithoutMembersItem) SetKeptBy(val OptString) {
 func (s *GridDataDimensionsWithoutMembersItem) SetGuidance(val string) {
 	s.Guidance = val
 }
+
+// GridDataHeaders wraps GridData with response headers.
+type GridDataHeaders struct {
+	ETag     OptString
+	Response GridData
+}
+
+// GetETag returns the value of ETag.
+func (s *GridDataHeaders) GetETag() OptString {
+	return s.ETag
+}
+
+// GetResponse returns the value of Response.
+func (s *GridDataHeaders) GetResponse() GridData {
+	return s.Response
+}
+
+// SetETag sets the value of ETag.
+func (s *GridDataHeaders) SetETag(val OptString) {
+	s.ETag = val
+}
+
+// SetResponse sets the value of Response.
+func (s *GridDataHeaders) SetResponse(val GridData) {
+	s.Response = val
+}
+
+func (*GridDataHeaders) getGridRes() {}
 
 // Each metric a table of records posts into, by id, to that table's name: its cells take no typed
 // value (a write is refused with 403 naming the table; clearing a typed value stays allowed).

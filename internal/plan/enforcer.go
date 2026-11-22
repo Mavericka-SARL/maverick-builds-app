@@ -639,6 +639,9 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 				log.Info().Str("tenant", id).Str("reason", t.LimitReason).Msg("tenant is over its edition limits and read-only")
 			}
 		}
+		if err := PruneDataChanges(ctx, db); err != nil && ctx.Err() == nil {
+			log.Warn().Err(err).Msg("data changes could not be pruned")
+		}
 		return false
 	}
 	// A sweep changes no work for other loops: it touches nothing.
