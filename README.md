@@ -21,7 +21,7 @@ business works in.
 
 No edition is licensed per user. The Community Edition is free to self-host
 for your company's internal use only, and maverickbuilds.app runs it for you
-as the Playground: the hosted Community Edition, free up to
+on the Playground to test: the hosted Community Edition, free up to
 100 MB. It is built with Go, React and PostgreSQL.
 
 The architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
