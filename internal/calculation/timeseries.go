@@ -252,6 +252,11 @@ type tsEvaluator struct {
 	// (exactRows); a recurrence peer has none.
 	rows map[string]*exactSource
 	memo map[memoKey]formula.Value
+	// rateAt is a rate metric read above its leaves: its operands' ratio
+	// (RatioFormula), never its time-series formula. nil for every other
+	// rule, and for a recurrence member whose operand is a peer (its values
+	// exist only in this pass).
+	rateAt cellEval
 	// varsMemo caches the resolved dependency values per coordinate. It is
 	// nil for a recurrence member: vars binds EVERY dependency eagerly, so
 	// caching would freeze a peer's value at a coordinate before the peer
@@ -325,6 +330,17 @@ func (s *Scheduler) newTSEvaluator(
 		e.stored.add(depID, valueMap)
 		if src := env.exactSource(ctx, depDef, valueMap); src != nil {
 			e.rows[depID] = src
+		}
+	}
+	if rd, rErr := ratioDef(def, allDefs); rErr != nil {
+		return nil, rErr
+	} else if rd != nil {
+		_, numPeer := ov[def.AggNumeratorID]
+		_, denPeer := ov[def.AggDenominatorID]
+		if !numPeer && !denPeer {
+			if e.rateAt, err = env.cellEvaluator(ctx, rd); err != nil {
+				return nil, err
+			}
 		}
 	}
 	e.plain = map[string]bool{}
@@ -680,6 +696,10 @@ func (e *tsEvaluator) evalLeaves(order []int, ov overlay, res *tsResults) {
 // any coordinate that leaves time unpinned, non-time dimensions reduce
 // first (agg_rule) and time last (time_summary).
 func (e *tsEvaluator) finish(res *tsResults) {
+	if e.rateAt != nil {
+		e.finishRate(res)
+		return
+	}
 	dimIDs := e.metricDims[e.def.ID]
 	rule := EffectiveAggRule(e.def.AggRule, e.def.Formula, e.dimIDToName)
 	useEval := rule == string(rollup.AggFormula) || rule == string(rollup.AggRate)
@@ -834,6 +854,49 @@ func (e *tsEvaluator) finish(res *tsResults) {
 				v, ok = overTime(pins, allPositions)
 			}
 			if ok {
+				res.rows = append(res.rows, CalcResultRow{DimMembers: slice, Value: v})
+			}
+		}
+	}
+}
+
+// finishRate is finish for a rate metric: every row above the leaves — the
+// '{}' total, each rollup combination (aggregate periods among them) and
+// each one-dimension slice — is its numerator over its denominator there,
+// each operand read by its own rules (rateAt), at the member a total rule
+// chooses (ruledAt). No row where the ratio has no value (a denominator of
+// 0, nothing entered): it renders "—".
+func (e *tsEvaluator) finishRate(res *tsResults) {
+	dimIDs := e.metricDims[e.def.ID]
+	res.rows = append(res.rows, res.leaf...)
+	at := func(combo map[string]string) (float64, bool) {
+		pin, _, ok := ruledAt(e.allDims, e.def.ID, dimIDs, combo)
+		if !ok {
+			return 0, false
+		}
+		v, _, err := e.rateAt(pin)
+		return v, err == nil
+	}
+	if v, ok := at(map[string]string{}); ok {
+		res.aggregate = &v
+	}
+	const rollupComboCap = 20000
+	for _, combo := range rollup.RollupCombos(e.allDims, dimIDs, rollupComboCap) {
+		if v, ok := at(combo); ok {
+			res.rows = append(res.rows, CalcResultRow{DimMembers: combo, Value: v})
+		}
+	}
+	if len(dimIDs) < 2 {
+		return
+	}
+	for _, dimID := range dimIDs {
+		d := e.allDims[dimID]
+		if d == nil {
+			continue
+		}
+		for _, m := range d.Members {
+			slice := map[string]string{dimID: m.Code}
+			if v, ok := at(slice); ok {
 				res.rows = append(res.rows, CalcResultRow{DimMembers: slice, Value: v})
 			}
 		}

@@ -1,8 +1,8 @@
 # maverickbuilds.app
 
-maverickbuilds.app turns spreadsheets into decision-making apps for planning,
-analytics and data management: budgets, forecasts, reports, workflows 
-the whole business works in.
+maverickbuilds.app turns spreadsheets into decision-making apps for planning
+and analytics: budgets, forecasts, targets and headcount plans the whole
+business works in.
 
 - **Multidimensional models**: regions, products, cost centres and time with
   totals on every level and spreadsheet-style formulas.
@@ -20,8 +20,8 @@ the whole business works in.
   published in one step; models move between workspaces by export and import.
 
 No edition is licensed per user. The Community Edition is free to self-host
-for your company's internal use only and maverickbuilds.app runs it for you
-on the Playground to test: the hosted Community Edition free up to
+for your company's internal use only, and maverickbuilds.app runs it for you
+as the Playground: the hosted Community Edition, free up to
 100 MB. It is built with Go, React and PostgreSQL.
 
 The architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
@@ -48,7 +48,7 @@ other program; see [Runtime topology](ARCHITECTURE.md#runtime-topology).
 
 ## Deploying it for real
 
-To run maverickbuilds.app on your own infrastructure - one server with Docker
+To run maverickbuilds.app on your own infrastructure — one server with Docker
 Compose, or Kubernetes — follow [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md):
 requirements, installation, backups, upgrades. Each release on the Releases
 page comes with ready-built images (`ghcr.io/mavericka-sarl/mavericks/*`,

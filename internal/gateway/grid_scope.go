@@ -6,6 +6,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/fairshare"
 	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
@@ -24,7 +25,8 @@ func gridMetricIDs(metrics []metricRow) []string {
 // grid's own — 60 of them for a six-metric grid of an OPEX budget, on
 // every poll of every widget (2026-11-22). Names match as the evaluator
 // binds them, ignoring case; a reference that names no metric (a function,
-// a dimension) adds nothing.
+// a dimension) adds nothing. A rate metric reads its numerator and
+// denominator too, input or calculated: its totals are their ratio.
 func readsClosure(targets []string, universe []metricRow) map[string]bool {
 	byID := make(map[string]*metricRow, len(universe))
 	byName := make(map[string]*metricRow, len(universe))
@@ -43,6 +45,12 @@ func readsClosure(targets []string, universe []metricRow) map[string]bool {
 	for len(queue) > 0 {
 		m := queue[0]
 		queue = queue[1:]
+		for _, id := range rateOperands(*m) {
+			if dep := byID[id]; dep != nil && !on[dep.ID] {
+				on[dep.ID] = true
+				queue = append(queue, dep)
+			}
+		}
 		if m.Formula == nil || *m.Formula == "" {
 			continue
 		}
@@ -58,6 +66,15 @@ func readsClosure(targets []string, universe []metricRow) map[string]bool {
 		}
 	}
 	return on
+}
+
+// rateOperands are a rate metric's numerator and denominator ids; none for
+// any other rule, or a rate missing either.
+func rateOperands(m metricRow) []string {
+	if m.AggRule != string(rollup.AggRate) || m.AggNumeratorMetricID == "" || m.AggDenominatorMetricID == "" {
+		return nil
+	}
+	return []string{m.AggNumeratorMetricID, m.AggDenominatorMetricID}
 }
 
 // gridMetricSet is gridMetricIDs as a set.

@@ -37,6 +37,12 @@ type Metric struct {
 	Formula string
 	// Dims are the metric's own dimension IDs.
 	Dims []string
+	// Reads are metrics it reads at its own coordinates besides its
+	// formula's: a rate metric's numerator and denominator, whose ratio is
+	// its value above its leaves (calculation.RatioFormula) whatever its
+	// formula reads. Counted at its leaves too, which can only withhold
+	// more, never less.
+	Reads []string
 }
 
 // Served reports whether a calculated metric's formula makes it served from
@@ -289,10 +295,16 @@ func (s *Set) usesOf(m *Metric) ([]use, error) {
 	if p, ok := s.parsed[m.ID]; ok {
 		return p.uses, p.err
 	}
-	node, err := formula.Parse(m.Formula)
 	var us []use
-	if err == nil {
-		us, err = uses(node)
+	var err error
+	if m.Formula != "" || len(m.Reads) == 0 {
+		var node formula.Node
+		if node, err = formula.Parse(m.Formula); err == nil {
+			us, err = uses(node)
+		}
+	}
+	for _, name := range m.Reads {
+		us = append(us, use{source: name})
 	}
 	s.parsed[m.ID] = parsedUse{uses: us, err: err}
 	return us, err

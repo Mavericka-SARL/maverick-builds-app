@@ -314,3 +314,17 @@ func TestRecurrenceDirection(t *testing.T) {
 	check(t, s, "fwd", at("Feb"), false)
 	check(t, s, "back", at("Feb"), false)
 }
+
+// A rate metric's total is its numerator over its denominator whatever its
+// formula reads (calculation.RatioFormula): a member hidden under either
+// operand withholds it, though the formula never reads that dimension.
+func TestRateOperandsAreRead(t *testing.T) {
+	price := calc("price", `k * 2`, "t")
+	s := newSet(t, with(price), hide("reg", "DE"))
+	check(t, s, "price", map[string]string{"t": "Jan"}, false) // the formula alone reads no region
+	price.Reads = []string{"revenue", "k"}
+	s = newSet(t, with(price), hide("reg", "DE"))
+	check(t, s, "price", map[string]string{"t": "Jan"}, true) // revenue at Jan covers DE
+	s = newSet(t, with(price), hide("prod", "P1"))
+	check(t, s, "price", map[string]string{"t": "Jan"}, false) // neither operand reads products
+}

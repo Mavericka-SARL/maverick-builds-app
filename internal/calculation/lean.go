@@ -134,7 +134,7 @@ func (c *compactRows) Row(i int) (map[string]string, float64, *string) {
 // metric of leanCellsAt cells or more, evaluated whole (no increment).
 func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, revisionID string,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, allDefs map[string]*MetricDef,
-	axis *timeAxis, evalOne cellEval,
+	axis *timeAxis, evalOne, aggEval cellEval,
 ) error {
 	dimIDs := metricDimIDs[def.ID]
 	rule := EffectiveAggRule(def.AggRule, def.Formula, dimIDToName)
@@ -177,7 +177,7 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 			if !ok {
 				continue
 			}
-			if v, _, err := evalOne(at); err == nil {
+			if v, _, err := aggEval(at); err == nil {
 				extra = append(extra, CalcResultRow{DimMembers: combo, Value: v})
 			}
 		}
@@ -237,7 +237,7 @@ func (s *Scheduler) executeLean(ctx context.Context, def *MetricDef, modelID, re
 
 	tail := append([]CalcResultRow{}, extra...)
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	tail = append(tail, oneDimSliceRows(def.ID, rule, dimConditional, dimIDs, allDims, leaves, evalOne, axis, def.TimeSummary)...)
+	tail = append(tail, oneDimSliceRows(def.ID, rule, dimConditional, dimIDs, allDims, leaves, aggEval, axis, def.TimeSummary)...)
 	tail = append(tail, aggregatePeriodRows(rule, dimIDs, leaves, axis, def.TimeSummary)...)
 	if writeAggregate {
 		tail = append(tail, CalcResultRow{DimMembers: map[string]string{}, Value: aggregate})

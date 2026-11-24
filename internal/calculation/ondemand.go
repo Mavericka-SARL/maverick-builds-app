@@ -176,9 +176,17 @@ func (env *evalEnv) exactSource(ctx context.Context, dep *MetricDef, valueMap ma
 		env.building[dep.ID] = true
 		defer delete(env.building, dep.ID)
 		axis, err := timeAxisFor(env.allDims, env.metricDimIDs[dep.ID])
+		// Read above its leaves only (at): a rate dependency is its
+		// operands' ratio there, as its persisted rows are — never a
+		// time-series formula, so it is evaluated on demand too.
+		rd, rErr := ratioDef(dep, env.allDefs)
 		switch {
 		case err != nil:
 			buildErr = err
+		case rErr != nil:
+			buildErr = rErr
+		case rd != nil:
+			built, buildErr = env.cellEvaluator(ctx, rd)
 		case axis != nil && usesTimeSeries(dep.Formula):
 			buildErr = fmt.Errorf("%s (agg_rule %s) has no computed value at these coordinates, and a time-series formula is not evaluated on demand", dep.Name, dep.AggRule)
 		default:

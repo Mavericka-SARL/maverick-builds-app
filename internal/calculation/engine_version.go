@@ -24,7 +24,10 @@ import (
 //	3  2026-11-19: a metric with a time function stores its totals and
 //	   one-dimension slices by the dimensions' total rules (a case dimension
 //	   totalling as its first member no longer stores the cases' sum).
-const EngineVersion = 3
+//	4  2026-11-24: a rate metric's subtotals, slices and (with a time
+//	   function) total are its numerator over its denominator, not its
+//	   formula there (RatioFormula).
+const EngineVersion = 4
 
 // engineUpgradeLease is how long a replica's claim on the sweep holds
 // without being renewed; the claim is renewed after every revision.

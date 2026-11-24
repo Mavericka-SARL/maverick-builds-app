@@ -694,8 +694,14 @@ func (s *Scheduler) executePartition(
 	if err != nil {
 		return err
 	}
+	// Above the leaves — rollup rows and slices — a rate metric is its
+	// operands' ratio, not its formula (RatioFormula).
+	aggEval, err := env.aggregateEvaluator(ctx, def, evalOne)
+	if err != nil {
+		return err
+	}
 	if lean {
-		return s.executeLean(ctx, def, modelID, revisionID, allDims, metricDimIDs, dimIDToName, allDefs, axis, evalOne)
+		return s.executeLean(ctx, def, modelID, revisionID, allDims, metricDimIDs, dimIDToName, allDefs, axis, evalOne, aggEval)
 	}
 
 	leafCombos := rollup.LeafCombos(allDims, metricDimIDs[def.ID])
@@ -780,7 +786,7 @@ func (s *Scheduler) executePartition(
 			if !ok {
 				continue
 			}
-			v, _, evalErr := evalOne(at)
+			v, _, evalErr := aggEval(at)
 			if evalErr != nil {
 				continue // empty subtree or genuine per-combo error — no row, renders "—"
 			}
@@ -913,7 +919,7 @@ func (s *Scheduler) executePartition(
 	// leaf: there time still totals by the time summary (a closing balance
 	// typed per scenario has its FY value).
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	perComboRows = append(perComboRows, oneDimSliceRows(def.ID, rule, dimConditional, metricDimIDs[def.ID], allDims, resultRows(results), evalOne, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, oneDimSliceRows(def.ID, rule, dimConditional, metricDimIDs[def.ID], allDims, resultRows(results), aggEval, axis, def.TimeSummary)...)
 	perComboRows = append(perComboRows, aggregatePeriodRows(rule, metricDimIDs[def.ID], resultRows(results), axis, def.TimeSummary)...)
 
 	// Replace the metric's result set in one transaction: the '{}' total
@@ -1215,6 +1221,49 @@ func (s *Scheduler) rateTotal(
 	return num / den, nil
 }
 
+// RatioFormula is how a rate metric reads above its leaves: its numerator
+// divided by its denominator, each read there by its own rules — the
+// formula the scheduler and the scoped grid read evaluate at every total,
+// subtotal and slice in place of the metric's own formula. It is that
+// formula only when the formula is the ratio itself; a rate metric whose
+// formula is something else (or an input metric, which has none) still
+// totals as the ratio — the '{}' row did, every other aggregate read the
+// formula, and the grid showed both (2026-11-24).
+func RatioFormula(numeratorName, denominatorName string) string {
+	return "={" + numeratorName + "} / {" + denominatorName + "}"
+}
+
+// ratioDef is def read above its leaves when its rule is rate: def with
+// RatioFormula in place of its formula and the two operands as its only
+// dependencies. nil for any other rule.
+func ratioDef(def *MetricDef, allDefs map[string]*MetricDef) (*MetricDef, error) {
+	if def.AggRule != string(rollup.AggRate) {
+		return nil, nil
+	}
+	num, den := allDefs[def.AggNumeratorID], allDefs[def.AggDenominatorID]
+	if num == nil || den == nil {
+		return nil, fmt.Errorf("rate needs both a numerator and a denominator metric of this model and revision")
+	}
+	r := *def
+	r.Formula = RatioFormula(num.Name, den.Name)
+	r.DependsOnID = []string{num.ID, den.ID}
+	r.DependsOn = []metricformula.Edge{{To: num.ID}, {To: den.ID}}
+	r.AggRule = string(rollup.AggFormula)
+	r.IsInput = false
+	r.Text = false
+	return &r, nil
+}
+
+// aggregateEvaluator is def's evaluation above its leaves: evalOne (its
+// formula), or for a rate metric the ratio of its operands (ratioDef).
+func (env *evalEnv) aggregateEvaluator(ctx context.Context, def *MetricDef, evalOne cellEval) (cellEval, error) {
+	rd, err := ratioDef(def, env.allDefs)
+	if err != nil || rd == nil {
+		return evalOne, err
+	}
+	return env.cellEvaluator(ctx, rd)
+}
+
 // EffectiveAggRule is how a metric's totals are made: its agg_rule, except
 // that a pure ratio — agg_rule "average" whose formula reads no member —
 // totals as "formula" (the formula on the totalled inputs), as the Formulas
@@ -1295,7 +1344,10 @@ func FormulaReferencesDims(expr string, dimIDToName map[string]string) bool {
 func AffectedMetricIDs(defs map[string]*MetricDef, changedInputIDs []string) []string {
 	reverse := make(map[string][]string)
 	for id, def := range defs {
-		for _, depID := range def.DependsOnID {
+		// A rate metric's totals read its numerator and denominator whether
+		// or not its formula does (RatioFormula): a change to either is a
+		// change to it.
+		for _, depID := range dependencyIDs(def) {
 			reverse[depID] = append(reverse[depID], id)
 		}
 	}

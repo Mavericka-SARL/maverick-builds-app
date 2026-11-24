@@ -9,7 +9,7 @@
 <tr><td><b>Average</b></td><td>The mean of the leaves under it that have a value; never a mean of the children's means. If the formula does not depend on the members (no dimension, property or PARENT in it), its totals are instead the formula evaluated on the totalled inputs, like Formula; each cell keeps its own value.</td><td>Levels that are averaged, such as a score</td></tr>
 <tr><td><b>Count</b></td><td>The number of leaves under it whose value is recorded and not 0.</td><td>"How many regions are active"</td></tr>
 <tr><td><b>Formula</b></td><td>The metric's own formula evaluated on the totalled inputs. Calculated metrics only.</td><td>Ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales</td></tr>
-<tr><td><b>Rate</b></td><td>The total of a <b>Numerator</b> metric divided by the total of a <b>Denominator</b> metric, both chosen in the form.</td><td>Blended rates: an average price is total revenue ÷ total units</td></tr>
+<tr><td><b>Rate</b></td><td>The total of a <b>Numerator</b> metric divided by the total of a <b>Denominator</b> metric, both chosen in the form. Every total and subtotal is that ratio — a parent member, an aggregate period, a filtered total — whatever the metric's own formula, and an input metric can total this way too: a price typed per product totals as revenue ÷ units.</td><td>Blended rates: an average price is total revenue ÷ total units</td></tr>
 </table>
 <p>Every level combines the <b>leaves</b> directly, however many levels up it is, so a World row always equals the grand total. A cell with no result (blank, or failed) is left out.</p>
 

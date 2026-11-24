@@ -4045,7 +4045,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
 			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
-			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when, rev.row_style, NULLIF(rev.input_rules, '{}'::jsonb)
+			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when, rev.row_style, NULLIF(rev.input_rules, '{}'::jsonb),
+			       COALESCE(rev.agg_numerator_metric_id::text,''), COALESCE(rev.agg_denominator_metric_id::text,'')
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -4059,7 +4060,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb)
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb),
+			       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,'')
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -4070,7 +4072,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules,
+			&mr.AggNumeratorMetricID, &mr.AggDenominatorMetricID); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -4129,7 +4132,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb)
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when, row_style, NULLIF(input_rules, '{}'::jsonb),
+			       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,'')
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -4139,7 +4143,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen, &mr.RowStyle, &mr.InputRules,
+				&mr.AggNumeratorMetricID, &mr.AggDenominatorMetricID); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -4581,6 +4586,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			}
 			totals[metricID] = v
 		}
+		ratioTotals(inputRates(allMetrics, nil), allMetrics, totals)
 	} else if sliceFast {
 		// totals-only, one-dimension pin: each calc metric's slice total is
 		// its precomputed {oneDim: member} row (loaded above), consistent with
@@ -4591,6 +4597,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			}
 			totals[metricID] = v
 		}
+		ratioTotals(inputRates(allMetrics, nil), allMetrics, totals)
 	} else if !metaOnly && len(hiddenByDim) == 0 && len(scopePinned) == 0 {
 		// Fully-unscoped, no-hidden caller: reuse the scheduler's own
 		// calc_result rows verbatim, including the '{}' company-wide
@@ -4642,6 +4649,35 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					cells[metricID+":"+strings.Join(codes, ":")] = val
 				}
 			}
+		}
+		// An input totalled as a rate has no rows of the scheduler's: its
+		// subtotals and total are its operands' ratio, worked out as a
+		// scoped read works them out (scopeCalcCells), for those metrics
+		// and what they read alone — nothing at all for a read without one.
+		var shown map[string]bool
+		if gridDefID != "" {
+			shown = gridMetricSet(metrics)
+		} else if len(askedMetrics) > 0 {
+			shown = map[string]bool{}
+			for _, id := range askedMetrics {
+				shown[id] = true
+			}
+		}
+		if rates := inputRates(allMetrics, shown); len(rates) > 0 {
+			rollupDims := toRollupDims(allDims)
+			dimIDToName := make(map[string]string, len(allDims))
+			for _, d := range allDims {
+				dimIDToName[d.ID] = d.Name
+			}
+			sr, sErr := h.loadScopedReads(ctx, modelID, revisionID, rollupDims, dimIDToName, allMetrics, revisionMetrics,
+				metricDims, nil, nil, nil, readsClosure(rates, allMetrics))
+			if sErr != nil {
+				jsonErr(w, sErr, http.StatusInternalServerError)
+				return
+			}
+			rateCells, rateTotals, _ := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics,
+				withDimensionlessInputs(cells, totals, allMetrics, metricDims), sr)
+			mergeInputRates(rates, rateCells, rateTotals, cells, totals)
 		}
 	} else if !metaOnly {
 		// Scoped and/or hidden-member caller: calc_result cannot be reused
@@ -4704,16 +4740,11 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// under its bare id (cellKeyOf), so it is handed over there; left
 		// out, every plain formula reading it saw 0 in a filtered read
 		// (opening_ppe + … / life: 208 instead of 32,351, found 2026-10-31).
-		inputCells, cloned := cells, false
-		for _, m := range allMetrics {
-			if v, ok := totals[m.ID]; ok && m.IsInput && len(metricDims[m.ID]) == 0 {
-				if !cloned {
-					inputCells, cloned = maps.Clone(cells), true
-				}
-				inputCells[m.ID] = v
-			}
-		}
+		inputCells := withDimensionlessInputs(cells, totals, allMetrics, metricDims)
 		scopedCells, scopedTotals, scopedWithheld := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics, inputCells, sr)
+		// An input totalled as a rate was worked out there too: its total is
+		// its operands' ratio, or none, never the plain sum read above.
+		mergeInputRates(inputRates(allMetrics, only), nil, nil, nil, totals)
 		for k, v := range scopedCells {
 			cells[k] = v
 		}

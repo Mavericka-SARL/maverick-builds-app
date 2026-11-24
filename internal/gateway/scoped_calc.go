@@ -676,11 +676,34 @@ func scopeCalcCells(
 	// combination of its leaves (see aggregateReader).
 	formulaAt := map[string]aggregateReader{}
 
+	// ratioRefs are a rate metric's numerator and denominator by name, as
+	// RatioFormula reads them; nil for any other rule or a missing operand.
+	byID := make(map[string]metricRow, len(universe))
+	for _, m := range universe {
+		byID[m.ID] = m
+	}
+	ratioRefs := func(m metricRow) []string {
+		ops := rateOperands(m)
+		if ops == nil {
+			return nil
+		}
+		num, okN := byID[ops[0]]
+		den, okD := byID[ops[1]]
+		if !okN || !okD {
+			return nil
+		}
+		return []string{num.Name, den.Name}
+	}
 	var remaining []metricRow
 	for _, m := range universe {
 		// A text calculation's cells are its stored texts (the grid's
 		// texts); a number evaluation of it would only fail.
 		if !m.IsInput && m.Formula != nil && *m.Formula != "" && m.Format != metricformula.FormatText && sr.wanted(m.ID) {
+			remaining = append(remaining, m)
+		}
+		// An input totalled as a rate: its cells are as entered, its
+		// subtotals and total the ratio of its operands (RatioFormula).
+		if m.IsInput && m.Format != metricformula.FormatText && sr.wanted(m.ID) && ratioRefs(m) != nil {
 			remaining = append(remaining, m)
 		}
 	}
@@ -719,10 +742,16 @@ func scopeCalcCells(
 				done[m.ID] = true
 				continue
 			}
-			refs, err := formula.ExtractRefs(*m.Formula)
-			ready := err == nil
+			var refs []string
+			ready := true
+			if !m.IsInput {
+				var err error
+				refs, err = formula.ExtractRefs(*m.Formula)
+				ready = err == nil
+			}
+			ratio := ratioRefs(m)
 			if ready {
-				for _, ref := range refs {
+				for _, ref := range append(append([]string{}, refs...), ratio...) {
 					refM, isMetric := byName[ref]
 					if !isMetric || refM.IsInput {
 						continue // not a metric reference, or an input (already fully available)
@@ -737,7 +766,7 @@ func scopeCalcCells(
 				unresolved = append(unresolved, m)
 				continue
 			}
-			scopeOrdinaryMetric(ctx, m, ownDims, refs, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor, recorded,
+			scopeOrdinaryMetric(ctx, m, ownDims, refs, ratio, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor, recorded,
 				formulaAt, cells, totals, working, withheld)
 			done[m.ID] = true
 		}
@@ -806,7 +835,7 @@ func pinsLeaves(dims map[string]*rollup.Dimension, ownDims []string, combo map[s
 // cells for budget_variance_pct against real seed data. A combo that reads a
 // withheld cell is withheld, and so is the total.
 func scopeOrdinaryMetric(
-	ctx context.Context, m metricRow, ownDims, refs []string, byName map[string]metricRow,
+	ctx context.Context, m metricRow, ownDims, refs, ratioRefs []string, byName map[string]metricRow,
 	rollupDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string,
 	sr *scopedReads, fetchFor func(string) rollup.RawValue, recorded rollup.Recorded, formulaAt map[string]aggregateReader,
 	cells, totals, working map[string]float64, withheld map[string]bool,
@@ -818,63 +847,82 @@ func scopeOrdinaryMetric(
 	// A pure ratio (agg_rule "average" whose formula reads no member) totals
 	// as "formula", as executePartition does (calculation.EffectiveAggRule):
 	// a ratio-of-sums at the total, its own value at every cell.
-	rule := calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)
-	evalCombo := func(combo map[string]string) (float64, error) {
-		values := make(map[string]float64, len(refs))
-		blank, noValue := map[string]bool{}, map[string]bool{}
-		for _, ref := range refs {
-			refM, isMetric := byName[ref]
-			if !isMetric {
-				continue // function or dimension name, not a metric reference
-			}
-			// ResolveTime with the dependency's time summary, as the
-			// scheduler reads a plain reference (resolveDependency): an
-			// unpinned time dimension reduces by time_summary, not agg_rule;
-			// a pin on a dimension the dependency neither has nor relates to
-			// is dropped (drv_global [cost_type] at All Departments × FY 2027
-			// read 84 × 2.5 = 210).
-			at := combo
-			if norm, nErr := rollup.NormalizeCombo(rollupDims, metricDimIDs[refM.ID], combo, nil); nErr == nil {
-				at = norm
-			}
-			// A formula/rate dependency above its leaves — a parent, an
-			// aggregate period, the total — is its formula evaluated there,
-			// as the scheduler reads it (resolveDependency's exact source):
-			// a margin read at FY by `margin - ly_margin` summed its months'
-			// margins by its time summary (2026-10-18, the CPG dashboard).
-			if read := formulaAt[refM.ID]; read != nil && !pinsLeaves(rollupDims, metricDimIDs[refM.ID], at) {
-				v, err := read(at)
+	// An input here is a rate (scopeCalcCells): it has no formula, and only
+	// its rows above the leaves are worked out.
+	formulaText := ""
+	if m.Formula != nil {
+		formulaText = *m.Formula
+	}
+	rule := m.AggRule
+	if !m.IsInput {
+		rule = calculation.EffectiveAggRule(m.AggRule, formulaText, dimIDToName)
+	}
+	evalWith := func(formulaText string, refs []string) aggregateReader {
+		return func(combo map[string]string) (float64, error) {
+			values := make(map[string]float64, len(refs))
+			blank, noValue := map[string]bool{}, map[string]bool{}
+			for _, ref := range refs {
+				refM, isMetric := byName[ref]
+				if !isMetric {
+					continue // function or dimension name, not a metric reference
+				}
+				// ResolveTime with the dependency's time summary, as the
+				// scheduler reads a plain reference (resolveDependency): an
+				// unpinned time dimension reduces by time_summary, not agg_rule;
+				// a pin on a dimension the dependency neither has nor relates to
+				// is dropped (drv_global [cost_type] at All Departments × FY 2027
+				// read 84 × 2.5 = 210).
+				at := combo
+				if norm, nErr := rollup.NormalizeCombo(rollupDims, metricDimIDs[refM.ID], combo, nil); nErr == nil {
+					at = norm
+				}
+				// A formula/rate dependency above its leaves — a parent, an
+				// aggregate period, the total — is its formula evaluated there,
+				// as the scheduler reads it (resolveDependency's exact source):
+				// a margin read at FY by `margin - ly_margin` summed its months'
+				// margins by its time summary (2026-10-18, the CPG dashboard).
+				if read := formulaAt[refM.ID]; read != nil && !pinsLeaves(rollupDims, metricDimIDs[refM.ID], at) {
+					v, err := read(at)
+					if err != nil {
+						return 0, err
+					}
+					values[refM.Name] = v
+					continue
+				}
+				// Recorded, as resolveDependency: nothing entered beneath the
+				// cell (a month with no postings on any account) is blank to
+				// ISBLANK and "", and 0 in arithmetic.
+				v, found, err := rollup.ResolveTimeRecorded(rollup.WithRecorded(ctx, recorded), rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
+					rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 				if err != nil {
 					return 0, err
 				}
 				values[refM.Name] = v
-				continue
-			}
-			// Recorded, as resolveDependency: nothing entered beneath the
-			// cell (a month with no postings on any account) is blank to
-			// ISBLANK and "", and 0 in arithmetic.
-			v, found, err := rollup.ResolveTimeRecorded(rollup.WithRecorded(ctx, recorded), rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
-				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
-			if err != nil {
-				return 0, err
-			}
-			values[refM.Name] = v
-			if !found {
-				blank[refM.Name] = true
-				if calculation.NoValueAt(rollupDims, refM.ID, metricDimIDs[refM.ID], refM.AggRule, refM.TimeSummary, at) {
-					noValue[refM.Name] = true
+				if !found {
+					blank[refM.Name] = true
+					if calculation.NoValueAt(rollupDims, refM.ID, metricDimIDs[refM.ID], refM.AggRule, refM.TimeSummary, at) {
+						noValue[refM.Name] = true
+					}
 				}
 			}
-		}
-		namedDims := make(map[string]string, len(combo))
-		for dimID, code := range combo {
-			if name, found := dimIDToName[dimID]; found {
-				namedDims[name] = code
+			namedDims := make(map[string]string, len(combo))
+			for dimID, code := range combo {
+				if name, found := dimIDToName[dimID]; found {
+					namedDims[name] = code
+				}
 			}
+			// The member-metadata context (UNFILTERED): dim.property and PARENT
+			// compute exactly as in the scheduler.
+			return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, formulaText, values, blank, noValue, namedDims, sr.cellContext(combo))
 		}
-		// The member-metadata context (UNFILTERED): dim.property and PARENT
-		// compute exactly as in the scheduler.
-		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, blank, noValue, namedDims, sr.cellContext(combo))
+	}
+	evalCombo := evalWith(formulaText, refs)
+	// Above its leaves a rate metric is its numerator over its denominator,
+	// each read there by its own rules — as the scheduler's rows are — not
+	// its formula (calculation.RatioFormula).
+	aggEval := evalCombo
+	if len(ratioRefs) == 2 {
+		aggEval = evalWith(calculation.RatioFormula(ratioRefs[0], ratioRefs[1]), ratioRefs)
 	}
 	if isFormulaRule(rule) {
 		// Its readers evaluate it above its leaves (see evalCombo); each
@@ -885,7 +933,7 @@ func scopeOrdinaryMetric(
 			if r, ok := memo[key]; ok {
 				return r.v, r.err
 			}
-			v, err := evalCombo(combo)
+			v, err := aggEval(combo)
 			memo[key] = onceResult{v, err}
 			return v, err
 		}
@@ -893,6 +941,9 @@ func scopeOrdinaryMetric(
 
 	var leaves []leafValue
 	anyWithheld := false
+	if m.IsInput {
+		combos = nil // its cells are as entered
+	}
 	for _, combo := range combos {
 		key := cellKeyOf(m.ID, ownDims, combo)
 		if len(combo) == 0 {
@@ -947,7 +998,7 @@ func scopeOrdinaryMetric(
 	const rollupComboCap = 20000
 	for _, combo := range rollup.RollupCombos(rollupDims, ownDims, rollupComboCap) {
 		key := cellKeyOf(m.ID, ownDims, combo)
-		v, err := evalCombo(combo)
+		v, err := aggEval(combo)
 		if errors.Is(err, errWithheld) {
 			withheld[key] = true
 			continue
@@ -962,7 +1013,7 @@ func scopeOrdinaryMetric(
 	// row and slice rows — never a combination of the per-combo results.
 	// When that evaluation fails, the combined value computed above is NOT
 	// left standing: it is the very number the rule exists to avoid.
-	v, err := evalCombo(sr.totalCombo())
+	v, err := aggEval(sr.totalCombo())
 	switch {
 	case errors.Is(err, errWithheld):
 		delete(totals, m.ID)
@@ -1041,11 +1092,23 @@ func (h *handler) loadScopedReads(
 		sr.Trimmed[d] = true
 	}
 	if len(hiddenByDim) > 0 {
+		names := make(map[string]string, len(revisionMetrics))
+		for _, m := range revisionMetrics {
+			names[m.ID] = m.Name
+		}
 		metrics := make([]readset.Metric, 0, len(revisionMetrics))
 		for _, m := range revisionMetrics {
 			rm := readset.Metric{ID: m.ID, Name: m.Name, IsInput: m.IsInput, Dims: metricDims[m.ID]}
 			if m.Formula != nil {
 				rm.Formula = *m.Formula
+			}
+			// A served rate metric's rows above its leaves are its operands'
+			// ratio: a reader is withheld them where the operands read a
+			// member hidden from it, whatever its formula reads.
+			for _, id := range rateOperands(m) {
+				if name, ok := names[id]; ok {
+					rm.Reads = append(rm.Reads, name)
+				}
 			}
 			metrics = append(metrics, rm)
 		}
