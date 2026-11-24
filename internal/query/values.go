@@ -97,6 +97,9 @@ func (r *ChartResolver) valueAt(ctx context.Context, d *fullMetricDef, point map
 // index, not its code), and whether anything is recorded or computed there.
 func (r *ChartResolver) rawAt(ctx context.Context, d *fullMetricDef, point map[string]string, dims map[string]*rollup.Dimension, cc *chartCalc) (float64, bool, error) {
 	if d.IsInput {
+		if v, ok, err, handled := r.rateAt(ctx, d, point, dims, cc, map[string]bool{}); handled {
+			return v, ok, err
+		}
 		return resolveInput(ctx, dims, d, point, cc.inputs)
 	}
 	return r.evalCalcMetricVisited(ctx, d.ID, point, dims, cc, map[string]bool{})

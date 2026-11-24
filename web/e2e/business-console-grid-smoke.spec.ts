@@ -194,6 +194,66 @@ test("Business Console grid: a withheld total renders as a dash, never the visib
   await expect(total.getByRole("cell").nth(2)).toHaveText("—");
 });
 
+// A context selector does not cost a ratio its Total: the grid's read is
+// scoped to the selection, so its totals are the total under it (a tester's
+// fill rate by SKU, one scenario selected, read "—", 2026-11-24). A search
+// that narrows the rows keeps the dash: the shown rows are not the total's.
+function contextTotalGrid() {
+  return {
+    scenario: "Working",
+    version: "draft",
+    metrics: [
+      { id: "m-fill", name: "fill", label: "Fill rate", is_input: false, formula: "=IF(dem=0, 0, ful/dem)", agg_rule: "rate",
+        agg_numerator_metric_id: "m-ful", agg_denominator_metric_id: "m-dem", format: "number", format_decimals: 2 },
+      { id: "m-units", name: "units", label: "Units", is_input: false, formula: "=ful", agg_rule: "sum", format: "number", format_decimals: 0 },
+    ],
+    dimensions: [
+      { id: "sku", name: "sku", members: [
+        { id: "s-ne", code: "NE", label: "North East" },
+        { id: "s-nw", code: "NW", label: "North West" },
+      ] },
+      { id: "scn", name: "scenario", members: [
+        { id: "c-s1", code: "S1", label: "S1" },
+        { id: "c-s2", code: "S2", label: "S2" },
+      ] },
+    ],
+    departments: [],
+    cells: { "m-fill:NE:S1": 0.9, "m-fill:NW:S1": 0.5, "m-units:NE:S1": 9, "m-units:NW:S1": 5 },
+    // The scoped read's totals: scenario S1, every SKU.
+    totals: { "m-fill": 0.7, "m-units": 14 },
+    access_rules: { dim_members: {}, metrics: {} },
+  };
+}
+
+test("Business Console grid: a Rate metric's Total under a context selection is the scoped read's total", async ({ page }) => {
+  await mockApi(page);
+  const scopes: string[] = [];
+  await mockTotalRowGrid(page, contextTotalGrid());
+  await page.route("**/api/grid*", (route) => {
+    const scope = new URL(route.request().url()).searchParams.get("scope");
+    if (scope) scopes.push(scope);
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(contextTotalGrid()) });
+  });
+  await page.route(`**/api/dashboards/${TOTAL_DASH_ID}`, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      id: TOTAL_DASH_ID, name: "Total Row Dashboard", tags: [],
+      widgets: [{ id: "w-total", widget_type: "grid", ref_id: TOTAL_GRID_ID, content: null, sort_order: 0, col_start: 1, col_span: 12,
+        widget_props: { default_view: { rows: ["sku"], cols: ["__metrics__"], context: ["scn"] } } }],
+    }) })
+  );
+  await loadAs(page, "dept_head");
+  await expect(page.getByText("Total Row Dashboard")).toBeVisible({ timeout: 15_000 });
+  const total = page.locator("table").first().getByRole("row", { name: /^Total/ });
+  await expect(total.getByRole("cell").nth(1)).toHaveText("0.70");
+  await expect(total.getByRole("cell").nth(2)).toHaveText("14");
+  expect(scopes.some((s) => JSON.parse(s).scn === "S1")).toBe(true);
+
+  // Narrowed by a search, the rows shown are not the total's: a ratio's
+  // Total is a dash (a sum still adds up the rows shown).
+  await page.getByPlaceholder(/Find a row or column/).first().fill("North");
+  await expect(total.getByRole("cell").nth(1)).toHaveText("—");
+});
+
 // ── Parents two or more levels up reduce FLAT over their leaves ──────────────
 // agg_rule average is the mean of every leaf under the parent that has a
 // value (a leaf with none is left out, never a 0) and count is the number of

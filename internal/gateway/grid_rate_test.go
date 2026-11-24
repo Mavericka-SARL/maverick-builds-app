@@ -1,10 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/mavericks-engine/mavericks/internal/query"
 )
 
 // TestRateTotalsAreNumeratorOverDenominator: a metric totalled as a rate
@@ -120,6 +124,65 @@ func TestRateTotalsAreNumeratorOverDenominator(t *testing.T) {
 	// An input rate keeps its cells as entered.
 	if got, ok := cellAt(reads["unfiltered"], d.metric["typed_price"], "UK", "LAPTOP", "Q1"); !ok || got != 1000 {
 		t.Errorf("typed_price at UK × Laptop × Q1: %v (present %v), want the 1,000 entered", got, ok)
+	}
+
+	// Charts and the chat connector (the chart resolver, /api/grid/series)
+	// read the same numbers: by geography, laptops in Q1 — EMEA is
+	// 1.4m / 1,000; a leaf is its own value (the typed price, the formula).
+	// They read an input rate as the mean of its children and a calculated
+	// one as its formula at the parent (2026-11-24).
+	ids := []string{}
+	for _, name := range []string{"avg_price", "typed_price", "price_by_margin"} {
+		ids = append(ids, d.metric[name])
+	}
+	sq := url.Values{
+		"grid_def_id": {d.gridID}, "dimension_id": {d.geoDim}, "metric_ids": {strings.Join(ids, ",")},
+		"context": {fmt.Sprintf(`{%q:%q,%q:%q}`, d.prodDim, "LAPTOP", d.periodDim, "Q1")},
+	}
+	st, raw := d.req("GET", "/api/grid/series?"+sq.Encode(), d.dev, nil)
+	var series struct {
+		Categories []struct{ Key string } `json:"categories"`
+		Series     []struct {
+			MetricID string     `json:"metric_id"`
+			Values   []*float64 `json:"values"`
+		} `json:"series"`
+	}
+	if st != 200 || json.Unmarshal(raw, &series) != nil {
+		t.Fatalf("series: %d %s", st, raw)
+	}
+	// Above the leaves (EMEA) every rate is 1.4m / 1,000; at a leaf, each
+	// metric's own value: revenue / units, the price typed, the margin.
+	wantAt := map[string]map[string]float64{
+		d.metric["avg_price"]:       {"EMEA": 1400, "UK": 1000, "DE": 5000},
+		d.metric["typed_price"]:     {"EMEA": 1400, "UK": 1000, "DE": 1000},
+		d.metric["price_by_margin"]: {"EMEA": 1400, "UK": 200_000, "DE": 200_000},
+	}
+	for _, s := range series.Series {
+		for i, c := range series.Categories {
+			want, check := wantAt[s.MetricID][c.Key]
+			if !check {
+				continue
+			}
+			if s.Values[i] == nil || !nearly(*s.Values[i], want) {
+				got := "none"
+				if s.Values[i] != nil {
+					got = fmt.Sprint(*s.Values[i])
+				}
+				t.Errorf("chart series of %s at %s: %s, want %v", s.MetricID, c.Key, got, want)
+			}
+		}
+	}
+	// Workflow conditions and the AI sheet check (MetricValuesAt): the
+	// grand total.
+	vals, err := query.NewChartResolver(d.pool).MetricValuesAt(context.Background(), d.modelID, d.revID,
+		[]string{"typed_price", "price_by_margin", "price_lagged"}, map[string]string{})
+	if err != nil {
+		t.Fatalf("MetricValuesAt: %v", err)
+	}
+	for name, v := range vals {
+		if n, ok := v.Number(); !ok || !nearly(n, 1520) {
+			t.Errorf("MetricValuesAt %s at the total: %v, want 1,520", name, v)
+		}
 	}
 
 	// A change to the denominator alone recalculates a rate whose formula

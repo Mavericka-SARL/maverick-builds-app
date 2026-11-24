@@ -1125,6 +1125,15 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   const rowDims  = inZone(pivotRows).map(onAxis).map(narrowed(!!followRows)).map(withData).map(d => searchAxis(d, findQuery) ?? d);
   const colDims  = inZone(pivotCols).map(onAxis).map(narrowed(!!followColumns)).map(d => searchAxis(d, findQuery) ?? d);
   const ctxDims  = inZone(pivotContext);
+  // Every context dimension is pinned in the read (scope): its totals are the
+  // grid's total under the selection shown, each row and column dimension
+  // taken whole — the one number a ratio's Total over a flat dimension has (a
+  // Rate or Formula metric cannot be added up from its rows; a tester's fill
+  // rate by SKU, scenario S1 selected, read "—", 2026-11-24). Not while a
+  // search or a followed selection narrows an axis: the rows shown are then
+  // fewer than the total's. colTotal reads it only once the selection's own
+  // answer is in (cellsLoading), never the previous selection's.
+  const totalsAtContext = ctxDims.every(d => scope[d.id] !== undefined) && !findQuery && !followRows && !followColumns;
   // When metrics are in the context zone, only show the one selected metric in the grid
   const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
   // On an axis, the metrics narrow to those matching the search, when any do.
@@ -1656,7 +1665,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // each column dimension: with FY 2026 and FY 2027 both roots, each
     // column took the grid's one total (both years), and a ratio's Total
     // read the same, neither year's, under each (2026-11-08).
-    const spansGrid = ctxDims.length === 0 &&
+    const spansGrid = (ctxDims.length === 0 || totalsAtContext) &&
       colDims.every((dim, i) => cc[i] !== undefined && isAggNode(dim, cc[i]) && !cc[i].parent_code &&
         dim.members.every(m => m.parent_code || m.code === cc[i].code));
     if (spansGrid && withheld.has(metricId)) return null;
@@ -1717,7 +1726,11 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     if (aggRule === "none") return !acrossNonTime;
     if (aggRule === "formula" || aggRule === "rate" || (aggRule === "average" && !!m.aggregate_evaluated && acrossNonTime)) {
       const roots = rowDims.map(dim => dim.members.filter(x => !x.parent_code));
-      return roots.every((r, i) => r.length === 1 && isAggNode(rowDims[i], r[0]));
+      if (roots.every((r, i) => r.length === 1 && isAggNode(rowDims[i], r[0]))) return true;
+      // Flat rows: the read's total under the selection (totalsAtContext),
+      // where a column stands for the whole grid (colTotal's spansGrid).
+      return (ctxDims.length === 0 || totalsAtContext) &&
+        colDims.every(dim => dim.members.filter(x => !x.parent_code).length === 1);
     }
     return true;
   }

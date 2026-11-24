@@ -786,6 +786,13 @@ func (r *ChartResolver) resolveMetricPerMember(
 			return v, ok
 		}
 		if m.IsInput {
+			// An input totalled as a rate: its operands' ratio above its
+			// leaves, as the grid shows it (rateAt).
+			if def := cc.defs[m.ID]; def != nil {
+				if v, ok, err, handled := r.rateAt(ctx, def, combo, allDims, cc, map[string]bool{}); handled {
+					return v, err == nil && ok
+				}
+			}
 			v, ok, err := rollup.ResolveTime(inputCtx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, facts.fetch)
 			return v, err == nil && ok
 		}
@@ -1006,6 +1013,9 @@ type fullMetricDef struct {
 	// Text: a text metric (format text) — a number formula comparing one
 	// is served from its rows, never recomputed here (no text is bound).
 	Text bool
+	// AggNumeratorID and AggDenominatorID are a rate metric's operands:
+	// above its leaves it is the one over the other (rateAt).
+	AggNumeratorID, AggDenominatorID string
 }
 
 // readsText reports whether def's formula compares a text metric: it is
@@ -1023,7 +1033,8 @@ func (cc *chartCalc) readsText(def *fullMetricDef) bool {
 func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revisionID string) (map[string]*fullMetricDef, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum'), time_summary,
-		       COALESCE(picklist_dimension_id::text,''), COALESCE(format,'') = 'text'
+		       COALESCE(picklist_dimension_id::text,''), COALESCE(format,'') = 'text',
+		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,'')
 		FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -1033,7 +1044,8 @@ func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revision
 	defs := make(map[string]*fullMetricDef)
 	for rows.Next() {
 		var d fullMetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary, &d.PicklistDimID, &d.Text); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary, &d.PicklistDimID, &d.Text,
+			&d.AggNumeratorID, &d.AggDenominatorID); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -1174,6 +1186,9 @@ func (r *ChartResolver) evalCalcMetricVisited(
 			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, cc.servedFetch())
 	}
 
+	if v, ok, err, handled := r.rateAt(ctx, def, dimMembers, allDims, cc, visited); handled {
+		return v, ok, err
+	}
 	if leafWise(def.AggRule, dimConditional) {
 		// The scheduler evaluates such a metric at each LEAF and combines
 		// the leaf rows by agg_rule (time by time_summary) for every
@@ -1227,6 +1242,66 @@ func (r *ChartResolver) evalCalcMetricVisited(
 			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, lfetch)
 	}
 	return r.evalFormulaPoint(ctx, def, dimMembers, allDims, cc, visited)
+}
+
+// rateAt reads a rate metric above its leaves: its numerator over its
+// denominator at point, each read by its own rules (an input by
+// resolveInput, a calculated one by evalCalcMetricVisited) — the number the
+// grid and the scheduler give there (calculation.RatioFormula), whatever the
+// metric's formula, an input's typed cells included. A chart or a connector
+// answer at a parent read an input rate as the mean of its children, and a
+// calculated one as its formula there (2026-11-24). No value where the
+// denominator has none or is 0; a numerator with none reads 0, as a blank
+// in the ratio's arithmetic. handled is false at a leaf of every one of the
+// metric's dimensions, time included (its own value there), and for any
+// other rule or a rate missing an operand.
+func (r *ChartResolver) rateAt(ctx context.Context, def *fullMetricDef, point map[string]string, allDims map[string]*rollup.Dimension,
+	cc *chartCalc, visited map[string]bool,
+) (v float64, ok bool, err error, handled bool) {
+	if def.AggRule != string(rollup.AggRate) || def.AggNumeratorID == "" || def.AggDenominatorID == "" {
+		return 0, false, nil, false
+	}
+	num, den := cc.defs[def.AggNumeratorID], cc.defs[def.AggDenominatorID]
+	if num == nil || den == nil || atOwnLeaves(allDims, def.DimensionIDs, point) {
+		return 0, false, nil, false
+	}
+	read := func(d *fullMetricDef) (float64, bool, error) {
+		if d.IsInput {
+			return resolveInput(ctx, allDims, d, point, cc.inputs)
+		}
+		return r.evalCalcMetricVisited(ctx, d.ID, point, allDims, cc, visited)
+	}
+	n, okN, err := read(num)
+	if err != nil {
+		return 0, false, err, true
+	}
+	dv, okD, err := read(den)
+	if err != nil {
+		return 0, false, err, true
+	}
+	if !okD || dv == 0 {
+		return 0, false, nil, true
+	}
+	if !okN {
+		n = 0
+	}
+	return n / dv, true, nil, true
+}
+
+// atOwnLeaves reports whether point pins every one of dimIDs (time
+// included) at a member with nothing under it.
+func atOwnLeaves(dims map[string]*rollup.Dimension, dimIDs []string, point map[string]string) bool {
+	for _, id := range dimIDs {
+		code, pinned := point[id]
+		d := dims[id]
+		if !pinned || d == nil {
+			return false
+		}
+		if leaves := rollup.LeafDescendants(d, code); len(leaves) != 1 || leaves[0] != code {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveInput reads an input metric at point by its aggregation and time
