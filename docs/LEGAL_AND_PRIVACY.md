@@ -1,6 +1,6 @@
 # Terms of service and privacy notice
 
-> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
+> **Last verified:** 2026-11-24 (every path, variable, route and identifier it names checked against the code)
 
 A deployment that lets strangers sign up collects personal data from them, and
 owes them two documents before it does: what the agreement is, and what happens
@@ -13,18 +13,37 @@ configured is left out rather than guessed at.
 
 | Page | Source |
 |---|---|
-| `/terms` | `web/src/public/legal/documents.ts`, `termsDocument` |
-| `/privacy` | `web/src/public/legal/documents.ts`, `privacyDocument` |
+| `/terms` | `internal/gateway/legal_documents.go`, `termsDocument` |
+| `/privacy` | `internal/gateway/legal_documents.go`, `privacyDocument` |
 | The line under the sign-up form | `web/src/signup/SignUpPage.tsx`, shown only when both documents exist |
 | The links under the sign-in form | `web/src/public/LegalFooter.tsx` |
 
-Both pages render outside the auth layer (`web/src/main.tsx`): requiring an
-account in order to read the terms of the account would be absurd.
+Requiring an account in order to read the terms of the account would be
+absurd, so both pages are public.
+
+### Plain HTML, and what a proxy has to route
+
+The gateway serves `/terms` and `/privacy` as finished HTML
+(`internal/gateway/legal_pages.go`): no script, the text in the markup, so a
+reader that runs no JavaScript — a search engine, an AI assistant — reads the
+documents themselves. The Kubernetes Ingress (`deploy/k8s/base/ingress.yaml`)
+and the Compose stack's `deploy/compose/Caddyfile` send those two paths to the
+gateway beside `/api`.
+
+Behind a proxy of your own, route `/terms` and `/privacy` to the gateway too.
+If you do not, nothing breaks: the paths reach the console, whose page
+(`web/src/public/legal/LegalPage.tsx`, outside the auth layer in
+`web/src/main.tsx`) renders the same document from
+`GET /api/legal/documents/{doc}` — it only needs JavaScript to do it.
+
+The console's `robots.txt` (`web/public/robots.txt`) lets crawlers read
+`/signup`, `/terms`, `/privacy` and the manuals under `/docs/`, and nothing
+behind sign-in.
 
 ## Configuration
 
-The gateway reads these and serves them at `GET /api/legal`
-(`internal/gateway/legal.go`). Every one is optional, and every one is a
+The gateway reads these, serves them at `GET /api/legal`
+(`internal/gateway/legal.go`) and writes them into both documents. Every one is optional, and every one is a
 deployment's own answer.
 
 | Variable | What it is |
@@ -56,7 +75,7 @@ checkable in this repository:
 
 | The text says | Where it comes from |
 |---|---|
-| The sign-up edition's name and limits, and that the workspace goes read-only | `GET /api/signup/options` at render time — the seeded edition, not a number typed into the page |
+| The sign-up edition's name and limits, and that the workspace goes read-only | The edition sign-up offers when the page is served (`signupOffer` in `internal/gateway/signup.go`, the one `GET /api/signup/options` returns) — the seeded edition, not a number typed into the page |
 | Backups are kept for fourteen days | `BACKUP_RETENTION_DAYS` in `deploy/docker/pg-backup/pg-backup.sh` |
 | No analytics, tracking, or third-party script | `web/index.html` loads none, and the CSP-relevant surface is the app's own bundle |
 | Sign-in stores a cookie and an in-memory token | `web/src/auth/AuthProvider.tsx` — `check-sso` with PKCE, the token in React state |

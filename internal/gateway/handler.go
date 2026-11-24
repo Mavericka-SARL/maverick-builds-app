@@ -282,7 +282,7 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	if deps.ModelLinks != nil {
 		deps.ModelLinks.h, deps.ModelLinks.api = h, api
 	}
-	return limitRequestBodies(h.mountMCP(api))
+	return limitRequestBodies(legalTrailingSlash(h.mountMCP(api)))
 }
 
 // maxRequestBodyBytes caps every request body the gateway reads. It is the
@@ -392,6 +392,12 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// The terms and the privacy notice are read before an account exists
 	// (legal.go), so this is public too.
 	register("GET", "/api/legal", "public", cors(h.legalInfo))
+	// The documents themselves: as JSON for the console's fallback page,
+	// and as plain HTML at the console's own paths, which the Ingress and
+	// the Compose Caddyfile route here (legal_pages.go).
+	register("GET", "/api/legal/documents/{doc}", "public", cors(h.legalDocumentJSON))
+	register("GET", "/terms", "public", h.legalPage("terms"))
+	register("GET", "/privacy", "public", h.legalPage("privacy"))
 	register("POST", "/api/signup", "public", cors(h.signup))
 	register("GET", "/api/admin/plans", "admin", cors(h.adminPlans))
 	register("GET", "/api/admin/dormancy", "admin", adm(h.adminDormancy))

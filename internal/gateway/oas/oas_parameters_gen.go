@@ -8813,6 +8813,79 @@ func decodeGetIntegrationRunParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// GetLegalDocumentParams is parameters of getLegalDocument operation.
+type GetLegalDocumentParams struct {
+	Doc GetLegalDocumentDoc
+}
+
+func unpackGetLegalDocumentParams(packed middleware.Parameters) (params GetLegalDocumentParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "doc",
+			In:   "path",
+		}
+		params.Doc = packed[key].(GetLegalDocumentDoc)
+	}
+	return params
+}
+
+func decodeGetLegalDocumentParams(args [1]string, argsEscaped bool, r *http.Request) (params GetLegalDocumentParams, _ error) {
+	// Decode path: doc.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "doc",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.Doc = GetLegalDocumentDoc(c)
+				return nil
+			}(); err != nil {
+				return err
+			}
+			if err := func() error {
+				if err := params.Doc.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "doc",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetModelCheckParams is parameters of getModelCheck operation.
 type GetModelCheckParams struct {
 	// The revision to check; the model's active revision when left out.

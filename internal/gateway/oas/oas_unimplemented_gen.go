@@ -1309,6 +1309,17 @@ func (UnimplementedHandler) GetIntegrationRun(ctx context.Context, params GetInt
 	return r, ht.ErrNotImplemented
 }
 
+// GetLegalDocument implements getLegalDocument operation.
+//
+// The text of the terms of service or the privacy notice with the operator filled in, for the
+// console's own page where a proxy sends /terms and /privacy to it (public; see
+// internal/gateway/legal_pages.go).
+//
+// GET /api/legal/documents/{doc}
+func (UnimplementedHandler) GetLegalDocument(ctx context.Context, params GetLegalDocumentParams) (r GetLegalDocumentRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetLegalInfo implements getLegalInfo operation.
 //
 // The operator's identity and the documents it publishes, for the terms of service and privacy
@@ -1372,6 +1383,16 @@ func (UnimplementedHandler) GetMyWorkflowHistory(ctx context.Context, params Get
 //
 // GET /api/notifications/settings
 func (UnimplementedHandler) GetNotificationSettings(ctx context.Context) (r GetNotificationSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetPrivacyPage implements getPrivacyPage operation.
+//
+// The privacy notice as a plain HTML page, readable without JavaScript (public; routed to the
+// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+//
+// GET /privacy
+func (UnimplementedHandler) GetPrivacyPage(ctx context.Context) (r GetPrivacyPageRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1461,6 +1482,16 @@ func (UnimplementedHandler) GetSsoSettings(ctx context.Context) (r GetSsoSetting
 //
 // GET /api/admin/ai-settings
 func (UnimplementedHandler) GetTenantAISettings(ctx context.Context) (r GetTenantAISettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetTermsPage implements getTermsPage operation.
+//
+// The terms of service as a plain HTML page, readable without JavaScript (public; routed to the
+// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+//
+// GET /terms
+func (UnimplementedHandler) GetTermsPage(ctx context.Context) (r GetTermsPageRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

@@ -401,6 +401,10 @@ type GetIntegrationRunRes interface {
 	getIntegrationRunRes()
 }
 
+type GetLegalDocumentRes interface {
+	getLegalDocumentRes()
+}
+
 type GetLicenseRes interface {
 	getLicenseRes()
 }
@@ -415,6 +419,10 @@ type GetModelCheckRes interface {
 
 type GetNotificationSettingsRes interface {
 	getNotificationSettingsRes()
+}
+
+type GetPrivacyPageRes interface {
+	getPrivacyPageRes()
 }
 
 type GetReconciliationDifferencesRes interface {
@@ -447,6 +455,10 @@ type GetSsoSettingsRes interface {
 
 type GetTenantAISettingsRes interface {
 	getTenantAISettingsRes()
+}
+
+type GetTermsPageRes interface {
+	getTermsPageRes()
 }
 
 type GetTimeWindowRes interface {

@@ -74,6 +74,20 @@ func (h *handler) publicBranding(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if v, ok := h.hostBrand(ctx, r); ok {
+		jsonOK(w, v)
+		return
+	}
+	jsonOK(w, brandView{Source: "default"})
+}
+
+// hostBrand is the brand the request's host carries — a tenant's own domain
+// with white-labelling configured — for a reader who is not signed in: the
+// public pages (legal_pages.go) and publicBranding's anonymous case.
+func (h *handler) hostBrand(ctx context.Context, r *http.Request) (brandView, bool) {
+	if !h.lic.Has(license.FeatureWhiteLabel) {
+		return brandView{}, false
+	}
 	host := r.Host
 	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
 		host = strings.TrimSpace(strings.Split(fwd, ",")[0])
@@ -84,11 +98,10 @@ func (h *handler) publicBranding(w http.ResponseWriter, r *http.Request) {
 	if tenant, err := branding.NewDomains(h.db.Control()).Lookup(ctx, host); err == nil && tenant != "" {
 		tctx := h.tenantCtx(ctx, tenant)
 		if s, err := branding.NewStore(h.db.For(tctx), tenant).Get(tctx); err == nil && s.Configured {
-			jsonOK(w, toView(s, "host"))
-			return
+			return toView(s, "host"), true
 		}
 	}
-	jsonOK(w, brandView{Source: "default"})
+	return brandView{}, false
 }
 
 // adminBranding handles GET, PUT and DELETE on /api/admin/branding.

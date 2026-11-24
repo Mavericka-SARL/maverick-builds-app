@@ -919,6 +919,14 @@ type Handler interface {
 	//
 	// GET /api/developer/integration-runs/{runId}
 	GetIntegrationRun(ctx context.Context, params GetIntegrationRunParams) (GetIntegrationRunRes, error)
+	// GetLegalDocument implements getLegalDocument operation.
+	//
+	// The text of the terms of service or the privacy notice with the operator filled in, for the
+	// console's own page where a proxy sends /terms and /privacy to it (public; see
+	// internal/gateway/legal_pages.go).
+	//
+	// GET /api/legal/documents/{doc}
+	GetLegalDocument(ctx context.Context, params GetLegalDocumentParams) (GetLegalDocumentRes, error)
 	// GetLegalInfo implements getLegalInfo operation.
 	//
 	// The operator's identity and the documents it publishes, for the terms of service and privacy
@@ -967,6 +975,13 @@ type Handler interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetPrivacyPage implements getPrivacyPage operation.
+	//
+	// The privacy notice as a plain HTML page, readable without JavaScript (public; routed to the
+	// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+	//
+	// GET /privacy
+	GetPrivacyPage(ctx context.Context) (GetPrivacyPageRes, error)
 	// GetReconciliation implements getReconciliation operation.
 	//
 	// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
@@ -1029,6 +1044,13 @@ type Handler interface {
 	//
 	// GET /api/admin/ai-settings
 	GetTenantAISettings(ctx context.Context) (GetTenantAISettingsRes, error)
+	// GetTermsPage implements getTermsPage operation.
+	//
+	// The terms of service as a plain HTML page, readable without JavaScript (public; routed to the
+	// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+	//
+	// GET /terms
+	GetTermsPage(ctx context.Context) (GetTermsPageRes, error)
 	// GetTimeWindow implements getTimeWindow operation.
 	//
 	// What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the

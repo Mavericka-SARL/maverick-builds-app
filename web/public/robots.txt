@@ -1,0 +1,9 @@
+# The console of a maverickbuilds.app deployment. Crawlers may read what a
+# visitor reads before an account exists (sign-up, the terms, the privacy
+# notice and the manuals) and nothing behind sign-in.
+User-agent: *
+Allow: /signup
+Allow: /terms
+Allow: /privacy
+Allow: /docs/
+Disallow: /

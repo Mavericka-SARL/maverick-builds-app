@@ -54,19 +54,13 @@ type signupRequest struct {
 func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	out := map[string]any{"enabled": false, "contact_url": h.signupCfg.ContactURL}
-	p, ok, err := h.selfServicePlan(ctx)
+	p, reason := h.signupOffer(ctx)
 	// The hosted Playground, where unused workspaces are retired: the
 	// terms and the console's edition settings say so only there.
 	out["playground"] = h.signupCfg.Playground
 	switch {
-	case !h.signupCfg.Enabled:
-		out["reason"] = "Self-service sign-up is not enabled on this deployment."
-	case h.kc == nil && !h.devMode:
-		out["reason"] = "Sign-up is not available: the identity provider is not configured."
-	case err != nil:
-		out["reason"] = "Sign-up is temporarily unavailable."
-	case !ok:
-		out["reason"] = "No edition is open for self-service sign-up."
+	case reason != "":
+		out["reason"] = reason
 	default:
 		out["enabled"] = true
 		// "Sign up with Google": a first Google sign-in is a sign-up on
@@ -83,6 +77,26 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 		out["plan"] = offered
 	}
 	jsonOK(w, out)
+}
+
+// signupOffer is the edition a visitor would sign up to right now, or why
+// there is none. /signup (signupOptions) and the terms (legal_pages.go) both
+// describe this one offer, so they share it.
+func (h *handler) signupOffer(ctx context.Context) (plan.Plan, string) {
+	switch {
+	case !h.signupCfg.Enabled:
+		return plan.Plan{}, "Self-service sign-up is not enabled on this deployment."
+	case h.kc == nil && !h.devMode:
+		return plan.Plan{}, "Sign-up is not available: the identity provider is not configured."
+	}
+	p, ok, err := h.selfServicePlan(ctx)
+	switch {
+	case err != nil:
+		return plan.Plan{}, "Sign-up is temporarily unavailable."
+	case !ok:
+		return plan.Plan{}, "No edition is open for self-service sign-up."
+	}
+	return p, ""
 }
 
 // selfServicePlan is the edition sign-up assigns: the first self-service

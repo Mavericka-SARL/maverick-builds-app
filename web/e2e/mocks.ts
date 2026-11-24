@@ -358,6 +358,36 @@ export const legalInfo = {
   updated: "2026-09-18",
 };
 
+/**
+ * GET /api/legal/documents/{doc}: the gateway writes the text
+ * (internal/gateway/legal_documents.go, whose Go tests check what it says);
+ * these are its opening sections for the deployment above, enough to see the
+ * console render paragraphs, lists and headings.
+ */
+export const legalDocuments: Record<string, unknown> = {
+  terms: {
+    title: "Terms of service",
+    intro: "The agreement between you and Acme Software SARL for the use of maverickbuilds.app.",
+    sections: [
+      { heading: "1. Who this agreement is with", body: [
+        "maverickbuilds.app is operated by Acme Software SARL, 1 Rue de Test, L-1000 Luxembourg. In this document \"we\" and \"us\" mean that company, and \"you\" means the person or organisation using the service.",
+        "Questions about this agreement go to legal@acme.test.",
+      ] },
+      { heading: "4. What you may not do", body: [
+        "Use of the service is subject to a few limits:",
+        ["do not use it to store or process unlawful content, or content you have no right to process", "do not resell or sublicense access to the service without a written agreement with us"],
+      ] },
+    ],
+  },
+  privacy: {
+    title: "Privacy notice",
+    intro: "What Acme Software SARL does with personal data in maverickbuilds.app, and the rights you have over it.",
+    sections: [
+      { heading: "1. Who is responsible", body: ["Acme Software SARL, 1 Rue de Test, L-1000 Luxembourg is the controller of the personal data described here."] },
+    ],
+  },
+};
+
 /** GET /api/legal for one that has published nothing. */
 export const legalUnpublished = {
   published: false, builtin: false, terms_url: "", privacy_url: "",
@@ -377,12 +407,6 @@ export function overStoragePlanState() {
     reason: `This tenant is over its edition's limits (The Community Edition allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
   };
 }
-
-/** The same with a plan that has no note of its own — the terms then fall back to the generic wording. */
-export const signupOptionsSmall = {
-  ...signupOptions,
-  plan: { key: "small", name: "Small", description: "A handful of everything.", limits: smallLimits, limit_note: "" },
-};
 
 /** GET /api/license as a deployment without a key answers it. */
 export const communityLicense = {
@@ -456,7 +480,7 @@ export const notificationSettings = {
   mailer_configured: false,
 };
 
-export async function mockApi(page: Page, overrides: { license?: unknown; tenantAI?: unknown; sso?: unknown; scimTokens?: unknown; brand?: unknown; plan?: unknown; plans?: unknown; signup?: unknown; legal?: unknown } = {}) {
+export async function mockApi(page: Page, overrides: { license?: unknown; tenantAI?: unknown; sso?: unknown; scimTokens?: unknown; brand?: unknown; plan?: unknown; plans?: unknown; signup?: unknown; legal?: unknown; legalDocuments?: Record<string, unknown> } = {}) {
   await page.route("**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -509,6 +533,10 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (path === "/api/license") return ok(overrides.license ?? communityLicense);
     if (path === "/api/signup/options") return ok(overrides.signup ?? signupOptions);
     if (path === "/api/legal") return ok(overrides.legal ?? legalInfo);
+    if (path.startsWith("/api/legal/documents/")) {
+      const body = (overrides.legalDocuments ?? legalDocuments)[path.slice("/api/legal/documents/".length)];
+      return body ? ok(body) : route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not published" }) });
+    }
     if (path === "/api/admin/plans") return ok(overrides.plans ?? adminPlans);
     if (path === "/api/branding") return ok(overrides.brand ?? { product_name: "", tagline: "", logo_data_url: "", favicon_data_url: "", brand_color: "", configured: false, source: "default" });
     if (path === "/api/admin/branding") return ok(overrides.brand ? { ...(overrides.brand as object), email_from_name: "", custom_domain: "planning.acme.test" } : { product_name: "", tagline: "", logo_data_url: "", favicon_data_url: "", brand_color: "", email_from_name: "", custom_domain: "", configured: false });

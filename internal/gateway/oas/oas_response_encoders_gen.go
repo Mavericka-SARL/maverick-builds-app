@@ -4843,6 +4843,32 @@ func encodeGetIntegrationRunResponse(response GetIntegrationRunRes, w http.Respo
 	}
 }
 
+func encodeGetLegalDocumentResponse(response GetLegalDocumentRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *LegalDocument:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetLegalDocumentNotFound:
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeGetLegalInfoResponse(response *LegalInfo, w http.ResponseWriter, span trace.Span) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
@@ -4984,6 +5010,31 @@ func encodeGetNotificationSettingsResponse(response GetNotificationSettingsRes, 
 	case *GetNotificationSettingsForbidden:
 		w.WriteHeader(403)
 		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeGetPrivacyPageResponse(response GetPrivacyPageRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GetPrivacyPageOK:
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		return nil
+
+	case *GetPrivacyPageFound:
+		w.WriteHeader(302)
+		span.SetStatus(codes.Ok, http.StatusText(302))
+
+		return nil
+
+	case *GetPrivacyPageNotFound:
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
 
 		return nil
 
@@ -5250,6 +5301,31 @@ func encodeGetTenantAISettingsResponse(response GetTenantAISettingsRes, w http.R
 	case *GetTenantAISettingsForbidden:
 		w.WriteHeader(403)
 		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeGetTermsPageResponse(response GetTermsPageRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GetTermsPageOK:
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		return nil
+
+	case *GetTermsPageFound:
+		w.WriteHeader(302)
+		span.SetStatus(codes.Ok, http.StatusText(302))
+
+		return nil
+
+	case *GetTermsPageNotFound:
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
 
 		return nil
 

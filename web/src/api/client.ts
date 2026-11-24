@@ -473,6 +473,21 @@ export interface LegalInfo {
   chat_connector?: boolean;
 }
 
+/** A paragraph, or a list of points rendered as bullets. */
+export type LegalBlock = string | string[];
+
+/**
+ * The terms of service or the privacy notice as the gateway writes it
+ * (internal/gateway/legal_documents.go — the one copy of the text, also
+ * served as plain HTML at /terms and /privacy).
+ */
+export interface LegalDocument {
+  title: string;
+  /** The line under the title: what this document is. */
+  intro: string;
+  sections: { heading: string; body: LegalBlock[] }[];
+}
+
 export interface SignupOptions {
   enabled: boolean;
   /** The realm offers Google: "Sign up with Google" (a first Google sign-in signs up). */
@@ -3148,6 +3163,7 @@ export const api = {
   signupOptions: () => apiFetch<SignupOptions>("/api/signup/options"),
   /** Public: who operates this deployment and which documents it publishes. */
   legal: () => apiFetch<LegalInfo>("/api/legal"),
+  legalDocument: (doc: "terms" | "privacy") => apiFetch<LegalDocument>(`/api/legal/documents/${doc}`),
   signup: (body: SignupRequest) => apiFetch<SignupResult>("/api/signup", { method: "POST", body: JSON.stringify(body) }),
   // The plan catalog: read by administrators, written by the platform admin.
   getPlans: () => apiFetch<PlanDef[]>("/api/admin/plans"),

@@ -939,6 +939,14 @@ type Invoker interface {
 	//
 	// GET /api/developer/integration-runs/{runId}
 	GetIntegrationRun(ctx context.Context, params GetIntegrationRunParams) (GetIntegrationRunRes, error)
+	// GetLegalDocument invokes getLegalDocument operation.
+	//
+	// The text of the terms of service or the privacy notice with the operator filled in, for the
+	// console's own page where a proxy sends /terms and /privacy to it (public; see
+	// internal/gateway/legal_pages.go).
+	//
+	// GET /api/legal/documents/{doc}
+	GetLegalDocument(ctx context.Context, params GetLegalDocumentParams) (GetLegalDocumentRes, error)
 	// GetLegalInfo invokes getLegalInfo operation.
 	//
 	// The operator's identity and the documents it publishes, for the terms of service and privacy
@@ -987,6 +995,13 @@ type Invoker interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetPrivacyPage invokes getPrivacyPage operation.
+	//
+	// The privacy notice as a plain HTML page, readable without JavaScript (public; routed to the
+	// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+	//
+	// GET /privacy
+	GetPrivacyPage(ctx context.Context) (GetPrivacyPageRes, error)
 	// GetReconciliation invokes getReconciliation operation.
 	//
 	// A revision's workbook reconciliation — the stored workbook (name, size, sheets), its map, cases,
@@ -1049,6 +1064,13 @@ type Invoker interface {
 	//
 	// GET /api/admin/ai-settings
 	GetTenantAISettings(ctx context.Context) (GetTenantAISettingsRes, error)
+	// GetTermsPage invokes getTermsPage operation.
+	//
+	// The terms of service as a plain HTML page, readable without JavaScript (public; routed to the
+	// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+	//
+	// GET /terms
+	GetTermsPage(ctx context.Context) (GetTermsPageRes, error)
 	// GetTimeWindow invokes getTimeWindow operation.
 	//
 	// What a grid or chart widget's `time_window` shows: the leaf periods of a time dimension from the
@@ -18856,6 +18878,100 @@ func (c *Client) sendGetIntegrationRun(ctx context.Context, params GetIntegratio
 	return result, nil
 }
 
+// GetLegalDocument invokes getLegalDocument operation.
+//
+// The text of the terms of service or the privacy notice with the operator filled in, for the
+// console's own page where a proxy sends /terms and /privacy to it (public; see
+// internal/gateway/legal_pages.go).
+//
+// GET /api/legal/documents/{doc}
+func (c *Client) GetLegalDocument(ctx context.Context, params GetLegalDocumentParams) (GetLegalDocumentRes, error) {
+	res, err := c.sendGetLegalDocument(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetLegalDocument(ctx context.Context, params GetLegalDocumentParams) (res GetLegalDocumentRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getLegalDocument"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/legal/documents/{doc}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetLegalDocumentOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/legal/documents/"
+	{
+		// Encode "doc" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "doc",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(string(params.Doc)))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetLegalDocumentResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetLegalInfo invokes getLegalInfo operation.
 //
 // The operator's identity and the documents it publishes, for the terms of service and privacy
@@ -19529,6 +19645,81 @@ func (c *Client) sendGetNotificationSettings(ctx context.Context) (res GetNotifi
 
 	stage = "DecodeResponse"
 	result, err := decodeGetNotificationSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetPrivacyPage invokes getPrivacyPage operation.
+//
+// The privacy notice as a plain HTML page, readable without JavaScript (public; routed to the
+// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+//
+// GET /privacy
+func (c *Client) GetPrivacyPage(ctx context.Context) (GetPrivacyPageRes, error) {
+	res, err := c.sendGetPrivacyPage(ctx)
+	return res, err
+}
+
+func (c *Client) sendGetPrivacyPage(ctx context.Context) (res GetPrivacyPageRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getPrivacyPage"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/privacy"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetPrivacyPageOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/privacy"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetPrivacyPageResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -20585,6 +20776,81 @@ func (c *Client) sendGetTenantAISettings(ctx context.Context) (res GetTenantAISe
 
 	stage = "DecodeResponse"
 	result, err := decodeGetTenantAISettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetTermsPage invokes getTermsPage operation.
+//
+// The terms of service as a plain HTML page, readable without JavaScript (public; routed to the
+// gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go).
+//
+// GET /terms
+func (c *Client) GetTermsPage(ctx context.Context) (GetTermsPageRes, error) {
+	res, err := c.sendGetTermsPage(ctx)
+	return res, err
+}
+
+func (c *Client) sendGetTermsPage(ctx context.Context) (res GetTermsPageRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getTermsPage"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/terms"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetTermsPageOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/terms"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetTermsPageResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

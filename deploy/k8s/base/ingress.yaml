@@ -85,6 +85,26 @@ spec:
                 name: gateway
                 port:
                   number: 8080
+          # The terms and the privacy notice as plain HTML, readable without
+          # JavaScript (internal/gateway/legal_pages.go). Prefix, not Exact,
+          # like /mcp: Traefik ranks routers by rule length, and Path(`/terms`)
+          # is shorter than the console's PathPrefix(`/`), which would win.
+          # A proxy without these two still works: the console renders the
+          # same text.
+          - path: /terms
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 8080
+          - path: /privacy
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:

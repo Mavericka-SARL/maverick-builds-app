@@ -1,68 +1,43 @@
 /**
- * /terms and /privacy: the documents a visitor is asked to agree to on
- * /signup. Three things are worth holding still — that the documents render
- * outside the auth layer, that the terms quote the edition the server actually
- * offers rather than a number typed into the page, and that a deployment which
- * has published nothing says so instead of showing an unsigned policy.
+ * /terms and /privacy as the console renders them: behind a proxy that sends
+ * those paths to the console rather than to the gateway (which serves them as
+ * plain HTML itself, internal/gateway/legal_pages.go). The text is the
+ * gateway's — GET /api/legal/documents/{doc}, whose Go tests check what it
+ * says. What is worth holding still here: the documents render outside the
+ * auth layer, as the server wrote them, and a deployment which has published
+ * nothing says so instead of showing an unsigned policy.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi, legalInfo, legalUnpublished, signupOptionsSmall } from "./mocks";
+import { mockApi, legalUnpublished } from "./mocks";
 
-test("the terms name the operator and quote the server's edition", async ({ page }) => {
+test("the terms render the server's document outside the auth layer", async ({ page }) => {
   await mockApi(page);
   await page.goto("/terms");
   const doc = page.getByTestId("legal-terms");
   await expect(doc.getByRole("heading", { name: "Terms of service", level: 1 })).toBeVisible();
-  // The operator comes from GET /api/legal, never from the bundle.
-  await expect(doc).toContainText("Acme Software SARL");
-  await expect(doc).toContainText("1 Rue de Test, L-1000 Luxembourg");
-  await expect(doc).toContainText("legal@acme.test");
+  await expect(doc).toContainText("The agreement between you and Acme Software SARL for the use of maverickbuilds.app.");
+  // The date comes from GET /api/legal, formatted for reading.
   await expect(doc).toContainText("In force from 18 September 2026");
-  // The edition clause is the edition from GET /api/signup/options: free, no
-  // end date, 100 MB of data, read-only when the space is used up.
-  await expect(doc).toContainText("Community Edition costs nothing and has no end date");
-  await expect(doc).toContainText("limited to 100 MB of data");
-  await expect(doc).toContainText("becomes read-only");
-  // …and the edition's own way forward, never "an edition is agreed".
-  await expect(doc).toContainText("run the platform on your own infrastructure");
-  await expect(doc).not.toContainText("an edition is agreed");
-  await expect(doc).toContainText("law of Luxembourg");
+  await expect(doc.getByRole("heading", { name: "4. What you may not do", level: 2 })).toBeVisible();
+  // A list in the document is a list on the page.
+  await expect(doc.getByRole("listitem")).toHaveCount(2);
+  await expect(doc.getByRole("listitem").first()).toContainText("do not use it to store or process unlawful content");
   await expect(doc.getByRole("link", { name: "Privacy notice" })).toHaveAttribute("href", "/privacy");
 });
 
-test("an edition without a note of its own still gets the edition clause, with no trial in it", async ({ page }) => {
-  await mockApi(page, { signup: signupOptionsSmall });
-  await page.goto("/terms");
-  const doc = page.getByTestId("legal-terms");
-  await expect(doc).toContainText("Small Edition costs nothing and has no end date");
-  await expect(doc).toContainText("5 users, 2 applications and 3 models");
-  await expect(doc).not.toContainText(/trial/i);
-});
-
-test("the privacy notice states what is held and who else sees it", async ({ page }) => {
+test("the privacy notice renders the server's document", async ({ page }) => {
   await mockApi(page);
   await page.goto("/privacy");
   const doc = page.getByTestId("legal-privacy");
   await expect(doc.getByRole("heading", { name: "Privacy notice", level: 1 })).toBeVisible();
-  await expect(doc).toContainText("is the controller of the personal data");
-  await expect(doc).toContainText("no analytics, tracking or advertising technology");
-  await expect(doc).toContainText("Example Hosting GmbH (Germany)");
-  await expect(doc).toContainText("kept for fourteen days");
-  await expect(doc).toContainText("complain to a data-protection supervisory authority");
+  await expect(doc).toContainText("is the controller of the personal data described here");
   await expect(doc.getByRole("link", { name: "Terms of service" })).toHaveAttribute("href", "/terms");
 });
 
-test("the privacy notice describes the chat connector only where it runs", async ({ page }) => {
-  await mockApi(page);
-  await page.goto("/privacy");
-  await expect(page.getByTestId("legal-privacy")).not.toContainText("ChatGPT");
-
-  await mockApi(page, { legal: { ...legalInfo, chat_connector: true } });
-  await page.goto("/privacy");
-  const doc = page.getByTestId("legal-privacy");
-  await expect(doc).toContainText("You can also connect ChatGPT or Claude to your account.");
-  await expect(doc).toContainText("the text of the dashboards and workflows you may open");
-  await expect(doc).toContainText("your workspace's administrator can turn this off");
+test("a document the server cannot send says so rather than loading forever", async ({ page }) => {
+  await mockApi(page, { legalDocuments: {} });
+  await page.goto("/terms");
+  await expect(page.getByTestId("legal-terms")).toContainText("The document could not be loaded");
 });
 
 test("a deployment that publishes nothing says so, and /signup promises nothing", async ({ page }) => {

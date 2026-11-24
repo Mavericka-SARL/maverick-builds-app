@@ -3,8 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { useBrand } from "../../branding/brand";
 import { PublicPage } from "../PublicPage";
-import { planAllowanceProse } from "../planAllowance";
-import { privacyDocument, termsDocument, type PlanFacts } from "./documents";
 import "../public.css";
 
 /**
@@ -12,6 +10,12 @@ import "../public.css";
  * they hand over a name and an e-mail address. Rendered outside the auth layer
  * (main.tsx), because requiring an account to read the terms of the account
  * would be absurd.
+ *
+ * The gateway serves both as plain HTML at these same paths wherever the
+ * proxy routes them to it (the Ingress and the Compose Caddyfile do), so this
+ * page renders only behind a proxy that sends them to the console. The text
+ * is the gateway's either way (GET /api/legal/documents/{doc}): one copy, in
+ * internal/gateway/legal_documents.go.
  *
  * Three states, all of them honest:
  *
@@ -25,12 +29,19 @@ import "../public.css";
 export function LegalPage({ doc }: { doc: "terms" | "privacy" }) {
   const brand = useBrand();
   const { data: legal, isLoading } = useQuery({ queryKey: ["legal"], queryFn: api.legal });
-  // The terms quote the plan the server actually offers, so its limits
-  // cannot drift from what /signup promises.
-  const { data: opts } = useQuery({ queryKey: ["signup-options"], queryFn: api.signupOptions, enabled: doc === "terms" });
 
   const external = legal ? (doc === "terms" ? legal.terms_url : legal.privacy_url) : "";
   const isExternal = /^https?:\/\//i.test(external);
+  // The text, with the operator and (in the terms) the edition sign-up
+  // offers filled in by the server, so it cannot drift from /signup.
+  const { data: document, isError } = useQuery({
+    queryKey: ["legal-document", doc],
+    queryFn: () => api.legalDocument(doc),
+    enabled: !!legal && legal.builtin && !isExternal,
+    // A 404 means the server publishes no such text; asking again changes
+    // nothing and only keeps the reader on "Loading…".
+    retry: false,
+  });
 
   useEffect(() => {
     if (isExternal) window.location.replace(external);
@@ -70,16 +81,14 @@ export function LegalPage({ doc }: { doc: "terms" | "privacy" }) {
     );
   }
 
-  const plan: PlanFacts | undefined =
-    opts?.plan
-      ? {
-          name: opts.plan.name, allowance: planAllowanceProse(opts.plan.limits), next: opts.plan.limit_note || undefined,
-          dormancy: opts.plan.dormant_warn_days && opts.plan.dormant_delete_days
-            ? { warnDays: opts.plan.dormant_warn_days, deleteDays: opts.plan.dormant_delete_days, backupDays: opts.plan.backup_retention_days ?? 14 }
-            : undefined,
-        }
-      : undefined;
-  const document = doc === "terms" ? termsDocument(legal, brand.name, plan) : privacyDocument(legal, brand.name);
+  if (!document) {
+    return (
+      <PublicPage testId={`legal-${doc}`}>
+        <p>{isError ? "The document could not be loaded. Try again in a moment." : "Loading…"}</p>
+      </PublicPage>
+    );
+  }
+
   const other = doc === "terms" ? { href: legal.privacy_url, label: "Privacy notice" } : { href: legal.terms_url, label: "Terms of service" };
 
   return (

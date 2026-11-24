@@ -16269,6 +16269,52 @@ type GetIntegrationRunOK struct{}
 
 func (*GetIntegrationRunOK) getIntegrationRunRes() {}
 
+type GetLegalDocumentDoc string
+
+const (
+	GetLegalDocumentDocTerms   GetLegalDocumentDoc = "terms"
+	GetLegalDocumentDocPrivacy GetLegalDocumentDoc = "privacy"
+)
+
+// AllValues returns all GetLegalDocumentDoc values.
+func (GetLegalDocumentDoc) AllValues() []GetLegalDocumentDoc {
+	return []GetLegalDocumentDoc{
+		GetLegalDocumentDocTerms,
+		GetLegalDocumentDocPrivacy,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetLegalDocumentDoc) MarshalText() ([]byte, error) {
+	switch s {
+	case GetLegalDocumentDocTerms:
+		return []byte(s), nil
+	case GetLegalDocumentDocPrivacy:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetLegalDocumentDoc) UnmarshalText(data []byte) error {
+	switch GetLegalDocumentDoc(data) {
+	case GetLegalDocumentDocTerms:
+		*s = GetLegalDocumentDocTerms
+		return nil
+	case GetLegalDocumentDocPrivacy:
+		*s = GetLegalDocumentDocPrivacy
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// GetLegalDocumentNotFound is response for GetLegalDocument operation.
+type GetLegalDocumentNotFound struct{}
+
+func (*GetLegalDocumentNotFound) getLegalDocumentRes() {}
+
 // GetLicenseUnauthorized is response for GetLicense operation.
 type GetLicenseUnauthorized struct{}
 
@@ -16625,6 +16671,21 @@ func (s *GetModelCheckOKFindingsItemSeverity) UnmarshalText(data []byte) error {
 type GetNotificationSettingsForbidden struct{}
 
 func (*GetNotificationSettingsForbidden) getNotificationSettingsRes() {}
+
+// GetPrivacyPageFound is response for GetPrivacyPage operation.
+type GetPrivacyPageFound struct{}
+
+func (*GetPrivacyPageFound) getPrivacyPageRes() {}
+
+// GetPrivacyPageNotFound is response for GetPrivacyPage operation.
+type GetPrivacyPageNotFound struct{}
+
+func (*GetPrivacyPageNotFound) getPrivacyPageRes() {}
+
+// GetPrivacyPageOK is response for GetPrivacyPage operation.
+type GetPrivacyPageOK struct{}
+
+func (*GetPrivacyPageOK) getPrivacyPageRes() {}
 
 type GetReconciliationDifferencesOK struct {
 	Data io.Reader
@@ -17026,6 +17087,21 @@ func (*GetSsoSettingsForbidden) getSsoSettingsRes() {}
 type GetTenantAISettingsForbidden struct{}
 
 func (*GetTenantAISettingsForbidden) getTenantAISettingsRes() {}
+
+// GetTermsPageFound is response for GetTermsPage operation.
+type GetTermsPageFound struct{}
+
+func (*GetTermsPageFound) getTermsPageRes() {}
+
+// GetTermsPageNotFound is response for GetTermsPage operation.
+type GetTermsPageNotFound struct{}
+
+func (*GetTermsPageNotFound) getTermsPageRes() {}
+
+// GetTermsPageOK is response for GetTermsPage operation.
+type GetTermsPageOK struct{}
+
+func (*GetTermsPageOK) getTermsPageRes() {}
 
 type GetTimeWindowBadRequest Error
 
@@ -21441,6 +21517,140 @@ func (s *IssueAdminUserTemporaryPasswordOK) SetTemporaryPassword(val OptString) 
 }
 
 func (*IssueAdminUserTemporaryPasswordOK) issueAdminUserTemporaryPasswordRes() {}
+
+// Ref: #/components/schemas/LegalDocument
+type LegalDocument struct {
+	Title string `json:"title"`
+	// The line under the title - what this document is.
+	Intro    string                      `json:"intro"`
+	Sections []LegalDocumentSectionsItem `json:"sections"`
+}
+
+// GetTitle returns the value of Title.
+func (s *LegalDocument) GetTitle() string {
+	return s.Title
+}
+
+// GetIntro returns the value of Intro.
+func (s *LegalDocument) GetIntro() string {
+	return s.Intro
+}
+
+// GetSections returns the value of Sections.
+func (s *LegalDocument) GetSections() []LegalDocumentSectionsItem {
+	return s.Sections
+}
+
+// SetTitle sets the value of Title.
+func (s *LegalDocument) SetTitle(val string) {
+	s.Title = val
+}
+
+// SetIntro sets the value of Intro.
+func (s *LegalDocument) SetIntro(val string) {
+	s.Intro = val
+}
+
+// SetSections sets the value of Sections.
+func (s *LegalDocument) SetSections(val []LegalDocumentSectionsItem) {
+	s.Sections = val
+}
+
+func (*LegalDocument) getLegalDocumentRes() {}
+
+type LegalDocumentSectionsItem struct {
+	Heading string `json:"heading"`
+	// Paragraphs, and lists of points as arrays of strings.
+	Body []LegalDocumentSectionsItemBodyItem `json:"body"`
+}
+
+// GetHeading returns the value of Heading.
+func (s *LegalDocumentSectionsItem) GetHeading() string {
+	return s.Heading
+}
+
+// GetBody returns the value of Body.
+func (s *LegalDocumentSectionsItem) GetBody() []LegalDocumentSectionsItemBodyItem {
+	return s.Body
+}
+
+// SetHeading sets the value of Heading.
+func (s *LegalDocumentSectionsItem) SetHeading(val string) {
+	s.Heading = val
+}
+
+// SetBody sets the value of Body.
+func (s *LegalDocumentSectionsItem) SetBody(val []LegalDocumentSectionsItemBodyItem) {
+	s.Body = val
+}
+
+// LegalDocumentSectionsItemBodyItem represents sum type.
+type LegalDocumentSectionsItemBodyItem struct {
+	Type        LegalDocumentSectionsItemBodyItemType // switch on this field
+	String      string
+	StringArray []string
+}
+
+// LegalDocumentSectionsItemBodyItemType is oneOf type of LegalDocumentSectionsItemBodyItem.
+type LegalDocumentSectionsItemBodyItemType string
+
+// Possible values for LegalDocumentSectionsItemBodyItemType.
+const (
+	StringLegalDocumentSectionsItemBodyItem      LegalDocumentSectionsItemBodyItemType = "string"
+	StringArrayLegalDocumentSectionsItemBodyItem LegalDocumentSectionsItemBodyItemType = "[]string"
+)
+
+// IsString reports whether LegalDocumentSectionsItemBodyItem is string.
+func (s LegalDocumentSectionsItemBodyItem) IsString() bool {
+	return s.Type == StringLegalDocumentSectionsItemBodyItem
+}
+
+// IsStringArray reports whether LegalDocumentSectionsItemBodyItem is []string.
+func (s LegalDocumentSectionsItemBodyItem) IsStringArray() bool {
+	return s.Type == StringArrayLegalDocumentSectionsItemBodyItem
+}
+
+// SetString sets LegalDocumentSectionsItemBodyItem to string.
+func (s *LegalDocumentSectionsItemBodyItem) SetString(v string) {
+	s.Type = StringLegalDocumentSectionsItemBodyItem
+	s.String = v
+}
+
+// GetString returns string and true boolean if LegalDocumentSectionsItemBodyItem is string.
+func (s LegalDocumentSectionsItemBodyItem) GetString() (v string, ok bool) {
+	if !s.IsString() {
+		return v, false
+	}
+	return s.String, true
+}
+
+// NewStringLegalDocumentSectionsItemBodyItem returns new LegalDocumentSectionsItemBodyItem from string.
+func NewStringLegalDocumentSectionsItemBodyItem(v string) LegalDocumentSectionsItemBodyItem {
+	var s LegalDocumentSectionsItemBodyItem
+	s.SetString(v)
+	return s
+}
+
+// SetStringArray sets LegalDocumentSectionsItemBodyItem to []string.
+func (s *LegalDocumentSectionsItemBodyItem) SetStringArray(v []string) {
+	s.Type = StringArrayLegalDocumentSectionsItemBodyItem
+	s.StringArray = v
+}
+
+// GetStringArray returns []string and true boolean if LegalDocumentSectionsItemBodyItem is []string.
+func (s LegalDocumentSectionsItemBodyItem) GetStringArray() (v []string, ok bool) {
+	if !s.IsStringArray() {
+		return v, false
+	}
+	return s.StringArray, true
+}
+
+// NewStringArrayLegalDocumentSectionsItemBodyItem returns new LegalDocumentSectionsItemBodyItem from []string.
+func NewStringArrayLegalDocumentSectionsItemBodyItem(v []string) LegalDocumentSectionsItemBodyItem {
+	var s LegalDocumentSectionsItemBodyItem
+	s.SetStringArray(v)
+	return s
+}
 
 // Ref: #/components/schemas/LegalInfo
 type LegalInfo struct {

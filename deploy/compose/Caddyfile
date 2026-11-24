@@ -18,6 +18,12 @@
 	handle @api {
 		reverse_proxy gateway:8080
 	}
+	# The terms and the privacy notice as plain HTML, readable without
+	# JavaScript (internal/gateway/legal_pages.go), as the Ingress routes them.
+	@legal path /terms /terms/ /privacy /privacy/
+	handle @legal {
+		reverse_proxy gateway:8080
+	}
 	handle {
 		reverse_proxy web:8080
 	}

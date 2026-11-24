@@ -55,6 +55,13 @@ spec:
           - path: /api
             pathType: Prefix
             backend: { service: { name: gateway, port: { number: 8080 } } }
+          # The terms and the privacy notice as plain HTML (base/ingress.yaml).
+          - path: /terms
+            pathType: Prefix
+            backend: { service: { name: gateway, port: { number: 8080 } } }
+          - path: /privacy
+            pathType: Prefix
+            backend: { service: { name: gateway, port: { number: 8080 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: web, port: { number: 80 } } }

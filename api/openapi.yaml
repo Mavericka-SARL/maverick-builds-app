@@ -609,6 +609,27 @@ components:
         hosting:      { type: string, description: Who hosts the deployment and where }
         updated:      { type: string, description: The date the documents last changed as YYYY-MM-DD }
 
+    LegalDocument:
+      type: object
+      required: [title, intro, sections]
+      properties:
+        title: { type: string }
+        intro: { type: string, description: The line under the title - what this document is }
+        sections:
+          type: array
+          items:
+            type: object
+            required: [heading, body]
+            properties:
+              heading: { type: string }
+              body:
+                type: array
+                description: Paragraphs, and lists of points as arrays of strings
+                items:
+                  oneOf:
+                    - { type: string }
+                    - { type: array, items: { type: string } }
+
     SignupOptions:
       type: object
       required: [enabled]
@@ -4092,6 +4113,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LegalInfo" }
+
+  /api/legal/documents/{doc}:
+    get:
+      operationId: getLegalDocument
+      security: []
+      summary: The text of the terms of service or the privacy notice with the operator filled in, for the console's own page where a proxy sends /terms and /privacy to it (public; see internal/gateway/legal_pages.go)
+      parameters:
+        - { in: path, name: doc, required: true, schema: { type: string, enum: [terms, privacy] } }
+      responses:
+        "200":
+          description: The document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalDocument" }
+        "404": { description: No such document, or this deployment publishes no built-in text of it (GET /api/legal says which) }
+
+  /terms:
+    get:
+      operationId: getTermsPage
+      security: []
+      summary: The terms of service as a plain HTML page, readable without JavaScript (public; routed to the gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go)
+      responses:
+        "200": { description: The page (text/html) }
+        "302": { description: The operator publishes its own terms elsewhere (LEGAL_TERMS_URL); Location names them }
+        "404": { description: This deployment publishes no terms; an HTML page says so }
+
+  /privacy:
+    get:
+      operationId: getPrivacyPage
+      security: []
+      summary: The privacy notice as a plain HTML page, readable without JavaScript (public; routed to the gateway by the Ingress and the Compose Caddyfile; see internal/gateway/legal_pages.go)
+      responses:
+        "200": { description: The page (text/html) }
+        "302": { description: The operator publishes its own notice elsewhere (LEGAL_PRIVACY_URL); Location names it }
+        "404": { description: This deployment publishes no privacy notice; an HTML page says so }
 
   /api/signup/options:
     get:
