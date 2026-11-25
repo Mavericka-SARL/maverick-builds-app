@@ -18,20 +18,21 @@ import (
 )
 
 // continuationMessage is the message of a turn that goes on after the
-// session's last plan ran. It is refused when the last plan has not run (a
-// pending, rejected or no plan): there is nothing to go on from.
-func (h *handler) continuationMessage(ctx context.Context, store *aiassistant.ChatStore, sessionID string) (string, error) {
+// session's last plan ran, and the steps that ran (none when the turn goes on
+// after the task plan's approval). It is refused when the last plan has not
+// run (a pending, rejected or no plan): there is nothing to go on from.
+func (h *handler) continuationMessage(ctx context.Context, store *aiassistant.ChatStore, sessionID string) (string, []aiassistant.ProposalStep, error) {
 	props, err := aiassistant.NewProposalStore(h.db.For(ctx)).ListProposals(ctx, sessionID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// The developer just approved the plan: build its first open stage.
 	if plan, _ := store.TaskPlan(ctx, sessionID); plan != nil && plan.ApprovedAt != nil && !plan.PendingApproval &&
 		(len(props) == 0 || props[0].CreatedAt.Before(*plan.ApprovedAt)) {
-		return aiassistant.PlanApprovedMessage(plan), nil
+		return aiassistant.PlanApprovedMessage(plan), nil, nil
 	}
 	if len(props) == 0 || (props[0].Status != "executed" && props[0].Status != "partial") {
-		return "", fmt.Errorf("nothing to go on from: the session's last plan has not run")
+		return "", nil, fmt.Errorf("nothing to go on from: the session's last plan has not run")
 	}
 	last := props[0]
 	failed := 0
@@ -41,7 +42,7 @@ func (h *handler) continuationMessage(ctx context.Context, store *aiassistant.Ch
 		}
 	}
 	plan, _ := store.TaskPlan(ctx, sessionID)
-	return aiassistant.ContinuationMessage(len(last.Steps), failed, plan), nil
+	return aiassistant.ContinuationMessage(len(last.Steps), failed, plan), last.Steps, nil
 }
 
 // ── POST /api/ai/sessions/{id}/plan/approve ─────────────────────────────────

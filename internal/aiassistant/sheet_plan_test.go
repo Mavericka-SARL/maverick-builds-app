@@ -80,7 +80,7 @@ func TestPlanSheetTranslates(t *testing.T) {
 // A sheet turn's prompt leaves out the sections and examples it never uses,
 // keeps the cross-step rule, and offers only the model-building tools.
 func TestTrimPromptForSheet(t *testing.T) {
-	full := BuildSystemPrompt(ModelContext{})
+	full := BuildSystemPrompt()
 	trimmed := TrimPromptForSheet(full)
 	for _, gone := range []string{"\n## Workflow rule", "\n## REST API connectors", "\n## The pages people use", `Example — developer says "build a dashboard`} {
 		if !strings.Contains(full, gone) || strings.Contains(trimmed, gone) {

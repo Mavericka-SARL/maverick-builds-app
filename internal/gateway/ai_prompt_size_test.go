@@ -35,12 +35,12 @@ func TestPromptSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 	mc := aiassistant.FetchModelContext(ctx, pool, sess.ModelID, sess.DraftRevisionID)
-	base := aiassistant.BuildSystemPrompt(mc)
+	base := aiassistant.BuildSystemPrompt() + aiassistant.ApplicationContext(mc)
 	docs, _ := aiassistant.NewDocumentStore(pool).ListDocumentsWithContent(ctx, sid)
 	dc := buildDocumentContext(docs)
 	plan, _ := chat.TaskPlan(ctx, sid)
 	brief := aiassistant.TurnBrief(aiassistant.RequestMode{Mode: aiassistant.ModeDelegated, Tasks: []string{"workbook_build"}}, plan)
-	tools, _ := json.Marshal(aiassistant.TurnTools(aiassistant.RequestMode{Mode: aiassistant.ModeDelegated, Tasks: []string{"workbook_build"}}, "continue"))
+	tools, _ := json.Marshal(aiassistant.AllTools())
 	msgs, _ := chat.ListMessages(ctx, sid)
 	msgs = append(msgs, aiassistant.ChatMessage{Role: "user", Content: "Confirmed. Continue with the next stage of the plan.", CreatedAt: time.Now()})
 	hist := 0
@@ -57,7 +57,7 @@ func TestPromptSizes(t *testing.T) {
 	}
 	t.Logf("chars: base prompt %d (model context part of it), documents %d (%d docs), turn brief %d (target %d), tools %d, stored history %d (%d messages)",
 		len(base), len(dc), len(docs), len(brief), targetPart, len(tools), hist, len(msgs))
-	static := aiassistant.BuildSystemPrompt(aiassistant.ModelContext{})
+	static := aiassistant.BuildSystemPrompt()
 	stages := 0
 	if plan != nil {
 		stages = len(plan.Render()) - targetPart
@@ -82,7 +82,7 @@ func TestPromptSizesTrimmed(t *testing.T) {
 	plan, _ := chat.TaskPlan(ctx, sid)
 	cur := plan.Current()
 	t.Logf("current stage %d %q sheet %q", cur+1, plan.Stages[cur].Title, plan.Stages[cur].Sheet)
-	base := aiassistant.TrimPromptForSheet(aiassistant.BuildSystemPrompt(aiassistant.FetchModelContext(ctx, pool, sess.ModelID, sess.DraftRevisionID)))
+	base := aiassistant.TrimPromptForSheet(aiassistant.BuildSystemPrompt()) + aiassistant.ApplicationContext(aiassistant.FetchModelContext(ctx, pool, sess.ModelID, sess.DraftRevisionID))
 	docs, _ := aiassistant.NewDocumentStore(pool).ListDocumentsWithContent(ctx, sid)
 	wbs := map[string][]byte{}
 	for _, d := range docs {
@@ -93,7 +93,7 @@ func TestPromptSizesTrimmed(t *testing.T) {
 	idx := buildDocumentIndex(docs, wbs)
 	mode := aiassistant.RequestMode{Mode: aiassistant.ModeDelegated, Tasks: []string{"workbook_build"}}
 	brief := aiassistant.TurnBrief(mode, plan)
-	tools, _ := json.Marshal(aiassistant.SheetStageTools(aiassistant.TurnTools(mode, "continue")))
+	tools, _ := json.Marshal(aiassistant.SheetStageTools(aiassistant.AllTools()))
 	sys := len(base) + len(idx) + len(brief)
 	msgs, _ := chat.ListMessages(ctx, sid)
 	msgs = append(msgs, aiassistant.ChatMessage{Role: "user", Content: "Confirmed. Continue with the next stage of the plan.", CreatedAt: time.Now()})

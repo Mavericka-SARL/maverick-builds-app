@@ -599,14 +599,15 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A turn that goes on after a confirmed plan says what ran and asks for
-	// the next step (ai_continue.go).
+	// the next step (ai_continue.go); ranSteps narrow its check (CheckBrief).
+	var ranSteps []aiassistant.ProposalStep
 	if req.Continue {
-		msg, cErr := h.continuationMessage(ctx, store, sessionID)
+		msg, ran, cErr := h.continuationMessage(ctx, store, sessionID)
 		if cErr != nil {
 			jsonErr(w, cErr, http.StatusConflict)
 			return
 		}
-		req.Content = msg
+		req.Content, ranSteps = msg, ran
 	}
 
 	// 1. Save the user's message.
@@ -657,12 +658,18 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	if cur := taskPlan.Current(); cur >= 0 && taskPlan.Target != nil && len(taskPlan.Stages[cur].StageSheets()) > 0 {
 		sheetTurn = true
 	}
-	systemPrompt := aiassistant.BuildSystemPrompt(mc)
+	// The instructions hold what stays the same from turn to turn; what
+	// changes with every turn (the model's size, the plan's progress, the
+	// turn's brief, the workbook map) is turnContext and goes with the
+	// turn's message. The provider caches the instructions only while they
+	// stay the same: any change re-sent ~44k tokens uncached (2026-11-25).
+	systemPrompt := aiassistant.BuildSystemPrompt()
 	if sheetTurn {
 		systemPrompt = aiassistant.TrimPromptForSheet(systemPrompt)
 	}
 	// Every turn, sheet turns too (owner, 2026-11-13).
 	systemPrompt += aiassistant.MultidimensionalRule
+	turnContext := aiassistant.ApplicationContext(mc)
 	// The attached files go into the prompt once the memory is ready
 	// (after the stream starts): their analysis, not their text.
 	sessionDocs, _ := aiassistant.NewDocumentStore(h.db.For(ctx)).ListDocumentsWithContent(ctx, sessionID)
@@ -680,7 +687,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// What the turn takes goes to the stage it works on (owner, 2026-11-12:
 	// minutes, calls, tokens, tool calls and corrections per stage).
 	defer h.measureTurn(ctx, store, sessionID, taskPlan, req.Content)()
-	systemPrompt += h.targetProgress(ctx, modelID, revID, taskPlan)
+	turnContext += h.targetProgress(ctx, modelID, revID, taskPlan)
 	var reqMode aiassistant.RequestMode
 	if req.Continue || approvedNow {
 		// Going on with the work under way: no reading of the message needed.
@@ -689,11 +696,12 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		reqMode = classifyRequest(ctx, llmProvider, llmModel, req.Content, taskPlan, store, sessionID)
 	}
 	log.Printf("AI request: session=%s mode=%s tasks=%v", sessionID, reqMode.Mode, reqMode.Tasks)
-	systemPrompt += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
+	turnContext += "\n\n" + aiassistant.TurnBrief(reqMode, taskPlan)
 	// The workbook map: which row became which metric, what differs and what
 	// is not mapped yet (ai_workbook_map.go).
-	systemPrompt += h.workbookMapBrief(ctx, sessionID, modelID, revID)
-	systemPrompt += sessionLengthNote(sessionCalls, maxLLMCallsPerSession)
+	turnContext += h.workbookMapBrief(ctx, sessionID, modelID, revID)
+	turnContext += sessionLengthNote(sessionCalls, maxLLMCallsPerSession)
+	turnContext += aiassistant.CheckBrief(ranSteps)
 
 	// 4. Tool executors.
 	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(
@@ -705,7 +713,11 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		Compared: func(sheets []string) string { return h.comparedFor(ctx, modelID, revID, sheets) },
 	}
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
-	tools := aiassistant.TurnTools(reqMode, req.Content)
+	// Every turn offers the same tools: the tool list opens what the provider
+	// caches, so a list that changed with the request's mode (connector tools
+	// left out of a build, ~700 tokens) made the next turn re-send the whole
+	// prompt uncached — ~44k tokens, after every typed turn (2026-11-25).
+	tools := aiassistant.AllTools()
 	if sheetTurn && reqMode.Mode != aiassistant.ModeQuestion {
 		tools = aiassistant.SheetStageTools(tools)
 	}
@@ -786,6 +798,8 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	mem, _ := store.Memory(ctx, sessionID)
 	earlierPlans, _ := store.EarlierPlans(ctx, sessionID)
+	// The attached files and the memory change only when a file comes or the
+	// memory is kept: they stay in the instructions.
 	systemPrompt += documentsSection(sessionDocs, mem, taskPlan, h.sessionWorkbooks(ctx, sessionID), reread)
 	systemPrompt += mem.Render(earlierPlans)
 	sendSSE("memory", map[string]any{"memory": h.memoryStatus(ctx, store, sessionID)})
@@ -796,6 +810,16 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	// plan, its decisions and the workbook map carry what they found; the
 	// conversation the memory's summary holds is not sent again.
 	provMessages := aiassistant.MessagesToProviderHistory(h.sentHistory(ctx, sessionID, history, mem))
+	// turnContext goes with the turn's message as the model reads it; the
+	// chat and the stored message keep the developer's words (or the go-on
+	// line). Within the turn it stays in place, so its calls read it from
+	// the cache.
+	for i := len(provMessages) - 1; i >= 0; i-- {
+		if provMessages[i].Role == "user" {
+			provMessages[i].Content += aiassistant.TurnContextNote + turnContext
+			break
+		}
+	}
 	var finalReply string
 
 	// Repeat-call breaker: gpt-4o-mini has been observed calling the SAME
@@ -1014,6 +1038,11 @@ turn:
 		// call cap and a build's cost are read from it.
 		if uErr := store.AddUsage(context.WithoutCancel(ctx), sessionID, llmResp.Usage); uErr != nil {
 			log.Printf("AI call: session=%s record usage: %v", sessionID, uErr)
+		} else if u, qErr := store.Usage(context.WithoutCancel(ctx), sessionID); qErr == nil {
+			// The counter under the title follows every call: sent only at the
+			// turn's end, it stood still through a long turn while the session
+			// list, which reloads on its own, moved on (2026-11-25).
+			sendSSE("usage", map[string]any{"usage": withCost(u, llmModel)})
 		}
 
 		// A reply cut off at the output limit while writing a tool call: its
@@ -1476,11 +1505,18 @@ turn:
 			if allMsgs == nil {
 				allMsgs = []aiassistant.ChatMessage{}
 			}
+			// The usage and the memory go with the plan as with every turn's
+			// end: without them the counter under the title stood still
+			// through every turn that ended in a plan (2026-11-25: four turns,
+			// 111 calls shown for 165).
+			usage, _ := store.Usage(context.WithoutCancel(ctx), sessionID)
 			sendSSE("proposal", map[string]any{
 				"proposal": proposal,
 				"messages": allMsgs,
 				"session":  sess,
 				"warnings": shownWarnings,
+				"usage":    withCost(usage, llmModel),
+				"memory":   h.memoryStatus(context.WithoutCancel(ctx), store, sessionID),
 			})
 			_ = writeExecutor // suppress unused warning until confirm path uses it
 			return

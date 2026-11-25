@@ -221,12 +221,37 @@ func TestSendMessage_ProposeActionsToolCallCreatesRealProposal(t *testing.T) {
 type multiScriptProvider struct {
 	calls int
 	resps []providers.ChatResponse
+	// prompts, lastUser and tools are the system prompt, the last user
+	// message and the tool names of each main call, in order.
+	prompts  []string
+	lastUser []string
+	tools    [][]string
+	// classify, when set, is the request classifier's answer (sideCall's
+	// otherwise).
+	classify string
 }
 
 func (p *multiScriptProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
+	if p.classify != "" && req.SystemPrompt == aiassistant.ClassifierPrompt {
+		return providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: p.classify}}, nil
+	}
 	if r, ok := sideCall(req); ok {
 		return r, nil
 	}
+	p.prompts = append(p.prompts, req.SystemPrompt)
+	last := ""
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			last = req.Messages[i].Content
+			break
+		}
+	}
+	p.lastUser = append(p.lastUser, last)
+	names := make([]string, 0, len(req.Tools))
+	for _, td := range req.Tools {
+		names = append(names, td.Name)
+	}
+	p.tools = append(p.tools, names)
 	p.calls++
 	if p.calls > len(p.resps) {
 		return p.resps[len(p.resps)-1], nil

@@ -600,6 +600,49 @@ func TestSendMessage_WarnsOfHiddenDecimals(t *testing.T) {
 	}
 }
 
+// The counter under the title follows every call of a turn, not only its end
+// (2026-11-25: it stood still through a turn while the session list moved on).
+func TestSendMessage_SendsUsageAfterEveryCall(t *testing.T) {
+	u := providers.Usage{InputTokens: 1000, OutputTokens: 50}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		{FinishReason: "tool_calls", Usage: u, Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: "c1", Name: "get_model_summary", Arguments: json.RawMessage(`{}`)}}}},
+		{FinishReason: "stop", Usage: u, Message: providers.Message{Role: "assistant", Content: "The model holds three metrics."}},
+	}}
+	env := newAITurnEnv(t, fake)
+	status, sse := env.send("what does the model hold")
+	if status != http.StatusOK {
+		t.Fatalf("turn: %d\n%s", status, sse)
+	}
+	first := strings.Index(sse, "event: usage\ndata: {\"usage\":{\"llm_calls\":1,\"input_tokens\":1000,")
+	second := strings.Index(sse, "event: usage\ndata: {\"usage\":{\"llm_calls\":2,\"input_tokens\":2000,")
+	done := strings.Index(sse, "event: done\n")
+	if first < 0 || second < first || done < second {
+		t.Errorf("want a usage event after each call, before done (at %d, %d, %d):\n%s", first, second, done, sse)
+	}
+}
+
+// A turn that ends in a plan reports the session's usage with it, as a turn
+// that ends in a reply does (2026-11-25: the counter stood still through four
+// turns that each ended in a plan).
+func TestSendMessage_PlanCarriesTheUsage(t *testing.T) {
+	plan := proposeResp("c1", turnMetricStep("revenue", map[string]any{"is_input": true}))
+	plan.Usage = providers.Usage{InputTokens: 1200, OutputTokens: 80}
+	env := newAITurnEnv(t, &multiScriptProvider{resps: []providers.ChatResponse{plan}})
+	status, sse := env.send("add a revenue input")
+	at := strings.Index(sse, "event: proposal\n")
+	if status != http.StatusOK || at < 0 {
+		t.Fatalf("send: %d\n%s", status, sse)
+	}
+	frame := sse[at:]
+	if end := strings.Index(frame, "\n\n"); end > 0 {
+		frame = frame[:end]
+	}
+	if !strings.Contains(frame, `"usage":{"llm_calls":1,"input_tokens":1200,"output_tokens":80,`) || !strings.Contains(frame, `"memory":`) {
+		t.Errorf("the proposal frame carries no usage or memory:\n%s", frame)
+	}
+}
+
 // A session keeps what its calls were billed for, as the provider reports
 // it, and AI_SESSION_TOKEN_LIMIT stops it at a budget (2026-11-07: a build's
 // cost was only in the gateway log).

@@ -29,6 +29,10 @@ func TestOpenAIResponsesFallback(t *testing.T) {
 			if body["reasoning"].(map[string]any)["effort"] != "high" {
 				t.Errorf("effort not sent: %v", body["reasoning"])
 			}
+			// Several tool calls per message: OpenAI's default (2026-11-25).
+			if v, ok := body["parallel_tool_calls"]; ok {
+				t.Errorf("parallel_tool_calls sent (%v), want OpenAI's default", v)
+			}
 			if calls == 2 {
 				second = body
 			}

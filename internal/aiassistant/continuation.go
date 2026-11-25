@@ -34,6 +34,37 @@ func ContinuationMessage(steps, failed int, plan *TaskPlan) string {
 	return ContinuePrefix + ran + next
 }
 
+// CheckBrief is the unseen brief of a turn that goes on after a plan ran:
+// what each step changed, and to check only that. The check otherwise
+// re-read every table and dashboard, one read a call: in one session the
+// automatic turns made 95 of 106 calls (2026-11-25).
+func CheckBrief(ran []ProposalStep) string {
+	if len(ran) == 0 {
+		return ""
+	}
+	oneLine := func(s string, n int) string { return clipRunes(strings.Join(strings.Fields(s), " "), n) }
+	var b strings.Builder
+	b.WriteString("\n\nTHE PLAN THAT JUST RAN — its steps and what each changed:\n")
+	for i, s := range ran {
+		if i == checkBriefSteps {
+			fmt.Fprintf(&b, "… and %d more step(s)\n", len(ran)-i)
+			break
+		}
+		outcome := s.Result
+		if s.Status == "failed" {
+			outcome = "FAILED: " + outcome
+		}
+		fmt.Fprintf(&b, "%d. %s — %s → %s\n", i+1, s.Tool, oneLine(s.Description, 140), oneLine(outcome, 160))
+	}
+	b.WriteString("Check only what these steps changed — and, for a field or metric removed or renamed, what shows it: read each once, " +
+		"by its name (no list_* call to find it), all those reads together in one reply. What a check after an earlier plan verified " +
+		"stays verified: do not read it again. Then go on.\n")
+	return b.String()
+}
+
+// checkBriefSteps is how many steps CheckBrief lists.
+const checkBriefSteps = 20
+
 // PlanApprovalBrief is the turn's brief while the plan waits for the
 // developer's approval.
 const PlanApprovalBrief = "THE PLAN AWAITS THE DEVELOPER'S APPROVAL: build nothing and propose nothing for it. They see it in a card with its stages " +

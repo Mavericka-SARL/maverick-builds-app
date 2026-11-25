@@ -39,7 +39,7 @@ func TestContinueAfterConfirm(t *testing.T) {
 	fake := &multiScriptProvider{resps: []providers.ChatResponse{
 		proposeResp("c1", turnMetricStep("cost", map[string]any{"is_input": true})),
 		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Next: add price. Shall I?"}},
-	}}
+	}, classify: `{"mode": "direct", "tasks": ["workbook_build", "pages"]}`} // a build, as live
 	env := newAITurnEnv(t, fake)
 	ctx := context.Background()
 	if status, body := env.post("/api/ai/sessions/"+env.session+"/messages", []byte(`{"continue":true}`)); status != http.StatusConflict {
@@ -65,6 +65,49 @@ func TestContinueAfterConfirm(t *testing.T) {
 	}
 	if !strings.HasPrefix(last, aiassistant.ContinuePrefix) || !strings.Contains(last, "all 1 steps ran") || !strings.Contains(last, "without waiting") {
 		t.Errorf("the go-on message: %q", last)
+	}
+	// The go-on turn's check is narrowed to what the plan changed, in a brief
+	// sent with the turn's message — not in the instructions, which the
+	// provider caches only while they stay the same; the developer's line
+	// stays short and the turn before had no such brief (2026-11-25).
+	if n := len(fake.lastUser); n < 2 || strings.Contains(fake.lastUser[0], "THE PLAN THAT JUST RAN") {
+		t.Fatalf("calls: %d, or the first turn already carried a check brief", n)
+	}
+	brief := "" // the go-on turn's message as its first call sent it
+	for _, u := range fake.lastUser {
+		if strings.HasPrefix(u, aiassistant.ContinuePrefix) {
+			brief = u
+			break
+		}
+	}
+	if !strings.HasPrefix(brief, last) || !strings.Contains(brief, "THE PLAN THAT JUST RAN") ||
+		!strings.Contains(brief, "1. "+props[0].Steps[0].Tool+" — ") || !strings.Contains(brief, "Check only what these steps changed") {
+		t.Errorf("the go-on turn's message does not carry what ran:\n%s", brief)
+	}
+	if strings.Contains(fake.prompts[len(fake.prompts)-1], "THE PLAN THAT JUST RAN") {
+		t.Error("the check brief went into the instructions, which then change every go-on turn")
+	}
+	if strings.Contains(last, "THE PLAN THAT JUST RAN") {
+		t.Errorf("the check brief leaked into the developer's line: %q", last)
+	}
+	// The typed turn (a build) and the go-on turn offer the same tools: the
+	// tool list opens the provider's cache, so a changed list re-sent the
+	// whole prompt uncached (2026-11-25).
+	if first, goOn := strings.Join(fake.tools[0], ","), strings.Join(fake.tools[len(fake.tools)-1], ","); first != goOn {
+		t.Errorf("the tools changed between the turns:\ntyped: %s\ngo-on: %s", first, goOn)
+	}
+	// And the same instructions: the plan added a metric and the turn's mode
+	// changed, which goes with the turn's message, not into them.
+	if typed, goOn := fake.prompts[0], fake.prompts[len(fake.prompts)-1]; typed != goOn {
+		i := 0
+		for i < len(typed) && i < len(goOn) && typed[i] == goOn[i] {
+			i++
+		}
+		t.Errorf("the instructions changed between the turns at %d of %d:\ntyped: %q\ngo-on: %q", i, len(typed),
+			typed[max(0, i-80):min(len(typed), i+160)], goOn[max(0, i-80):min(len(goOn), i+160)])
+	}
+	if !strings.Contains(brief, "## Current application context") || strings.Contains(fake.prompts[0], "## Current application context") {
+		t.Error("the application context is not with the turn's message, or still in the instructions")
 	}
 }
 

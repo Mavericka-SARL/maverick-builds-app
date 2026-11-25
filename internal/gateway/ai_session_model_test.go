@@ -27,14 +27,14 @@ import (
 // system prompt of the last call — the prompt names the model the turn
 // was scoped to.
 type promptCapturingProvider struct {
-	lastSystemPrompt string
+	lastGiven string
 }
 
 func (p *promptCapturingProvider) Chat(_ context.Context, req providers.ChatRequest) (providers.ChatResponse, error) {
 	if r, ok := sideCall(req); ok {
 		return r, nil
 	}
-	p.lastSystemPrompt = req.SystemPrompt
+	p.lastGiven = modelGiven(req)
 	return providers.ChatResponse{
 		FinishReason: "stop",
 		Message:      providers.Message{Role: "assistant", Content: "ok"},
@@ -157,8 +157,8 @@ func TestAISession_FollowsTheConsoleModel(t *testing.T) {
 	if status, body := send(testSess, testRev); status != http.StatusOK {
 		t.Fatalf("send in Test: %d %s", status, body)
 	}
-	if !strings.Contains(fake.lastSystemPrompt, "Model: **Test**") {
-		t.Fatalf("a Test session should work in Test; prompt:\n%s", fake.lastSystemPrompt)
+	if !strings.Contains(fake.lastGiven, "Model: **Test**") {
+		t.Fatalf("a Test session should work in Test; prompt:\n%s", fake.lastGiven)
 	}
 
 	// From the default model it is refused, by name — not quietly answered

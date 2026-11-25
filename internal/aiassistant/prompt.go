@@ -57,8 +57,10 @@ func FetchModelContext(ctx context.Context, pool *pgxpool.Pool, modelID, revID s
 	return mc
 }
 
-// BuildSystemPrompt returns the system prompt injected on every LLM call.
-func BuildSystemPrompt(mc ModelContext) string {
+// BuildSystemPrompt returns the instructions every LLM call opens with — the
+// same for every turn, so the provider keeps them cached; what changes from
+// turn to turn goes with the turn's message (ApplicationContext, 2026-11-25).
+func BuildSystemPrompt() string {
 	var sb strings.Builder
 
 	sb.WriteString(`You are an AI assistant embedded in the maverickbuilds.app Developer Console.
@@ -68,6 +70,9 @@ You help developers build and modify their application model through natural con
 You have full READ and WRITE capability over the developer's application model:
 - Read tools (call freely): get_model_summary, list_metrics, list_dimensions, list_grids, list_dashboards, describe_dashboard, list_revisions, list_workflows, get_workflow, validate_workflow, list_workflow_roles, list_automation_rules, list_forms, get_form, query_records, list_form_integrations, list_users, validate_formulas, check_grid_completeness, list_integrations, get_integration, list_integration_runs, test_integration, list_connections, list_model_link_sources, attach_google_sheet, preview_file_import, preview_export, read_manual
 - Write gateway: propose_actions — use this whenever the developer asks you to create, update, or delete anything
+- Reads that do not depend on each other go out together, as several tool calls in one reply: every reply re-sends
+  the whole conversation, so one read per reply multiplies the cost. Tools take names: no list_* call to find
+  something you can name.
 
 ## Scope
 You build and change what a developer builds and changes in the console: metrics, dimensions and members, grids,
@@ -1481,12 +1486,26 @@ with the playbook for its tasks and your plan.
 
 `)
 
+	return sb.String()
+}
+
+// TurnContextNote opens what the server sends with the turn's message: the
+// turn's context and instructions, which change from turn to turn and so are
+// not in the instructions (2026-11-25).
+const TurnContextNote = "\n\n---\n(Sent by the server with this message, not written by the developer: this turn's context and " +
+	"instructions. Follow them as you follow your instructions.)\n\n"
+
+// ApplicationContext is the application, the model, its revisions and its
+// size. It changes as the model does, so it goes with the turn's message,
+// not into the instructions: the provider caches the instructions only
+// while they stay the same (2026-11-25).
+func ApplicationContext(mc ModelContext) string {
+	var sb strings.Builder
 	fmt.Fprintf(&sb, "## Current application context\n")
 	fmt.Fprintf(&sb, "- Application: **%s** | Model: **%s**\n", mc.AppName, mc.ModelName)
 	fmt.Fprintf(&sb, "- Active revision: %s | Working revision: %s\n", mc.ActiveRev, mc.WorkingRev)
 	fmt.Fprintf(&sb, "- %d metrics, %d dimensions, %d grids, %d dashboards\n",
 		mc.MetricCount, mc.DimCount, mc.GridCount, mc.DashCount)
-
 	return sb.String()
 }
 

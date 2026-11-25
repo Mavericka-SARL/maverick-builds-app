@@ -11,7 +11,6 @@ package aiassistant
 
 import (
 	"encoding/json"
-	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"regexp"
 	"slices"
 	"strings"
@@ -259,40 +258,4 @@ Know-how from earlier builds:
 2. Which inputs each role may change (role access rules) is a business admin's to set: list them per role, as
    the workbook's Guide names the owners, for the business admin.
 `,
-}
-
-// connectorTools are read tools only a request about connectors, exports or
-// outside sources needs.
-var connectorTools = map[string]bool{
-	"test_integration": true, "list_connections": true, "list_model_link_sources": true,
-	"attach_google_sheet": true, "preview_export": true,
-}
-
-// connectorWords: a request naming a connector, an export or an outside
-// source keeps every tool.
-var connectorWords = regexp.MustCompile(`(?i)\b(api|rest|connector|connection|oauth|google|sheets?\s+url|export|link(ed)?\s+model|sftp|webhook|endpoint)\b`)
-
-// TurnTools are the tools a turn offers: every one, except the connector
-// tools when the request is about building, fixing, pages, workflows or
-// access and names no connector — each call re-sends the tool list, and a
-// build never used them (2026-11-11). A question keeps every tool.
-func TurnTools(m RequestMode, request string) []providers.ToolDef {
-	all := AllTools()
-	if m.Mode == ModeQuestion || len(m.Tasks) == 0 || connectorWords.MatchString(request) {
-		return all
-	}
-	for _, t := range m.Tasks {
-		switch t {
-		case "workbook_build", "workbook_fix", "pages", "workflows", "access":
-		default:
-			return all
-		}
-	}
-	out := make([]providers.ToolDef, 0, len(all))
-	for _, t := range all {
-		if !connectorTools[t.Name] {
-			out = append(out, t)
-		}
-	}
-	return out
 }

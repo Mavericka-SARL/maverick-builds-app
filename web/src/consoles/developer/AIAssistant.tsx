@@ -41,7 +41,8 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
   const limitN = limit.trim() === "" ? null : Number(limit.trim());
   const limitBad = limitN !== null && (!Number.isInteger(limitN) || limitN < 1 || limitN > 1_000_000);
   // The models the key reaches: asked for the saved key when the panel opens
-  // or the provider changes, and for a typed key on "List models".
+  // or the provider changes, and for a typed key when Test connection or
+  // Save settings sends it (owner, 2026-11-25: no List models button).
   const [typedKeyAsked, setTypedKeyAsked] = useState("");
   const models = useQuery({
     queryKey: ["ai-models", provider, typedKeyAsked],
@@ -61,6 +62,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
     mutationFn: () => api.aiSaveSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort, daily_call_limit: limitN }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-settings"] });
+      if (apiKey) setTypedKeyAsked(apiKey);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     },
@@ -68,6 +70,8 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
 
   const test = useMutation({
     mutationFn: () => api.aiTestSettings({ provider, model, api_key: apiKey || undefined, reasoning_effort: effort }),
+    // The typed key's models fill the Model list alongside the test.
+    onMutate: () => { if (apiKey) setTypedKeyAsked(apiKey); },
   });
 
   return (
@@ -190,11 +194,6 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           <Button loading={test.isPending} loadingLabel="Testing…" onClick={() => test.mutate()}>
             Test connection
           </Button>
-          {apiKey && apiKey !== typedKeyAsked && (
-            <Button loading={models.isFetching} loadingLabel="Listing…" onClick={() => setTypedKeyAsked(apiKey)}>
-              List models
-            </Button>
-          )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
         </div>
 
@@ -1570,10 +1569,22 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
     setNowTick(Date.now());
     setHeardAt(Date.now());
 
+    // The counter under the title and the session's line in the list show
+    // the same count: the list reloads by itself (window focus) and could
+    // run ahead of the counter during a long turn (2026-11-25).
+    const applyUsage = (u: AISessionUsage) => {
+      setUsage(u);
+      qc.setQueryData<AISession[]>(["ai-sessions", revisionId ?? ""], list =>
+        list?.map(s => (s.id === sid ? { ...s, llm_calls: u.llm_calls } : s)));
+    };
+
     try {
       await api.aiSendMessage(sid, content, (event) => {
         setHeardAt(Date.now());
         switch (event.type) {
+          case "usage":
+            if (event.usage) applyUsage(event.usage);
+            break;
           case "delta":
             setStreamingContent(prev => prev + (event.content ?? ""));
             break;
@@ -1604,7 +1615,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
             setPendingProposal(event.proposal ?? null);
             setProposalWarnings(event.warnings ?? []);
             if (event.session) setCurrentSession(event.session);
-            if (event.usage) setUsage(event.usage);
+            if (event.usage) applyUsage(event.usage);
             if (event.memory) setMemory(event.memory);
             qc.invalidateQueries({ queryKey: ["ai-proposals", sid] });
             break;
@@ -1634,7 +1645,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               if (openSession.current === sid) setPendingProposal(null);
             });
             if (event.session) setCurrentSession(event.session);
-            if (event.usage) setUsage(event.usage);
+            if (event.usage) applyUsage(event.usage);
             if (event.task_plan !== undefined) setTaskPlan(event.task_plan ?? null);
             if (event.earlier_plans) setEarlierPlans(event.earlier_plans);
             if (event.memory) setMemory(event.memory);
@@ -1923,8 +1934,8 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
               </>
             )}
             {usage && usage.llm_calls > 0 && (
-              <span title={`Input ${usage.input_tokens.toLocaleString()}, read from cache ${usage.cache_read_tokens.toLocaleString()}, written to cache ${usage.cache_write_tokens.toLocaleString()}, output ${usage.output_tokens.toLocaleString()}`}>
-                <Txt>{`· ${usage.llm_calls}${currentSession?.call_budget ? ` of ${currentSession.call_budget}` : ""} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in, ${fmtTokens(usage.output_tokens)} out`}</Txt>
+              <span title={`Input ${usage.input_tokens.toLocaleString()}, read from cache ${usage.cache_read_tokens.toLocaleString()}, written to cache ${usage.cache_write_tokens.toLocaleString()}, output ${usage.output_tokens.toLocaleString()}. Every call sends the instructions, the tools and the conversation again; what the provider reads from its cache costs a fraction of new input.${usage.estimated_cost_usd == null ? " This deployment prices no models (AI_MODEL_PRICES), so the provider's usage page has the cost." : ""}`}>
+                <Txt>{`· ${usage.llm_calls}${currentSession?.call_budget ? ` of ${currentSession.call_budget}` : ""} calls, ${fmtTokens(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens)} tokens in${usage.cache_read_tokens > 0 ? ` (${fmtTokens(usage.cache_read_tokens)} from cache)` : ""}, ${fmtTokens(usage.output_tokens)} out`}</Txt>
                 {usage.estimated_cost_usd != null && <Txt>{` · about ${fmtUSD(usage.estimated_cost_usd)}`}</Txt>}
               </span>
             )}

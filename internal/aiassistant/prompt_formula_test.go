@@ -10,7 +10,7 @@ import (
 // TestPromptListsEveryFormulaFunction: the assistant is told of exactly the
 // functions the engine has.
 func TestPromptListsEveryFormulaFunction(t *testing.T) {
-	prompt := BuildSystemPrompt(ModelContext{})
+	prompt := BuildSystemPrompt()
 	i := strings.Index(prompt, "The functions are exactly these: ")
 	if i < 0 {
 		t.Fatal("the prompt has no formula function list")

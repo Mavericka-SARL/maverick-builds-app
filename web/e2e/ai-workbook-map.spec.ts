@@ -42,7 +42,7 @@ test("the session shows its workbook map, kept decisions, cost and call budget",
   await page.getByRole("button", { name: "AI Developer" }).click();
   await page.getByRole("button", { name: /Session/ }).first().click();
 
-  await expect(page.getByText("6 calls, 183.0k tokens in, 278 out")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("6 calls, 183.0k tokens in (113.7k from cache), 278 out")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("about USD 0.04")).toBeVisible();
 
   await page.getByRole("button", { name: /Workbook map: 3 rows mapped, 1 match, 2 differ, 2 with numbers not mapped/ }).click();

@@ -382,14 +382,15 @@ func TestOpenAICompatible_BaseURLWithPathPrefix(t *testing.T) {
 	}
 }
 
-// gpt-4o-mini sent the same propose_actions twice in one message (only one
-// proposal is shown per turn), so requests with tools ask OpenAI for one call
-// at a time. Other OpenAI-compatible vendors do not all accept the field.
-func TestOpenAIProvider_Chat_OneToolCallPerMessageOnOpenAIOnly(t *testing.T) {
+// Several tool calls per message are left to the vendor's default (on OpenAI,
+// allowed): reads one at a time each re-sent the whole conversation
+// (2026-11-25). The field is never sent: some vendors and the o-series refuse
+// it, and a second propose_actions in a message is answered by the gateway.
+func TestOpenAIProvider_Chat_ParallelToolCallsLeftToTheVendor(t *testing.T) {
 	for _, tc := range []struct {
 		label string
 		want  bool
-	}{{"openai", true}, {"mistral", false}, {"openai-o3", false}} {
+	}{{"openai", false}, {"mistral", false}, {"openai-o3", false}} {
 		var captured map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewDecoder(r.Body).Decode(&captured)

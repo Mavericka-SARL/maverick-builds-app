@@ -136,7 +136,7 @@ func TestWriteToolNames_MatchExecutorSchemaAndPrompt(t *testing.T) {
 			t.Errorf("%s: err %v, want unknown write tool", gone, err)
 		}
 	}
-	prompt := aiassistant.BuildSystemPrompt(aiassistant.ModelContext{})
+	prompt := aiassistant.BuildSystemPrompt()
 	var schema string
 	for _, tool := range aiassistant.AllTools() {
 		if tool.Name == "propose_actions" {

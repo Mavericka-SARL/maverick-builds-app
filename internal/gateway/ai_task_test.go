@@ -27,7 +27,7 @@ func (p *planningProvider) Chat(_ context.Context, req providers.ChatRequest) (p
 		return r, nil
 	}
 	p.calls++
-	p.prompts = append(p.prompts, req.SystemPrompt)
+	p.prompts = append(p.prompts, modelGiven(req))
 	if p.calls == 1 {
 		args, _ := json.Marshal(map[string]any{"goal": "Add the pages people need", "stages": []map[string]any{
 			{"title": "Demand & revenue", "items": []string{"page Demand & revenue"}, "check": "describe_dashboard"},

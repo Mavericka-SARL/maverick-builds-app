@@ -170,13 +170,12 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 	}
 	if len(tools) > 0 {
 		creq.Tools = tools
-		// One tool call per message on OpenAI itself: gpt-4o-mini otherwise
-		// sends the same propose_actions twice in one message, and only one
-		// proposal is shown per turn. Other OpenAI-compatible vendors do not
-		// all accept the field, so it is left to their defaults.
-		if p.label == "openai" && !openAIReasoningModel(req.Model) {
-			creq.ParallelToolCalls = false
-		}
+		// parallel_tool_calls is left to the vendor's default, which on OpenAI
+		// allows several calls per message: reads one at a time each re-sent
+		// the whole conversation (2026-11-25). gpt-4o-mini's second
+		// propose_actions in one message is answered "only one proposal per
+		// turn" (TestSendMessage_SiblingToolCallsAllAnswered); some vendors
+		// and the o-series refuse the field outright.
 	}
 	return creq
 }

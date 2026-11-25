@@ -26,3 +26,16 @@ func sideCall(req providers.ChatRequest) (providers.ChatResponse, bool) {
 	}
 	return providers.ChatResponse{}, false
 }
+
+// modelGiven is what a main call gave the model to work from: the
+// instructions and the turn's message as sent, which carries the turn's
+// context and brief (2026-11-25: they left the instructions so the provider
+// keeps those cached).
+func modelGiven(req providers.ChatRequest) string {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			return req.SystemPrompt + "\n" + req.Messages[i].Content
+		}
+	}
+	return req.SystemPrompt
+}

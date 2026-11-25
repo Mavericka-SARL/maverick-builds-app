@@ -108,12 +108,11 @@ func (p *OpenAIProvider) buildResponsesRequest(req ChatRequest, stream bool) res
 		r.Tools = append(r.Tools, map[string]any{"type": "function", "name": td.Name, "description": td.Description,
 			"parameters": params, "strict": false})
 	}
-	if len(r.Tools) > 0 {
-		// One tool call per message, as on chat completions: only one
-		// proposal is shown per turn.
-		f := false
-		r.ParallelToolCalls = &f
-	}
+	// Several tool calls per message are allowed (OpenAI's default): each
+	// call re-sends the whole conversation, and reads one at a time made a
+	// check after a plan cost 8–16 calls (2026-11-25). A second
+	// propose_actions in a message is answered "only one proposal per turn"
+	// (TestSendMessage_SiblingToolCallsAllAnswered).
 	return r
 }
 

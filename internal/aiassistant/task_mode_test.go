@@ -151,31 +151,3 @@ func TestSettleHistory(t *testing.T) {
 		t.Fatal("nothing confirmed, yet history was dropped")
 	}
 }
-
-func TestTurnToolsLeaveConnectorsOutOfABuild(t *testing.T) {
-	has := func(tools []providers.ToolDef, name string) bool {
-		for _, t := range tools {
-			if t.Name == name {
-				return true
-			}
-		}
-		return false
-	}
-	build := TurnTools(RequestMode{Mode: ModeDelegated, Tasks: []string{"workbook_build"}}, "build the engine sheets")
-	if has(build, "test_integration") || !has(build, "compare_with_sheet") || !has(build, "propose_actions") {
-		t.Fatal("a build turn's tools are wrong")
-	}
-	for _, m := range []struct {
-		mode RequestMode
-		msg  string
-	}{
-		{RequestMode{Mode: ModeQuestion, Tasks: []string{"pages"}}, "what does the P&L page show?"},
-		{RequestMode{Mode: ModeDelegated, Tasks: []string{"workbook_build"}}, "load the actuals from the REST API"},
-		{RequestMode{Mode: ModeDelegated, Tasks: []string{"records"}}, "load the GL file"},
-		{RequestMode{Mode: ModeDirect}, "rename revenue"},
-	} {
-		if !has(TurnTools(m.mode, m.msg), "test_integration") {
-			t.Errorf("%q dropped the connector tools", m.msg)
-		}
-	}
-}

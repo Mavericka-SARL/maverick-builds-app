@@ -2,6 +2,7 @@ package aiassistant
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,32 @@ func TestContinuationMessage(t *testing.T) {
 	plan.Stages[1].Status = StageDone
 	if m := ContinuationMessage(2, 0, plan); !strings.Contains(m, "stages are all done") && !strings.Contains(m, "report what was built") {
 		t.Errorf("finished plan: %s", m)
+	}
+}
+
+// The go-on turn's check brief lists each step with what it changed — a
+// failed one marked — and caps a long plan; nothing ran, no brief.
+func TestCheckBrief(t *testing.T) {
+	if CheckBrief(nil) != "" {
+		t.Error("no steps ran, yet a brief")
+	}
+	ran := []ProposalStep{
+		{Tool: "update_form_def", Description: "Remove inline Notes\nfrom Deals", Status: "success", Result: "Table 'deals' updated (14 field(s))"},
+		{Tool: "save_records", Description: "Keep the two notes", Status: "failed", Result: "notes: no such table"},
+	}
+	b := CheckBrief(ran)
+	for _, want := range []string{"1. update_form_def — Remove inline Notes from Deals → Table 'deals' updated (14 field(s))",
+		"2. save_records — Keep the two notes → FAILED: notes: no such table", "Check only what these steps changed", "together in one reply"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("brief lacks %q:\n%s", want, b)
+		}
+	}
+	many := make([]ProposalStep, checkBriefSteps+5)
+	for i := range many {
+		many[i] = ProposalStep{Tool: "create_metric", Description: "m", Result: "ok"}
+	}
+	if b := CheckBrief(many); !strings.Contains(b, "… and 5 more step(s)") || strings.Contains(b, strconv.Itoa(checkBriefSteps+1)+". ") {
+		t.Errorf("a long plan is not capped:\n%s", b)
 	}
 }
 

@@ -2676,7 +2676,7 @@ export interface AITurnStatus {
 }
 
 export interface AISendMessageEvent extends Partial<AITurnStatus> {
-  type: "delta" | "tool_status" | "status" | "progress" | "proposal" | "done" | "error" | "task_plan" | "memory";
+  type: "delta" | "tool_status" | "status" | "progress" | "proposal" | "done" | "error" | "task_plan" | "memory" | "usage";
   task_plan?: AITaskPlan | null; // task_plan | done: the session's plan
   earlier_plans?: AIEarlierPlan[]; // done: the session's plans no longer under way
   memory?: AIMemoryStatus; // memory | proposal | done: how full the session's memory is
@@ -2685,7 +2685,7 @@ export interface AISendMessageEvent extends Partial<AITurnStatus> {
   chars?: number; // progress: how much of the tool call is written
   steps?: number; // progress: steps of a proposal written so far
   warnings?: string[]; // proposal: formulas the plan check thinks look wrong
-  usage?: AISessionUsage; // proposal | done: what the session was billed for so far
+  usage?: AISessionUsage; // usage (after every call) | proposal | done: what the session was billed for so far
   error?: string; // error
   proposal?: AIProposal; // proposal
   reply?: AIMessage; // done
