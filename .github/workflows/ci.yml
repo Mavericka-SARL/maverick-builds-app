@@ -70,17 +70,62 @@ jobs:
     name: Detect changed areas
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       go: ${{ steps.filter.outputs.go }}
       web: ${{ steps.filter.outputs.web }}
       docs: ${{ steps.filter.outputs.docs }}
+      tested: ${{ steps.prior.outputs.tested }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      # A publish-and-deploy run does not run the gates again on a commit
+      # whose push run passed them: it waits for that run (concurrency
+      # above), finds it green, and goes on to publish and deploy — the same
+      # tests on the same commit took a second half hour (2026-11-25). Every
+      # gate must have run and passed there: a green push run of a docs-only
+      # commit skipped the Go and web gates, which proves nothing about the
+      # code it carries. Anything else — no such run, one that did not pass,
+      # the API unreadable — runs every gate here, as before.
+      - id: prior
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty' 2>/dev/null || true)
+          if [ -z "$run" ]; then
+            echo "no green push run of $SHA: running every gate" >&2
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gates='["Go lint","Go test","Go build (all services)","ogen generate (verify no drift)","Proto lint","ESLint","TypeScript type check","Frontend build","Playwright e2e (smoke 1/2)","Playwright e2e (smoke 2/2)","Playwright e2e (real Keycloak login)"]'
+          if ! missing=$(gh api "repos/$REPO/actions/runs/$run/jobs?per_page=100" \
+            --jq "[.jobs[] | select(.conclusion == \"success\") | .name] as \$ok | $gates - \$ok | join(\", \")"); then
+            missing="its jobs (unreadable)"
+          fi
+          if [ -n "$missing" ]; then
+            echo "push run $run of $SHA did not pass $missing: running every gate" >&2
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "push run $run passed every gate on $SHA: publishing without running them again" >&2
+          echo "tested=true" >> "$GITHUB_OUTPUT"
       - id: filter
         run: |
           set -euo pipefail
+          if [ "${{ steps.prior.outputs.tested }}" = "true" ]; then
+            echo "go=false"   >> "$GITHUB_OUTPUT"
+            echo "web=false"  >> "$GITHUB_OUTPUT"
+            echo "docs=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
           else
@@ -584,8 +629,8 @@ jobs:
 
   docker-publish:
     name: Publish image (${{ matrix.service }})
-    needs: [go-lint, go-test, go-build]
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
+    needs: [changes, go-lint, go-test, go-build]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.tested == 'true' || !contains(needs.*.result, 'skipped')) && ((github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/'))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
@@ -672,8 +717,8 @@ jobs:
 
   docker-publish-backup:
     name: Publish image (postgres-backup)
-    needs: [go-lint, go-test, go-build]
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
+    needs: [changes, go-lint, go-test, go-build]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.tested == 'true' || !contains(needs.*.result, 'skipped')) && ((github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/'))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
@@ -740,8 +785,8 @@ jobs:
 
   docker-publish-postgres-walg:
     name: Publish image (postgres-walg)
-    needs: [go-lint, go-test, go-build]
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
+    needs: [changes, go-lint, go-test, go-build]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.tested == 'true' || !contains(needs.*.result, 'skipped')) && ((github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/'))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
@@ -811,8 +856,8 @@ jobs:
     # code, and its own build type-checks what ships (app + node projects) before
     # `vite build`, so a type error fails it regardless. Without this job the console had no deployable artifact at
     # all — CI built web/dist and uploaded it as an artifact nothing consumed.
-    needs: [web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
+    needs: [changes, web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.tested == 'true' || !contains(needs.*.result, 'skipped')) && ((github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/'))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
@@ -950,8 +995,8 @@ jobs:
   # path without making a release.
   docker-publish-arm64:
     name: Publish arm64 image (${{ matrix.image }})
-    needs: [go-lint, go-test, go-build, web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.arm64_trial)
+    needs: [changes, go-lint, go-test, go-build, web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.tested == 'true' || !contains(needs.*.result, 'skipped')) && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.arm64_trial))
     runs-on: ${{ vars.ARM64_RUNNER_LABEL || 'ubuntu-24.04-arm' }}
     timeout-minutes: 45
     permissions:
