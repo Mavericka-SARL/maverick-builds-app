@@ -33473,6 +33473,12 @@ func (s *FormField) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Multiple.Set {
+			e.FieldStart("multiple")
+			s.Multiple.Encode(e)
+		}
+	}
+	{
 		if s.MetricID.Set {
 			e.FieldStart("metric_id")
 			s.MetricID.Encode(e)
@@ -33634,7 +33640,7 @@ func (s *FormField) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfFormField = [31]string{
+var jsonFieldsNameOfFormField = [32]string{
 	0:  "name",
 	1:  "label",
 	2:  "type",
@@ -33642,30 +33648,31 @@ var jsonFieldsNameOfFormField = [31]string{
 	4:  "options",
 	5:  "dimension_id",
 	6:  "allowed_members",
-	7:  "metric_id",
-	8:  "value_field",
-	9:  "code_prefix",
-	10: "code_digits",
-	11: "default",
-	12: "required_with",
-	13: "hidden",
-	14: "core",
-	15: "history",
-	16: "on_delete",
-	17: "format",
-	18: "min",
-	19: "max",
-	20: "whole",
-	21: "deadline",
-	22: "done_field",
-	23: "done_values",
-	24: "transitions",
-	25: "locks_in",
-	26: "required_when",
-	27: "stamp_when",
-	28: "active_flag",
-	29: "roles",
-	30: "notify",
+	7:  "multiple",
+	8:  "metric_id",
+	9:  "value_field",
+	10: "code_prefix",
+	11: "code_digits",
+	12: "default",
+	13: "required_with",
+	14: "hidden",
+	15: "core",
+	16: "history",
+	17: "on_delete",
+	18: "format",
+	19: "min",
+	20: "max",
+	21: "whole",
+	22: "deadline",
+	23: "done_field",
+	24: "done_values",
+	25: "transitions",
+	26: "locks_in",
+	27: "required_when",
+	28: "stamp_when",
+	29: "active_flag",
+	30: "roles",
+	31: "notify",
 }
 
 // Decode decodes FormField from json.
@@ -33770,6 +33777,16 @@ func (s *FormField) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"allowed_members\"")
+			}
+		case "multiple":
+			if err := func() error {
+				s.Multiple.Reset()
+				if err := s.Multiple.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"multiple\"")
 			}
 		case "metric_id":
 			if err := func() error {

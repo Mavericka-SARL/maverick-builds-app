@@ -114,7 +114,7 @@ export function FieldRules({ f, fields, applicationId, onUpdate }: {
   const serverFilled = f.type === "autocode" || f.type === "status";
   return (
     <>
-      {(f.type === "select" || f.type === "dimension") && (
+      {(f.type === "select" || f.type === "dimension") && !f.multiple && (
         <TransitionsEditor f={f} applicationId={applicationId} onUpdate={onUpdate} />
       )}
       {!serverFilled && !f.stamp_when && (
@@ -125,7 +125,7 @@ export function FieldRules({ f, fields, applicationId, onUpdate }: {
         <ConditionEditor label="Set by the server to the day it comes to meet" value={f.stamp_when} others={others}
           onChange={c => onUpdate({ stamp_when: c, ...(c ? { default: undefined, required: false, required_with: undefined, required_when: undefined } : {}) })} />
       )}
-      {f.type === "dimension" && (
+      {f.type === "dimension" && !f.multiple && (
         <div style={row}>
           <Checkbox checked={!!f.notify} onChange={e => onUpdate({ notify: e.target.checked || undefined })}
             label="Tell the person the chosen record names (its Person field) — a ticket's assignee is an agent record" />

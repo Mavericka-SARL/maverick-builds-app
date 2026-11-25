@@ -1889,6 +1889,10 @@
   word-break: break-word;
 }
 
+/* An AI reply's Markdown: the bubble's padding, not its last block's margin, ends it. */
+.mvx-chat-bubble .mvx-rich-text { white-space: normal; }
+.mvx-chat-bubble .mvx-rich-text > :last-child { margin-bottom: 0; }
+
 .mvx-chat-bubble--user {
   border-radius: 14px 14px 4px 14px;
   background: var(--color-brand-solid);
@@ -2104,6 +2108,16 @@
 .mvx-dash-cell {
   grid-column: var(--dash-col-start) / span var(--dash-col-span);
   position: relative;
+}
+
+/* A part of a dashboard scrolls sideways on a narrow screen. A box that
+   scrolls one way clips the other too, so it keeps room above its first row
+   for the full-screen button on a widget's top edge — taken back by the
+   margin, so nothing below moves. */
+.mvx-dash-segment {
+  overflow-x: auto;
+  padding-top: 12px;
+  margin-top: -12px;
 }
 
 /* A widget's frame: as tall as its cell, scrolling a designed height. */

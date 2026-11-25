@@ -2582,6 +2582,7 @@ components:
         options:         { type: array, items: { type: string } }
         dimension_id:    { type: string, format: uuid, description: "Set when type=dimension" }
         allowed_members: { type: array, items: { type: string }, description: "Set when type=dimension" }
+        multiple:        { type: boolean, description: "A dimension field holding several members (a deal's contacts): its value is a list of member codes; required asks for at least one. A filter for a member keeps the records whose list holds it. Not a board column, a mapping's coordinate, a sort or a grouping; on_delete is block or clear" }
         metric_id:       { type: string, format: uuid, description: "Set when type=metric" }
         value_field:     { type: string, description: "Set when type=metric — name of the sibling field holding the numeric amount" }
         code_prefix:     { type: string, maxLength: 20, description: "Set when type=autocode — text before the number (EXP-)" }

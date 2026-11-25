@@ -47,7 +47,11 @@ const DIMENSIONS = [
 
 type Server = { puts: { id: string; body: Record<string, unknown> }[]; created: Record<string, unknown>[] };
 
-async function serveBoard(page: Page): Promise<Server> {
+const STAGES = [
+  { key: "QUAL", label: "Qualification", color: "#4A90D9" }, { key: "MEET", label: "1st Meeting", color: "#56B4E9" },
+  { key: "WON", label: "Closed Won", color: "#7ED3D9", read_only: true }];
+
+async function serveBoard(page: Page, columns: { key: string; label: string; color?: string; read_only?: boolean }[] = STAGES): Promise<Server> {
   const server: Server = { puts: [], created: [] };
   const records = [deal("d-1", "Big", "QUAL", 1000, "2020-01-01"), deal("d-2", "Small", "QUAL", 50), deal("d-3", "Done", "WON", 700)];
   const dashboard = { id: "dash-board", name: "Pipeline", tags: [], widgets: [{ id: "wb", widget_type: "board", ref_id: "deals", content: null, title: "Pipeline",
@@ -57,9 +61,7 @@ async function serveBoard(page: Page): Promise<Server> {
     route.fulfill({ json: new URL(route.request().url()).pathname === "/api/dashboards" ? [dashboard] : dashboard }));
   await page.route((url) => url.pathname === "/api/forms", (route) => route.fulfill({ json: [ACCOUNTS, DEALS] }));
   await page.route((url) => url.pathname === "/api/dimensions", (route) => route.fulfill({ json: DIMENSIONS }));
-  await page.route((url) => url.pathname === "/api/forms/deals/board-columns", (route) => route.fulfill({ json: { columns: [
-    { key: "QUAL", label: "Qualification", color: "#4A90D9" }, { key: "MEET", label: "1st Meeting", color: "#56B4E9" },
-    { key: "WON", label: "Closed Won", color: "#7ED3D9", read_only: true }] } }));
+  await page.route((url) => url.pathname === "/api/forms/deals/board-columns", (route) => route.fulfill({ json: { columns } }));
   await page.route((url) => url.pathname === "/api/forms/deals/records/query", (route) => {
     const q = route.request().postDataJSON() as { group_by?: unknown[] };
     if (q.group_by) {
@@ -85,6 +87,15 @@ async function serveBoard(page: Page): Promise<Server> {
       created_at: "", updated_at: "", permissions: perms } });
   });
   return server;
+}
+
+/** A card held still: a browser repeats dragover at the pointer, which a test's
+ * drag sends only when the pointer moves (and drops while one is pending). */
+async function hold(page: Page, x: number, y: number) {
+  for (let i = 0; i < 4; i++) {
+    await page.waitForTimeout(40);
+    await page.mouse.move(x, y + (i % 2));
+  }
 }
 
 async function openBoard(page: Page) {
@@ -130,6 +141,55 @@ test.describe("board widget", () => {
     await small.getByLabel("Move Small to").selectOption("MEET");
     await expect.poll(() => server.puts.length).toBe(2);
     expect(server.puts[1]).toMatchObject({ id: "d-2", body: { data: { stage: "MEET" } } });
+  });
+
+  test("a card held at the board's edge scrolls it, and drops into a column that was out of sight", async ({ page }) => {
+    const server = await serveBoard(page, [STAGES[0], STAGES[1],
+      { key: "DEMO", label: "Demo" }, { key: "POC", label: "Validation" }, { key: "OFFER", label: "Offer sent" }, { key: "NEG", label: "Negotiation" }]);
+    await page.setViewportSize({ width: 1500, height: 900 }); // the whole widget in sight, the board's last columns not
+    await openBoard(page);
+    const board = page.locator(".mvx-board");
+    const neg = page.getByRole("listitem", { name: "Negotiation" });
+    const boardBox = (await board.boundingBox())!;
+    // The last column starts beyond the board's right edge.
+    expect((await neg.boundingBox())!.x).toBeGreaterThan(boardBox.x + boardBox.width);
+
+    const big = (await page.getByRole("article", { name: "Big" }).boundingBox())!;
+    await page.mouse.move(big.x + 40, big.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(big.x + 60, big.y + 30, { steps: 4 });
+    // Held near the right edge, the board scrolls to its end — 40px in, where
+    // the browser's own drag scrolling (a 20px strip) does not reach.
+    await page.mouse.move(boardBox.x + boardBox.width - 40, big.y + 40, { steps: 8 });
+    await hold(page, boardBox.x + boardBox.width - 40, big.y + 40);
+    await expect.poll(() => board.evaluate(el => el.scrollLeft + el.clientWidth >= el.scrollWidth - 1)).toBe(true);
+    const target = (await neg.boundingBox())!;
+    expect(target.x + target.width).toBeLessThanOrEqual(boardBox.x + boardBox.width + 1);
+    // Away from the edge it stops, and the card drops into the column.
+    await page.mouse.move(target.x + target.width / 2, target.y + 80, { steps: 8 });
+    await hold(page, target.x + target.width / 2, target.y + 80);
+    const still = await board.evaluate(el => el.scrollLeft);
+    await page.waitForTimeout(150);
+    expect(await board.evaluate(el => el.scrollLeft)).toBe(still);
+    await page.mouse.up();
+    await expect.poll(() => server.puts.length).toBe(1);
+    expect(server.puts[0]).toMatchObject({ id: "d-1", body: { data: { stage: "NEG" } } });
+  });
+
+  test("the full-screen button on the board's top edge shows whole", async ({ page }) => {
+    await serveBoard(page);
+    await page.setViewportSize({ width: 1500, height: 900 }); // the whole widget in sight
+    await openBoard(page);
+    await page.locator(".mvx-dash-cell").first().hover();
+    const button = page.getByRole("button", { name: "Full screen: Pipeline" });
+    await expect(button).toBeVisible();
+    const box = (await button.boundingBox())!;
+    // Its top edge and its corners are the button itself, not clipped away.
+    for (const [x, y] of [[box.x + box.width / 2, box.y + 2], [box.x + 6, box.y + 6], [box.x + box.width - 6, box.y + 6]]) {
+      expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest(".mvx-dash-cell__expand") != null, [x, y])).toBe(true);
+    }
+    await button.click();
+    await expect(page.getByRole("dialog", { name: "Pipeline" })).toBeVisible();
   });
 
   test("a card opens the record's page: details, history, Edit; a linked account opens in the same window", async ({ page }) => {

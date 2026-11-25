@@ -27,12 +27,26 @@ type RowCondition struct {
 // filter: every record does).
 func RowFilterMatches(filter []RowCondition, data map[string]any) bool {
 	for _, c := range filter {
-		v := ""
+		// A field holding several members meets "is" when it holds one of
+		// the values, and "is_not" when it holds none of them.
+		vs := []string{""}
 		if raw, ok := data[c.Field]; ok && raw != nil {
-			v = strings.TrimSpace(fmt.Sprint(raw))
+			if list, ok := raw.([]any); ok {
+				vs = nil
+				for _, x := range list {
+					vs = append(vs, strings.TrimSpace(fmt.Sprint(x)))
+				}
+				if len(vs) == 0 {
+					vs = []string{""}
+				}
+			} else {
+				vs = []string{strings.TrimSpace(fmt.Sprint(raw))}
+			}
 		}
 		in := func(list []string) bool {
-			return slices.ContainsFunc(list, func(x string) bool { return strings.EqualFold(strings.TrimSpace(x), v) })
+			return slices.ContainsFunc(list, func(x string) bool {
+				return slices.ContainsFunc(vs, func(v string) bool { return strings.EqualFold(strings.TrimSpace(x), v) })
+			})
 		}
 		if len(c.Is) > 0 && !in(c.Is) {
 			return false

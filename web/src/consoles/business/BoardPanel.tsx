@@ -1,6 +1,6 @@
 import { useDateFormat } from "../dateFormat";
 import { shownDecimals } from "../shownDecimals";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Filter, Link2, Lock, Plus as PlusIcon } from "lucide-react";
 import {
@@ -19,6 +19,10 @@ const BOARD_LIMIT = 1000;
 
 /** The column a record with no value in the column field stands in. */
 const NONE = "";
+
+/** How near the board's left or right edge (px) a dragged card scrolls it, and how fast (px a frame) at the edge itself. */
+const EDGE_ZONE = 80;
+const EDGE_SPEED = 18;
 
 /**
  * A table's records as cards in columns — the members of a dimension field
@@ -150,6 +154,49 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
     const moves = rec ? movesOf(rec) : undefined;
     return moves === undefined || moves.includes(col.key) || String(rec?.data[settings.column_field] ?? "") === col.key;
   };
+  // A card held near the board's left or right edge scrolls the board that
+  // way, so a column scrolled out of sight can still take the card; the
+  // browser's own drag scrolling misses a box that scrolls sideways.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const draggingId = dragging?.id;
+  useEffect(() => {
+    if (!draggingId) return;
+    let speed = 0;
+    let frame: number | null = null;
+    const step = () => {
+      const el = boardRef.current;
+      if (!el || speed === 0) { frame = null; return; }
+      el.scrollLeft += speed;
+      frame = requestAnimationFrame(step);
+    };
+    const onDragOver = (e: DragEvent) => {
+      const el = boardRef.current;
+      if (!el) return;
+      // The edges the viewer sees: a dashboard narrower than the board's
+      // widget scrolls sideways itself and hides part of the board.
+      const r = el.getBoundingClientRect();
+      let left = Math.max(r.left, 0), right = Math.min(r.right, window.innerWidth);
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX === "visible") continue;
+        const ar = a.getBoundingClientRect();
+        left = Math.max(left, ar.left);
+        right = Math.min(right, ar.right);
+      }
+      if (right - left < 40) { speed = 0; return; }
+      const zone = Math.min(EDGE_ZONE, (right - left) / 4);
+      const pace = (fromEdge: number) => Math.ceil(EDGE_SPEED * Math.min(1, Math.max(0, 1 - fromEdge / zone)));
+      speed = e.clientY < r.top || e.clientY > r.bottom ? 0
+        : e.clientX < left + zone ? -pace(e.clientX - left)
+        : e.clientX > right - zone ? pace(right - e.clientX)
+        : 0;
+      if (speed !== 0 && frame === null) frame = requestAnimationFrame(step);
+    };
+    document.addEventListener("dragover", onDragOver);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [draggingId]);
   const moveTo = (rec: FormRecord, to: string) => {
     if (String(rec.data[settings.column_field] ?? "") === to) return;
     move.mutate({ rec, to });
@@ -227,7 +274,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
       {(listError || colError) && <InlineAlert tone="danger">The board could not be read — {((listError ?? colError) as Error).message}</InlineAlert>}
       {moveError && <InlineAlert tone="danger">{moveError}</InlineAlert>}
       {isLoading ? <LoadingState /> : (
-        <div className="mvx-board" role="list" aria-label={`${title || form.label} by ${colField.label || colField.name}`}>
+        <div ref={boardRef} className="mvx-board" role="list" aria-label={`${title || form.label} by ${colField.label || colField.name}`}>
           {shownColumns.map(col => {
             const cards = byColumn.get(col.key) ?? [];
             const t = totalsBy.get(col.key);

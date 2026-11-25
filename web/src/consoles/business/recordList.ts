@@ -123,11 +123,23 @@ export function rememberPeople(named: Record<string, string>) {
 }
 
 /** How a stored value reads in the list: a member's or metric's name, Yes/No, a grouped number. */
+/** The member codes a value names: a list's (a field holding several members), or the one code; none when empty. */
+export function memberList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(v => String(v ?? "").trim()).filter(Boolean);
+  if (value === null || value === undefined) return [];
+  const s = String(value).trim();
+  return s ? [s] : [];
+}
+
 export function displayValue(f: FormField | undefined, value: unknown, dims: DevDimension[], metrics: Metric[], dateFormat = ""): string {
+  if (Array.isArray(value) && value.length === 0) return "—";
   if (value === null || value === undefined || value === "") return "—";
-  if (!f) return String(value);
+  if (!f) return Array.isArray(value) ? value.join(", ") : String(value);
   if (f.type === "person") return personNames.get(String(value)) ?? "…";
-  if (f.type === "dimension") return memberLabels(dims, f.dimension_id).get(String(value)) ?? String(value);
+  if (f.type === "dimension") {
+    const labels = memberLabels(dims, f.dimension_id);
+    return memberList(value).map(code => labels.get(code) ?? code).join(", ") || "—";
+  }
   if (f.type === "metric" && !f.metric_id) {
     const m = metrics.find(x => x.name === value || x.label === value);
     return m ? (m.label || m.name) : String(value);
@@ -179,9 +191,9 @@ export function memberCodeOf(form: FormDef, data: Record<string, unknown>): stri
  * field's own dimension selected is also the value a new record starts with. dims: the model's dimensions as the
  * grids read them (members by code, parent_code crossing into a parent dimension).
  */
-export function followSelection(form: FormDef, follows: string[] | undefined, selected: Record<string, string> | undefined, dims: ScopeDim[]): { filters: RecordFilter[]; prefill: Record<string, string> } {
+export function followSelection(form: FormDef, follows: string[] | undefined, selected: Record<string, string> | undefined, dims: ScopeDim[]): { filters: RecordFilter[]; prefill: Record<string, string | string[]> } {
   const filters: RecordFilter[] = [];
-  const prefill: Record<string, string> = {};
+  const prefill: Record<string, string | string[]> = {};
   if (!selected || !follows?.length) return { filters, prefill };
   for (const name of follows) {
     const f = form.fields.find(x => x.name === name && x.type === "dimension" && x.dimension_id);
@@ -192,7 +204,8 @@ export function followSelection(form: FormDef, follows: string[] | undefined, se
     filters.push(codes.length === 1 ? { field: name, op: "eq", value: codes[0] } : { field: name, op: "in", values: codes.length > 0 ? codes : [""] });
     const own = selected[f.dimension_id!];
     const members = dims.find(d => d.id === f.dimension_id)?.members ?? [];
-    if (own && scope.has(own) && members.some(m => m.code === own) && !members.some(m => m.parent_code === own)) prefill[name] = own;
+    // A field holding several members starts as a list of the one selected.
+    if (own && scope.has(own) && members.some(m => m.code === own) && !members.some(m => m.parent_code === own)) prefill[name] = f.multiple ? [own] : own;
   }
   return { filters, prefill };
 }

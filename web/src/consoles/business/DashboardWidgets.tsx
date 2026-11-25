@@ -95,7 +95,7 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
     // every widget up on wide monitors, making Preview disagree with
     // Design (reported live). Below that width the grid still shrinks
     // proportionally, so nothing overflows on smaller screens.
-    <div key={key} style={{ overflowX: "auto" }}>
+    <div key={key} className="mvx-dash-segment">
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width, maxWidth: width }}>
         {part.map((row, i) => (
           <div key={i} style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 20px)` }}>

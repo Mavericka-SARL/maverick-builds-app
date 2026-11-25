@@ -2551,12 +2551,22 @@ func (h *handler) recordContextEntries(ctx context.Context, formID string, taskC
 		e.Display = e.Value
 		switch f.Type {
 		case "dimension":
-			var label string
-			if f.DimensionID != "" && h.db.QueryRow(ctx, `
-				SELECT COALESCE(NULLIF(label, ''), code) FROM model.dimension_member
-				WHERE dimension_id::text = $1 AND code = $2`, f.DimensionID, e.Value).Scan(&label) == nil {
-				e.Display = label
+			// A field holding several members shows each by its label.
+			codes := crudapp.FieldValues(crudapp.FormField{Multiple: true}, raw)
+			labels := make([]string, 0, len(codes))
+			for _, code := range codes {
+				label := code
+				if f.DimensionID != "" {
+					_ = h.db.QueryRow(ctx, `
+						SELECT COALESCE(NULLIF(label, ''), code) FROM model.dimension_member
+						WHERE dimension_id::text = $1 AND code = $2`, f.DimensionID, code).Scan(&label)
+				}
+				labels = append(labels, label)
 			}
+			if _, isList := raw.([]any); isList {
+				e.Value = strings.Join(codes, "; ")
+			}
+			e.Display = strings.Join(labels, ", ")
 		case "date":
 			e.Kind = "date"
 		}
@@ -12385,7 +12395,10 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		change, err := store.UpdateForm(ctx, formID, body.Name, body.Label, body.Fields)
-		if err != nil {
+		if crudapp.IsQueryError(err) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		} else if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}

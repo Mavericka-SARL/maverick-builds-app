@@ -113,6 +113,9 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 	if m.SourceField != "" && !has(m.SourceField) {
 		return refErr("source_field %q is no field of the table", m.SourceField)
 	}
+	if m.SourceField != "" && slices.ContainsFunc(fields, func(f FormField) bool { return f.Name == m.SourceField && f.Multiple }) {
+		return refErr("source_field %q holds several members: a posting takes one value from each record", m.SourceField)
+	}
 	dims := make([]string, 0, len(m.DimensionMappings))
 	for d := range m.DimensionMappings {
 		dims = append(dims, d)
@@ -126,6 +129,9 @@ func CheckMappingRefs(ctx context.Context, db dbx.DB, modelID, revisionID string
 		}
 		if field := m.DimensionMappings[dimID]; !has(field) {
 			return refErr("dimension_mappings maps a dimension to %q, which is no field of the table", field)
+		}
+		if field := m.DimensionMappings[dimID]; slices.ContainsFunc(fields, func(f FormField) bool { return f.Name == field && f.Multiple }) {
+			return refErr("dimension_mappings maps a dimension to %q, which holds several members: a record's value posts to one member of each dimension", field)
 		}
 	}
 	if err := checkRowFilter(ctx, db, fields, m.RowFilter); err != nil {

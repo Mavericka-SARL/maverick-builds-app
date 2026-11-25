@@ -14,7 +14,7 @@ import { useDemo } from "../../api/useDemo";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge,
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
-  Txt,
+  Txt, RichText,
 } from "../../ui";
 import { parsePastedTable } from "./pastedTable";
 import { buildAdvice } from "./aiBuildAdvice";
@@ -319,7 +319,8 @@ function MessageBubble({ msg }: { msg: AIMessage }) {
   return (
     <div className={["mvx-chat-row", isUser ? "mvx-chat-row--user" : ""].filter(Boolean).join(" ")}>
       <div className={["mvx-chat-bubble", isUser ? "mvx-chat-bubble--user" : ""].filter(Boolean).join(" ")}>
-        {msg.content}
+        {/* The AI writes a small Markdown (its prompt says which); the developer's own words show as typed. */}
+        {isUser ? <Txt>{msg.content}</Txt> : <RichText text={msg.content} />}
         {msg.tool_calls && msg.tool_calls.length > 0 && (
           <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7, display: "flex", alignItems: "center", gap: 4 }}>
             <Search size={11} aria-hidden="true" /> Fetching: {msg.tool_calls.map(tc => tc.name).join(", ")}
@@ -2050,7 +2051,7 @@ export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
 
           {thinking && streamingContent && (
             <div className="mvx-chat-row">
-              <div className="mvx-chat-bubble">{streamingContent}{elapsed && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{elapsed}</span>}</div>
+              <div className="mvx-chat-bubble"><RichText text={streamingContent} />{elapsed &&<span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{elapsed}</span>}</div>
             </div>
           )}
 

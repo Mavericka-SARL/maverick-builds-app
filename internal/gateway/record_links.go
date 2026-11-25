@@ -241,6 +241,17 @@ func (h *handler) recordHistory(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, v := range []*any{&entries[i].Old, &entries[i].New} {
+			if list, ok := (*v).([]any); ok {
+				// A list shows the members the caller sees.
+				shown := []any{}
+				for _, x := range list {
+					if c, ok := x.(string); !ok || !view.HiddenCode(f.DimensionID, c) {
+						shown = append(shown, x)
+					}
+				}
+				*v = shown
+				continue
+			}
 			if s, ok := (*v).(string); ok && view.HiddenCode(f.DimensionID, s) {
 				*v = map[string]any{"hidden": true}
 			}
@@ -359,6 +370,10 @@ func (h *handler) recordBoardColumns(w http.ResponseWriter, r *http.Request) {
 	f := scope.form.Field(r.URL.Query().Get("field"))
 	if f == nil || (f.Type != "select" && (f.Type != "dimension" || f.DimensionID == "")) {
 		jsonErr(w, fmt.Errorf("field names no dimension or select field of %s", scope.form.Label), http.StatusBadRequest)
+		return
+	}
+	if f.Multiple {
+		jsonErr(w, fmt.Errorf("%s holds several members: a card stands in one column", firstNonEmpty(f.Label, f.Name)), http.StatusBadRequest)
 		return
 	}
 	cols := []boardColumn{}

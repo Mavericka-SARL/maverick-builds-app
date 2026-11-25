@@ -71,7 +71,7 @@ func (h *handler) parentLinks(ctx context.Context, form *crudapp.FormDef) ([]par
 	var out []parentLink
 	store := crudapp.NewStore(h.db.For(ctx))
 	for _, f := range form.Fields {
-		if f.Type != "dimension" || f.DimensionID == "" || f.OnDelete == crudapp.OnDeleteClear {
+		if f.Type != "dimension" || f.DimensionID == "" || f.OnDelete == crudapp.OnDeleteClear || f.Multiple { // a list names no parent
 			continue
 		}
 		var parentID string

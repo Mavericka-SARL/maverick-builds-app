@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, History as HistoryIcon, Pencil, Plus as PlusIcon } from "lucide-react";
 import {
   api, recordStatusOptions, statusFieldOf,
   type DevDimension, type FormDef, type FormField, type FormRecord, type Metric, type RecordDeletePlan,
 } from "../../api/client";
-import { Button, Dialog, Field, IconButton, InlineAlert, LoadingState, Select, useConfirm } from "../../ui";
+import { Button, Dialog, Field, IconButton, InlineAlert, LoadingState, Select, Txt, useConfirm } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
 import { useDateFormat } from "../dateFormat";
 import { isoToLocal } from "../dateSerial";
@@ -13,7 +13,7 @@ import { FormFieldInput, RecordStatusBadge } from "./RecordFieldInput";
 import { canCreateRecords, createStatusesOf, createStatusFor } from "./formPermissions";
 import {
   conditionWords, defaultsOf, displayValue, editableFields, isDueToday, isOverdue, keeperOf, memberLabels, pairedField, postsMember,
-  inSentence, localDateTime, recordTitle, requiredNow, singular, statusLabel,
+  inSentence, localDateTime, memberList, recordTitle, requiredNow, singular, statusLabel,
 } from "./recordList";
 import { useRecordChoices } from "./useRecordChoices";
 
@@ -30,6 +30,21 @@ export function RecordFieldValue({ f, data, dims, metrics, onOpenMember }: {
 }) {
   const dateFormat = useDateFormat();
   const value = data[f.name];
+  if (onOpenMember && f.type === "dimension" && Array.isArray(value) && value.length > 0) {
+    // Several members: each opens its own record.
+    return (
+      <>
+        {memberList(value).map((code, i) => (
+          <Fragment key={code}>
+            <Txt>{i > 0 ? ", " : ""}</Txt>
+            <button type="button" className="mvx-link-button" onClick={e => { e.stopPropagation(); onOpenMember(f, code); }}>
+              {displayValue(f, code, dims, metrics, dateFormat)}
+            </button>
+          </Fragment>
+        ))}
+      </>
+    );
+  }
   if (onOpenMember && f.type === "dimension" && typeof value === "string" && value !== "") {
     return (
       <button type="button" className="mvx-link-button" onClick={e => { e.stopPropagation(); onOpenMember(f, value); }}>
@@ -113,7 +128,11 @@ export function RecordFields({ form, forms, draft, setDraft, dims, metrics, revi
             {creating === f.name && keeper && (
               <LinkedCreatePanel keeper={keeper} origin={form} originDraft={draft} revisionId={revisionId} dims={dims} metrics={metrics}
                 onCancel={() => setCreating(null)}
-                onCreated={(code) => { setDraft(d => ({ ...d, [f.name]: code })); setCreating(null); }} />
+                onCreated={(code) => {
+                  // A field holding several members takes the new one on its list.
+                  setDraft(d => ({ ...d, [f.name]: f.multiple ? [...memberList(d[f.name]).filter(c => c !== code), code] : code }));
+                  setCreating(null);
+                }} />
             )}
           </React.Fragment>
         );
@@ -423,7 +442,7 @@ export function RecordDialog({ form, forms, record, initialData, revisionId, onC
       )}
       <RecordView key={stack.length + (step.record?.id ?? "new")} step={step} forms={forms} revisionId={revisionId}
         onOpen={(f, r) => push({ form: f, record: r })}
-        onAdd={(f, field, code) => push({ form: f, record: null, initialData: { [field]: code } })}
+        onAdd={(f, field, code) => push({ form: f, record: null, initialData: { [field]: f.fields.find(x => x.name === field)?.multiple ? [code] : code } })}
         onDone={() => (stack.length > 1 ? back() : onClose())} />
     </Dialog>
   );

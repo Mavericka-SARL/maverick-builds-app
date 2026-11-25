@@ -1469,6 +1469,8 @@ export interface FormField {
   // dimension type
   dimension_id?: string;
   allowed_members?: string[];
+  /** A dimension field holding several members (a deal's contacts): its value is a list of codes. */
+  multiple?: boolean;
   // metric type
   metric_id?: string;
   value_field?: string;

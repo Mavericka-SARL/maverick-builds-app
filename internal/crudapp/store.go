@@ -26,6 +26,14 @@ type FormField struct {
 	// dimension type
 	DimensionID    string   `json:"dimension_id,omitempty"`
 	AllowedMembers []string `json:"allowed_members,omitempty"`
+	// Multiple lets a dimension field hold several members — a deal's
+	// contacts — stored as a list of their codes (opt-in, 2026-11-25; a
+	// field without it holds one code, as before). Required asks for at
+	// least one. A filter for a member keeps the records whose list holds
+	// it; such a field is no column of a board, no coordinate a mapping
+	// posts to, and is neither sorted nor grouped by. A deleted member is
+	// taken off the lists ("clear") or kept from being deleted ("block").
+	Multiple bool `json:"multiple,omitempty"`
 	// metric type
 	MetricID   string `json:"metric_id,omitempty"`
 	ValueField string `json:"value_field,omitempty"` // name of sibling field that holds the numeric amount
@@ -506,6 +514,9 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 		formID, name, label, fieldsJSON); err != nil {
 		return change, err
 	}
+	if err := convertMultiple(ctx, tx, before, fields); err != nil {
+		return change, err
+	}
 	after := *before
 	after.Fields = fields
 	change.StatusChanged = before.HasStatus() != after.HasStatus()
@@ -520,6 +531,45 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 		change.CodesAssigned += n
 	}
 	return change, tx.Commit(ctx)
+}
+
+// convertMultiple puts the saved values of a dimension field that comes to
+// hold several members, or stops holding several, in their new form: a
+// code becomes a list of one, a list of one its code. A field still naming
+// several members in a record cannot hold one: the change is refused
+// (a QueryError), naming how many records do.
+func convertMultiple(ctx context.Context, tx dbx.DB, before *FormDef, fields []FormField) error {
+	for _, f := range fields {
+		old := before.Field(f.Name)
+		if old == nil || old.Multiple == f.Multiple || f.Type != "dimension" {
+			continue
+		}
+		if f.Multiple {
+			if _, err := tx.Exec(ctx, `
+				UPDATE runtime.form_record SET data = jsonb_set(data, ARRAY[$2::text], jsonb_build_array(data->$2::text))
+				WHERE form_id = $1::uuid AND jsonb_typeof(data->$2::text) = 'string'`, before.ID, f.Name); err != nil {
+				return fmt.Errorf("make %s a list: %w", f.Name, err)
+			}
+			continue
+		}
+		var several int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*) FROM runtime.form_record
+			WHERE form_id = $1::uuid AND jsonb_typeof(data->$2::text) = 'array' AND jsonb_array_length(data->$2::text) > 1`,
+			before.ID, f.Name).Scan(&several); err != nil {
+			return err
+		}
+		if several > 0 {
+			return queryErr("%s names several members in %d record(s): it can hold one only once each of them names one", firstNonEmpty(f.Label, f.Name), several)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE runtime.form_record
+			SET data = CASE jsonb_array_length(data->$2::text) WHEN 0 THEN data - $2::text ELSE jsonb_set(data, ARRAY[$2::text], data->$2::text->0) END
+			WHERE form_id = $1::uuid AND jsonb_typeof(data->$2::text) = 'array'`, before.ID, f.Name); err != nil {
+			return fmt.Errorf("make %s one value: %w", f.Name, err)
+		}
+	}
+	return nil
 }
 
 // SetOwnRecordsOnly sets whether the table shows each person only the

@@ -535,7 +535,9 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                 {cols.map((c) => {
                   const sorted = sort?.field === c.key ? (sort.desc ? "descending" : "ascending") : undefined;
                   return (
-                    <th key={c.key} aria-sort={sorted ?? "none"} className={c.kind === "number" ? "mvx-cell--num" : undefined}>
+                    <th key={c.key} aria-sort={c.field?.multiple ? undefined : sorted ?? "none"} className={c.kind === "number" ? "mvx-cell--num" : undefined}>
+                      {/* A list of members has no order to sort by. */}
+                      {c.field?.multiple ? <Txt>{c.label}</Txt> : (
                       <button type="button" className="mvx-th-sort" onClick={() => setSort(s => nextSort(s, c.key))}
                         title={`Sort by ${c.label}`}
                         style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -543,6 +545,7 @@ export function FormPanel({ form, revisionId, title, newRecordButton = false, fi
                         {sorted === "ascending" && <ArrowUp size={12} aria-hidden="true" />}
                         {sorted === "descending" && <ArrowDown size={12} aria-hidden="true" />}
                       </button>
+                      )}
                     </th>
                   );
                 })}

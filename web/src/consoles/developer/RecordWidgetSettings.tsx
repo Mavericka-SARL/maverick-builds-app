@@ -19,7 +19,7 @@ export function BoardSettingsEditor({ form, dims, value, onChange }: {
   value: BoardSettings;
   onChange: (next: BoardSettings) => void;
 }) {
-  const columnFields = form.fields.filter(f => (f.type === "dimension" && f.dimension_id) || f.type === "select");
+  const columnFields = form.fields.filter(f => (f.type === "dimension" && f.dimension_id && !f.multiple) || f.type === "select"); // a card stands in one column
   const colField = form.fields.find(f => f.name === value.column_field);
   const colDim = colField?.type === "dimension" ? dims.find(d => d.id === colField.dimension_id) : undefined;
   const colorProps = [...new Set((colDim?.members ?? []).flatMap(m => Object.keys(m.properties ?? {})))].sort();

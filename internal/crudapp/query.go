@@ -63,7 +63,11 @@ type Column struct {
 	// DimensionID: a dimension field's dimension, whose member labels name
 	// its values.
 	DimensionID string `json:"dimension_id,omitempty"`
-	system      string // id, created_at, updated_at, created_by, status: a column of the record row
+	// Multiple: a dimension field holding several members (a list of
+	// codes). A filter for a member keeps the records whose list holds it;
+	// it is not sorted or grouped by.
+	Multiple bool   `json:"multiple,omitempty"`
+	system   string // id, created_at, updated_at, created_by, status: a column of the record row
 }
 
 // Columns lists what a query can name in the table: its fields, then the
@@ -88,6 +92,7 @@ func (f *FormDef) Columns() []Column {
 			c.Kind = KindUser // a filter may say "me"
 		case fd.Type == "dimension":
 			c.DimensionID = fd.DimensionID
+			c.Multiple = fd.Multiple
 		}
 		cols = append(cols, c)
 		names[fd.Name] = true
@@ -288,6 +293,15 @@ func (b *qb) expr(c Column) string {
 	return "(r.data->>" + p + ")"
 }
 
+// elements is the jsonb list of the members a field holding several names
+// in record row r: a code saved before the field held several counts as a
+// list of one, no value as an empty list.
+func (b *qb) elements(key string) string {
+	p := b.arg(key) + "::text"
+	return "(CASE jsonb_typeof(r.data->" + p + ") WHEN 'array' THEN r.data->" + p +
+		" WHEN 'string' THEN jsonb_build_array(r.data->" + p + ") ELSE '[]'::jsonb END)"
+}
+
 // visibility adds what the person may see.
 func (b *qb) visibility(v Visibility) {
 	b.conds = append(b.conds, "r.form_id = "+b.arg(b.form.ID)+"::uuid")
@@ -298,9 +312,17 @@ func (b *qb) visibility(v Visibility) {
 		b.conds = append(b.conds, "r.created_by = "+b.arg(v.OwnerID)+"::uuid")
 	}
 	for _, field := range sortedKeys(v.HiddenCodes) {
-		if codes := v.HiddenCodes[field]; len(codes) > 0 {
-			b.conds = append(b.conds, "COALESCE(r.data->>"+b.arg(field)+"::text, '') <> ALL("+b.arg(codes)+"::text[])")
+		codes := v.HiddenCodes[field]
+		if len(codes) == 0 {
+			continue
 		}
+		if fd := b.form.Field(field); fd != nil && fd.Multiple {
+			// A list naming any hidden member withholds the record, as one
+			// naming it alone does.
+			b.conds = append(b.conds, "NOT ("+b.elements(field)+" ?| "+b.arg(codes)+"::text[])")
+			continue
+		}
+		b.conds = append(b.conds, "COALESCE(r.data->>"+b.arg(field)+"::text, '') <> ALL("+b.arg(codes)+"::text[])")
 	}
 	for _, field := range sortedKeys(v.HiddenNames) {
 		if names := v.HiddenNames[field]; len(names) > 0 {
@@ -336,7 +358,10 @@ func (b *qb) search(text string) {
 			continue
 		}
 		keys = append(keys, f.Name)
-		if f.Type == "dimension" && f.DimensionID != "" {
+		if f.Type == "dimension" && f.DimensionID != "" && f.Multiple {
+			ors = append(ors, "EXISTS (SELECT 1 FROM model.dimension_member m WHERE m.dimension_id = "+
+				b.arg(f.DimensionID)+"::uuid AND m.code IN (SELECT jsonb_array_elements_text("+b.elements(f.Name)+")) AND m.label ILIKE "+pat+")")
+		} else if f.Type == "dimension" && f.DimensionID != "" {
 			ors = append(ors, "EXISTS (SELECT 1 FROM model.dimension_member m WHERE m.dimension_id = "+
 				b.arg(f.DimensionID)+"::uuid AND m.code = r.data->>"+b.arg(f.Name)+"::text AND m.label ILIKE "+pat+")")
 		}
@@ -359,6 +384,9 @@ func (b *qb) filter(f Filter) error {
 	op := strings.ToLower(strings.TrimSpace(f.Op))
 	if op == "" {
 		op = "eq"
+	}
+	if c.Multiple {
+		return b.multipleFilter(c, op, f)
 	}
 	e := b.expr(c)
 	if relativeDateOps[op] {
@@ -479,6 +507,65 @@ func (b *qb) filter(f Filter) error {
 	case "not_in":
 		b.conds = append(b.conds, "NOT COALESCE("+lhs+" IN ("+strings.Join(params, ", ")+"), false)")
 	}
+	return nil
+}
+
+// multipleFilter adds f on c, a field holding several members: eq keeps
+// the records whose list holds the member, ne those whose list does not,
+// in and not_in any of several; contains and starts_with test the codes;
+// empty and not_empty the list.
+func (b *qb) multipleFilter(c Column, op string, f Filter) error {
+	el := b.elements(c.Key)
+	switch op {
+	case "empty", "not_empty":
+		cond := "jsonb_array_length(" + el + ") = 0"
+		if op == "not_empty" {
+			cond = "NOT (" + cond + ")"
+		}
+		b.conds = append(b.conds, cond)
+		return nil
+	case "contains", "starts_with":
+		s, err := textValue(f.Value)
+		if err != nil {
+			return queryErr("%s of %s: %v", op, c.Label, err)
+		}
+		pat := likeEscape(s) + "%"
+		if op == "contains" {
+			pat = "%" + pat
+		}
+		b.conds = append(b.conds, "EXISTS (SELECT 1 FROM jsonb_array_elements_text("+el+") x WHERE x ILIKE "+b.arg(pat)+"::text)")
+		return nil
+	case "eq", "ne", "in", "not_in":
+	default:
+		return queryErr("%s holds several members: filter it with eq (holds the member), ne (does not), in, not_in, contains, starts_with, empty or not_empty — not %s", c.Label, op)
+	}
+	vals := f.Values
+	if f.Value != nil && len(vals) == 0 {
+		if list, ok := f.Value.([]any); ok && (op == "in" || op == "not_in") {
+			vals = list
+		} else {
+			vals = []any{f.Value}
+		}
+	}
+	if (op == "eq" || op == "ne") && len(vals) != 1 {
+		return queryErr("%s of %s takes one value", op, c.Label)
+	}
+	if len(vals) == 0 {
+		return queryErr("%s of %s takes a list of values", op, c.Label)
+	}
+	want := make([]string, 0, len(vals))
+	for _, v := range vals {
+		s, err := textValue(v)
+		if err != nil {
+			return queryErr("%s of %s: %v", op, c.Label, err)
+		}
+		want = append(want, strings.ToLower(s))
+	}
+	cond := "EXISTS (SELECT 1 FROM jsonb_array_elements_text(" + el + ") x WHERE lower(x) = ANY(" + b.arg(want) + "::text[]))"
+	if op == "ne" || op == "not_in" {
+		cond = "NOT " + cond
+	}
+	b.conds = append(b.conds, cond)
 	return nil
 }
 
@@ -728,6 +815,9 @@ func (s *Store) queryRecords(ctx context.Context, form *FormDef, vis Visibility,
 		if !ok {
 			return nil, queryErr("cannot sort by %q: it is not a field of %s (its fields: %s)", so.Field, form.Label, columnKeys(form))
 		}
+		if c.Multiple {
+			return nil, queryErr("cannot sort by %s: it holds several members", c.Label)
+		}
 		order = append(order, b.expr(c)+direction(so.Desc))
 	}
 	order = append(order, "r.created_at DESC", "r.id DESC")
@@ -852,6 +942,9 @@ func (s *Store) QueryTotals(ctx context.Context, form *FormDef, vis Visibility, 
 		if !ok {
 			return nil, queryErr("cannot group by %q: it is not a field of %s (its fields: %s)", g.Field, form.Label, columnKeys(form))
 		}
+		if c.Multiple {
+			return nil, queryErr("cannot group by %s: it holds several members, and a record would count in each — filter by one instead", c.Label)
+		}
 		e := b.expr(c)
 		key := c.Key
 		kind := c.Kind
@@ -905,6 +998,9 @@ func (s *Store) QueryTotals(ctx context.Context, form *FormDef, vis Visibility, 
 			c, ok := form.column(a.Field)
 			if !ok {
 				return nil, queryErr("%s needs a field of %s (its fields: %s)", op, form.Label, columnKeys(form))
+			}
+			if c.Multiple {
+				return nil, queryErr("%s of %s: it holds several members — count the records holding one with a filter", op, c.Label)
 			}
 			fe := b.expr(c)
 			switch op {

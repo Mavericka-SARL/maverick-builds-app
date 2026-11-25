@@ -2,9 +2,9 @@ import { DateInput } from "../DateInput";
 import { useDateFormat } from "../dateFormat";
 import { Plus as PlusIcon } from "lucide-react";
 import { type Metric, type DevDimension, type DevDimensionMember, type FormField } from "../../api/client";
-import { Button, Select, TextInput, NumberInput, StatusBadge, Textarea } from "../../ui";
+import { Button, FilterChip, Select, TextInput, NumberInput, StatusBadge, Textarea, Txt } from "../../ui";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
-import { statusLabel } from "./recordList";
+import { memberList, statusLabel } from "./recordList";
 
 // A record's dimension field only ever lets the user pick a real, concrete
 // member (e.g. a specific department) — never an aggregate/rollup node,
@@ -93,6 +93,51 @@ export function FormFieldInput({
       ? (m: DimFormMember) => (!allowedSet || allowedSet.has(m.code)) && !(readOnlyMembersOut && m.access === "read")
         && offered(m.code) && offInactive(m.code)
       : undefined;
+    if (f.multiple) {
+      // Several members: each chosen one a chip to take off, the picker
+      // adding another (one not chosen yet), "+ New" making one in place.
+      const chosen = memberList(value);
+      const savedList = memberList(saved);
+      const labelOf = (code: string) => allMembers.find(m => m.code === code)?.label ?? code;
+      const addable = (m: DimFormMember) => !chosen.includes(m.code)
+        && (!allowedSet || allowedSet.has(m.code)) && !(readOnlyMembersOut && m.access === "read")
+        && (!inactive?.includes(m.code) || savedList.includes(m.code));
+      return (
+        <div role="group" aria-label={f.label || f.name} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {chosen.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {chosen.map(code => (
+                <FilterChip key={code} active aria-label={`Remove ${labelOf(code)}`}
+                  onClick={() => onChange(chosen.filter(c => c !== code))} onClear={() => onChange(chosen.filter(c => c !== code))}>
+                  <Txt>{labelOf(code)}</Txt>
+                </FilterChip>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <HierarchicalMemberSelect
+                id={id}
+                ariaLabel={`Add to ${f.label || dim?.name || "the list"}`}
+                members={allMembers}
+                value=""
+                onChange={code => { if (code && !chosen.includes(code)) onChange([...chosen, code]); }}
+                placeholder={chosen.length > 0 ? "Add another…" : "Select…"}
+                leafOnly
+                isSelectable={addable}
+                className="mvx-hier-select__trigger--full-width"
+              />
+            </div>
+            {onCreateLinked && (
+              <Button size="sm" variant="ghost" leadingIcon={<PlusIcon size={13} />} onClick={onCreateLinked}
+                aria-label={`New ${linkedLabel ?? f.label}`}>
+                New
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
     const picker = (
       <HierarchicalMemberSelect
         id={id}

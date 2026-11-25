@@ -55,7 +55,7 @@ function FieldOptions({ f, fields, onUpdate, keeper, applicationId }: {
   const row = { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" as const, fontSize: 12 };
   return (
     <div className="mvx-panel" style={{ marginLeft: 148, marginTop: 6, padding: 10, display: "flex", flexDirection: "column", gap: 8 }} role="group" aria-label={`Options of ${f.label || f.name || "field"}`}>
-      {!serverFilled && f.type !== "metric" && f.type !== "person" && !f.stamp_when && (
+      {!serverFilled && f.type !== "metric" && f.type !== "person" && !f.stamp_when && !f.multiple && (
         <div style={row}>
           <span className="mvx-admin-muted">Default:</span>
           {f.type === "boolean" ? (
@@ -92,6 +92,15 @@ function FieldOptions({ f, fields, onUpdate, keeper, applicationId }: {
             label="The record's code (typed, unique, unchanged once saved)" />
         )}
         {!serverFilled && <Checkbox checked={!!f.history} onChange={e => onUpdate({ history: e.target.checked || undefined })} label="Keep history" />}
+        {f.type === "dimension" && (
+          // Several members (a deal's contacts): the options that follow one
+          // value go, and a delete takes the member off the list or waits.
+          <Checkbox checked={!!f.multiple} label="Several values (a list of members)"
+            onChange={e => onUpdate(e.target.checked
+              ? { multiple: true, default: undefined, transitions: undefined, locks_in: undefined, notify: undefined, roles: undefined,
+                  ...(f.on_delete === "cascade" ? { on_delete: undefined } : {}) }
+              : { multiple: undefined })} />
+        )}
         {f.type === "number" && (
           <Checkbox checked={f.format === "money"} onChange={e => onUpdate({ format: e.target.checked ? "money" : undefined })} label="Money" />
         )}
@@ -134,8 +143,8 @@ function FieldOptions({ f, fields, onUpdate, keeper, applicationId }: {
           <Select style={{ width: 220 }} value={f.on_delete ?? "block"} aria-label="When the linked record is deleted"
             onChange={e => onUpdate({ on_delete: e.target.value === "block" ? undefined : e.target.value as FormField["on_delete"] })}>
             <option value="block">refuse while this record names it</option>
-            <option value="cascade">delete this record with it</option>
-            <option value="clear" disabled={f.required}>empty this field</option>
+            <option value="cascade" disabled={f.multiple}>delete this record with it</option>
+            <option value="clear" disabled={f.required}>{f.multiple ? "take it off this field's list" : "empty this field"}</option>
           </Select>
         </div>
       )}

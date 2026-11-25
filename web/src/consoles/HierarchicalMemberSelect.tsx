@@ -181,9 +181,16 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
   function reposition() {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
+    // Below the trigger, or above it when the room below is short and there
+    // is more above — a picker low in a long form opened off the screen, its
+    // options out of reach (2026-11-25); either way no taller than the room.
+    const below = window.innerHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    const up = below < 200 && above > below;
     setPopoverStyle({
       position: "fixed",
-      top: rect.bottom + 4,
+      ...(up ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+      maxHeight: Math.max(120, Math.min(320, up ? above : below)),
       left: rect.left,
       minWidth: rect.width,
       // Above the Dialog overlay (zIndex 1000): without this, a select
@@ -213,7 +220,9 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setOpen(false); triggerRef.current?.focus(); return; }
+      // Escape closes the list only: a dialog around the picker (a record's
+      // form) listens for it too, and closed with the half-filled form.
+      if (e.key === "Escape") { e.stopPropagation(); setOpen(false); triggerRef.current?.focus(); return; }
       const opts = flatOptionsRef.current;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (opts.length === 0) return;
@@ -243,12 +252,12 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
       if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
       setOpen(false);
     };
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true); // before the dialog's own listener
     document.addEventListener("mousedown", onMouseDownOutside);
     return () => {
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("mousedown", onMouseDownOutside);
     };
   }, [open, pick]);

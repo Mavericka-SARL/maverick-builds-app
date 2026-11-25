@@ -111,6 +111,16 @@ func formCellString(v any) string {
 		return strconv.FormatFloat(t, 'f', -1, 64)
 	case bool:
 		return strconv.FormatBool(t)
+	case []any:
+		// A field holding several members: its codes apart by "; ", as a
+		// file's cell gives them back (recordpost.multipleItems).
+		parts := make([]string, 0, len(t))
+		for _, x := range t {
+			if c := formCellString(x); c != "" {
+				parts = append(parts, c)
+			}
+		}
+		return strings.Join(parts, "; ")
 	default:
 		b, err := json.Marshal(t)
 		if err != nil {

@@ -92,6 +92,11 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 	if p.Sort != nil && !form.HasColumn(p.Sort.Field) {
 		return fmt.Errorf("record_sort names %q, which is not a field of %s", p.Sort.Field, form.Label)
 	}
+	if p.Sort != nil {
+		if f := form.Field(p.Sort.Field); f != nil && f.Multiple {
+			return fmt.Errorf("record_sort names %q, which holds several members and has no order", p.Sort.Field)
+		}
+	}
 	seen := map[string]bool{}
 	for _, name := range p.Follows {
 		f := form.Field(name)
@@ -124,6 +129,9 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 	col := form.Field(b.ColumnField)
 	if col == nil || (col.Type != "dimension" && col.Type != "select") || (col.Type == "dimension" && col.DimensionID == "") {
 		return fmt.Errorf("board.column_field %q is not a dimension or select field of %s (its fields: %s)", b.ColumnField, form.Label, fieldNames(form))
+	}
+	if col.Multiple {
+		return fmt.Errorf("board.column_field %q holds several members: a card stands in one column — choose a field holding one", b.ColumnField)
 	}
 	if b.TitleField != "" && form.Field(b.TitleField) == nil {
 		return fmt.Errorf("board.title_field %q is not a field of %s", b.TitleField, form.Label)

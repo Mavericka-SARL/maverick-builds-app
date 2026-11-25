@@ -470,7 +470,9 @@ func (ps *Poster) linkedVisibility(ctx context.Context, view *AccessView, form *
 	store := crudapp.NewStore(ps.db(ctx))
 	for _, f := range form.Fields {
 		keeper := keepers[f.DimensionID]
-		if f.Type != "dimension" || keeper == nil || seen[keeper.ID] || f.DeleteRule() == crudapp.OnDeleteClear {
+		// A field naming several members refers to them; the record is no
+		// member's own (a deal is not its contacts').
+		if f.Type != "dimension" || keeper == nil || seen[keeper.ID] || f.DeleteRule() == crudapp.OnDeleteClear || f.Multiple {
 			continue
 		}
 		next := maps.Clone(seen)
@@ -574,8 +576,10 @@ func (v *AccessView) ReadOnlyMember(form *crudapp.FormDef, data map[string]any) 
 		if f.Type != "dimension" || f.DimensionID == "" {
 			continue
 		}
-		if s, ok := data[f.Name].(string); ok && not(f.DimensionID, s) {
-			return firstNonEmpty(f.Label, f.Name)
+		for _, s := range crudapp.FieldValues(f, data[f.Name]) {
+			if not(f.DimensionID, s) {
+				return firstNonEmpty(f.Label, f.Name)
+			}
 		}
 	}
 	return ""
@@ -622,6 +626,28 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 				continue
 			}
 			data[f.Name] = strings.TrimSpace(fmt.Sprint(v))
+			continue
+		}
+		if f.Multiple && f.Type == "dimension" && f.DimensionID != "" {
+			codes, msgs, err := ps.multipleValue(ctx, view, form, f, current, v, leaves)
+			if err != nil {
+				return nil, err
+			}
+			for _, m := range msgs {
+				bad(f, "%s", m)
+			}
+			if len(codes) == 0 {
+				delete(data, f.Name)
+				if required && f.Required && len(msgs) == 0 {
+					bad(f, "%s is required: name at least one", label)
+				}
+				continue
+			}
+			list := make([]any, len(codes))
+			for i, c := range codes {
+				list[i] = c
+			}
+			data[f.Name] = list
 			continue
 		}
 		if v == nil {
@@ -775,7 +801,87 @@ func hasValue(v any) bool {
 	if s, ok := v.(string); ok {
 		return strings.TrimSpace(s) != ""
 	}
+	if list, ok := v.([]any); ok {
+		return len(list) > 0
+	}
 	return true
+}
+
+// multipleItems are the members a value for a field holding several names:
+// a list (the console, the API), or text a file's cell holds, its members
+// apart by ";" or a new line ("Chloe Andersen; Omar Okonkwo") — a comma
+// stays inside a label ("Smith, John").
+func multipleItems(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case string:
+		var out []string
+		for _, part := range strings.FieldsFunc(t, func(r rune) bool { return r == ';' || r == '\n' || r == '\r' }) {
+			if s := strings.TrimSpace(part); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return crudapp.FieldValues(crudapp.FormField{Multiple: true}, v)
+}
+
+// multipleValue checks a value of f, a dimension field holding several
+// members, as a single one is checked member by member, and gives the codes
+// it stores (in the order named, each once). A member the record held
+// before the save is not checked again: a member made inactive since stays
+// on the records naming it.
+func (ps *Poster) multipleValue(ctx context.Context, view *AccessView, form *crudapp.FormDef, f crudapp.FormField, current map[string]any, v any, leaves *MemberCache) ([]string, []string, error) {
+	label := firstNonEmpty(f.Label, f.Name)
+	held := map[string]bool{}
+	if current != nil {
+		for _, c := range crudapp.FieldValues(f, current[f.Name]) {
+			held[c] = true
+		}
+	}
+	var codes, msgs []string
+	seen := map[string]bool{}
+	for _, raw := range multipleItems(v) {
+		code := raw
+		if !held[raw] {
+			c, err := leaves.codeFor(ctx, ps, f.DimensionID, raw)
+			if err != nil {
+				return nil, nil, err
+			}
+			code = c
+		}
+		if seen[code] {
+			continue
+		}
+		seen[code] = true
+		if held[code] {
+			codes = append(codes, code)
+			continue
+		}
+		// A member hidden from the person is no member to them: the message
+		// is the one an unknown code gets, confirming nothing.
+		if view.hiddenCodes[f.DimensionID][code] {
+			msgs = append(msgs, fmt.Sprintf("%q is not a member of %s (no member has this code or label)", raw, label))
+			continue
+		}
+		msg, err := ps.FormMemberProblem(ctx, f, code, leaves)
+		if err != nil {
+			return nil, nil, err
+		}
+		if msg != "" {
+			msgs = append(msgs, msg)
+			continue
+		}
+		if off, err := leaves.inactive(ctx, ps, form, f.DimensionID, code); err != nil {
+			return nil, nil, err
+		} else if off {
+			msgs = append(msgs, fmt.Sprintf("%q is inactive: it stays on the records that name it and is not chosen for others", raw))
+			continue
+		}
+		codes = append(codes, code)
+	}
+	return codes, msgs, nil
 }
 
 // tableInputMetrics are the names and labels of the input metrics of

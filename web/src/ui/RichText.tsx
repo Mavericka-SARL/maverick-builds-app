@@ -30,7 +30,10 @@ import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
  * Anything else is shown as written.
  */
 
-const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|page:[^)\n]+|[^)\s]+)\))/g;
+// Bold and italic only where the stars hug the words they mark and stand
+// outside a word, as Markdown reads them: "a * b * c" and "Price*Qty*12" (a
+// formula the AI writes in its reply) stay as written.
+const INLINE = /((?<![\w*])\*\*(?=[^\s*])[^*]+?(?<=\S)\*\*(?![\w*])|(?<![\w*])\*(?=[^\s*])[^*]+?(?<=\S)\*(?![\w*])|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|page:[^)\n]+|[^)\s]+)\))/g;
 
 /** The cells of a table row: "| a | b |" → ["a", "b"]; "\|" is a pipe inside a cell. */
 function tableCells(line: string): string[] {
@@ -82,7 +85,9 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
   text.split(INLINE).forEach((part, i) => {
     if (!part) return;
     const key = `${keyPrefix}-${i}`;
-    if (part.startsWith("**") && part.endsWith("**")) out.push(<strong key={key}>{part.slice(2, -2)}</strong>);
+    // Odd parts are INLINE's matches; the text between is shown as written.
+    if (i % 2 === 0) out.push(part);
+    else if (part.startsWith("**") && part.endsWith("**")) out.push(<strong key={key}>{part.slice(2, -2)}</strong>);
     else if (part.startsWith("`") && part.endsWith("`")) out.push(<code key={key} style={{ fontFamily: "var(--font-mono)", fontSize: "0.92em", background: "var(--color-surface-subtle)", padding: "1px 5px", borderRadius: 4 }}>{part.slice(1, -1)}</code>);
     else if (part.startsWith("*") && part.endsWith("*")) out.push(<em key={key}>{part.slice(1, -1)}</em>);
     else if (part.startsWith("[")) {
@@ -114,7 +119,7 @@ export function RichText({ text, style }: { text: string; style?: React.CSSPrope
   // Blank lines separate blocks; list items and headings stand alone.
   const src = text.replace(/\r\n/g, "\n").split("\n");
   let para: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; start: number; items: string[] } | null = null;
 
   const flushPara = () => {
     if (para.length === 0) return;
@@ -129,7 +134,7 @@ export function RichText({ text, style }: { text: string; style?: React.CSSPrope
     // Explicit markers: the global reset (Tailwind preflight) strips them,
     // so a list would otherwise read as indented prose.
     blocks.push(list.ordered
-      ? <ol key={key} style={{ margin: "0 0 10px", paddingLeft: 22, listStyle: "decimal outside" }}>{items}</ol>
+      ? <ol key={key} start={list.start === 1 ? undefined : list.start} style={{ margin: "0 0 10px", paddingLeft: 22, listStyle: "decimal outside" }}>{items}</ol>
       : <ul key={key} style={{ margin: "0 0 10px", paddingLeft: 22, listStyle: "disc outside" }}>{items}</ul>);
     list = null;
   };
@@ -167,7 +172,7 @@ export function RichText({ text, style }: { text: string; style?: React.CSSPrope
     }
     const heading = /^(#{1,3})\s+(.*)$/.exec(line);
     const bullet = /^[-*]\s+(.*)$/.exec(line);
-    const numbered = /^\d+[.)]\s+(.*)$/.exec(line);
+    const numbered = /^(\d+)[.)]\s+(.*)$/.exec(line);
     const quote = /^>\s?(.*)$/.exec(line);
 
     if (line.trim() === "") { flushPara(); flushList(); continue; }
@@ -188,8 +193,10 @@ export function RichText({ text, style }: { text: string; style?: React.CSSPrope
     if (bullet || numbered) {
       flushPara();
       const ordered = !!numbered;
-      if (!list || list.ordered !== ordered) { flushList(); list = { ordered, items: [] }; }
-      list.items.push((bullet ?? numbered)![1]);
+      // A numbered list keeps its first number: items a blank line apart
+      // (as replies write them) read 1, 2, 3 — not 1, 1, 1.
+      if (!list || list.ordered !== ordered) { flushList(); list = { ordered, start: numbered ? Number(numbered[1]) : 1, items: [] }; }
+      list.items.push(bullet ? bullet[1] : numbered![2]);
       continue;
     }
     if (quote) {

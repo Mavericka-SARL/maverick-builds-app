@@ -13508,6 +13508,10 @@ type FormField struct {
 	DimensionID OptUUID `json:"dimension_id"`
 	// Set when type=dimension.
 	AllowedMembers []string `json:"allowed_members"`
+	// A dimension field holding several members (a deal's contacts): its value is a list of member codes;
+	//  required asks for at least one. A filter for a member keeps the records whose list holds it. Not
+	// a board column, a mapping's coordinate, a sort or a grouping; on_delete is block or clear.
+	Multiple OptBool `json:"multiple"`
 	// Set when type=metric.
 	MetricID OptUUID `json:"metric_id"`
 	// Set when type=metric — name of the sibling field holding the numeric amount.
@@ -13594,6 +13598,11 @@ func (s *FormField) GetDimensionID() OptUUID {
 // GetAllowedMembers returns the value of AllowedMembers.
 func (s *FormField) GetAllowedMembers() []string {
 	return s.AllowedMembers
+}
+
+// GetMultiple returns the value of Multiple.
+func (s *FormField) GetMultiple() OptBool {
+	return s.Multiple
 }
 
 // GetMetricID returns the value of MetricID.
@@ -13749,6 +13758,11 @@ func (s *FormField) SetDimensionID(val OptUUID) {
 // SetAllowedMembers sets the value of AllowedMembers.
 func (s *FormField) SetAllowedMembers(val []string) {
 	s.AllowedMembers = val
+}
+
+// SetMultiple sets the value of Multiple.
+func (s *FormField) SetMultiple(val OptBool) {
+	s.Multiple = val
 }
 
 // SetMetricID sets the value of MetricID.

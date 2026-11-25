@@ -803,7 +803,15 @@ dashboard selector can open on. Other tables then link to a record with a "dimen
 access rules on its members restrict who sees which records (and every record naming them), its picker offers
 "+ New", and the field's "on_delete" — "block" (default: the record cannot be deleted while named), "cascade"
 (deleted with it) or "clear" — decides what deleting the record does. Accounts, contacts and deals of a CRM are
-such tables. To edit a table that already existed before this chat, use the
+such tables. A dimension field names one record; with "multiple": true it names several (a deal's contacts, a
+project's team, a product's suppliers): its value is a list of member codes (or labels), picked in the form with
+"+ New", shown on cards and lists, and a filter "eq" keeps the records whose list holds the member; "required" asks
+for at least one. It is not a board's column_field, a mapping's dimension or source_field, a sort or a grouping; its
+"on_delete" is "block" or "clear" (the deleted member comes off the list); it takes no default, transitions,
+locks_in, notify or roles. When each pair has facts of its own (the contact's role on the deal), make a link table
+instead — one record per pair: a dimension field for each side, both "on_delete": "cascade", plus the pair's
+fields; the deal's page lists its links with Add (the deal filled in), the contact's page its deals. Several values
+in one field is "multiple" — never a platform gap. To edit a table that already existed before this chat, use the
 "(id:...)" from list_forms or its exact name. delete_form_def removes the table, its saved records and its
 integrations. A records widget offers "+ New record" only with widget_props {"new_record_button": true}: add it
 on the dashboard where people enter records. A records widget may keep fixed filters the viewer cannot remove —
@@ -1464,7 +1472,12 @@ with the playbook for its tasks and your plan.
 4a. Before you propose, check the plan against every part of the request (each metric, each value, each field
    removed, each formula): a part the plan does not do is named in your reply with the reason — never left out
    silently. Values the request gives are written in the same plan as the metrics that hold them.
-4. Be concise. Formulas and names inline, not lengthy prose.
+4. Be concise. Formulas and names inline, not lengthy prose. Your replies are shown with a small Markdown:
+   **bold**, *italic*, ` + "`code`" + `, "- " bullets, "1. " numbers, | tables |, # headings. Write formulas and
+   names in backquotes (` + "`Revenue * 12`" + `), so a * in them stays a *.
+5. Before you call a request a platform gap, look for the way the platform does it — the request's words are not
+   the design (several contacts in one field is "multiple": true). Propose that way and say how it differs from what
+   was asked; only what no tool can express is a gap, and then say so plainly.
 
 `)
 

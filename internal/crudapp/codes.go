@@ -291,6 +291,11 @@ func validateFieldOptions(f FormField, fields []FormField) error {
 			return fmt.Errorf("on_delete is %q, %q or %q, not %q", OnDeleteBlock, OnDeleteCascade, OnDeleteClear, f.OnDelete)
 		}
 	}
+	if f.Multiple {
+		if err := checkMultiple(f); err != nil {
+			return err
+		}
+	}
 	if f.Format != "" && (f.Type != "number" || f.Format != "money") {
 		return fmt.Errorf("format %q: a number field may be shown as \"money\"; other fields have no format", f.Format)
 	}
@@ -309,6 +314,56 @@ func validateFieldOptions(f FormField, fields []FormField) error {
 		return fmt.Errorf("done_values belong to a done_field")
 	}
 	return validateRuleOptions(f, fields)
+}
+
+// checkMultiple says what a field holding several members may not be: the
+// options that follow one value (moves, locks, a stamp's condition, the
+// person a member's record names) and a delete that takes the record with
+// any one of its members.
+func checkMultiple(f FormField) error {
+	switch {
+	case f.Type != "dimension":
+		return fmt.Errorf("multiple is a dimension field's option: it names several members of its dimension")
+	case f.Default != nil:
+		return fmt.Errorf("a field holding several members has no default")
+	case f.OnDelete == OnDeleteCascade:
+		return fmt.Errorf("a field holding several members takes a deleted member off its list (on_delete %q) or keeps it from being deleted (%q), not %q", OnDeleteClear, OnDeleteBlock, OnDeleteCascade)
+	case len(f.Transitions) > 0 || len(f.LocksIn) > 0:
+		return fmt.Errorf("moves and locks follow a field holding one value, not several")
+	case f.Notify || len(f.Roles) > 0:
+		return fmt.Errorf("notify and roles name the person of one member's record, not of several")
+	}
+	return nil
+}
+
+// FieldValues are the values a field holds in a record's data: the list of
+// a field holding several (a code saved before it held several counts as a
+// list of one), or the one value of any other field. Empty values are left
+// out.
+func FieldValues(f FormField, v any) []string {
+	var out []string
+	add := func(x any) {
+		if x == nil {
+			return
+		}
+		if s := strings.TrimSpace(fmt.Sprintf("%v", x)); s != "" {
+			out = append(out, s)
+		}
+	}
+	if list, ok := v.([]any); ok {
+		for _, x := range list {
+			add(x)
+		}
+		return out
+	}
+	if list, ok := v.([]string); ok {
+		for _, x := range list {
+			add(x)
+		}
+		return out
+	}
+	add(v)
+	return out
 }
 
 // checkDefault checks f's default is a value of its type.

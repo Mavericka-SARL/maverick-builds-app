@@ -161,6 +161,9 @@ type plannedClear struct {
 	form      *crudapp.FormDef
 	field     string
 	recordIDs []string
+	// A field holding several members loses only code from its list.
+	code     string
+	multiple bool
 }
 
 // Referrer is a dimension field of a table naming a kept dimension.
@@ -183,6 +186,7 @@ func (ps *Poster) PlanDelete(ctx context.Context, form *crudapp.FormDef, rec *cr
 		ref  Referrer
 		ids  []string
 		rule string
+		code string // the member named
 	}
 	var hits []hit
 	referrers := map[string][]Referrer{} // kept dimension id → its referring fields
@@ -215,7 +219,7 @@ func (ps *Poster) PlanDelete(ctx context.Context, form *crudapp.FormDef, rec *cr
 				continue
 			}
 			rule := ref.Field.DeleteRule()
-			hits = append(hits, hit{ref: ref, ids: ids, rule: rule})
+			hits = append(hits, hit{ref: ref, ids: ids, rule: rule, code: code})
 			if rule != crudapp.OnDeleteCascade {
 				continue
 			}
@@ -255,7 +259,7 @@ func (ps *Poster) PlanDelete(ctx context.Context, form *crudapp.FormDef, rec *cr
 			plan.Cascade = add(plan.Cascade, h.ref, left)
 		case crudapp.OnDeleteClear:
 			plan.Clear = add(plan.Clear, h.ref, left)
-			plan.clears = append(plan.clears, plannedClear{form: h.ref.Form, field: h.ref.Field.Name, recordIDs: left})
+			plan.clears = append(plan.clears, plannedClear{form: h.ref.Form, field: h.ref.Field.Name, recordIDs: left, code: h.code, multiple: h.ref.Field.Multiple})
 		default:
 			plan.Blocked = add(plan.Blocked, h.ref, left)
 		}
@@ -306,7 +310,7 @@ func (ps *Poster) Referrers(ctx context.Context, form *crudapp.FormDef) ([]Refer
 func recordsNaming(ctx context.Context, ps *Poster, ref Referrer, code string) ([]string, []map[string]any, error) {
 	rows, err := ps.db(ctx).Query(ctx, `
 		SELECT id::text, data FROM runtime.form_record
-		WHERE form_id = $1::uuid AND data->>$2::text = $3
+		WHERE form_id = $1::uuid AND (data->>$2::text = $3 OR jsonb_typeof(data->$2::text) = 'array' AND data->$2::text ? $3)
 		ORDER BY created_at, id`, ref.Form.ID, ref.Field.Name, code)
 	if err != nil {
 		return nil, nil, err
@@ -346,16 +350,31 @@ func (ps *Poster) ExecuteDelete(ctx context.Context, plan *DeletePlan, rootStatu
 			if err := tx.QueryRow(ctx, `SELECT data FROM runtime.form_record WHERE id = $1::uuid FOR UPDATE`, id).Scan(&before); err != nil {
 				return fmt.Errorf("clear %s: %w", c.field, err)
 			}
-			if _, err := tx.Exec(ctx, `UPDATE runtime.form_record SET data = data - $2::text, updated_at = now() WHERE id = $1::uuid`, id, c.field); err != nil {
+			after := map[string]any{}
+			for k, v := range before {
+				if k != c.field {
+					after[k] = v
+				}
+			}
+			sql, args := `UPDATE runtime.form_record SET data = data - $2::text, updated_at = now() WHERE id = $1::uuid`, []any{id, c.field}
+			if c.multiple {
+				// The member comes off the list; the others stay.
+				kept := []any{}
+				for _, x := range crudapp.FieldValues(crudapp.FormField{Multiple: true}, before[c.field]) {
+					if x != c.code {
+						kept = append(kept, x)
+					}
+				}
+				if len(kept) > 0 {
+					after[c.field] = kept
+					sql = `UPDATE runtime.form_record SET data = jsonb_set(data, ARRAY[$2::text], $3::jsonb), updated_at = now() WHERE id = $1::uuid`
+					args = append(args, kept)
+				}
+			}
+			if _, err := tx.Exec(ctx, sql, args...); err != nil {
 				return fmt.Errorf("clear %s: %w", c.field, err)
 			}
 			if slices.Contains(c.form.HistoryFields(), c.field) {
-				after := map[string]any{}
-				for k, v := range before {
-					if k != c.field {
-						after[k] = v
-					}
-				}
 				if err := crudapp.LogFieldChanges(ctx, tx, c.form, id, before, after, userID); err != nil {
 					return err
 				}
