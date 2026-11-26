@@ -7,7 +7,7 @@
   </picture>
 </a>
 
-### Turn your spreadsheets into planning and analytics apps, built with an AI developer and ready for Claude and ChatGPT.
+### Build planning, analytics & data apps with AI.
 
 [![Latest release](https://img.shields.io/github/v/release/Mavericka-SARL/maverick-builds-app?sort=date&label=release)](https://github.com/Mavericka-SARL/maverick-builds-app/releases)
 [![Licence: Sustainable Use](https://img.shields.io/badge/licence-Sustainable%20Use-blue)](LICENSE)
@@ -274,7 +274,7 @@ it, switched off until a signed, offline license key switches it on; see
 
 <div align="center">
 
-**If this saves you a spreadsheet, a star helps others find it.** ⭐
+**If this is interesting for you, a star helps others find it.** ⭐
 
 <!-- Star history: add once the repository passes about 50 stars.
 [![Star history](https://api.star-history.com/svg?repos=Mavericka-SARL/maverick-builds-app&type=Date)](https://star-history.com/#Mavericka-SARL/maverick-builds-app&Date)
