@@ -22,10 +22,10 @@
 [Roadmap](https://github.com/orgs/Mavericka-SARL/projects/1)
 
 <a href="https://www.youtube.com/watch?v=NSS7vX4LDKI">
-  <img src="docs/developer-manual/img/28-dashboard-preview.png" alt="A planning dashboard: KPIs, a chart by region, an editable budget grid and an expense request table. Click to watch the demo." width="820">
+  <img src="docs/assets/management-dashboard.png" alt="A management dashboard for a production company: KPIs against budget, the month-end close gate, and monthly revenue, EBITDA, production and dispatch charts. Click to watch the demo." width="820">
 </a>
 
-<sub>A dashboard built on one model: totals, a chart, an editable grid and an approval workflow. Click it for the demo video.</sub>
+<sub>A management dashboard built on one model: KPIs against budget, the month-end close gate and monthly trends. Click it for the demo video.</sub>
 
 </div>
 
