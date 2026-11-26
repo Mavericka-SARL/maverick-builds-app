@@ -1,4 +1,33 @@
-# maverickbuilds.app
+<div align="center">
+
+<a href="https://maverickbuilds.app">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wordmark-dark.svg">
+    <img alt="maverickbuilds.app" src="docs/assets/wordmark-light.svg" width="380">
+  </picture>
+</a>
+
+### Turn your spreadsheets into planning and analytics apps, built with an AI developer and ready for Claude and ChatGPT.
+
+[![Latest release](https://img.shields.io/github/v/release/Mavericka-SARL/maverick-builds-app?sort=date&label=release)](https://github.com/Mavericka-SARL/maverick-builds-app/releases)
+[![Licence: Sustainable Use](https://img.shields.io/badge/licence-Sustainable%20Use-blue)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Mavericka-SARL/maverick-builds-app/ci.yml?branch=main&label=CI)](https://github.com/Mavericka-SARL/maverick-builds-app/actions/workflows/ci.yml)
+[![GitHub Discussions](https://img.shields.io/github/discussions/Mavericka-SARL/maverick-builds-app)](https://github.com/Mavericka-SARL/maverick-builds-app/discussions)
+[![Try the Playground](https://img.shields.io/badge/try%20the%20Playground-free-FFC000)](https://app.maverickbuilds.app/signup)
+
+[Website](https://maverickbuilds.app) ·
+[Playground](https://app.maverickbuilds.app/signup) ·
+[Docs](docs/README.md) ·
+[YouTube demo](https://www.youtube.com/watch?v=NSS7vX4LDKI) ·
+[Roadmap](https://github.com/orgs/Mavericka-SARL/projects/1)
+
+<a href="https://www.youtube.com/watch?v=NSS7vX4LDKI">
+  <img src="docs/developer-manual/img/28-dashboard-preview.png" alt="A planning dashboard: KPIs, a chart by region, an editable budget grid and an expense request table. Click to watch the demo." width="820">
+</a>
+
+<sub>A dashboard built on one model: totals, a chart, an editable grid and an approval workflow. Click it for the demo video.</sub>
+
+</div>
 
 maverickbuilds.app turns spreadsheets into decision-making apps for planning
 and analytics: budgets, forecasts, targets and headcount plans the whole
@@ -19,15 +48,73 @@ business works in.
 - **Revisions**: each change built and tested in its own revision and
   published in one step; models move between workspaces by export and import.
 
-No edition is licensed per user. The Community Edition is free to self-host
-for your company's internal use only, and maverickbuilds.app runs it for you
-as the Playground: the hosted Community Edition, free up to
-100 MB. It is built with Go, React and PostgreSQL.
+It is built with Go, React and PostgreSQL. The architecture is described in
+[ARCHITECTURE.md](ARCHITECTURE.md), and every document is indexed in
+[docs/README.md](docs/README.md).
 
-The architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
-every document is indexed in [docs/README.md](docs/README.md).
+## Get started in 60 seconds
 
-## Current runtime
+**1. Try it hosted.** [Sign up for the Playground](https://app.maverickbuilds.app/signup):
+the Community Edition run for you, hosted in the EU, free up to 100 MB with
+no time limit. Start from your own spreadsheet, or import a ready-made model
+from [Discussions › Models](https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/models).
+
+**2. Self-host it with Docker Compose.** One server, the published images for
+x86-64 and ARM, no build:
+
+```bash
+git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
+cd maverickbuilds
+git checkout 2026.11.25.1          # a release: the newest is on the Releases page
+cd deploy/compose
+./setup.sh env                     # creates .env with random secrets; set the host names in it
+docker compose pull
+docker compose up -d
+```
+
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) has the whole path: the settings
+to fill in, trying it on your own computer, Kubernetes, backups and upgrades.
+
+**3. Connect Claude or ChatGPT.** In the console, the account menu (top right)
+→ **Connect ChatGPT or Claude** shows the connector URL and each host's
+client ID and secret. Add it as a connector in Claude or ChatGPT, and ask
+about your grids and records in the chat, with your own access.
+[docs/CHAT_CONNECTOR.md](docs/CHAT_CONNECTOR.md) lists every tool.
+
+## Why maverickbuilds.app
+
+- **No per-user licence.** No edition is licensed per user. The Community
+  Edition is free to self-host for your company's internal use with
+  unlimited users, so everyone who plans can work in the model.
+- **Chat with your planning data.** Claude and ChatGPT read the grids,
+  records, dashboards and workflows as the signed-in person, make charts and
+  reports, and enter values only where that person may.
+- **Run it on your own servers.** Docker Compose on one server or Kubernetes,
+  with your data in your own PostgreSQL. The source is public, so you can read
+  exactly what runs.
+
+## How it compares
+
+| | maverickbuilds.app | Excel or Google Sheets | Anaplan | Pigment | Causal |
+|---|---|---|---|---|---|
+| Multidimensional models with totals on every level | Yes | No, two-dimensional sheets | Yes | Yes | Yes |
+| Run it on your own servers | Yes, Docker Compose or Kubernetes | Excel files only | No, cloud only | No, cloud only | No, cloud only |
+| Source code you can read | Yes, [source-available](LICENSE) | No | No | No | No |
+
+<sub>Compared from the vendors' public pages as of November 2026. Causal is
+part of Lucanet since 2024. Something out of date? [Open an
+issue](https://github.com/Mavericka-SARL/maverick-builds-app/issues/new/choose).</sub>
+
+## Develop the platform
+
+The rest of this page is about developing the platform. The quick start below
+runs it in development mode, where anyone can act as any user, so it must
+never face a network you do not trust. To run it for real, follow
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): each release on the Releases
+page comes with ready-built images (`ghcr.io/mavericka-sarl/mavericks/*`,
+x86-64 and ARM).
+
+### Current runtime
 
 The primary local runtime is:
 
@@ -46,18 +133,7 @@ The gateway serves the whole browser API and runs the domain packages
 in-process. The integration worker, which runs connector syncs, is the only
 other program; see [Runtime topology](ARCHITECTURE.md#runtime-topology).
 
-## Deploying it for real
-
-To run maverickbuilds.app on your own infrastructure — one server with Docker
-Compose, or Kubernetes — follow [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md):
-requirements, installation, backups, upgrades. Each release on the Releases
-page comes with ready-built images (`ghcr.io/mavericka-sarl/mavericks/*`,
-x86-64 and ARM), so neither path needs a build. The rest of this page is about
-developing the platform: the quick start below runs it in development mode,
-where anyone can act as any user, and must never face a network you do not
-trust.
-
-## Prerequisites
+### Prerequisites
 
 - Go 1.26.9, matching `go.mod`
 - Node.js 24, matching CI
@@ -65,7 +141,7 @@ trust.
 - npm
 - optional code-generation tools: Buf and ogen
 
-## Quick start
+### Quick start
 
 Start PostgreSQL and the supporting local infrastructure:
 
@@ -105,7 +181,7 @@ roles in development mode.
 `make dev-up` starts infrastructure only: PostgreSQL, PgBouncer, Keycloak,
 and MinIO. It does not start the Go gateway or the web application.
 
-## Verification
+### Verification
 
 The CI-equivalent checks are:
 
@@ -127,7 +203,7 @@ npm run build
 The ogen step is a drift check: generated files must remain unchanged
 after generation.
 
-## Repository map
+### Repository map
 
 | Path | Purpose |
 |---|---|
@@ -193,3 +269,15 @@ it, switched off until a signed, offline license key switches it on; see
 - [Notifications and reminders](docs/NOTIFICATIONS.md)
 - [Web application](web/README.md)
 - [UI design system](web/src/ui/DESIGN_SYSTEM.md)
+
+---
+
+<div align="center">
+
+**If this saves you a spreadsheet, a star helps others find it.** ⭐
+
+<!-- Star history: add once the repository passes about 50 stars.
+[![Star history](https://api.star-history.com/svg?repos=Mavericka-SARL/maverick-builds-app&type=Date)](https://star-history.com/#Mavericka-SARL/maverick-builds-app&Date)
+-->
+
+</div>
