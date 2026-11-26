@@ -274,7 +274,7 @@ it, switched off until a signed, offline license key switches it on; see
 
 <div align="center">
 
-**If this is interesting for you, a star helps others find it.** ⭐
+**If this is interesting to you, a star helps others find it.** ⭐
 
 <!-- Star history: add once the repository passes about 50 stars.
 [![Star history](https://api.star-history.com/svg?repos=Mavericka-SARL/maverick-builds-app&type=Date)](https://star-history.com/#Mavericka-SARL/maverick-builds-app&Date)
