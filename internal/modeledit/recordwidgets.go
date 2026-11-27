@@ -51,21 +51,25 @@ type RecordSort struct {
 }
 
 // CheckRecordWidgetProps checks the record settings in props of a widget of
-// widgetType ("form" or "board") over the table formID: the fields they
+// widgetType ("form", "board" or "gantt") over the table formID: the fields they
 // name are the table's, of the kind each setting needs, and the filters are
 // filters the records query answers. Other widget types pass.
 func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID string, props json.RawMessage) error {
-	if widgetType != "form" && widgetType != "board" {
+	if widgetType != "form" && widgetType != "board" && widgetType != "gantt" {
 		return nil
 	}
 	if len(props) == 0 || string(props) == "null" {
 		if widgetType == "board" {
 			return fmt.Errorf(`a board needs widget_props.board.column_field: the dimension or select field whose members are its columns`)
 		}
+		if widgetType == "gantt" {
+			return fmt.Errorf(`a Gantt widget needs widget_props.gantt.start_field: the date field each record's bar starts on`)
+		}
 		return nil
 	}
 	var p struct {
 		Board   *BoardSettings   `json:"board"`
+		Gantt   *GanttSettings   `json:"gantt"`
 		Filters []crudapp.Filter `json:"record_filters"`
 		Columns []string         `json:"record_columns"`
 		Sort    *RecordSort      `json:"record_sort"`
@@ -107,6 +111,12 @@ func CheckRecordWidgetProps(ctx context.Context, db DB, widgetType, formID strin
 			return fmt.Errorf("record_follows names two fields of the same dimension (%q): the dashboard selects one member of it", name)
 		}
 		seen[f.DimensionID] = true
+	}
+	if widgetType == "gantt" {
+		if p.Selects {
+			return fmt.Errorf("record_selects belongs to a records widget, not a Gantt widget")
+		}
+		return checkGantt(form, p.Gantt)
 	}
 	if p.Selects {
 		if widgetType != "form" {
@@ -183,4 +193,55 @@ func fieldNames(f *crudapp.FormDef) string {
 		names = append(names, fd.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+// GanttSettings are a Gantt widget's "gantt" props (web GanttPanel.tsx).
+type GanttSettings struct {
+	StartField         string `json:"start_field"`
+	EndField           string `json:"end_field,omitempty"`
+	LabelField         string `json:"label_field,omitempty"`
+	BaselineStartField string `json:"baseline_start_field,omitempty"`
+	BaselineEndField   string `json:"baseline_end_field,omitempty"`
+	GroupField         string `json:"group_field,omitempty"`
+	ColorField         string `json:"color_field,omitempty"`
+	ProgressField      string `json:"progress_field,omitempty"`
+	PredecessorField   string `json:"predecessor_field,omitempty"`
+}
+
+// checkGantt refuses settings naming no start date, or fields the table
+// does not have or of the wrong kind: a misnamed field draws nothing.
+func checkGantt(form *crudapp.FormDef, g *GanttSettings) error {
+	if g == nil || g.StartField == "" {
+		return fmt.Errorf(`a Gantt widget needs widget_props.gantt.start_field: the date field each record's bar starts on`)
+	}
+	date := func(setting, name string) error {
+		if name == "" {
+			return nil
+		}
+		if f := form.Field(name); f == nil || f.Type != "date" {
+			return fmt.Errorf("gantt.%s %q is not a date field of %s (its fields: %s)", setting, name, form.Label, fieldNames(form))
+		}
+		return nil
+	}
+	for _, c := range []struct{ setting, name string }{{"start_field", g.StartField}, {"end_field", g.EndField},
+		{"baseline_start_field", g.BaselineStartField}, {"baseline_end_field", g.BaselineEndField}} {
+		if err := date(c.setting, c.name); err != nil {
+			return err
+		}
+	}
+	for _, c := range []struct{ setting, name string }{{"label_field", g.LabelField}, {"group_field", g.GroupField},
+		{"predecessor_field", g.PredecessorField}} {
+		if c.name != "" && form.Field(c.name) == nil {
+			return fmt.Errorf("gantt.%s %q is not a field of %s (its fields: %s)", c.setting, c.name, form.Label, fieldNames(form))
+		}
+	}
+	if g.ColorField != "" && g.ColorField != "status" && form.Field(g.ColorField) == nil {
+		return fmt.Errorf("gantt.color_field %q is not a field of %s (its fields: %s)", g.ColorField, form.Label, fieldNames(form))
+	}
+	if g.ProgressField != "" {
+		if f := form.Field(g.ProgressField); f == nil || (f.Type != "number" && f.Type != "metric") {
+			return fmt.Errorf("gantt.progress_field %q is not a number field of %s", g.ProgressField, form.Label)
+		}
+	}
+	return nil
 }

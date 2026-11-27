@@ -907,6 +907,12 @@ func (f *storedValues) recorded(ctx context.Context, metricID string) ([]map[str
 // its dim_members so a fetch(combo) lookup matches. This is getInputValue's
 // old per-combo query with the combo filter removed — run once, not per leaf.
 func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
+	return calculation.MemoFloats(ctx, "chart_input_facts", []string{modelID, revisionID, metricID}, func() (map[string]float64, error) {
+		return r.loadInputFactMapNow(ctx, modelID, revisionID, metricID)
+	})
+}
+
+func (r *ChartResolver) loadInputFactMapNow(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
 	// The form-covered combos are read once (calculation.LoadInputValueMap
 	// says why): a correlated NOT EXISTS rescanned the metric per combo.
 	rows, err := r.pool.Query(ctx, `

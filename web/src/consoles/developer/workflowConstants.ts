@@ -12,6 +12,7 @@ import type { StepType, TriggerEventCatalogItem } from "../../api/client";
 export function triggerTypeFromWorkflow(triggerEvent: string): string {
   if (triggerEvent === "form.submit" || triggerEvent.endsWith(".submitted")) return "form_submit";
   if (triggerEvent === "form.approve" || triggerEvent.endsWith(".approved")) return "form_approval";
+  if (triggerEvent === "form.update" || triggerEvent.endsWith(".updated")) return "record_updated";
   if (triggerEvent === "grid.change" || triggerEvent.endsWith(".changed")) return "grid_change";
   if (triggerEvent === "api.workflow.start") return "api";
   if (triggerEvent.endsWith(".import.completed")) return "integration_completed";
@@ -21,7 +22,7 @@ export function triggerTypeFromWorkflow(triggerEvent: string): string {
 
 // The events that name no source: a rule made from them fires for any form
 // or any integration run, which is what they say.
-const ANY_SOURCE_EVENTS = new Set(["form.submit", "form.approve", "grid.change", "integration.import.completed", "integration.import.failed"]);
+const ANY_SOURCE_EVENTS = new Set(["form.submit", "form.approve", "form.update", "grid.change", "integration.import.completed", "integration.import.failed"]);
 
 export interface RuleTriggerFromWorkflow {
   trigger_type: string;

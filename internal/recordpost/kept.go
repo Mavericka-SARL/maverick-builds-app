@@ -141,6 +141,10 @@ func propertyFields(ctx context.Context, db dbx.DB, form *crudapp.FormDef) (map[
 	return out, nil
 }
 
+// IdentKey is identKey for other packages: a field or property name as a
+// property compares it.
+func IdentKey(s string) string { return identKey(s) }
+
 // identKey is a name as a property compares it: lower case, every run of
 // other characters than letters and digits one underscore.
 func identKey(s string) string {
@@ -451,6 +455,11 @@ type TableSettings struct {
 	// ExistingCodes: what a file row giving the auto code a value does —
 	// "refuse" or "update" (migration 193).
 	ExistingCodes *string `json:"existing_codes"`
+	// EditorField: a person field — to a holder of one of EditorRoles, the
+	// members whose record names someone else there are read-only ("" to
+	// stop; migration 200, crudapp.SetEditorField).
+	EditorField *string   `json:"editor_field"`
+	EditorRoles *[]string `json:"editor_roles"`
 }
 
 // SettingError is a table setting refused: Status is the HTTP status it
@@ -478,6 +487,32 @@ func (ps *Poster) ApplyTableSettings(ctx context.Context, form *crudapp.FormDef,
 // ApplyTableSettingsOn is ApplyTableSettings on db (a pool, or a
 // transaction the caller keeps).
 func ApplyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef, s TableSettings) (int, error) {
+	added, err := applyTableSettingsOn(ctx, db, form, s)
+	if err != nil || (s.EditorField == nil && s.EditorRoles == nil) {
+		return added, err
+	}
+	// Who changes each record: after the dimension the table keeps is set.
+	field, roles := form.EditorField, form.EditorRoles
+	if s.EditorField != nil {
+		field = *s.EditorField
+	}
+	if s.EditorRoles != nil {
+		roles = *s.EditorRoles
+	}
+	if err := crudapp.NewStoreOn(db).SetEditorField(ctx, form.ID, field, roles); err != nil {
+		if crudapp.IsMappingRefError(err) {
+			return added, settingErr(400, "%s", err.Error())
+		}
+		return added, err
+	}
+	form.EditorField, form.EditorRoles = field, roles
+	if field == "" {
+		form.EditorRoles = nil
+	}
+	return added, nil
+}
+
+func applyTableSettingsOn(ctx context.Context, db dbx.DB, form *crudapp.FormDef, s TableSettings) (int, error) {
 	if s.EditAccess != nil {
 		if *s.EditAccess != crudapp.EditCreator && *s.EditAccess != crudapp.EditEveryone {
 			return 0, settingErr(400, "edit_access is %q or %q, not %q", crudapp.EditCreator, crudapp.EditEveryone, *s.EditAccess)

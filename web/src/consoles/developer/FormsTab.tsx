@@ -379,6 +379,9 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [editOwnOnly, setEditOwnOnly] = useState(false);
   const [editEditAccess, setEditEditAccess] = useState<EditAccess>("creator");
   const [editCreateRoles, setEditCreateRoles] = useState<string[]>([]);
+  // Who changes each record: a person field and the roles it narrows (migration 200).
+  const [editEditorField, setEditEditorField] = useState("");
+  const [editEditorRoles, setEditEditorRoles] = useState<string[]>([]);
   const [editDeleteAdmins, setEditDeleteAdmins] = useState(false);
   const [editDeleteRoles, setEditDeleteRoles] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
@@ -442,6 +445,10 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
     const out: TableSettings = {};
     if (editEditAccess !== (t?.edit_access ?? "creator")) out.edit_access = editEditAccess;
     if (editCreateRoles.join("\u0000") !== (t?.create_roles ?? []).join("\u0000")) out.create_roles = editCreateRoles;
+    if (editEditorField !== (t?.editor_field ?? "") || (editEditorField && editEditorRoles.join("\u0000") !== (t?.editor_roles ?? []).join("\u0000"))) {
+      out.editor_field = editEditorField;
+      out.editor_roles = editEditorField ? editEditorRoles : [];
+    }
     if (editDeleteAdmins !== (t?.delete_access === "admins")) out.delete_access = editDeleteAdmins ? "admins" : "";
     if (editDeleteRoles.join("\u0000") !== (t?.delete_roles ?? []).join("\u0000")) out.delete_roles = editDeleteRoles;
     if (editOpen !== (t?.record_scope === "open")) out.record_scope = editOpen ? "open" : "";
@@ -456,7 +463,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   };
   const startEdit = (f: FormDef) => {
     setEditId(f.id); setEditName(f.name); setEditLabel(f.label); setEditFields([...(f.fields ?? [])]); setEditOwnOnly(!!f.own_records_only);
-    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditDeleteAdmins(f.delete_access === "admins"); setEditDeleteRoles(f.delete_roles ?? []); setEditOpen(f.record_scope === "open"); setEditCodes(f.existing_codes ?? ""); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? ""); setEditWithCode(!!f.member_label_with_code);
+    setEditEditAccess(f.edit_access ?? "creator"); setEditCreateRoles(f.create_roles ?? []); setEditEditorField(f.editor_field ?? ""); setEditEditorRoles(f.editor_roles ?? []); setEditDeleteAdmins(f.delete_access === "admins"); setEditDeleteRoles(f.delete_roles ?? []); setEditOpen(f.record_scope === "open"); setEditCodes(f.existing_codes ?? ""); setEditKeeps(f.keeps_dimension_id ?? ""); setEditLabelField(f.member_label_field ?? ""); setEditRootLabel(f.member_root_label ?? ""); setEditWithCode(!!f.member_label_with_code);
   };
   const editing = (forms as FormDef[]).find(f => f.id === editId);
   // Removing the status field makes every record count; adding one makes new records wait for approval.
@@ -578,6 +585,23 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
                         <option value="refuse">Refuse the row</option>
                         <option value="update">Update the record holding the code</option>
                       </Select>
+                    </Field>
+                  )}
+                  {editKeeps && editFields.some(ff => ff.type === "person") && (
+                    <Field label="Who changes each record"
+                      description={editEditorField
+                        ? "People of the roles ticked below change only the records — and the members, their cells and the records naming them — whose field names them, and read the others. Everyone else keeps the access they have; a new record follows at once."
+                        : "Everyone allowed above changes every record. Choose a person field to let each project manager change only the projects naming them, without an access rule per person."}>
+                      <Select value={editEditorField} onChange={e => setEditEditorField(e.target.value)} style={{ width: 320 }} aria-label="Person field naming who changes each record">
+                        <option value="">— everyone allowed above —</option>
+                        {editFields.filter(ff => ff.type === "person").map(ff => <option key={ff.name} value={ff.name}>The person in {ff.label || ff.name}</option>)}
+                      </Select>
+                      {editEditorField && demoCtx?.app_id && (
+                        <div style={{ marginTop: 6 }}>
+                          <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>For people of these roles:</p>
+                          <RolePicker applicationId={demoCtx.app_id} value={editEditorRoles} onChange={setEditEditorRoles} />
+                        </div>
+                      )}
                     </Field>
                   )}
                   <Field label="Who may delete records">

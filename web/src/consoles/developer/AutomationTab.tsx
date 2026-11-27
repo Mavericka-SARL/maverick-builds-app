@@ -11,19 +11,20 @@ const EXEC_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success", running: "warning", failed: "danger", cancelled: "neutral",
 };
 
-type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string; cron_expr: string; timezone: string; misfire_policy: string; fires_on_import: boolean };
+type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string; cron_expr: string; timezone: string; misfire_policy: string; fires_on_import: boolean; watch_fields: string[] };
 
 // The schedule fields go to the server only for a schedule rule: a cron
 // expression in the body (re)configures scheduling.
 const ruleBody = (r: RuleState) => {
-  const recordRule = r.trigger_type === "form_submit" || r.trigger_type === "form_approval";
-  const body = { ...r, fires_on_import: recordRule ? r.fires_on_import : undefined };
+  const recordRule = r.trigger_type === "form_submit" || r.trigger_type === "form_approval" || r.trigger_type === "record_updated";
+  // Watched fields belong to a record_updated rule only (migration 199).
+  const body = { ...r, fires_on_import: recordRule ? r.fires_on_import : undefined, watch_fields: r.trigger_type === "record_updated" ? r.watch_fields : undefined };
   return r.trigger_type === "schedule" ? body : { ...body, cron_expr: undefined, timezone: undefined, misfire_policy: undefined };
 };
 
 export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
   const qc = useQueryClient();
-  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip", fires_on_import: true };
+  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip", fires_on_import: true, watch_fields: [] };
   const [showCreate, setShowCreate] = useState(false);
   const [newRule, setNewRule] = useState<RuleState>(empty);
   const [editId, setEditId] = useState<string | null>(null);
@@ -81,7 +82,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
 
   const startEdit = (r: AutomationRule) => {
     setEditId(r.id);
-    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "", cron_expr: r.cron_expr ?? "", timezone: r.timezone || "UTC", misfire_policy: r.misfire_policy || "skip", fires_on_import: r.fires_on_import ?? true });
+    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "", cron_expr: r.cron_expr ?? "", timezone: r.timezone || "UTC", misfire_policy: r.misfire_policy || "skip", fires_on_import: r.fires_on_import ?? true , watch_fields: r.watch_fields ?? []});
   };
 
   // Find workflow summary for a rule, matching by name (legacy) or id
@@ -275,7 +276,8 @@ function RuleForm({
 }) {
   const published = workflows.filter(w => w.status === "published");
   const others = workflows.filter(w => w.status !== "published");
-  const needsForm = rule.trigger_type === "form_submit" || rule.trigger_type === "form_approval";
+  const needsForm = rule.trigger_type === "form_submit" || rule.trigger_type === "form_approval" || rule.trigger_type === "record_updated";
+  const watchForm = rule.trigger_type === "record_updated" ? forms.find(f => f.id === rule.source_form_id) : undefined;
   const needsGrid = rule.trigger_type === "grid_change";
   const needsIntegration = rule.trigger_type === "integration_completed" || rule.trigger_type === "integration_failed";
   const isSchedule = rule.trigger_type === "schedule";
@@ -344,6 +346,7 @@ function RuleForm({
           {!onlyManualOrSchedule && <>
             <option value="form_submit">form_submit — a record is submitted (saved, in a table without a status field)</option>
             <option value="form_approval">form_approval — a record is approved</option>
+            <option value="record_updated">record_updated — a record changes</option>
             <option value="grid_change">grid_change — on cell writeback</option>
             <option value="integration_completed">integration_completed — an integration run finished</option>
             <option value="integration_failed">integration_failed — an integration run failed</option>
@@ -373,6 +376,17 @@ function RuleForm({
             <option value="">— any table —</option>
             {forms.map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
           </Select>
+        </Field>
+      )}
+      {watchForm && (
+        <Field label="Only when one of these changes" description="none ticked: any change of the record">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+            {[{ name: "status", label: "Status" }, ...(watchForm.fields ?? []).map(f => ({ name: f.name, label: f.label || f.name }))].map(f => (
+              <Checkbox key={f.name} label={f.label}
+                checked={rule.watch_fields.includes(f.name)}
+                onChange={(e) => onChange({ ...rule, watch_fields: e.target.checked ? [...rule.watch_fields, f.name] : rule.watch_fields.filter(x => x !== f.name) })} />
+            ))}
+          </div>
         </Field>
       )}
       {needsForm && (

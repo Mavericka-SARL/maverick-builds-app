@@ -5,7 +5,7 @@ import { useDateFormat } from "../dateFormat";
 import { DateInput } from "../DateInput";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
-import { api, dimLabel, memberTotalRule, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
+import { api, dimLabel, memberTotalRule, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale, type CellExpected } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput, Txt } from "../../ui";
@@ -485,12 +485,22 @@ function crossDimensionSources(
     if (!ownDim) return undefined;
     if (ownDim.dimension_type === "time" && timeAxis < 0) timeAxis = j;
 
+    // Every grid dimension relating to it narrows it: a country × sector
+    // grid over projects (two groupings of project) reads the projects of
+    // that country AND that sector — stopping at the first relation read
+    // every country's row as the sector's total (2026-11-27).
     let resolved: string[] | undefined;
     for (let i = 0; i < dims.length; i++) {
       const gridMember = combo[i];
       if (!gridMember) continue;
-      resolved = resolveAxisCodes(grid, ownDim, dims[i], gridMember);
-      if (resolved !== undefined) break;
+      const codes = resolveAxisCodes(grid, ownDim, dims[i], gridMember);
+      if (codes === undefined) continue;
+      if (resolved === undefined) {
+        resolved = codes;
+      } else {
+        const keep = new Set(codes);
+        resolved = resolved.filter(c => keep.has(c));
+      }
     }
     // No relationship to any of the current grid's dims — not a failure,
     // just an axis this view doesn't slice by. Read all of it.
@@ -639,14 +649,35 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // cell's pending note sits in pendingText.
   const [pending, setPending] = useState<Record<string, number | null>>({});
   const [pendingText, setPendingText] = useState<Record<string, string | null>>({});
+  // Two people changing one cell: a save names the cell as the server last
+  // answered it (served, no overlay), and one someone changed meanwhile is
+  // refused rather than written over (cell_conflict.go). A cell with this
+  // person's own save on its way, or saved since the last answer, names
+  // nothing: the person's own change is not a conflict.
+  const served = useRef<{ cells?: Record<string, number>; texts?: Record<string, string> } | undefined>(undefined);
+  const ownSaves = useRef<Map<string, number>>(new Map());
+  const expectedFor = (k: string, isText: boolean): CellExpected | undefined => {
+    const s = served.current;
+    if (!s || ownSaves.current.has(k)) return undefined;
+    if (isText) return s.texts && k in s.texts ? { text: s.texts[k] } : { blank: true };
+    return s.cells && k in s.cells ? { value: s.cells[k] } : { blank: true };
+  };
   const writeback = useMutation({
-    mutationFn: ({ metric_id, dim_codes, value, text, clear }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; clear?: boolean }) =>
-      api.writeback({ metric_id, dim_codes, value, text, clear, model_id: ctx.model_id, revision_id: ctx.revision_id, recalc: "background" }),
+    mutationFn: ({ cellKey, metric_id, dim_codes, value, text, clear }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; clear?: boolean }) => {
+      const isText = gridMeta?.metrics?.find(m => m.id === metric_id)?.format === "text";
+      const expected = expectedFor(cellKey, isText);
+      ownSaves.current.set(cellKey, (ownSaves.current.get(cellKey) ?? 0) + 1);
+      return api.writeback({ metric_id, dim_codes, value, text, clear, model_id: ctx.model_id, revision_id: ctx.revision_id, recalc: "background", ...(expected ? { expected } : {}) });
+    },
     // Every fact-derived query on the page, not just this grid's own: the
     // KPI cards and charts beside it must show the new number too.
     // Returning the promise defers onSettled until those refetches complete.
     onSuccess: () => invalidateModelData(qc),
+    // A refused save (someone changed the cell) shows the cell as it now is.
+    onError: () => invalidateModelData(qc),
     onSettled: (_data, _err, { cellKey: k }) => {
+      const n = (ownSaves.current.get(k) ?? 1) - 1;
+      if (n > 0) ownSaves.current.set(k, n); else ownSaves.current.delete(k);
       setPending((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
       setPendingText((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
     },
@@ -840,6 +871,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     refetchInterval: (q) => (q.state.data?.recalc_pending ? 250 : 2000),
     placeholderData: (prev) => prev,
   });
+  // The server's answer as the next save names it (expectedFor).
+  useEffect(() => { served.current = cellsData ? { cells: cellsData.cells, texts: cellsData.texts } : undefined; }, [cellsData]);
   const cellsLoading = isPlaceholderData || cellsData === undefined;
 
   // A write answered before its dependents were recalculated: calculated
@@ -1082,22 +1115,33 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const picked = codes.flatMap(c => d.members.filter(m => m.code === c).map(m => ({ ...m, parent_code: undefined })));
     return picked.length > 0 ? { ...d, members: picked } : d;
   };
+  // When metrics are in the context zone, only show the one selected metric in the grid
+  const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
   const findQuery = find.trim().toLowerCase();
   // Members of a row dimension holding a value — a number other than 0 or a
   // text — in a shown metric at the selected context; their parents stay too.
-  const withData = (d: DimInfo): DimInfo => {
+  // Only cells the widget shows count: a column (or another row dimension)
+  // narrowed by show_members or a followed selection, and the one metric
+  // shown when metrics sit in the context, leave the rest out — a Top 10 of
+  // the Base scenario kept projects whose value was only in Inflation
+  // (2026-11-27).
+  const withData = (axes: DimInfo[]) => (d: DimInfo): DimInfo => {
     if (!hideEmptyRows) return d;
     const at = dims.findIndex(x => x.id === d.id);
     if (at < 0) return d;
-    const shown = new Set(visibleMetrics.map(m => m.id));
+    const shown = new Set(metricsInContext ? [ctxMetricId] : visibleMetrics.map(m => m.id));
     const pins = inZone(pivotContext).map(c => ({ at: dims.findIndex(x => x.id === c.id), code: filterSel[c.id] ?? defaultLeafCode(c) ?? "" }))
       .filter(p => p.at >= 0 && p.code && p.code !== SELECTION_CODE);
+    const onlyShown = axes.filter(a => a.id !== d.id && !dims.includes(a))
+      .map(a => ({ at: dims.findIndex(x => x.id === a.id), codes: new Set(a.members.map(m => m.code)) }))
+      .filter(a => a.at >= 0);
     const keep = new Set<string>();
     const consider = (key: string, has: boolean) => {
       if (!has) return;
       const parts = key.split(":");
       if (parts.length !== dims.length + 1 || !shown.has(parts[0])) return;
       if (pins.some(p => parts[p.at + 1] !== p.code)) return;
+      if (onlyShown.some(a => !a.codes.has(parts[a.at + 1]))) return;
       keep.add(parts[at + 1]);
     };
     for (const [key, v] of Object.entries(g.cells ?? {})) consider(key, typeof v === "number" && v !== 0);
@@ -1122,8 +1166,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     followed.push({ dim: d, shown: members.length });
     return { ...d, members };
   };
-  const rowDims  = inZone(pivotRows).map(onAxis).map(narrowed(!!followRows)).map(withData).map(d => searchAxis(d, findQuery) ?? d);
-  const colDims  = inZone(pivotCols).map(onAxis).map(narrowed(!!followColumns)).map(d => searchAxis(d, findQuery) ?? d);
+  const rowAxes  = inZone(pivotRows).map(onAxis).map(narrowed(!!followRows));
+  const colAxes  = inZone(pivotCols).map(onAxis).map(narrowed(!!followColumns));
+  const rowDims  = rowAxes.map(withData([...rowAxes, ...colAxes])).map(d => searchAxis(d, findQuery) ?? d);
+  const colDims  = colAxes.map(d => searchAxis(d, findQuery) ?? d);
   const ctxDims  = inZone(pivotContext);
   // Every context dimension is pinned in the read (scope): its totals are the
   // grid's total under the selection shown, each row and column dimension
@@ -1134,8 +1180,6 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // fewer than the total's. colTotal reads it only once the selection's own
   // answer is in (cellsLoading), never the previous selection's.
   const totalsAtContext = ctxDims.every(d => scope[d.id] !== undefined) && !findQuery && !followRows && !followColumns;
-  // When metrics are in the context zone, only show the one selected metric in the grid
-  const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
   // On an axis, the metrics narrow to those matching the search, when any do.
   const foundMetrics = findQuery ? visibleMetrics.filter(m => m.label.toLowerCase().includes(findQuery) || m.name.toLowerCase().includes(findQuery)) : [];
   const gridMetrics = metricsInContext ? visibleMetrics.filter(m => m.id === ctxMetricId)

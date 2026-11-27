@@ -7,7 +7,7 @@ import { DateFormatContext, useDateFormat } from "../dateFormat";
 import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon, Maximize2, X as XIcon } from "lucide-react";
-import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
+import { api, type ApiError, type ImportRowError, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings, type GanttSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { useImportKey } from "../../api/useImportKey";
 import { ContextSelectors } from "../dashboard/ContextSelectors";
@@ -20,6 +20,7 @@ import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/lazyChart";
 import { FormPanel } from "./FormPanel";
 import { BoardPanel } from "./BoardPanel";
+import { GanttPanel } from "./GanttPanel";
 import { followSelection } from "./recordList";
 import { ImportWidget } from "./ImportWidget";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
@@ -59,7 +60,7 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, on
 
 // The widgets a full-screen view helps: tables, charts and long texts — not a
 // tile or a button.
-const FULL_SCREEN_TYPES = new Set(["grid", "chart", "form", "board", "text", "image", "workflow_status"]);
+const FULL_SCREEN_TYPES = new Set(["grid", "chart", "form", "board", "gantt", "text", "image", "workflow_status"]);
 
 function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { widgets: DashboardWidget[]; ctx: DemoContext; bar: SelectorBarEntry[]; columns: number; width: number; onOpenInstance?: (instanceId: string) => void }) {
   // The bar stands above the first row with a widget that follows it, so a
@@ -357,6 +358,13 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
         <BoardWidgetPanel formId={widget.ref_id} ctx={ctx} settings={widget.widget_props.board} title={widget.title ?? undefined}
           newRecordButton={!!widget.widget_props?.new_record_button} fixedFilters={widget.widget_props?.record_filters} follows={widget.widget_props?.record_follows} />
+      </div>
+    );
+  } else if (widget.widget_type === "gantt" && widget.ref_id && widget.widget_props?.gantt) {
+    inner = (
+      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
+        <GanttWidgetPanel formId={widget.ref_id} ctx={ctx} settings={widget.widget_props.gantt} title={widget.title ?? undefined}
+          fixedFilters={widget.widget_props?.record_filters} follows={widget.widget_props?.record_follows} />
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
@@ -828,6 +836,7 @@ function triggerWhen(triggerType: string): string {
   switch (triggerType) {
     case "form_submit": return "when a record is submitted";
     case "form_approval": return "when a record is approved";
+    case "record_updated": return "when a record changes";
     case "grid_change": return "when grid values change";
     case "schedule": return "on its schedule";
     case "integration_completed": return "when an integration run completes";
@@ -896,6 +905,29 @@ function useFollowSelection(form: FormDef | undefined, follows: string[] | undef
 }
 
 // A board widget's body: the table's records as cards in columns (BoardPanel).
+// A table's records on a timeline (GanttPanel.tsx), with the widget's
+// filters and the dashboard selection it follows, as the board.
+export function GanttWidgetPanel({ formId, ctx: hostCtx, settings, fixedFilters, title, follows }: {
+  formId: string;
+  ctx?: DemoContext;
+  settings: GanttSettings;
+  fixedFilters?: RecordFilter[];
+  title?: string;
+  follows?: string[];
+}) {
+  const { data: formsRaw = [], isLoading } = useQuery({
+    queryKey: ["forms", hostCtx?.revision_id ?? ""],
+    queryFn: () => api.listForms(hostCtx?.revision_id),
+    refetchInterval: 20_000,
+  });
+  const { data: demoCtx } = useDemo(undefined, { enabled: !hostCtx });
+  const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
+  const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
+  const follow = useFollowSelection(form, follows, revisionId);
+  if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
+  return <GanttPanel form={form} revisionId={revisionId} settings={settings} fixedFilters={fixedFilters} followFilters={follow.follow} title={title} />;
+}
+
 export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButton, fixedFilters, title, follows }: {
   formId: string;
   ctx?: DemoContext;

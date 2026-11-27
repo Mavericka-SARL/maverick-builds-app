@@ -681,6 +681,11 @@ Every step: unique "id", "name", "type" (task | approval | condition | notificat
   required), optional "required_comment". Optional "on_approve": {"copy_facts_to_context_key": "<context
   var naming a target revision>", "scope_context_key": "<Dimension member context var>"} copies the approved
   scope's data into that revision on approval.
+- task or approval: "assignee_field": "project.country.manager" gives the step to the one person the run's data names —
+  a path from a start field holding a member of a dimension a table keeps (or "record", the run's record) through
+  the tables' dimension fields to a person field; they must hold one of "assignee_roles" (otherwise, or when the field
+  is empty, everyone of the roles gets it, as without it). Use it when a role has many holders and the item belongs
+  to one of them (each country's manager approves their country's plans).
 - condition: automatic. "condition": {"left": "<context variable key>", "operator": equals | not_equals |
   greater_than | greater_than_or_equal | less_than | less_than_or_equal | contains | is_empty | is_not_empty,
   "right": <value>}, "routes": {"true": "<step id>", "false": "<step id>"}. A missing key parks the step for
@@ -749,6 +754,9 @@ A workflow only fires through an automation rule (list_automation_rules shows th
   status field: saved) / approved (omit the table to fire for every table). It fires for the records a file import creates too;
   "fires_on_import": false leaves them out — for a table loaded with records that already exist (the restaurants a
   chain runs, last year's requests), so a load does not start one workflow per row.
+- record_updated — when a record of the table "source_form_id" changes (a field, or its status); "watch_fields":
+  ["finish", "status"] fires only for a change of one of them (an activity rescheduled). The run gets
+  changed_fields and old_<field> / new_<field>; "fires_on_import" applies as above.
 - grid_change — when cells of "source_grid_id" change.
 - schedule — "cron_expr" (5-field cron), optional "timezone" (IANA, default UTC), "misfire_policy"
   ("skip" | "fire_now"), "max_retries", "retry_backoff_seconds".
@@ -792,7 +800,9 @@ with one, a record counts in the statuses its integrations post in, and a workfl
 moves it (see Workflow). "own_records_only": true shows each person only the records they created (the
 application's administrators still see all). "edit_access": "everyone" lets everyone who sees a record change and
 delete it ("creator", the default: its creator and the administrators); a member read-only for a person makes the
-records naming it theirs to see only. "create_roles": ["<role name>", ...] lets only people of those roles (and
+records naming it theirs to see only. "editor_field": "<person field>" with "editor_roles": ["<role>", ...] on a
+table that keeps a dimension: people of those roles change only the members whose record names them there and read
+the others (each project manager their projects) — instead of one access rule per person; "" stops it. "create_roles": ["<role name>", ...] lets only people of those roles (and
 the administrators) add records — a table whose records add a plant or a GL account; [] or none: anyone who opens
 the application. "delete_access": "admins" lets only the administrators — and those who may change a record and hold one
 of "delete_roles": [...] — delete records (tickets are closed, not deleted); "" or none: whoever may change a record.
@@ -827,7 +837,12 @@ the records out as cards in columns: widget_props {"board": {"column_field": <a 
 dimension, its members in order are the columns>, "title_field", "card_fields": [...], "sum_field": <a number field
 totalled per column>, "color_property": <a property of the column dimension holding a CSS colour>, "hide_empty"},
 "record_filters", "new_record_button"}; dragging a card to another column changes that field (a sales pipeline by
-stage, tasks by status, requests by team). Widgets on a dashboard share its selection, one member per dimension (the
+stage, tasks by status, requests by team). A "gantt" widget (ref_id: the table) draws each record as a bar on a
+timeline: widget_props {"gantt": {"start_field": <date field, required>, "end_field" (none: a milestone),
+"label_field", "baseline_start_field"/"baseline_end_field" (a thinner bar under it: planned against current),
+"group_field" (rows under a project, a work package), "color_field" (a field or "status"), "progress_field" (0–100),
+"predecessor_field" (the field naming the record it follows — an arrow, red when it starts first)}, "record_filters",
+"record_follows"} — an activity plan. Widgets on a dashboard share its selection, one member per dimension (the
 selector bar's, a synced grid's): a records widget over a table that keeps a dimension selects the member of the
 record clicked with "record_selects": true, and a records widget or board shows only the records whose dimension
 fields hold the selected members with "record_follows": [<dimension field names>] — journals above with

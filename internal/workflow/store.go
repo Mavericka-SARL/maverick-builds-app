@@ -1326,6 +1326,9 @@ func (s *Store) closeInstanceIfIdle(ctx context.Context, instanceID, finalStatus
 	`, instanceID, finalStatus)
 	// The records the run was about take its decision, once.
 	if tag.RowsAffected() == 1 && finalStatus == "completed" {
+		// An approved run supersedes the approved runs of its workflow and
+		// scope before it: its lock replaces theirs (supersede.go).
+		s.supersedeEarlierApprovals(ctx, instanceID)
 		s.driveRecords(ctx, instanceID, runFinished, "")
 		// An approved run that locks a scope keeps what it approved, so a
 		// later change through an input outside the lock shows as "changed
@@ -2245,6 +2248,9 @@ type AutomationRule struct {
 	// for the records a file import creates. On unless switched off: moving
 	// existing data into a table need not start one workflow per row.
 	FiresOnImport bool `json:"fires_on_import"`
+	// WatchFields narrows a record_updated rule to a change of one of these
+	// fields of the record; empty: any change (migration 199).
+	WatchFields []string `json:"watch_fields"`
 
 	// Schedule config — only meaningful when TriggerType == "schedule".
 	CronExpr            string     `json:"cron_expr,omitempty"`
@@ -2464,7 +2470,7 @@ func (s *Store) ListAutomationRules(ctx context.Context, appID, revisionID strin
 		       COALESCE(source_integration_id::text,''),
 		       enabled, created_at,
 		       COALESCE(cron_expr,''), timezone, misfire_policy, max_retries, retry_backoff_seconds,
-		       next_fire_at, last_fire_at, fires_on_import
+		       next_fire_at, last_fire_at, fires_on_import, watch_fields
 		FROM workflow.automation_rule
 		WHERE application_id = $1::uuid
 		  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
@@ -2483,7 +2489,7 @@ func (s *Store) ListAutomationRules(ctx context.Context, appID, revisionID strin
 			&r.SourceIntegrationID,
 			&r.Enabled, &r.CreatedAt,
 			&r.CronExpr, &r.Timezone, &r.MisfirePolicy, &r.MaxRetries, &r.RetryBackoffSeconds,
-			&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport); err != nil {
+			&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport, &r.WatchFields); err != nil {
 			return nil, err
 		}
 		rules = append(rules, &r)
@@ -3097,7 +3103,7 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 	}
 	// Enrich form-event payloads with the record's field values so condition
 	// steps and context_schema variables (e.g. "amount") have data to read.
-	if (triggerType == "form_submit" || triggerType == "form_approval") && payload["record_id"] != "" {
+	if (triggerType == "form_submit" || triggerType == "form_approval" || triggerType == "record_updated") && payload["record_id"] != "" {
 		payload = s.enrichFormPayload(ctx, payload)
 	}
 
@@ -3110,14 +3116,17 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 		  AND enabled = true
 		  AND ($4 = '' OR revision_id IS NULL OR revision_id::text = $4)
 		  AND ($5 = '' OR fires_on_import)
+		  -- record_updated: a rule watching fields fires for a change of one of them
+		  AND (cardinality(watch_fields) = 0 OR EXISTS (
+		      SELECT 1 FROM unnest(watch_fields) w WHERE lower(w) = ANY(string_to_array(lower($6), ','))))
 		  AND (
-		      (trigger_type IN ('form_submit','form_approval') AND (source_form_id IS NULL OR ($3 <> '' AND source_form_id::text = $3)))
+		      (trigger_type IN ('form_submit','form_approval','record_updated') AND (source_form_id IS NULL OR ($3 <> '' AND source_form_id::text = $3)))
 		      OR (trigger_type = 'grid_change'                 AND (source_grid_id IS NULL OR ($3 <> '' AND source_grid_id::text = $3)))
 		      OR (trigger_type IN ('integration_completed','integration_failed')
 		          AND (source_integration_id IS NULL OR ($3 <> '' AND source_integration_id::text = $3)))
-		      OR trigger_type NOT IN ('form_submit','form_approval','grid_change','integration_completed','integration_failed')
+		      OR trigger_type NOT IN ('form_submit','form_approval','record_updated','grid_change','integration_completed','integration_failed')
 		  )
-	`, appID, triggerType, sourceID, revisionID, payload["record_source"])
+	`, appID, triggerType, sourceID, revisionID, payload["record_source"], payload["changed_fields"])
 	if err != nil {
 		return
 	}
@@ -3284,7 +3293,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 		          COALESCE(source_integration_id::text,''),
 		          enabled, created_at,
 		          COALESCE(cron_expr,''), timezone, misfire_policy, max_retries, retry_backoff_seconds,
-		          next_fire_at, last_fire_at, fires_on_import
+		          next_fire_at, last_fire_at, fires_on_import, watch_fields
 	`, ruleID, name, description, triggerType, workflowName, workflowDefID, sourceFormID, sourceGridID, enabled,
 		cronExpr, timezone, misfirePolicy, maxRetries, retryBackoff, nextFireAt, sourceIntegrationID).Scan(
 		&r.ID, &r.ApplicationID, &r.RevisionID, &r.Name, &r.Description,
@@ -3292,13 +3301,26 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 		&r.SourceIntegrationID,
 		&r.Enabled, &r.CreatedAt,
 		&r.CronExpr, &r.Timezone, &r.MisfirePolicy, &r.MaxRetries, &r.RetryBackoffSeconds,
-		&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport,
+		&r.NextFireAt, &r.LastFireAt, &r.FiresOnImport, &r.WatchFields,
 	)
 	return &r, err
 }
 
 // SetRuleFiresOnImport sets whether a record rule also fires for the
 // records a file import creates (AutomationRule.FiresOnImport).
+// SetRuleWatchFields sets the fields whose change fires a record_updated rule
+// (empty: any change).
+func (s *Store) SetRuleWatchFields(ctx context.Context, ruleID string, fields []string) error {
+	clean := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			clean = append(clean, f)
+		}
+	}
+	_, err := s.db.Exec(ctx, `UPDATE workflow.automation_rule SET watch_fields = $2 WHERE id = $1::uuid`, ruleID, clean)
+	return err
+}
+
 func (s *Store) SetRuleFiresOnImport(ctx context.Context, ruleID string, on bool) error {
 	_, err := s.db.Exec(ctx, `UPDATE workflow.automation_rule SET fires_on_import = $2 WHERE id = $1::uuid`, ruleID, on)
 	return err
@@ -3359,6 +3381,7 @@ func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (
 		    ) step_def
 		    WHERE ws.status = 'in_progress'
 		      AND `+assignee.SQL("wd.application_id", assignee.StepRolesSQL("step_def.elem"), "$2::uuid")+`
+		      AND `+assignee.NamedSQL("ws", "step_def.elem", "wd.application_id", "$2::uuid")+`
 		)
 	`, stepID, userID).Scan(&eligible)
 	return eligible, err

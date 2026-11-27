@@ -10042,9 +10042,19 @@ func (s *AutomationRule) encodeFields(e *jx.Encoder) {
 			s.FiresOnImport.Encode(e)
 		}
 	}
+	{
+		if s.WatchFields != nil {
+			e.FieldStart("watch_fields")
+			e.ArrStart()
+			for _, elem := range s.WatchFields {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfAutomationRule = [22]string{
+var jsonFieldsNameOfAutomationRule = [23]string{
 	0:  "may_run",
 	1:  "id",
 	2:  "application_id",
@@ -10067,6 +10077,7 @@ var jsonFieldsNameOfAutomationRule = [22]string{
 	19: "next_fire_at",
 	20: "last_fire_at",
 	21: "fires_on_import",
+	22: "watch_fields",
 }
 
 // Decode decodes AutomationRule from json.
@@ -10316,6 +10327,25 @@ func (s *AutomationRule) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"fires_on_import\"")
 			}
+		case "watch_fields":
+			if err := func() error {
+				s.WatchFields = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.WatchFields = append(s.WatchFields, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"watch_fields\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -10513,9 +10543,19 @@ func (s *AutomationRuleRequest) encodeFields(e *jx.Encoder) {
 			s.FiresOnImport.Encode(e)
 		}
 	}
+	{
+		if s.WatchFields != nil {
+			e.FieldStart("watch_fields")
+			e.ArrStart()
+			for _, elem := range s.WatchFields {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfAutomationRuleRequest = [15]string{
+var jsonFieldsNameOfAutomationRuleRequest = [16]string{
 	0:  "name",
 	1:  "description",
 	2:  "trigger_type",
@@ -10531,6 +10571,7 @@ var jsonFieldsNameOfAutomationRuleRequest = [15]string{
 	12: "max_retries",
 	13: "retry_backoff_seconds",
 	14: "fires_on_import",
+	15: "watch_fields",
 }
 
 // Decode decodes AutomationRuleRequest from json.
@@ -10692,6 +10733,25 @@ func (s *AutomationRuleRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"fires_on_import\"")
 			}
+		case "watch_fields":
+			if err := func() error {
+				s.WatchFields = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.WatchFields = append(s.WatchFields, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"watch_fields\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -10780,6 +10840,8 @@ func (s *AutomationRuleRequestTriggerType) Decode(d *jx.Decoder) error {
 		*s = AutomationRuleRequestTriggerTypeAPI
 	case AutomationRuleRequestTriggerTypeFormApproval:
 		*s = AutomationRuleRequestTriggerTypeFormApproval
+	case AutomationRuleRequestTriggerTypeRecordUpdated:
+		*s = AutomationRuleRequestTriggerTypeRecordUpdated
 	case AutomationRuleRequestTriggerTypeGridChange:
 		*s = AutomationRuleRequestTriggerTypeGridChange
 	case AutomationRuleRequestTriggerTypeSchedule:
@@ -10832,6 +10894,8 @@ func (s *AutomationRuleTriggerType) Decode(d *jx.Decoder) error {
 		*s = AutomationRuleTriggerTypeAPI
 	case AutomationRuleTriggerTypeFormApproval:
 		*s = AutomationRuleTriggerTypeFormApproval
+	case AutomationRuleTriggerTypeRecordUpdated:
+		*s = AutomationRuleTriggerTypeRecordUpdated
 	case AutomationRuleTriggerTypeGridChange:
 		*s = AutomationRuleTriggerTypeGridChange
 	case AutomationRuleTriggerTypeSchedule:
@@ -13237,6 +13301,103 @@ func (s CategoryChartDataContext) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *CategoryChartDataContext) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *CellExpected) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *CellExpected) encodeFields(e *jx.Encoder) {
+	{
+		if s.Value.Set {
+			e.FieldStart("value")
+			s.Value.Encode(e)
+		}
+	}
+	{
+		if s.Text.Set {
+			e.FieldStart("text")
+			s.Text.Encode(e)
+		}
+	}
+	{
+		if s.Blank.Set {
+			e.FieldStart("blank")
+			s.Blank.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfCellExpected = [3]string{
+	0: "value",
+	1: "text",
+	2: "blank",
+}
+
+// Decode decodes CellExpected from json.
+func (s *CellExpected) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CellExpected to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "value":
+			if err := func() error {
+				s.Value.Reset()
+				if err := s.Value.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"value\"")
+			}
+		case "text":
+			if err := func() error {
+				s.Text.Reset()
+				if err := s.Text.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"text\"")
+			}
+		case "blank":
+			if err := func() error {
+				s.Blank.Reset()
+				if err := s.Blank.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"blank\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode CellExpected")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *CellExpected) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CellExpected) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -20764,18 +20925,36 @@ func (s *CreateFormRequest) encodeFields(e *jx.Encoder) {
 			s.EditAccess.Encode(e)
 		}
 	}
+	{
+		if s.EditorField.Set {
+			e.FieldStart("editor_field")
+			s.EditorField.Encode(e)
+		}
+	}
+	{
+		if s.EditorRoles != nil {
+			e.FieldStart("editor_roles")
+			e.ArrStart()
+			for _, elem := range s.EditorRoles {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateFormRequest = [9]string{
-	0: "name",
-	1: "label",
-	2: "fields",
-	3: "own_records_only",
-	4: "keeps_dimension_id",
-	5: "member_label_field",
-	6: "member_root_label",
-	7: "member_label_with_code",
-	8: "edit_access",
+var jsonFieldsNameOfCreateFormRequest = [11]string{
+	0:  "name",
+	1:  "label",
+	2:  "fields",
+	3:  "own_records_only",
+	4:  "keeps_dimension_id",
+	5:  "member_label_field",
+	6:  "member_root_label",
+	7:  "member_label_with_code",
+	8:  "edit_access",
+	9:  "editor_field",
+	10: "editor_roles",
 }
 
 // Decode decodes CreateFormRequest from json.
@@ -20882,6 +21061,35 @@ func (s *CreateFormRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"edit_access\"")
+			}
+		case "editor_field":
+			if err := func() error {
+				s.EditorField.Reset()
+				if err := s.EditorField.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"editor_field\"")
+			}
+		case "editor_roles":
+			if err := func() error {
+				s.EditorRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.EditorRoles = append(s.EditorRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"editor_roles\"")
 			}
 		default:
 			return d.Skip()
@@ -63359,6 +63567,39 @@ func (s *OptCategoryChartDataContext) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes CellExpected as json.
+func (o OptCellExpected) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes CellExpected from json.
+func (o *OptCellExpected) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCellExpected to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCellExpected) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCellExpected) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes CellHistoryEntrySourceKind as json.
 func (o OptCellHistoryEntrySourceKind) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -98228,15 +98469,22 @@ func (s *WritebackBatchReqCellsItem) encodeFields(e *jx.Encoder) {
 			s.Clear.Encode(e)
 		}
 	}
+	{
+		if s.Expected.Set {
+			e.FieldStart("expected")
+			s.Expected.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfWritebackBatchReqCellsItem = [6]string{
+var jsonFieldsNameOfWritebackBatchReqCellsItem = [7]string{
 	0: "metric_id",
 	1: "dim_codes",
 	2: "value",
 	3: "member",
 	4: "text",
 	5: "clear",
+	6: "expected",
 }
 
 // Decode decodes WritebackBatchReqCellsItem from json.
@@ -98309,6 +98557,16 @@ func (s *WritebackBatchReqCellsItem) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"clear\"")
+			}
+		case "expected":
+			if err := func() error {
+				s.Expected.Reset()
+				if err := s.Expected.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"expected\"")
 			}
 		default:
 			return d.Skip()
@@ -98848,19 +99106,26 @@ func (s *WritebackRequest) encodeFields(e *jx.Encoder) {
 			s.Clear.Encode(e)
 		}
 	}
+	{
+		if s.Expected.Set {
+			e.FieldStart("expected")
+			s.Expected.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfWritebackRequest = [10]string{
-	0: "model_id",
-	1: "revision_id",
-	2: "metric_id",
-	3: "dim_codes",
-	4: "dim_code",
-	5: "value",
-	6: "member",
-	7: "text",
-	8: "recalc",
-	9: "clear",
+var jsonFieldsNameOfWritebackRequest = [11]string{
+	0:  "model_id",
+	1:  "revision_id",
+	2:  "metric_id",
+	3:  "dim_codes",
+	4:  "dim_code",
+	5:  "value",
+	6:  "member",
+	7:  "text",
+	8:  "recalc",
+	9:  "clear",
+	10: "expected",
 }
 
 // Decode decodes WritebackRequest from json.
@@ -98975,6 +99240,16 @@ func (s *WritebackRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"clear\"")
+			}
+		case "expected":
+			if err := func() error {
+				s.Expected.Reset()
+				if err := s.Expected.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"expected\"")
 			}
 		default:
 			return d.Skip()

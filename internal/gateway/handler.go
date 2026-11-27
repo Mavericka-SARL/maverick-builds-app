@@ -2288,6 +2288,10 @@ type writebackReq struct {
 	Text *string `json:"text,omitempty"`
 	// Clear empties the cell — no value, not 0 (text_cells.go).
 	Clear bool `json:"clear,omitempty"`
+	// Expected is the cell as its writer read it (cell_conflict.go): set, a
+	// cell someone changed since is refused (409 cell_changed); omitted, the
+	// write is made as before.
+	Expected *cellExpected `json:"expected,omitempty"`
 	// Recalc "background" answers once the value is stored and recalculates
 	// its dependents after; the grid read reports recalc_pending meanwhile
 	// (recalc_state.go). Omitted, the write answers after the recalculation,
@@ -2759,7 +2763,8 @@ type taskRow struct {
 // role in every tenant; and even once scoped it matched a business role named
 // like a platform role (a business admin may call one "developer") as that
 // platform role, listing other workspaces' steps to the role's members.
-var taskAssigneeSQL = assignee.SQL("app.id", assignee.StepRolesSQL("step_def.elem"), "$1::uuid")
+var taskAssigneeSQL = "(" + assignee.SQL("app.id", assignee.StepRolesSQL("step_def.elem"), "$1::uuid") +
+	" AND " + assignee.NamedSQL("ws", "step_def.elem", "app.id", "$1::uuid") + ")"
 
 func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -3098,6 +3103,7 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 				Metadata: map[string]string{"model_id": freezeModel, "cells": strconv.Itoa(len(values)), "via": "approval_freeze",
 					"instance_id": instanceID, "approved_by": a.UserID},
 			})
+			h.keepFrozenApproval(ctx, instanceID, freezeRevision)
 		}
 	}
 
@@ -3631,6 +3637,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		ctx = turnCtx
 		r = r.WithContext(ctx)
 	}
+	// The whole-revision aggregates a read asks for (each metric's total, a
+	// slice, a metric's stored values, the input totals) are answered once
+	// per data generation for every read of the model: a dashboard's widgets
+	// asked the database the same questions each (calculation/readmemo.go).
+	ctx = h.withReadGeneration(ctx, modelID)
+	r = r.WithContext(ctx)
 
 	// ── resolve revision ─────────────────────────────────────────────────────
 	revisionID, _, err := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
@@ -4383,14 +4395,14 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	if groupedInput {
 		// One deduped SUM per input metric (latest-wins per combo, form
 		// 'replace'/'last' overriding direct entry), no per-combo rows built.
-		trows, terr := h.db.Query(ctx, `
+		inputTotalsSQL := `
 			WITH covered AS MATERIALIZED (
 				SELECT DISTINCT fi.metric_id, fi.dim_members
 				FROM runtime.fact_input fi
 				JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
 				WHERE fi.model_id = $1::uuid AND fi.revision_id = $2::uuid
 				  AND fmm.aggregation IN ('replace', 'last')
-			), `+writeguard.FedMetricsCTE+`
+			), ` + writeguard.FedMetricsCTE + `
 			SELECT metric_id::text, SUM(v)::float8 FROM (
 				SELECT metric_id, dim_members, SUM(value)::float8 AS v
 				FROM (
@@ -4398,7 +4410,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 						SELECT DISTINCT ON (metric_id, dim_members)
 							metric_id, dim_members, value
 						FROM runtime.fact_input
-						WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL`+scopeSQL+`
+						WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL` + scopeSQL + `
 						ORDER BY metric_id, dim_members, entered_at DESC, id DESC
 					) direct
 					WHERE NOT EXISTS (
@@ -4410,30 +4422,40 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					UNION ALL
 					SELECT metric_id, dim_members, value
 					FROM runtime.fact_input
-					WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NOT NULL`+scopeSQL+`
+					WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NOT NULL` + scopeSQL + `
 				) fi
 				GROUP BY metric_id, dim_members
 			) per_combo
 			GROUP BY metric_id
-		`, append([]any{modelID, revisionID}, scopeArgs...)...)
+		`
+		inputArgs := append([]any{modelID, revisionID}, scopeArgs...)
+		inputTotals, terr := calculation.MemoFloats(ctx, "input_totals", []string{inputTotalsSQL, fmt.Sprint(inputArgs...)}, func() (map[string]float64, error) {
+			trows, err := h.db.Query(ctx, inputTotalsSQL, inputArgs...)
+			if err != nil {
+				return nil, err
+			}
+			defer trows.Close()
+			out := map[string]float64{}
+			for trows.Next() {
+				var metricID string
+				var val float64
+				if err := trows.Scan(&metricID, &val); err != nil {
+					return nil, err
+				}
+				out[metricID] += val
+			}
+			return out, trows.Err()
+		})
 		if terr != nil {
 			jsonErr(w, terr, http.StatusInternalServerError)
 			return
 		}
-		for trows.Next() {
-			var metricID string
-			var val float64
-			if err := trows.Scan(&metricID, &val); err != nil {
-				trows.Close()
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
+		for metricID, val := range inputTotals {
 			if metricRules[metricID] == "hidden" {
 				continue
 			}
 			totals[metricID] += val
 		}
-		trows.Close()
 	} else if !metaOnly {
 		// Latest direct-entry per cell + all active form-integration entries.
 		// For cells covered by a "replace"/"last" mapping, the direct-entry row
@@ -4449,21 +4471,21 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// 10k-row import). Materializing removes the stats dependency: the
 		// plan is robust whether or not statistics are current.
 		cellArgs := append([]any{modelID, revisionID}, scopeArgs...)
-		cellRows, err := h.db.Query(ctx, `
+		cellSQL := `
 			WITH covered AS MATERIALIZED (
 				SELECT DISTINCT fi.metric_id, fi.dim_members
 				FROM runtime.fact_input fi
 				JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
 				WHERE fi.model_id = $1::uuid AND fi.revision_id = $2::uuid
 				  AND fmm.aggregation IN ('replace', 'last')
-			), `+writeguard.FedMetricsCTE+`
+			), ` + writeguard.FedMetricsCTE + `
 			SELECT metric_id::text, dim_members::text, SUM(value)::float8
 			FROM (
 				SELECT direct.metric_id, direct.dim_members, direct.value FROM (
 					SELECT DISTINCT ON (metric_id, dim_members)
 						metric_id, dim_members, value
 					FROM runtime.fact_input
-					WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL`+scopeSQL+`
+					WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NULL` + scopeSQL + `
 					ORDER BY metric_id, dim_members, entered_at DESC, id DESC
 				) direct
 				WHERE NOT EXISTS (
@@ -4476,22 +4498,34 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				UNION ALL
 				SELECT metric_id, dim_members, value
 				FROM runtime.fact_input
-				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NOT NULL`+scopeSQL+`
+				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND source_ref IS NOT NULL` + scopeSQL + `
 			) fi
 			GROUP BY metric_id, dim_members
-		`, cellArgs...)
+		`
+		// The rows are shared by every read of this generation
+		// (calculation.MemoRows): read here, never changed.
+		inputCells, err := calculation.MemoRows(ctx, "input_cells", []string{cellSQL, fmt.Sprint(cellArgs...)}, func() ([]calculation.InputCellRow, error) {
+			cellRows, err := h.db.Query(ctx, cellSQL, cellArgs...)
+			if err != nil {
+				return nil, err
+			}
+			defer cellRows.Close()
+			var out []calculation.InputCellRow
+			for cellRows.Next() {
+				var c calculation.InputCellRow
+				if err := cellRows.Scan(&c.MetricID, &c.DimMembers, &c.Value); err != nil {
+					return nil, err
+				}
+				out = append(out, c)
+			}
+			return out, cellRows.Err()
+		})
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		for cellRows.Next() {
-			var metricID, dmJSON string
-			var val float64
-			if err := cellRows.Scan(&metricID, &dmJSON, &val); err != nil {
-				cellRows.Close()
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
+		for _, ic := range inputCells {
+			metricID, dmJSON, val := ic.MetricID, ic.DimMembers, ic.Value
 			var dm map[string]string
 			if err := json.Unmarshal([]byte(dmJSON), &dm); err != nil {
 				continue
@@ -4522,7 +4556,6 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			}
 			cells[metricID+":"+strings.Join(codes, ":")] = val
 		}
-		cellRows.Close()
 		if !totalsOnly {
 			var textMetrics, textCalcs []string
 			for _, m := range allMetrics {
@@ -4626,7 +4659,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			// keepGridMetrics): the whole model's were the bulk of a read's
 			// memory.
 			allCalc, ccErr = calcStore.LoadAllCalcValueMapsScoped(ctx, modelID, revisionID,
-				` AND metric_id::text = ANY($3::text[])`, []any{gridMetricIDs(metrics)})
+				` AND metric_id = ANY($3::text[]::uuid[])`, []any{gridMetricIDs(metrics)})
 		} else {
 			allCalc, ccErr = calcStore.LoadAllCalcValueMaps(ctx, modelID, revisionID)
 		}
@@ -4745,8 +4778,18 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		} else if len(askedMetrics) > 0 {
 			only = readsClosure(askedMetrics, allMetrics)
 		}
-		sr, sErr := h.loadScopedReads(ctx, modelID, revisionID, unfilteredDims, dimIDToName, allMetrics, revisionMetrics,
-			metricDims, hiddenByDim, scopePinned, scopeSubtrees, only)
+		var sr *scopedReads
+		var sErr error
+		if direct := readMetricIDs(gridDefID, metrics, askedMetrics); len(hiddenByDim) == 0 && direct != nil {
+			sr, sErr = h.loadServedReads(ctx, modelID, revisionID, unfilteredDims, dimIDToName, allMetrics, revisionMetrics,
+				metricDims, scopePinned, scopeSubtrees, direct)
+			if sErr == nil {
+				only = sr.Only
+			}
+		} else {
+			sr, sErr = h.loadScopedReads(ctx, modelID, revisionID, unfilteredDims, dimIDToName, allMetrics, revisionMetrics,
+				metricDims, hiddenByDim, scopePinned, scopeSubtrees, only)
+		}
 		if sErr != nil {
 			jsonErr(w, sErr, http.StatusInternalServerError)
 			return
@@ -5566,7 +5609,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		),
 		new_forms AS (
 			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes)
+				edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes, editor_field, editor_roles)
 			SELECT f.model_id, f.name, f.label,
 				COALESCE((
 					SELECT jsonb_agg(
@@ -5578,7 +5621,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				), '[]'::jsonb),
 				$2::uuid, f.own_records_only,
 				f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-				f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes
+				f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes, f.editor_field, f.editor_roles
 			FROM model.form_def f
 			WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 			RETURNING id AS new_id, name
@@ -5849,7 +5892,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			INSERT INTO workflow.automation_rule
 			  (application_id, name, description, trigger_type, workflow_name, enabled,
 			   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
-			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, revision_id)
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, watch_fields, revision_id)
 			SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 				wm.new_id,
 				(SELECT nf.id FROM model.form_def ofd
@@ -5862,7 +5905,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
 				          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
 				          HAVING count(*) = 1), ar.source_integration_id),
-				ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import,
+				ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import, ar.watch_fields,
 				$2::uuid
 			FROM workflow.automation_rule ar
 			LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id
@@ -5916,7 +5959,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				 WHERE og.id::text = wm.old_ref_id AND wm.widget_type IN ('grid', 'chart', 'import')),
 				(SELECT nf.id::text FROM model.form_def ofd
 				 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-				 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board')),
+				 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board', 'gantt')),
 				(SELECT nm.id::text FROM model.metric_def om
 				 JOIN model.metric_def nm ON nm.model_id = om.model_id AND nm.name = om.name AND nm.revision_id = $2::uuid
 				 WHERE om.id::text = wm.old_ref_id AND wm.widget_type = 'metric_kpi'),
@@ -12653,7 +12696,13 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		// A member property the record's fields fill changed: what reads it
 		// is recalculated.
 		if keptChanged {
-			go h.recalcDimensionDependents(bgCtx, scope.form.KeepsDimensionID) //nolint:contextcheck
+			if h.groupedFieldChanged(ctx, scope.form, rec.Data, data) {
+				go h.recalcDimensionDependents(bgCtx, scope.form.KeepsDimensionID) //nolint:contextcheck
+			} else {
+				// Only this record's member changed: the pass follows it
+				// (calculation.RecalcMemberProperties).
+				go h.recalcMemberProperties(bgCtx, scope.form.KeepsDimensionID, scope.form.MemberCode(data)) //nolint:contextcheck
+			}
 		}
 		go func() { _ = h.applyFormMappings(bgCtx, recordID, formID, newStatus, data, userID) }()
 		statusChanged := newStatus != oldStatus
@@ -12666,6 +12715,9 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if statusChanged && newStatus == crudapp.StatusApproved {
 			go h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
 		}
+		// record_updated fires for any change of the record, with the fields
+		// that changed (recordpost/record_updated.go).
+		h.records().DispatchRecordUpdated(ctx, appID, revisionID, formID, recordID, oldStatus, newStatus, rec.Data, data, userID, false)
 		meta := map[string]string{"form_id": formID, "status": newStatus, "fields_changed": strconv.FormatBool(sent != nil)}
 		if statusChanged {
 			meta["previous_status"] = oldStatus
@@ -12777,6 +12829,8 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 			MaxRetries          int    `json:"max_retries"`
 			RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
 			FiresOnImport       *bool  `json:"fires_on_import"`
+			// WatchFields: a record_updated rule's fields (migration 199).
+			WatchFields *[]string `json:"watch_fields"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -12795,6 +12849,12 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 				RetryBackoffSeconds: body.RetryBackoffSeconds,
 			}
 		}
+		if body.WatchFields != nil {
+			if msg := h.watchFieldsRefusal(ctx, body.TriggerType, body.SourceFormID, *body.WatchFields); msg != "" {
+				jsonErr(w, fmt.Errorf("%s", msg), http.StatusBadRequest)
+				return
+			}
+		}
 		rule, err := store.CreateAutomationRuleScoped(ctx, appID, revisionID, body.Name, body.Description, body.TriggerType, body.WorkflowName, body.WorkflowDefID, body.SourceFormID, body.SourceGridID, body.SourceIntegrationID, sched)
 		if err != nil {
 			jsonErr(w, err, ruleErrStatus(err))
@@ -12806,6 +12866,13 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			rule.FiresOnImport = *body.FiresOnImport
+		}
+		if body.WatchFields != nil {
+			if err := store.SetRuleWatchFields(ctx, rule.ID, *body.WatchFields); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			rule.WatchFields = *body.WatchFields
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -16723,6 +16790,8 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 			MaxRetries          int    `json:"max_retries"`
 			RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
 			FiresOnImport       *bool  `json:"fires_on_import"`
+			// WatchFields: a record_updated rule's fields (migration 199).
+			WatchFields *[]string `json:"watch_fields"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -16740,6 +16809,19 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 				RetryBackoffSeconds: body.RetryBackoffSeconds,
 			}
 		}
+		if body.WatchFields != nil {
+			trigger, form := h.ruleTriggerAndForm(ctx, ruleID)
+			if body.TriggerType != "" {
+				trigger = body.TriggerType
+			}
+			if body.SourceFormID != "" {
+				form = body.SourceFormID
+			}
+			if msg := h.watchFieldsRefusal(ctx, trigger, form, *body.WatchFields); msg != "" {
+				jsonErr(w, fmt.Errorf("%s", msg), http.StatusBadRequest)
+				return
+			}
+		}
 		updated, err := store.UpdateAutomationRuleScoped(ctx, ruleID, body.Name, body.Description, body.TriggerType, body.WorkflowName, body.WorkflowDefID, body.SourceFormID, body.SourceGridID, body.SourceIntegrationID, body.Enabled, sched)
 		if err != nil {
 			jsonErr(w, err, ruleErrStatus(err))
@@ -16751,6 +16833,13 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			updated.FiresOnImport = *body.FiresOnImport
+		}
+		if body.WatchFields != nil {
+			if err := store.SetRuleWatchFields(ctx, ruleID, *body.WatchFields); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			updated.WatchFields = *body.WatchFields
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -16792,6 +16881,12 @@ func jsonOK(w http.ResponseWriter, v any) {
 
 func jsonErr(w http.ResponseWriter, err error, code int) {
 	w.Header().Set("Content-Type", "application/json")
+	// A checked cell save over a cell someone changed (cell_conflict.go).
+	if ce := asCellChanged(err); ce != nil {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(ce.body())
+		return
+	}
 	// A write the storage guard refused (migration 135), on whichever path
 	// it came: 402 with the guard's sentence, as a refused creation is.
 	var pgErr *pgconn.PgError
@@ -18071,7 +18166,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		if (body.WidgetType == "form" || body.WidgetType == "board") && body.RefID != nil {
+		if (body.WidgetType == "form" || body.WidgetType == "board" || body.WidgetType == "gantt") && body.RefID != nil {
 			if err := modeledit.CheckRecordWidgetProps(ctx, h.db.For(ctx), body.WidgetType, *body.RefID, body.WidgetProps); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
@@ -18192,7 +18287,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			var props []byte
 			if err := h.db.QueryRow(ctx,
 				`SELECT widget_type, COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
-				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && (wType == "form" || wType == "board") {
+				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && (wType == "form" || wType == "board" || wType == "gantt") {
 				if body.RefID != nil && *body.RefID != "" {
 					refID = *body.RefID
 				}
@@ -18972,6 +19067,55 @@ func (h *handler) recalcDimensionDependents(ctx context.Context, dimID string) {
 	if err := sched.RecalcDimensionDependents(ctx, dimID); err != nil {
 		h.log.Warn().Err(err).Str("dimension", dimID).Msg("recalc after dimension change failed")
 	}
+}
+
+// recalcMemberProperties recalculates after the properties of member code
+// of dimID changed (calculation.RecalcMemberProperties), in the background,
+// as recalcDimensionDependents does.
+func (h *handler) recalcMemberProperties(ctx context.Context, dimID, code string) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation after a member's properties changed")
+	defer done()
+	var codes []string
+	if code != "" {
+		codes = []string{code}
+	}
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
+	if err := sched.RecalcMemberProperties(ctx, dimID, codes); err != nil {
+		h.log.Warn().Err(err).Str("dimension", dimID).Msg("recalculation after a member's properties changed failed")
+	}
+}
+
+// groupedFieldChanged reports whether a record edit of form (a table keeping
+// a dimension) changed a field whose property a grouping groups the
+// dimension's members by, or the record's code: then the members under each
+// grouping member move and every metric reading through one is recalculated.
+// When it cannot tell, it says yes.
+func (h *handler) groupedFieldChanged(ctx context.Context, form *crudapp.FormDef, before, after map[string]any) bool {
+	if c := form.CodeField(); c != nil && fmt.Sprint(before[c.Name]) != fmt.Sprint(after[c.Name]) {
+		return true
+	}
+	rows, err := h.db.For(ctx).Query(ctx, `SELECT lower(source_property) FROM model.dimension_def
+		WHERE source_dimension_id = $1::uuid AND COALESCE(source_property, '') <> ''`, form.KeepsDimensionID)
+	if err != nil {
+		return true
+	}
+	grouped := map[string]bool{}
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			grouped[recordpost.IdentKey(p)] = true
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return true
+	}
+	for _, f := range form.Fields {
+		if grouped[recordpost.IdentKey(f.Name)] && fmt.Sprint(before[f.Name]) != fmt.Sprint(after[f.Name]) {
+			return true
+		}
+	}
+	return false
 }
 
 // sameOptionalID reports whether two optional IDs are equal (both absent,
@@ -20779,6 +20923,19 @@ func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, a
 					PayloadSchema: payload,
 					Enabled:       true,
 					CreatedFrom:   "form",
+				}, TriggerEventCatalogItem{
+					// record_updated (migration 199): the rule may narrow it to
+					// a change of chosen fields.
+					Key:           toEventKey(fname) + ".updated",
+					Label:         flabel + " changed",
+					Description:   "Starts when a " + flabel + " record changes (any field, or the fields its trigger watches); the run gets changed_fields and old_<field> / new_<field>.",
+					Category:      "form",
+					SourceType:    "form",
+					SourceID:      fid,
+					SourceName:    flabel,
+					PayloadSchema: append(append([]TriggerPayloadField{}, payload...), TriggerPayloadField{Key: "changed_fields", Type: "text"}),
+					Enabled:       true,
+					CreatedFrom:   "form",
 				})
 			}
 		}
@@ -20795,6 +20952,20 @@ func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, a
 			PayloadSchema: []TriggerPayloadField{
 				{Key: "record_id", Type: "form_record", Required: true},
 				{Key: "form_id", Type: "text", Required: true},
+			},
+			Enabled:     true,
+			CreatedFrom: "system",
+		})
+		catalog = append(catalog, TriggerEventCatalogItem{
+			Key:         "form.update",
+			Label:       "A record changed in any table",
+			Description: "Starts when a record of any table in this application changes; the run gets changed_fields and old_<field> / new_<field>.",
+			Category:    "form",
+			SourceType:  "system",
+			PayloadSchema: []TriggerPayloadField{
+				{Key: "record_id", Type: "form_record", Required: true},
+				{Key: "form_id", Type: "text", Required: true},
+				{Key: "changed_fields", Type: "text"},
 			},
 			Enabled:     true,
 			CreatedFrom: "system",
@@ -21226,6 +21397,7 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer release()
+	ctx = h.withReadGeneration(ctx, modelID) // calculation/readmemo.go, as a grid read
 	// A rolling window on the plotted time dimension: its periods, then the
 	// members the chart lists besides them (time_window.go).
 	if win := widgetTimeWindow(widgetPropsRaw); win != nil && win.DimensionID == cfg.DimensionID {

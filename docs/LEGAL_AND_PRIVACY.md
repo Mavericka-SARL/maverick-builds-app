@@ -36,9 +36,13 @@ If you do not, nothing breaks: the paths reach the console, whose page
 `web/src/main.tsx`) renders the same document from
 `GET /api/legal/documents/{doc}` — it only needs JavaScript to do it.
 
-The console's `robots.txt` (`web/public/robots.txt`) lets crawlers read
-`/signup`, `/terms`, `/privacy` and the manuals under `/docs/`, and nothing
-behind sign-in.
+Search engines may index `/signup`, `/terms`, `/privacy` and the manuals under
+`/docs/`, and nothing behind sign-in. The console's `robots.txt`
+(`web/public/robots.txt`) lets crawlers fetch every page except `/api/`, and
+the pages behind sign-in answer `X-Robots-Tag: noindex` (`web/nginx.conf`).
+Blocking them in `robots.txt` instead does not keep them out of the index: a
+crawler that may not read a linked page indexes its bare address ("Indexed,
+though blocked by robots.txt") without ever seeing the noindex.
 
 ## Configuration
 

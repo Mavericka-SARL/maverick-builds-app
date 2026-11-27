@@ -398,6 +398,10 @@ type dimReads struct {
 	memo map[string]formula.Value
 	// ranks is the RANK/RANKIFS ranked sets of the pass, kept with memo.
 	ranks map[string]*formula.RankedSet
+	// rangeReads are the criteria-range metrics' values (formula.DimEvalContext.RangeReads), kept with memo.
+	rangeReads map[string]map[string]formula.Value
+	// criteria are the pass's criteria indexes (formula.CriteriaIndexes), kept with memo.
+	criteria *formula.CriteriaIndexes
 	// pinned holds the pass's reads that pin every dimension of their
 	// source (nil with memo: values may still appear during the pass).
 	pinned map[string]pinnedRead
@@ -437,6 +441,8 @@ func newDimReads(ctx context.Context, meta *DimMetadata, def *MetricDef, allDefs
 	}
 	if memo {
 		r.memo, r.ranks = map[string]formula.Value{}, map[string]*formula.RankedSet{}
+		r.rangeReads = map[string]map[string]formula.Value{}
+		r.criteria = formula.NewCriteriaIndexes()
 		r.pinned = map[string]pinnedRead{}
 	}
 	return r
@@ -487,7 +493,7 @@ func (r *dimReads) context(combo map[string]string, useMemo bool) *formula.DimEv
 		return rollup.NoValueByRule(r.meta.dims, depID, srcDims, rollup.AggRule(def.AggRule), rollup.TimeSummaryRule(def.TimeSummary), norm)
 	}
 	if useMemo {
-		d.Memo, d.Ranks = r.memo, r.ranks
+		d.Memo, d.Ranks, d.RangeReads, d.CriteriaIndexes = r.memo, r.ranks, r.rangeReads, r.criteria
 	}
 	return d
 }

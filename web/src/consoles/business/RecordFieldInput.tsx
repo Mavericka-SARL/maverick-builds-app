@@ -2,7 +2,7 @@ import { DateInput } from "../DateInput";
 import { useDateFormat } from "../dateFormat";
 import { Plus as PlusIcon } from "lucide-react";
 import { type Metric, type DevDimension, type DevDimensionMember, type FormField } from "../../api/client";
-import { Button, FilterChip, Select, TextInput, NumberInput, StatusBadge, Textarea, Txt } from "../../ui";
+import { Button, FilterChip, Select, TextInput, NumberInput, GroupedNumberInput, StatusBadge, Textarea, Txt } from "../../ui";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { memberList, statusLabel } from "./recordList";
 
@@ -207,14 +207,21 @@ export function FormFieldInput({
     return <DateInput value={String(value ?? "").slice(0, 10)} format={dateFormat} className="mvx-input" style={{ width: "100%" }}
       ariaLabel={f.label || f.name} data-field={f.name} onCommit={iso => onChange(iso)} />;
   }
+  if (f.type === "number") {
+    // Thousands shown as they are typed: 5 000 000 (GroupedNumberInput).
+    return (
+      <GroupedNumberInput id={id} value={value as number | string | null | undefined}
+        decimals={f.format === "money" ? 2 : undefined}
+        onChange={v => onChange(v)} style={{ width: "100%" }} aria-label={f.label || f.name} />
+    );
+  }
   return (
     <TextInput
       id={id}
-      type={f.type === "number" ? "number" : f.type === "url" ? "url" : "text"}
-      step={f.type === "number" && f.format === "money" ? "0.01" : undefined}
+      type={f.type === "url" ? "url" : "text"}
       placeholder={f.type === "url" ? "https://…" : undefined}
       value={String(value ?? "")}
-      onChange={e => onChange(f.type === "number" ? (e.target.value === "" ? "" : parseFloat(e.target.value)) : e.target.value)}
+      onChange={e => onChange(e.target.value)}
       style={{ width: "100%" }}
     />
   );

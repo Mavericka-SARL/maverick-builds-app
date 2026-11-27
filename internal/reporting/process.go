@@ -275,6 +275,8 @@ func (s *Session) DescribeDashboard(ctx context.Context, p Pinned, dashboardID s
 			info.Action = "a form people fill in on this dashboard"
 		case "board":
 			info.Action = "a board of a table's records in columns; moving a card changes the record"
+		case "gantt":
+			info.Action = "a timeline (Gantt chart) of a table's records: each a bar from its start to its finish date, beside its baseline; read them with query_records"
 		case "automation_button":
 			info.Type = "button"
 			info.Title = firstNonEmpty(str(w.Content), info.Title)

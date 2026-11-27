@@ -115,8 +115,8 @@ func resolveFormDefRef(ctx context.Context, pool refQuerier, modelID, revID, ref
 // other value would fail at the column, so the tool refuses it with the
 // list instead.
 var validTriggerTypes = map[string]bool{
-	"manual": true, "form_submit": true, "form_approval": true, "grid_change": true,
+	"manual": true, "form_submit": true, "form_approval": true, "record_updated": true, "grid_change": true,
 	"schedule": true, "api": true, "integration_completed": true, "integration_failed": true,
 }
 
-const triggerTypeList = "manual | form_submit | form_approval | grid_change | schedule | api | integration_completed | integration_failed"
+const triggerTypeList = "manual | form_submit | form_approval | record_updated | grid_change | schedule | api | integration_completed | integration_failed"

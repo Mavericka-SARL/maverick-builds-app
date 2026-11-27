@@ -17,6 +17,74 @@ import (
 // changed inputs cannot find them: a member created, edited or deleted, a
 // property renamed, retyped or deleted, or a member import must call this.
 func (s *Scheduler) RecalcDimensionDependents(ctx context.Context, dimensionID string) (err error) {
+	return s.recalcDimension(ctx, dimensionID, true)
+}
+
+// RecalcMemberProperties recalculates after properties of the members codes
+// of dimensionID changed — a record of the table keeping it saved, with no
+// grouping reading what changed (RecalcDimensionDependents for one that
+// does). It follows the members: each metric reading the dimension starts
+// at their cells where it reads them there, and what it then changes is
+// followed through its readers, as a pass after written cells is
+// (incremental.go) — a cost line's quantity recalculated that cost line's
+// phasing and the totals above it, not all 575 cost lines and every metric
+// after them (2026-11-27).
+func (s *Scheduler) RecalcMemberProperties(ctx context.Context, dimensionID string, codes []string) (err error) {
+	defer s.recoverAsError(&err, "recalculation after a member's properties changed")
+	if len(codes) == 0 {
+		return s.recalcDimension(ctx, dimensionID, false)
+	}
+	var modelID, revisionID, name string
+	if err := s.store.pool.QueryRow(ctx, `
+		SELECT model_id::text, COALESCE(revision_id::text,''), name
+		FROM model.dimension_def WHERE id=$1::uuid
+	`, dimensionID).Scan(&modelID, &revisionID, &name); err != nil {
+		return fmt.Errorf("load dimension: %w", err)
+	}
+	found, err := metricformula.MetricsReferencingDimension(ctx, s.store.pool, modelID, revisionID, name)
+	if err != nil {
+		return fmt.Errorf("find metrics reading dimension %s: %w", name, err)
+	}
+	revs := make([]string, 0, len(found))
+	for rev := range found {
+		revs = append(revs, rev)
+	}
+	sort.Strings(revs)
+	var firstErr error
+	for _, rev := range revs {
+		defs, err := s.store.LoadModelMetrics(ctx, modelID, rev)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("load metrics: %w", err)
+			}
+			continue
+		}
+		var readers []string
+		for _, id := range found[rev] {
+			if def, ok := defs[id]; ok && !def.IsInput {
+				readers = append(readers, id)
+			}
+		}
+		if len(readers) == 0 {
+			continue
+		}
+		seen := map[string]bool{}
+		var ids []string
+		for _, id := range withDependencyFree(defs, append(append([]string(nil), readers...), AffectedMetricIDs(defs, readers)...)) {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		req := passRequest{ids: ids, members: map[string][]string{dimensionID: append([]string(nil), codes...)}, readers: readers}
+		if err := s.recalcRequest(ctx, modelID, rev, defs, req); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *Scheduler) recalcDimension(ctx context.Context, dimensionID string, wide bool) (err error) {
 	defer s.recoverAsError(&err, "recalculation after a dimension change")
 	var modelID, revisionID, name string
 	if err := s.store.pool.QueryRow(ctx, `
@@ -29,9 +97,11 @@ func (s *Scheduler) RecalcDimensionDependents(ctx context.Context, dimensionID s
 	// grouping of it, or a structural parent/child chain through it) reads
 	// this dimension's members too: SUMIFS(salary, area, "EMEA") over
 	// salary[employees] regroups when an employee's area property changes.
-	related, err := s.relatedDimensions(ctx, modelID, dimensionID)
-	if err != nil {
-		return fmt.Errorf("find dimensions related to %s: %w", name, err)
+	var related []relatedDim
+	if wide {
+		if related, err = s.relatedDimensions(ctx, modelID, dimensionID); err != nil {
+			return fmt.Errorf("find dimensions related to %s: %w", name, err)
+		}
 	}
 	byRev := map[string][]string{}
 	// The dimension and every related one, by revision: a calculated metric
@@ -48,7 +118,7 @@ func (s *Scheduler) RecalcDimensionDependents(ctx context.Context, dimensionID s
 		for rev, ids := range found {
 			byRev[rev] = append(byRev[rev], ids...)
 		}
-		if d.revisionID != "" {
+		if wide && d.revisionID != "" {
 			if placedOn[d.revisionID] == nil {
 				placedOn[d.revisionID] = map[string]bool{}
 			}

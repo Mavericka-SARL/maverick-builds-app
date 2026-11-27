@@ -107,6 +107,9 @@ func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID
 		if access, ok := memo.rule(key); ok {
 			return access, nil
 		}
+		if (ruleType == "dimension_member" || ruleType == "metric") && memo.rulesLoaded(userID) {
+			return "", nil // preloaded: no rule on it
+		}
 	}
 	var access string
 	var err error

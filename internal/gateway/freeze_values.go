@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mavericks-engine/mavericks/internal/approvalsnap"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -174,15 +176,21 @@ func (h *handler) freezeValues(ctx context.Context, r *http.Request, writer *act
 
 	// Read every value through the grid's own read, one totals read per
 	// source grid and scope.
-	type readKey struct{ grid, scope string }
+	type readKey struct {
+		grid, scope string
+		totals      bool
+	}
 	reads := map[readKey]map[string]any{}
-	read := func(from *freezeMetric, scope map[string]string) (map[string]any, error) {
+	read := func(from *freezeMetric, scope map[string]string, totalsOnly bool) (map[string]any, error) {
 		sb, _ := json.Marshal(scope)
-		k := readKey{from.gridID, string(sb)}
+		k := readKey{from.gridID, string(sb), totalsOnly}
 		if got, ok := reads[k]; ok {
 			return got, nil
 		}
-		q := url.Values{"revision_id": {revisionID}, "grid_def_id": {from.gridID}, "scope": {string(sb)}, "totals_only": {"1"}}
+		q := url.Values{"revision_id": {revisionID}, "grid_def_id": {from.gridID}, "scope": {string(sb)}}
+		if totalsOnly {
+			q.Set("totals_only", "1")
+		}
 		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(250 * time.Millisecond) {
 			status, body := h.callAsCaller(ctx, r, http.MethodGet, "/api/grid", q, nil)
 			if status != http.StatusOK {
@@ -200,22 +208,95 @@ func (h *handler) freezeValues(ctx context.Context, r *http.Request, writer *act
 			return g, nil
 		}
 	}
+	// One read per source grid and pins answers every cell whose dimensions
+	// are all pinned to a leaf or frozen leaf by leaf — a plan's 60 months
+	// took 60 totals reads of 2.3 s, and the approval outlasted the write
+	// timeout (2026-11-27). A cell that read cannot answer exactly — a
+	// dimension read at its total, a parent pinned, a value withheld or
+	// absent — is read on its own as before.
+	leafSets := map[string]map[string]bool{}
+	isLeaf := func(dimID, code string) bool {
+		set, ok := leafSets[dimID]
+		if !ok {
+			set = map[string]bool{}
+			if codes, err := h.leafCodes(ctx, dimID); err == nil {
+				for _, c := range codes {
+					set[c] = true
+				}
+			}
+			leafSets[dimID] = set
+		}
+		return set[code]
+	}
+	batched := func(from *freezeMetric, source map[string]string) (float64, bool) {
+		if len(source) != len(from.dims) {
+			return 0, false
+		}
+		scope := map[string]string{}
+		for id, code := range source {
+			if !isLeaf(id, code) {
+				return 0, false
+			}
+			if _, pinned := pins[id]; pinned {
+				scope[id] = code
+			}
+		}
+		if len(scope) == len(source) {
+			return 0, false // nothing varies: the totals read is the one read
+		}
+		g, err := read(from, scope, false)
+		if err != nil {
+			return 0, false
+		}
+		wh, _ := g["withheld"].([]any)
+		for _, x := range wh {
+			if str, _ := x.(string); str == from.id || strings.HasPrefix(str, from.id+":") {
+				return 0, false
+			}
+		}
+		dims, _ := g["dimensions"].([]any)
+		if len(dims) != len(source) {
+			return 0, false
+		}
+		key := []string{from.id}
+		for _, d := range dims {
+			dm, _ := d.(map[string]any)
+			id, _ := dm["id"].(string)
+			code, ok := source[id]
+			if !ok {
+				return 0, false
+			}
+			key = append(key, code)
+		}
+		cells, _ := g["cells"].(map[string]any)
+		v, ok := cells[strings.Join(key, ":")].(float64)
+		return v, ok
+	}
+	// The writer's access rules read once for every cell (prepareCell): the
+	// run's starter, a project manager with a rule per other project, cost
+	// a lookup per cell and member (writeguard.PreloadRules).
+	if memo := writeguard.NewMemo(); memo.PreloadRules(ctx, h.db.For(ctx), writer.UserID, revisionID) == nil {
+		ctx = writeguard.WithMemo(ctx, memo)
+	}
 	var out []frozenValue
 	var prepared []preparedCell
 	infos := map[string]cellMetricInfo{}
 	for i, c := range cells {
 		from := froms[i]
-		g, err := read(from, c.source)
-		if err != nil {
-			return nil, refuseCell(http.StatusForbidden, "%s cannot be read: %v", from.label, err), nil
-		}
-		if wh, _ := g["withheld"].([]any); containsAny(wh, from.id) {
-			return nil, refuseCell(http.StatusForbidden, "%s is withheld from you at these members (it reads a member hidden from you)", from.label), nil
-		}
-		totals, _ := g["totals"].(map[string]any)
-		v, ok := totals[from.id].(float64)
+		v, ok := batched(from, c.source)
 		if !ok {
-			continue // no value there: the target cell is left as it is
+			g, err := read(from, c.source, true)
+			if err != nil {
+				return nil, refuseCell(http.StatusForbidden, "%s cannot be read: %v", from.label, err), nil
+			}
+			if wh, _ := g["withheld"].([]any); containsAny(wh, from.id) {
+				return nil, refuseCell(http.StatusForbidden, "%s is withheld from you at these members (it reads a member hidden from you)", from.label), nil
+			}
+			totals, _ := g["totals"].(map[string]any)
+			v, ok = totals[from.id].(float64)
+			if !ok {
+				continue // no value there: the target cell is left as it is
+			}
 		}
 		members := map[string]string{}
 		for id, code := range c.codes {
@@ -374,3 +455,32 @@ func (h *handler) approvalFreeze(ctx context.Context, stepID string, instCtx map
 	}
 	return &spec, nil
 }
+
+// keepFrozenApproval makes an approval that froze values keep them: the run's
+// figures were kept when it completed (approvalsnap.Take in CompleteStep), and
+// its freeze wrote after that, so the run reported its own frozen values as
+// "changed since approval" (every freezing approval, 2026-11-27). They are kept
+// again now, and once more when the recalculation the freeze started has
+// finished, for the calculated figures built on them.
+func (h *handler) keepFrozenApproval(ctx context.Context, instanceID, revisionID string) {
+	db := h.db.For(ctx)
+	if _, err := approvalsnap.Retake(ctx, db, instanceID); err != nil {
+		h.log.Warn().Err(err).Str("instance_id", instanceID).Msg("keeping the frozen approval's figures failed")
+		return
+	}
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		deadline := time.Now().Add(freezeRecalcWait)
+		time.Sleep(time.Second) // the freeze's recalculation is queued, not always pending yet
+		for calculation.RecalcPending(bg, db, revisionID) && time.Now().Before(deadline) {
+			time.Sleep(time.Second)
+		}
+		if _, err := approvalsnap.Retake(bg, db, instanceID); err != nil {
+			h.log.Warn().Err(err).Str("instance_id", instanceID).Msg("keeping the frozen approval's recalculated figures failed")
+		}
+	}()
+}
+
+// freezeRecalcWait bounds how long keepFrozenApproval waits for the freeze's
+// recalculation before keeping the figures as they are.
+var freezeRecalcWait = 15 * time.Minute

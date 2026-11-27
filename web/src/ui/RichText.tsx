@@ -87,9 +87,10 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     const key = `${keyPrefix}-${i}`;
     // Odd parts are INLINE's matches; the text between is shown as written.
     if (i % 2 === 0) out.push(part);
-    else if (part.startsWith("**") && part.endsWith("**")) out.push(<strong key={key}>{part.slice(2, -2)}</strong>);
+    // Bold and italic hold links and code of their own: **[Open the plan](page:…)** (2026-11-27).
+    else if (part.startsWith("**") && part.endsWith("**")) out.push(<strong key={key}>{inline(part.slice(2, -2), key)}</strong>);
     else if (part.startsWith("`") && part.endsWith("`")) out.push(<code key={key} style={{ fontFamily: "var(--font-mono)", fontSize: "0.92em", background: "var(--color-surface-subtle)", padding: "1px 5px", borderRadius: 4 }}>{part.slice(1, -1)}</code>);
-    else if (part.startsWith("*") && part.endsWith("*")) out.push(<em key={key}>{part.slice(1, -1)}</em>);
+    else if (part.startsWith("*") && part.endsWith("*")) out.push(<em key={key}>{inline(part.slice(1, -1), key)}</em>);
     else if (part.startsWith("[")) {
       const close = part.indexOf("](");
       const label = part.slice(1, close);

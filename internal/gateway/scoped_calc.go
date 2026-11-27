@@ -51,6 +51,10 @@ var errWithheld = errors.New("the value reads a member hidden from the caller")
 // '{}' total), keyed like calculation's dimKey (json of the combo).
 type servedMetric struct {
 	Rows map[string]float64
+	// plain: served only because the caller has no hidden member
+	// (loadServedReads); its cells are the leaves a recompute gives, no
+	// aggregate periods worked out here.
+	plain bool
 }
 
 // scopedReads is what a scoped read needs beyond the scoped input cells.
@@ -348,7 +352,7 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 				res.cells[key] = v
 			}
 		}
-	} else if axis != nil && timeSummary != "none" {
+	} else if axis != nil && timeSummary != "none" && !sm.plain {
 		// Aggregate periods: each non-time leaf group's visible LEAF periods
 		// under the aggregate, reduced by the time summary — withheld when
 		// any of them is. Only dated leaves count: the persisted rows of the
@@ -1071,6 +1075,62 @@ func (h *handler) loadScopedReads(
 	hiddenByDim map[string]map[string]bool, scopePinned map[string]string, scopeSubtrees map[string]map[string]bool,
 	only map[string]bool,
 ) (*scopedReads, error) {
+	return h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
+		hiddenByDim, scopePinned, scopeSubtrees, only, false)
+}
+
+// loadServedReads is loadScopedReads for a caller with no hidden member: the
+// read's own calculated metrics (direct) are served from the scheduler's
+// rows, as the cells and totals a recompute over the scoped inputs would
+// give — the scope restricts the cells shown, never what a cell is, and
+// with nothing hidden no finer input can leak into a coarser cell. A metric
+// whose total under this scope no stored row holds (a formula rule under
+// two pins without a sole root) is worked out as before, with what it reads
+// served where it can be. Every scoped read used to work out every metric
+// it reaches again: a five-row region grid under a scenario selector took
+// 27 s for HQ (0.5 s unscoped), its rows read through four groupings
+// (2026-11-27).
+func (h *handler) loadServedReads(
+	ctx context.Context, modelID, revisionID string,
+	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
+	allMetrics, revisionMetrics []metricRow, metricDims map[string][]string,
+	scopePinned map[string]string, scopeSubtrees map[string]map[string]bool, direct []string,
+) (*scopedReads, error) {
+	want := make(map[string]bool, len(direct))
+	for _, id := range direct {
+		want[id] = true
+	}
+	sr, err := h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
+		nil, scopePinned, scopeSubtrees, want, true)
+	if err != nil {
+		return nil, err
+	}
+	var rest []string
+	for _, m := range allMetrics {
+		if want[m.ID] && !m.IsInput && m.Formula != nil && m.Format != metricformula.FormatText && sr.Served[m.ID] == nil {
+			rest = append(rest, m.ID)
+		}
+	}
+	if len(rest) == 0 {
+		return sr, nil
+	}
+	for id := range readsClosure(rest, allMetrics) {
+		want[id] = true
+	}
+	return h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
+		nil, scopePinned, scopeSubtrees, want, true)
+}
+
+// loadScopedReadsServing is loadScopedReads; serveAll serves every wanted
+// calculated metric whose total under the scope a stored row holds (a
+// caller with no hidden member, loadServedReads).
+func (h *handler) loadScopedReadsServing(
+	ctx context.Context, modelID, revisionID string,
+	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
+	allMetrics, revisionMetrics []metricRow, metricDims map[string][]string,
+	hiddenByDim map[string]map[string]bool, scopePinned map[string]string, scopeSubtrees map[string]map[string]bool,
+	only map[string]bool, serveAll bool,
+) (*scopedReads, error) {
 	store := calculation.NewStore(h.db.For(ctx))
 	schema, err := store.LoadDimensionSchema(ctx, modelID, revisionID)
 	if err != nil {
@@ -1128,14 +1188,21 @@ func (h *handler) loadScopedReads(
 		if m.IsInput || m.Formula == nil || !sr.wanted(m.ID) {
 			continue
 		}
-		if !readset.Served(*m.Formula) && !comparesText(*m.Formula, m.Format, textNames) && !sr.readsAcrossScope(m, byName, metricDims) {
+		natural := readset.Served(*m.Formula) || comparesText(*m.Formula, m.Format, textNames) || sr.readsAcrossScope(m, byName, metricDims)
+		if !natural && (!serveAll || m.Format == metricformula.FormatText) {
 			continue
 		}
 		rows, err := calcValueMapOnce(ctx, store, modelID, revisionID, m.ID)
 		if err != nil {
 			return nil, err
 		}
-		sr.Served[m.ID] = &servedMetric{Rows: rows}
+		sm := &servedMetric{Rows: rows, plain: !natural}
+		if !natural && isFormulaRule(calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)) {
+			if _, ok, _ := sr.persistedTotal(m, sm, metricDims[m.ID], nil); !ok {
+				continue // its total here is worked out (loadServedReads)
+			}
+		}
+		sr.Served[m.ID] = sm
 	}
 	return sr, nil
 }
@@ -1182,4 +1249,16 @@ func calcValueMapOnce(ctx context.Context, store *calculation.Store, modelID, re
 	memo.mu.Unlock()
 	e.once.Do(func() { e.rows, e.err = store.LoadCalcValueMap(ctx, modelID, revisionID, metricID) })
 	return e.rows, e.err
+}
+
+// readMetricIDs are the metrics a read answers for: a grid's own, or the
+// ones a KPI tile asked for; nil for a whole-model read.
+func readMetricIDs(gridDefID string, metrics []metricRow, asked []string) []string {
+	if gridDefID != "" {
+		return gridMetricIDs(metrics)
+	}
+	if len(asked) > 0 {
+		return asked
+	}
+	return nil
 }

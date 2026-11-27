@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -87,6 +88,16 @@ type DimEvalContext struct {
 	// RANKIFS call ranks among, shared like Memo: every member of a
 	// ranked set reads the same list. nil disables it.
 	Ranks map[string]*RankedSet
+	// RangeReads caches, for one metric's evaluation and like Memo, the value
+	// a metric used as a criteria range holds at each combination
+	// (SUMIFS(clf, cl_project, project): the project of each cost line). Every
+	// cell of the metric tests the same range: 36,000 cells read 575 lines'
+	// projects 21 million times, a third of a driver change's recalculation
+	// (2026-11-27). nil disables it.
+	RangeReads map[string]map[string]Value
+	// CriteriaIndexes are the pass's criteria indexes (criteria_index.go);
+	// nil: every member is tested.
+	CriteriaIndexes *CriteriaIndexes
 	// Picklist returns the codec of a metric whose format is "picklist"
 	// (its cells hold members of one dimension); ok is false for any other
 	// metric. nil: no metric is a pick-list.
@@ -655,40 +666,57 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 	// STDEVIFS and VARIFS: the recorded values, for a two-pass variance.
 	spread := fn == conditionalStdevIfs || fn == conditionalVarIfs
 	var recorded []float64
-	if tuples > 0 {
+	// visit tests one combination and adds up what it holds.
+	visit := func(overrides map[string]string) *FormulaError {
+		keep, ferr := metricCriteriaMatch(d, metricCrits, overrides)
+		if ferr != nil {
+			return ferr
+		}
+		var v float64
+		var ok bool
+		if keep && counting {
+			counted++
+		} else if keep {
+			v, ok, ferr = d.Resolve(source, overrides)
+			if ferr != nil {
+				return ferr
+			}
+		}
+		if ok {
+			if spread {
+				recorded = append(recorded, v)
+			}
+			if found == 0 || v < lo {
+				lo = v
+			}
+			if found == 0 || v > hi {
+				hi = v
+			}
+			found++
+		}
+		sum += v
+		return nil
+	}
+	if positions, indexed := indexedPositions(d, dimOrder, matches, metricCrits); tuples > 0 && indexed {
+		// Only the members the first criterion can hold, in their order
+		// (criteria_index.go).
+		overrides := make(map[string]string, 1)
+		for _, p := range positions {
+			overrides[dimOrder[0]] = matches[0][p]
+			if ferr := visit(overrides); ferr != nil {
+				return ErrorVal(ferr)
+			}
+		}
+	} else if tuples > 0 {
 		idx := make([]int, len(dimOrder))
 		overrides := make(map[string]string, len(dimOrder))
 		for {
 			for i, dim := range dimOrder {
 				overrides[dim] = matches[i][idx[i]]
 			}
-			keep, ferr := metricCriteriaMatch(d, metricCrits, overrides)
-			if ferr != nil {
+			if ferr := visit(overrides); ferr != nil {
 				return ErrorVal(ferr)
 			}
-			var v float64
-			var ok bool
-			if keep && counting {
-				counted++
-			} else if keep {
-				v, ok, ferr = d.Resolve(source, overrides)
-				if ferr != nil {
-					return ErrorVal(ferr)
-				}
-			}
-			if ok {
-				if spread {
-					recorded = append(recorded, v)
-				}
-				if found == 0 || v < lo {
-					lo = v
-				}
-				if found == 0 || v > hi {
-					hi = v
-				}
-				found++
-			}
-			sum += v
 			// Advance the odometer.
 			k := len(idx) - 1
 			for ; k >= 0; k-- {
@@ -813,34 +841,89 @@ func metricCriteriaMatch(d *DimEvalContext, crits []evaluatedCriterion, override
 				}
 			}
 		}
-		if d.Text != nil {
-			if text, isText := d.Text(c.rng.dim, own); isText {
-				candidate := BlankVal()
-				if text != "" {
-					candidate = StringVal(text)
-				}
-				if !c.crit.matches(candidate) {
-					return false, nil
-				}
-				continue
-			}
-		}
-		v, found, ferr := d.Resolve(c.rng.dim, own)
+		candidate, ferr := criteriaRangeValue(d, c, own)
 		if ferr != nil {
 			return false, ferr
-		}
-		candidate := BlankVal()
-		if found {
-			candidate = NumberVal(v)
-			if codec, ok := d.picklist(c.rng.dim); ok {
-				candidate = decodeKey(codec, c.rng.dim, v)
-			}
 		}
 		if !c.crit.matches(candidate) {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+// criteriaRangeValue is c's range metric at own, read once per pass
+// (RangeReads) when the pass keeps them.
+func criteriaRangeValue(d *DimEvalContext, c evaluatedCriterion, own map[string]string) (Value, *FormulaError) {
+	var reads map[string]Value
+	key := ""
+	if d.RangeReads != nil {
+		if reads = d.RangeReads[c.rng.dim]; reads == nil {
+			reads = map[string]Value{}
+			d.RangeReads[c.rng.dim] = reads
+		}
+		key = rangeReadKey(own)
+		if candidate, ok := reads[key]; ok {
+			return candidate, nil
+		}
+	}
+	candidate, ferr := rangeCandidate(d, c.rng.dim, own)
+	if ferr != nil {
+		return candidate, ferr
+	}
+	if reads != nil && len(reads) < conditionalMemoCap {
+		reads[key] = candidate
+	}
+	return candidate, nil
+}
+
+// rangeCandidate is what a metric used as a criteria range holds at own:
+// its text for a text metric, its member's code for a pick-list, its
+// number, or a blank where nothing is recorded.
+func rangeCandidate(d *DimEvalContext, metric string, own map[string]string) (Value, *FormulaError) {
+	if d.Text != nil {
+		if text, isText := d.Text(metric, own); isText {
+			if text != "" {
+				return StringVal(text), nil
+			}
+			return BlankVal(), nil
+		}
+	}
+	v, found, ferr := d.Resolve(metric, own)
+	if ferr != nil {
+		return BlankVal(), ferr
+	}
+	if !found {
+		return BlankVal(), nil
+	}
+	if codec, ok := d.picklist(metric); ok {
+		return decodeKey(codec, metric, v), nil
+	}
+	return NumberVal(v), nil
+}
+
+// rangeReadKey keys one range metric's RangeReads by its combination: the
+// member code alone for a metric on one dimension (no allocation), else the
+// dimensions and codes in dimension order.
+func rangeReadKey(own map[string]string) string {
+	if len(own) == 1 {
+		for _, code := range own {
+			return code
+		}
+	}
+	dims := make([]string, 0, len(own))
+	for k := range own {
+		dims = append(dims, k)
+	}
+	sort.Strings(dims)
+	var sb strings.Builder
+	for _, k := range dims {
+		sb.WriteString(strings.ToUpper(k))
+		sb.WriteString(memoValueSeparator)
+		sb.WriteString(own[k])
+		sb.WriteString(memoKeySeparator)
+	}
+	return sb.String()
 }
 
 func memberProperty(m DimMember, prop string) Value {

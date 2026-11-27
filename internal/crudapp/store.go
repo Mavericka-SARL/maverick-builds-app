@@ -214,6 +214,12 @@ type FormDef struct {
 	// EditCreator (their creator and the application's administrators) or
 	// EditEveryone (everyone who sees them).
 	EditAccess string `json:"edit_access"`
+	// EditorField names a person field of a table that keeps a dimension:
+	// to a holder of one of EditorRoles, the members whose record names
+	// someone else there are read-only — they change only their own and
+	// read the rest (migration 200). Empty: no such narrowing.
+	EditorField string   `json:"editor_field,omitempty"`
+	EditorRoles []string `json:"editor_roles,omitempty"`
 	// CreateRoles names who may add records, as a workflow's start roles
 	// do; none: anyone who reaches the application. Its administrators
 	// always may (migration 157).
@@ -429,7 +435,7 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 const formDefColumns = `id::text, model_id::text, name, label, fields, own_records_only,
 	COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''), edit_access, create_roles, created_at,
 	EXISTS (SELECT 1 FROM model.form_def k WHERE k.model_id = form_def.model_id AND k.keeps_dimension_id IS NOT NULL),
-	member_label_with_code, delete_access, delete_roles, record_scope, existing_codes`
+	member_label_with_code, delete_access, delete_roles, record_scope, existing_codes, editor_field, editor_roles`
 
 func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var f FormDef
@@ -438,7 +444,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	err := s.db.QueryRow(ctx, `
 		SELECT `+formDefColumns+`
 		FROM model.form_def WHERE id = $1::uuid
-	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes)
+	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes, &f.EditorField, &f.EditorRoles)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("form %s not found", formID)
 	}
@@ -469,7 +475,7 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	for rows.Next() {
 		var f FormDef
 		var fieldsJSON []byte
-		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes); err != nil {
+		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.CreatedAt, &f.ModelKeeps, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes, &f.EditorField, &f.EditorRoles); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fieldsJSON, &f.Fields)

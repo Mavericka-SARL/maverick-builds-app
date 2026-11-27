@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // A workflow instance locks the crossing of its "Dimension member" fields,
@@ -109,9 +110,11 @@ const LastApprovalJoinSQL = `
 `
 
 // ReopenableSQL is true for a run an administrator may reopen, given
-// LastApprovalJoinSQL: finished, with its last approval approved. It is the
-// run that locks its scope for good (see the terminalApproved rule below).
-const ReopenableSQL = `COALESCE(wi.status::text = 'completed' AND ws.decision = 'approve', false)`
+// LastApprovalJoinSQL: finished, with its last approval approved, and not
+// superseded by a later approved run of its workflow and scope (migration
+// 201). It is the run that locks its scope for good (see the
+// terminalApproved rule below).
+const ReopenableSQL = `COALESCE(wi.status::text = 'completed' AND ws.decision = 'approve' AND wi.superseded_by IS NULL, false)`
 
 type decidingRunKey struct{}
 
@@ -168,6 +171,10 @@ func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]work
 	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID); err != nil {
 		return nil, err
 	}
+	deciding, err := loadDecidingScope(ctx, pool, DecidingRun(ctx))
+	if err != nil {
+		return nil, err
+	}
 	// awaiting_approval: an approval step of the instance is open, read
 	// from the definition the instance started with (steps_snapshot, else
 	// the definition's steps). A step's type is spelled as the workflow
@@ -175,6 +182,7 @@ func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]work
 	// "STEP_TYPE_APPROVAL", or the enum's number, 2.
 	rows, err := pool.Query(ctx, `
 		SELECT wi.context, wd.context_schema, wi.status::text, ws.decision,
+		       wi.superseded_by IS NOT NULL, wd.name, wi.started_at,
 		       EXISTS (
 		           SELECT 1 FROM workflow.workflow_step s,
 		                jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
@@ -202,8 +210,10 @@ func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]work
 		var ctxJSON, schemaJSON []byte
 		var status string
 		var decision *string
-		var awaitingApproval bool
-		if err := rows.Scan(&ctxJSON, &schemaJSON, &status, &decision, &awaitingApproval); err != nil {
+		var awaitingApproval, superseded bool
+		var wfName string
+		var startedAt time.Time
+		if err := rows.Scan(&ctxJSON, &schemaJSON, &status, &decision, &superseded, &wfName, &startedAt, &awaitingApproval); err != nil {
 			return nil, fmt.Errorf("scan workflow instance: %w", err)
 		}
 		var values map[string]string
@@ -233,6 +243,14 @@ func loadWorkflowLocks(ctx context.Context, pool ReadDB, modelID string) ([]work
 		// an already-approved instance left the approve decision on the
 		// step, and the lock persisted forever (found live).
 		terminalApproved := status != "running" && status != "cancelled" && status != "failed" && decision != nil && *decision == "approve"
+		// A run a later approved run superseded locks nothing (migration
+		// 201); an approved run of the deciding run's workflow and scope,
+		// started before it, does not keep that run's own work out — the
+		// second budget revision freezes over the first — while it still
+		// locks for everyone else until the deciding run is approved.
+		if superseded || (terminalApproved && deciding != nil && deciding.supersedes(wfName, startedAt, values, vars)) {
+			terminalApproved = false
+		}
 		l.locked = (status == "running" && awaitingApproval) || terminalApproved
 		locks = append(locks, l)
 	}

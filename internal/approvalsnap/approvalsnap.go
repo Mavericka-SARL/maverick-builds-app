@@ -138,6 +138,18 @@ func Take(ctx context.Context, db dbx.DB, instanceID string) (int64, error) {
 	return kept, nil
 }
 
+// Retake replaces what instanceID kept with its figures as they are now:
+// for an approval whose own on_approve freeze wrote values after the run
+// completed (Take ran in CompleteStep, before the freeze), so the run does not
+// report its own frozen values as "changed since approval" — every approval
+// with a freeze did, at once (55 figures on a project plan, 2026-11-27).
+func Retake(ctx context.Context, db dbx.DB, instanceID string) (int64, error) {
+	if _, err := db.Exec(ctx, `DELETE FROM workflow.approval_snapshot WHERE instance_id = $1::uuid`, instanceID); err != nil {
+		return 0, fmt.Errorf("drop the kept values: %w", err)
+	}
+	return Take(ctx, db, instanceID)
+}
+
 // Change is one approved figure that is not what was approved.
 type Change struct {
 	MetricID     string            `json:"metric_id"`

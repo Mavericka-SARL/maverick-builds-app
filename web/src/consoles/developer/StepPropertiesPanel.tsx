@@ -180,6 +180,13 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
             <Field label={step.type === "approval" ? "Approver roles" : "Assignee roles"}>
               <RolePicker applicationId={applicationId} value={step.assignee_roles ?? []} onChange={setRole} />
             </Field>
+            <Field label="Only the person in (optional)">
+              <input value={step.assignee_field ?? ""} onChange={e => onChange({ assignee_field: e.target.value || undefined })}
+                placeholder="project.country.manager" style={inputStyle} aria-label="The run's field naming the step's person" />
+              <div style={{ fontSize: 11, color: "var(--color-disabled)", marginTop: 4 }}>
+                A path from a start field (or <i>record</i>, the run's record) through the tables' fields to a person field: <i>project.country.manager</i> gives the Senegal plan to Senegal's country manager only. They must hold a role above; otherwise, or when the field is empty, everyone of the roles gets it.
+              </div>
+            </Field>
             <Field label="SLA hours">
               <input
                 type="number"

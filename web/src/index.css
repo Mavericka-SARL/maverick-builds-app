@@ -26,3 +26,16 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Number fields carry no spinner arrows: values are typed, and the arrows
+   crowded the field and changed a value by 1 on a stray click or scroll
+   (owner, 2026-11-27). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

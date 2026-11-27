@@ -231,6 +231,9 @@ type memoKey struct {
 
 // tsEvaluator evaluates one time-dimensioned metric at any (combo, period).
 type tsEvaluator struct {
+	// held is the pass's increment for the metric (nil: every cell is
+	// evaluated): outside its region a leaf keeps the value held.
+	held        *increment
 	s           *Scheduler
 	ctx         context.Context
 	def         *MetricDef
@@ -660,8 +663,28 @@ func (e *tsEvaluator) evalLeaves(order []int, ov overlay, res *tsResults) {
 	if len(groups) == 0 {
 		groups = []map[string]string{{}}
 	}
+	partial := e.held.partial() && e.held.in.bound[e.axis.dim.ID] == nil
 	for _, pos := range order {
 		for _, g := range groups {
+			// Outside the region a pass following cells or members reaches,
+			// a cell keeps the value it holds (region.go): its series is not
+			// evaluated. The region never bounds time on this path (a
+			// time-series formula moves along it, shapeOf), so a series is
+			// evaluated whole or not at all.
+			if partial && !e.held.in.contains(g) {
+				combo := make(map[string]string, len(g)+1)
+				for k, val := range g {
+					combo[k] = val
+				}
+				combo[e.axis.dim.ID] = e.axis.periods[pos].Code
+				if v, ok := e.held.old[dimKey(combo)]; ok {
+					res.leaf = append(res.leaf, CalcResultRow{DimMembers: combo, Value: v})
+					if ov != nil {
+						ov[e.def.ID][dimKey(combo)] = v
+					}
+				}
+				continue
+			}
 			v, noData, err := e.evalAt(g, pos)
 			combo := make(map[string]string, len(g)+1)
 			for k, val := range g {
@@ -1054,6 +1077,7 @@ func (s *Scheduler) executeTimeSeries(
 		return err
 	}
 	var res tsResults
+	e.held = inc // a pass following cells or members: only its region's cells are evaluated
 	e.evalLeaves(axis.order(metricformula.DirectionForward), nil, &res)
 	if len(res.leaf) == 0 {
 		if res.failures == 0 {

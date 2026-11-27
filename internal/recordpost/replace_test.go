@@ -137,3 +137,66 @@ func TestImportReplaceRefusals(t *testing.T) {
 		t.Errorf("ReplaceField(Region) = %v, %v", fld, err)
 	}
 }
+
+// A table whose records carry an ERP id (a typed code): loading a corrected
+// period again with replace_by keeps the rows the file holds unchanged. They
+// matched their records by code, were counted unchanged and skipped, and their
+// records were then deleted with the period: 2,340 of 4,335 actuals vanished
+// from a reload that reported success (2026-11-27).
+func TestImportReplaceKeepsRowsMatchedByCode(t *testing.T) {
+	f := setupImport(t)
+	ctx := context.Background()
+	// As an ERP table: the record's code is the ERP id (a typed code), no auto code.
+	if _, err := f.pool.Exec(ctx, `UPDATE model.form_def SET fields = jsonb_build_array(
+		jsonb_build_object('name','ref','label','Ref','type','text','code',true),
+		jsonb_build_object('name','batch','label','Batch','type','text')) ||
+		(SELECT jsonb_agg(x) FROM jsonb_array_elements(fields) x WHERE x->>'type' <> 'autocode') WHERE id = $1::uuid`, f.form.ID); err != nil {
+		t.Fatal(err)
+	}
+	form, err := crudapp.NewStore(f.pool).GetForm(ctx, f.form.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.form = form
+	ps := recordpost.OnPool(f.pool, logger.New("test"))
+	header := []string{"ref", "batch", "region", "amount"}
+	rows := func(pairs ...string) []importpkg.RawRow { // ref:region:amount
+		out := make([]importpkg.RawRow, len(pairs))
+		for i, p := range pairs {
+			parts := strings.Split(p, ":")
+			out[i] = importpkg.RawRow{RowNumber: i + 2, Cells: map[string]string{"ref": parts[0], "batch": "JUL", "region": parts[1], "amount": parts[2]}}
+		}
+		return out
+	}
+	load := func(r []importpkg.RawRow, replaceBy string) recordpost.ImportResult {
+		t.Helper()
+		res, err := ps.Import(ctx, recordpost.ImportRequest{Form: f.form, CreatorID: f.userID, Header: header, Rows: r, Inline: true, ReplaceBy: replaceBy,
+			UpdateRefusal: func(*crudapp.FormRecord, string) string { return "" }})
+		if err != nil || len(res.Errors) > 0 {
+			t.Fatalf("load: %+v %v", res, err)
+		}
+		return res
+	}
+	records := func() float64 {
+		return f.count(t, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, f.form.ID)
+	}
+	load(rows("R1:EU:10", "R2:US:20"), "")
+	// The same file again, replacing July: both records are July's, both rows are added anew.
+	if res := load(rows("R1:EU:10", "R2:US:20"), "batch"); res.Replaced != 2 || res.Created != 2 || res.Unchanged != 0 {
+		t.Errorf("same file replacing July: %+v, want 2 replaced and 2 created", res)
+	}
+	if n, eu, us := records(), f.spend(t, "EU"), f.spend(t, "US"); n != 2 || eu != 10 || us != 20 {
+		t.Errorf("after the same file: %v records, EU %v, US %v; want 2, 10, 20", n, eu, us)
+	}
+	// A corrected file: R1 unchanged, R2 corrected, R3 new — nothing of July is lost.
+	if res := load(rows("R1:EU:10", "R2:US:25", "R3:EU:5"), "batch"); res.Replaced != 2 || res.Created != 3 {
+		t.Errorf("corrected file: %+v, want 2 replaced and 3 created", res)
+	}
+	if n, eu, us := records(), f.spend(t, "EU"), f.spend(t, "US"); n != 3 || eu != 15 || us != 25 {
+		t.Errorf("after the corrected file: %v records, EU %v, US %v; want 3, 15, 25", n, eu, us)
+	}
+	// Without replace_by the same rows are recognised by their code and left as they are.
+	if res := load(rows("R1:EU:10", "R2:US:25", "R3:EU:5"), ""); res.Unchanged != 3 || res.Created != 0 {
+		t.Errorf("plain reload: %+v, want 3 unchanged", res)
+	}
+}

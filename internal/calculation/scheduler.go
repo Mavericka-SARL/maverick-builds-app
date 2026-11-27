@@ -271,7 +271,13 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 type passRequest struct {
 	ids    []string
 	cells  []ChangedCell
-	forced map[string]bool // set by the queue; nil: every id without cells is forced
+	forced map[string]bool // set by the queue; nil: every id without cells or members is forced
+	// members are the members whose properties changed (dimension ID →
+	// codes), and readers the metrics whose formulas read those
+	// dimensions: a pass following them starts each reader at the members'
+	// cells where it reads their properties there (incremental.go).
+	members map[string][]string
+	readers []string
 }
 
 // forcedID reports whether the request calculates id whole.
@@ -279,7 +285,7 @@ func (r passRequest) forcedID(id string) bool {
 	if r.forced != nil {
 		return r.forced[id]
 	}
-	return len(r.cells) == 0
+	return len(r.cells) == 0 && len(r.members) == 0
 }
 
 func (s *Scheduler) recalcRequest(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, req passRequest) error {
@@ -343,6 +349,10 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 	defer lockRevision(modelID, revisionID)()
 	s.store.EnsureRevisionParts(ctx, revisionID)
 	ctx = withPassCache(ctx)
+	// One index of each dependency's stored facts for the whole pass
+	// (rollup.WithFactIndexes): every cell reading a total of a large metric
+	// visits its candidates, not every fact (86 s → see the 2026-11-27 entry).
+	ctx = rollup.WithFactIndexes(ctx)
 	affectedIDs := req.ids
 	// Definitions were loaded before the lock; reload so a pass that queued
 	// behind another sees the graph as it is now.
@@ -661,7 +671,14 @@ func (s *Scheduler) executePartition(
 	// A number formula comparing a text metric binds that text per cell
 	// (evalOnDemand's texts), which the lean path does not.
 	lean := !def.Text && !readsTextMetric(def, allDefs) && len(metricDimIDs[def.ID]) > 0 && rollup.LeafComboCount(allDims, metricDimIDs[def.ID]) >= leanCellsAt
-	if lean && inc != nil {
+	// A time-series metric is evaluated on its own path, which holds every
+	// leaf anyway: in a pass following a few members (a cost line's
+	// quantity) it evaluates their cells only and keeps the rest it holds
+	// (evalLeaves), however many cells it has — 241,500 phased amounts for
+	// one cost line's change took 7.5 s (2026-11-27).
+	tsAxis, _ := timeAxisFor(allDims, metricDimIDs[def.ID])
+	partialTS := !def.Text && tsAxis != nil && usesTimeSeries(def.Formula) && inc.partial()
+	if lean && inc != nil && !partialTS {
 		inc.out = everywhere()
 		inc = nil
 	}

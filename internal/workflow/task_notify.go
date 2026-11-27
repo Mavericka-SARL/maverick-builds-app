@@ -34,6 +34,9 @@ const TaskAssignedTemplate = "workflow_task_assigned"
 // e-mail on, people heard of a run when it was cancelled, never when it had
 // work for them.
 func (s *Store) NotifyNewTasks(ctx context.Context, instanceID, actorUserID string) int {
+	// A step naming its person from the run's data is theirs before anyone
+	// is told of it (named_assignee.go).
+	s.AssignNamedPeople(ctx, instanceID)
 	type newTask struct {
 		id, name, kind, workflow string
 		due                      *time.Time

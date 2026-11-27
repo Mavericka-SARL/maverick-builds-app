@@ -28,6 +28,8 @@ export { Txt } from "./Txt";
 
 export { Field } from "./Field";
 export { TextInput } from "./TextInput";
+export { GroupedNumberInput } from "./GroupedNumberInput";
+export { groupDigits } from "./numberGrouping";
 export { Select } from "./Select";
 
 export { ToastProvider } from "./Toast";

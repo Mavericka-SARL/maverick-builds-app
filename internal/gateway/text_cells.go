@@ -107,7 +107,7 @@ func (h *handler) loadTextCells(ctx context.Context, modelID, revisionID string,
 		FROM runtime.fact_input fi
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		  AND (source_ref IS NULL) = NOT EXISTS (SELECT 1 FROM fed f WHERE f.metric_id = fi.metric_id)
-		  AND metric_id::text = ANY($%d::text[])%s
+		  AND metric_id = ANY($%d::text[]::uuid[])%s
 		ORDER BY metric_id, dim_members, entered_at DESC, id DESC`, len(args), scopeSQL), args...)
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ func (h *handler) loadCalcTextCells(ctx context.Context, modelID, revisionID str
 		SELECT metric_id::text, dim_members::text, text_value
 		FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND text_value IS NOT NULL
-		  AND metric_id::text = ANY($3::text[])`, modelID, revisionID, textCalcs)
+		  AND metric_id = ANY($3::text[]::uuid[])`, modelID, revisionID, textCalcs)
 	if err != nil {
 		return nil, err
 	}

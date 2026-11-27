@@ -20,6 +20,10 @@ type Memo struct {
 	access  map[[3]string]string
 	managed map[string]bool
 	members map[[4]string]resolvedMember
+	// loaded are the users whose member and metric rules in the batch's
+	// revision were all read at once (PreloadRules): a member or metric with
+	// no rule among them has none, without asking the database.
+	loaded map[string]bool
 }
 
 // resolvedMember is what ResolveWriteMembers read for one code.
@@ -34,7 +38,44 @@ func NewMemo() *Memo {
 	return &Memo{
 		chains: map[string][]AncestorRef{}, access: map[[3]string]string{},
 		managed: map[string]bool{}, members: map[[4]string]resolvedMember{},
+		loaded: map[string]bool{},
 	}
+}
+
+// PreloadRules reads every member and metric rule userID has in revisionID —
+// their own and their roles', resolved by lineage as every read path does
+// (RulesForRevision) — so the batch's access checks answer from memory. A
+// project manager with 84 read rules wrote 500 progress cells in more than 20
+// minutes: each member of each cell asked the rule view on its own, 35–60 ms a
+// question (2026-11-27). Only for writes into that one revision: a member of
+// another revision would read as having no rule.
+func (m *Memo) PreloadRules(ctx context.Context, q Querier, userID, revisionID string) error {
+	if userID == "" || revisionID == "" {
+		return nil
+	}
+	rules, err := RulesForRevision(ctx, q, userID, revisionID)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range rules {
+		if r.Type != "dimension_member" && r.Type != "metric" {
+			continue
+		}
+		key := [3]string{userID, r.Type, r.RefID}
+		if cur, ok := m.access[key]; !ok || Stricter(r.Access, cur) {
+			m.access[key] = r.Access
+		}
+	}
+	m.loaded[userID] = true
+	return nil
+}
+
+func (m *Memo) rulesLoaded(userID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loaded[userID]
 }
 
 type memoKey struct{}

@@ -821,3 +821,62 @@ func TestDecidingRunIsNotLockedByItself(t *testing.T) {
 		t.Errorf("another run (%s) on AP-010 no longer locks it for the deciding run", other)
 	}
 }
+
+// A batch whose writer's rules were read at once answers every check as the
+// member-by-member path does: a read-only member, a member under a read-only
+// parent, a member without a rule, a read-only metric. A project manager's
+// 500-cell batch asked the rule view once per member and took over 20 minutes
+// (2026-11-27).
+func TestPreloadedRulesAnswerAsTheLookups(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	f := seedFixture(t, pool)
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dim := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'project') RETURNING id::text`, f.modelID, f.revisionID)
+	parent := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'RW', 'Rwanda') RETURNING id::text`, dim)
+	under := q(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid, 'P2', 'P2', $2::uuid) RETURNING id::text`, dim, parent)
+	own := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'P1', 'P1') RETURNING id::text`, dim)
+	other := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'P3', 'P3') RETURNING id::text`, dim)
+	ab := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'approved', true) RETURNING id::text`, f.modelID, f.revisionID)
+	rep := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input) VALUES ($1::uuid, $2::uuid, 'progress', true) RETURNING id::text`, f.modelID, f.revisionID)
+	for _, r := range [][3]string{{"dimension_member", parent, "read"}, {"dimension_member", other, "read"}, {"metric", ab, "read"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, $2, $3, $4)`,
+			f.userID, r[0], r[1], r[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memo := NewMemo()
+	if err := memo.PreloadRules(ctx, pool, f.userID, f.revisionID); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		members, metrics []string
+		refused          bool
+	}{
+		{[]string{own}, []string{rep}, false},
+		{[]string{under}, []string{rep}, true}, // under a read-only parent
+		{[]string{other}, []string{rep}, true}, // read-only member
+		{[]string{own}, []string{ab}, false},   // metric rules are the caller's (the lock narrowing only here)
+		{[]string{own, other}, []string{rep}, true},
+	} {
+		plain, err := CheckWriteMetrics(ctx, pool, f.modelID, f.revisionID, f.userID, c.members, c.metrics)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fast, err := CheckWriteMetrics(WithMemo(ctx, memo), pool, f.modelID, f.revisionID, f.userID, c.members, c.metrics)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plain != fast || (plain != "") != c.refused {
+			t.Errorf("members %v metrics %v: looked up %q, preloaded %q; refused want %v", c.members, c.metrics, plain, fast, c.refused)
+		}
+	}
+}

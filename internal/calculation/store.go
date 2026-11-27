@@ -910,6 +910,12 @@ func (s *Store) LoadCalcTextMap(ctx context.Context, modelID, revisionID, metric
 
 // LoadCalcValueMap is LoadInputValueMap's runtime.calc_result analog.
 func (s *Store) LoadCalcValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
+	return memoRead(ctx, "calc_values", []string{modelID, revisionID, metricID}, func() (map[string]float64, error) {
+		return s.loadCalcValueMap(ctx, modelID, revisionID, metricID)
+	}, floatMapSize, cloneFloatMap)
+}
+
+func (s *Store) loadCalcValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (dim_members) dim_members::text, value
 		FROM runtime.calc_result
@@ -935,6 +941,12 @@ func (s *Store) LoadAllCalcValueMaps(ctx context.Context, modelID, revisionID st
 // totals-only, unscoped grid read this is ~one row per metric instead of the
 // tens of thousands LoadAllCalcValueMaps pulls back on a large model.
 func (s *Store) LoadCalcTotals(ctx context.Context, modelID, revisionID string) (map[string]float64, error) {
+	return memoRead(ctx, "calc_totals", []string{modelID, revisionID}, func() (map[string]float64, error) {
+		return s.loadCalcTotals(ctx, modelID, revisionID)
+	}, floatMapSize, cloneFloatMap)
+}
+
+func (s *Store) loadCalcTotals(ctx context.Context, modelID, revisionID string) (map[string]float64, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id) metric_id::text, value
 		FROM runtime.calc_result
@@ -965,6 +977,12 @@ func (s *Store) LoadCalcTotals(ctx context.Context, modelID, revisionID string) 
 // (an eval-skipped combo, or a revision mid-recompute) and the caller must
 // fall back to the live recompute for the whole read.
 func (s *Store) LoadCalcSlice(ctx context.Context, modelID, revisionID, sliceJSON string) (map[string]float64, error) {
+	return memoRead(ctx, "calc_slice", []string{modelID, revisionID, sliceJSON}, func() (map[string]float64, error) {
+		return s.loadCalcSlice(ctx, modelID, revisionID, sliceJSON)
+	}, floatMapSize, cloneFloatMap)
+}
+
+func (s *Store) loadCalcSlice(ctx context.Context, modelID, revisionID, sliceJSON string) (map[string]float64, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id) metric_id::text, value
 		FROM runtime.calc_result
@@ -994,6 +1012,12 @@ func (s *Store) LoadCalcSlice(ctx context.Context, modelID, revisionID, sliceJSO
 // — the difference between a sub-second and a multi-second read at 500
 // members. scopeSQL == "" loads everything (the unscoped call above).
 func (s *Store) LoadAllCalcValueMapsScoped(ctx context.Context, modelID, revisionID, scopeSQL string, scopeArgs []any) (map[string]map[string]float64, error) {
+	return memoRead(ctx, "calc_all_values", []string{modelID, revisionID, scopeSQL, fmt.Sprint(scopeArgs...)}, func() (map[string]map[string]float64, error) {
+		return s.loadAllCalcValueMapsScoped(ctx, modelID, revisionID, scopeSQL, scopeArgs)
+	}, nestedFloatMapSize, cloneNestedFloatMap)
+}
+
+func (s *Store) loadAllCalcValueMapsScoped(ctx context.Context, modelID, revisionID, scopeSQL string, scopeArgs []any) (map[string]map[string]float64, error) {
 	args := append([]any{modelID, revisionID}, scopeArgs...)
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id, dim_members) metric_id::text, dim_members::text, value

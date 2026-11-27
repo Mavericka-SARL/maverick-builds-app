@@ -1506,6 +1506,8 @@ func (s AutomationRuleRequestTriggerType) Validate() error {
 		return nil
 	case "form_approval":
 		return nil
+	case "record_updated":
+		return nil
 	case "grid_change":
 		return nil
 	case "schedule":
@@ -1528,6 +1530,8 @@ func (s AutomationRuleTriggerType) Validate() error {
 	case "api":
 		return nil
 	case "form_approval":
+		return nil
+	case "record_updated":
 		return nil
 	case "grid_change":
 		return nil
@@ -1887,6 +1891,36 @@ func (s CategoryChartDataChartType) Validate() error {
 	default:
 		return errors.Errorf("invalid value: %v", s)
 	}
+}
+
+func (s *CellExpected) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.Value.Get(); ok {
+			if err := func() error {
+				if err := (validate.Float{}).Validate(float64(value)); err != nil {
+					return errors.Wrap(err, "float")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "value",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
 }
 
 func (s *CellHistoryEntry) Validate() error {
@@ -11034,6 +11068,24 @@ func (s *WritebackBatchReqCellsItem) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.Expected.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "expected",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
@@ -11088,6 +11140,24 @@ func (s *WritebackRequest) Validate() error {
 	}(); err != nil {
 		failures = append(failures, validate.FieldError{
 			Name:  "recalc",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Expected.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "expected",
 			Error: err,
 		})
 	}

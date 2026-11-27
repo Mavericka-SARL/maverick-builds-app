@@ -108,7 +108,9 @@ async function fillNewRecord(page: Page) {
   await page.getByRole("button", { name: "New purchase request" }).click();
   // By its label: Field ties the label to the control FormFieldInput renders.
   await page.getByLabel("Vendor").fill("Beta Soft");
-  await expect(page.getByLabel("Amount")).toHaveAttribute("type", "number");
+  // A number field: typed with its thousands grouped (GroupedNumberInput), a
+  // decimal keypad on a phone.
+  await expect(page.getByLabel("Amount")).toHaveAttribute("inputmode", "decimal");
 }
 
 for (const s of surfaces) {

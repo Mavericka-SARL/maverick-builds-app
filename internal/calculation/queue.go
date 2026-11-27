@@ -24,11 +24,13 @@ type passQueue struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
 	running bool
-	pending map[string]bool // metric ids the next pass calculates
-	forced  map[string]bool // of those, the ones a request asked for without cells
-	cells   []ChangedCell   // the cells the next pass's requests wrote
-	next    uint64          // the pass that takes pending when it starts
-	done    uint64          // the last pass finished
+	pending map[string]bool     // metric ids the next pass calculates
+	forced  map[string]bool     // of those, the ones a request asked for without cells
+	cells   []ChangedCell       // the cells the next pass's requests wrote
+	members map[string][]string // the members whose properties they changed (dimension ID → codes)
+	readers []string            // the metrics reading those members' properties
+	next    uint64              // the pass that takes pending when it starts
+	done    uint64              // the last pass finished
 	failed  map[uint64]error
 }
 
@@ -68,11 +70,18 @@ func (q *passQueue) runRequest(req passRequest, pass func(passRequest) error) er
 	q.mu.Lock()
 	for _, id := range req.ids {
 		q.pending[id] = true
-		if len(req.cells) == 0 {
+		if len(req.cells) == 0 && len(req.members) == 0 {
 			q.forced[id] = true
 		}
 	}
 	q.cells = append(q.cells, req.cells...)
+	for dim, codes := range req.members {
+		if q.members == nil {
+			q.members = map[string][]string{}
+		}
+		q.members[dim] = append(q.members[dim], codes...)
+	}
+	q.readers = append(q.readers, req.readers...)
 	mine := q.next
 	for q.done < mine {
 		if q.running {
@@ -85,8 +94,8 @@ func (q *passQueue) runRequest(req passRequest, pass func(passRequest) error) er
 			ids = append(ids, id)
 		}
 		slices.Sort(ids)
-		merged := passRequest{ids: ids, cells: q.cells, forced: q.forced}
-		q.pending, q.forced, q.cells = map[string]bool{}, map[string]bool{}, nil
+		merged := passRequest{ids: ids, cells: q.cells, forced: q.forced, members: q.members, readers: q.readers}
+		q.pending, q.forced, q.cells, q.members, q.readers = map[string]bool{}, map[string]bool{}, nil, nil, nil
 		gen := q.next
 		q.next++
 		q.mu.Unlock()

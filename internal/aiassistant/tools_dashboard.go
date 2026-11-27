@@ -231,7 +231,7 @@ func widgetRefNoun(widgetType string) string {
 	switch widgetType {
 	case "metric_kpi":
 		return "metric"
-	case "form", "board":
+	case "form", "board", "gantt":
 		return "table"
 	case "integration_button":
 		return "integration"

@@ -4391,8 +4391,12 @@ type AutomationRule struct {
 	RetryBackoffSeconds int                            `json:"retry_backoff_seconds"`
 	NextFireAt          OptNilDateTime                 `json:"next_fire_at"`
 	LastFireAt          OptNilDateTime                 `json:"last_fire_at"`
-	// A form_submit or form_approval rule also fires for the records a file import creates.
+	// A form_submit, form_approval or record_updated rule also fires for the records a file import
+	// creates.
 	FiresOnImport OptBool `json:"fires_on_import"`
+	// A record_updated rule fires only for a change of one of these fields of the record (or status);
+	// empty, for any change. Its run gets changed_fields and old_<field> / new_<field>.
+	WatchFields []string `json:"watch_fields"`
 }
 
 // GetMayRun returns the value of MayRun.
@@ -4505,6 +4509,11 @@ func (s *AutomationRule) GetFiresOnImport() OptBool {
 	return s.FiresOnImport
 }
 
+// GetWatchFields returns the value of WatchFields.
+func (s *AutomationRule) GetWatchFields() []string {
+	return s.WatchFields
+}
+
 // SetMayRun sets the value of MayRun.
 func (s *AutomationRule) SetMayRun(val OptBool) {
 	s.MayRun = val
@@ -4615,6 +4624,11 @@ func (s *AutomationRule) SetFiresOnImport(val OptBool) {
 	s.FiresOnImport = val
 }
 
+// SetWatchFields sets the value of WatchFields.
+func (s *AutomationRule) SetWatchFields(val []string) {
+	s.WatchFields = val
+}
+
 func (*AutomationRule) createAutomationRuleRes() {}
 func (*AutomationRule) updateAutomationRuleRes() {}
 
@@ -4681,6 +4695,9 @@ type AutomationRuleRequest struct {
 	RetryBackoffSeconds OptInt                                `json:"retry_backoff_seconds"`
 	// False: a form_submit or form_approval rule leaves out the records a file import creates.
 	FiresOnImport OptBool `json:"fires_on_import"`
+	// Record_updated only: the record's fields whose change fires the rule (status included); a name
+	// that is no field of the rule's table is refused (400). Omitted keeps them; [] fires for any change.
+	WatchFields []string `json:"watch_fields"`
 }
 
 // GetName returns the value of Name.
@@ -4758,6 +4775,11 @@ func (s *AutomationRuleRequest) GetFiresOnImport() OptBool {
 	return s.FiresOnImport
 }
 
+// GetWatchFields returns the value of WatchFields.
+func (s *AutomationRuleRequest) GetWatchFields() []string {
+	return s.WatchFields
+}
+
 // SetName sets the value of Name.
 func (s *AutomationRuleRequest) SetName(val OptString) {
 	s.Name = val
@@ -4833,6 +4855,11 @@ func (s *AutomationRuleRequest) SetFiresOnImport(val OptBool) {
 	s.FiresOnImport = val
 }
 
+// SetWatchFields sets the value of WatchFields.
+func (s *AutomationRuleRequest) SetWatchFields(val []string) {
+	s.WatchFields = val
+}
+
 type AutomationRuleRequestMisfirePolicy string
 
 const (
@@ -4881,6 +4908,7 @@ const (
 	AutomationRuleRequestTriggerTypeFormSubmit           AutomationRuleRequestTriggerType = "form_submit"
 	AutomationRuleRequestTriggerTypeAPI                  AutomationRuleRequestTriggerType = "api"
 	AutomationRuleRequestTriggerTypeFormApproval         AutomationRuleRequestTriggerType = "form_approval"
+	AutomationRuleRequestTriggerTypeRecordUpdated        AutomationRuleRequestTriggerType = "record_updated"
 	AutomationRuleRequestTriggerTypeGridChange           AutomationRuleRequestTriggerType = "grid_change"
 	AutomationRuleRequestTriggerTypeSchedule             AutomationRuleRequestTriggerType = "schedule"
 	AutomationRuleRequestTriggerTypeIntegrationCompleted AutomationRuleRequestTriggerType = "integration_completed"
@@ -4894,6 +4922,7 @@ func (AutomationRuleRequestTriggerType) AllValues() []AutomationRuleRequestTrigg
 		AutomationRuleRequestTriggerTypeFormSubmit,
 		AutomationRuleRequestTriggerTypeAPI,
 		AutomationRuleRequestTriggerTypeFormApproval,
+		AutomationRuleRequestTriggerTypeRecordUpdated,
 		AutomationRuleRequestTriggerTypeGridChange,
 		AutomationRuleRequestTriggerTypeSchedule,
 		AutomationRuleRequestTriggerTypeIntegrationCompleted,
@@ -4911,6 +4940,8 @@ func (s AutomationRuleRequestTriggerType) MarshalText() ([]byte, error) {
 	case AutomationRuleRequestTriggerTypeAPI:
 		return []byte(s), nil
 	case AutomationRuleRequestTriggerTypeFormApproval:
+		return []byte(s), nil
+	case AutomationRuleRequestTriggerTypeRecordUpdated:
 		return []byte(s), nil
 	case AutomationRuleRequestTriggerTypeGridChange:
 		return []byte(s), nil
@@ -4940,6 +4971,9 @@ func (s *AutomationRuleRequestTriggerType) UnmarshalText(data []byte) error {
 	case AutomationRuleRequestTriggerTypeFormApproval:
 		*s = AutomationRuleRequestTriggerTypeFormApproval
 		return nil
+	case AutomationRuleRequestTriggerTypeRecordUpdated:
+		*s = AutomationRuleRequestTriggerTypeRecordUpdated
+		return nil
 	case AutomationRuleRequestTriggerTypeGridChange:
 		*s = AutomationRuleRequestTriggerTypeGridChange
 		return nil
@@ -4964,6 +4998,7 @@ const (
 	AutomationRuleTriggerTypeFormSubmit           AutomationRuleTriggerType = "form_submit"
 	AutomationRuleTriggerTypeAPI                  AutomationRuleTriggerType = "api"
 	AutomationRuleTriggerTypeFormApproval         AutomationRuleTriggerType = "form_approval"
+	AutomationRuleTriggerTypeRecordUpdated        AutomationRuleTriggerType = "record_updated"
 	AutomationRuleTriggerTypeGridChange           AutomationRuleTriggerType = "grid_change"
 	AutomationRuleTriggerTypeSchedule             AutomationRuleTriggerType = "schedule"
 	AutomationRuleTriggerTypeIntegrationCompleted AutomationRuleTriggerType = "integration_completed"
@@ -4977,6 +5012,7 @@ func (AutomationRuleTriggerType) AllValues() []AutomationRuleTriggerType {
 		AutomationRuleTriggerTypeFormSubmit,
 		AutomationRuleTriggerTypeAPI,
 		AutomationRuleTriggerTypeFormApproval,
+		AutomationRuleTriggerTypeRecordUpdated,
 		AutomationRuleTriggerTypeGridChange,
 		AutomationRuleTriggerTypeSchedule,
 		AutomationRuleTriggerTypeIntegrationCompleted,
@@ -4994,6 +5030,8 @@ func (s AutomationRuleTriggerType) MarshalText() ([]byte, error) {
 	case AutomationRuleTriggerTypeAPI:
 		return []byte(s), nil
 	case AutomationRuleTriggerTypeFormApproval:
+		return []byte(s), nil
+	case AutomationRuleTriggerTypeRecordUpdated:
 		return []byte(s), nil
 	case AutomationRuleTriggerTypeGridChange:
 		return []byte(s), nil
@@ -5022,6 +5060,9 @@ func (s *AutomationRuleTriggerType) UnmarshalText(data []byte) error {
 		return nil
 	case AutomationRuleTriggerTypeFormApproval:
 		*s = AutomationRuleTriggerTypeFormApproval
+		return nil
+	case AutomationRuleTriggerTypeRecordUpdated:
+		*s = AutomationRuleTriggerTypeRecordUpdated
 		return nil
 	case AutomationRuleTriggerTypeGridChange:
 		*s = AutomationRuleTriggerTypeGridChange
@@ -5921,6 +5962,50 @@ func (s *CategoryChartDataContext) init() CategoryChartDataContext {
 		*s = m
 	}
 	return m
+}
+
+// The cell as the writer read it: one of value, text or blank. Set, a cell someone changed since is
+// not written over: 409 with code "cell_changed", the message, the cell's index in a batch and what
+// it holds now ("current", null when blank); a batch is then written not at all. Omitted, the write
+// is made as before (the last write wins).
+// Ref: #/components/schemas/CellExpected
+type CellExpected struct {
+	// The number (or pick-list key, or date serial) read.
+	Value OptFloat64 `json:"value"`
+	// The text read.
+	Text OptString `json:"text"`
+	// The cell was empty.
+	Blank OptBool `json:"blank"`
+}
+
+// GetValue returns the value of Value.
+func (s *CellExpected) GetValue() OptFloat64 {
+	return s.Value
+}
+
+// GetText returns the value of Text.
+func (s *CellExpected) GetText() OptString {
+	return s.Text
+}
+
+// GetBlank returns the value of Blank.
+func (s *CellExpected) GetBlank() OptBool {
+	return s.Blank
+}
+
+// SetValue sets the value of Value.
+func (s *CellExpected) SetValue(val OptFloat64) {
+	s.Value = val
+}
+
+// SetText sets the value of Text.
+func (s *CellExpected) SetText(val OptString) {
+	s.Text = val
+}
+
+// SetBlank sets the value of Blank.
+func (s *CellExpected) SetBlank(val OptBool) {
+	s.Blank = val
 }
 
 // One value an intersection held (enterprise feature `cell_history`). Rows come newest first;
@@ -8454,6 +8539,14 @@ type CreateFormRequest struct {
 	MemberLabelWithCode OptBool `json:"member_label_with_code"`
 	// Omitted keeps the setting.
 	EditAccess OptCreateFormRequestEditAccess `json:"edit_access"`
+	// A person field of a table that keeps a dimension: to a holder of one of editor_roles, the members
+	// whose record names someone else there are read-only — their records, the records naming them and
+	// their cells — while every member stays visible (a project manager changes the projects naming
+	// them). "" stops it; omitted keeps it. A field that is no person field, or no roles, is refused
+	// (400).
+	EditorField OptString `json:"editor_field"`
+	// With editor_field: the business roles it narrows; everyone else keeps the access they have.
+	EditorRoles []string `json:"editor_roles"`
 }
 
 // GetName returns the value of Name.
@@ -8501,6 +8594,16 @@ func (s *CreateFormRequest) GetEditAccess() OptCreateFormRequestEditAccess {
 	return s.EditAccess
 }
 
+// GetEditorField returns the value of EditorField.
+func (s *CreateFormRequest) GetEditorField() OptString {
+	return s.EditorField
+}
+
+// GetEditorRoles returns the value of EditorRoles.
+func (s *CreateFormRequest) GetEditorRoles() []string {
+	return s.EditorRoles
+}
+
 // SetName sets the value of Name.
 func (s *CreateFormRequest) SetName(val OptString) {
 	s.Name = val
@@ -8544,6 +8647,16 @@ func (s *CreateFormRequest) SetMemberLabelWithCode(val OptBool) {
 // SetEditAccess sets the value of EditAccess.
 func (s *CreateFormRequest) SetEditAccess(val OptCreateFormRequestEditAccess) {
 	s.EditAccess = val
+}
+
+// SetEditorField sets the value of EditorField.
+func (s *CreateFormRequest) SetEditorField(val OptString) {
+	s.EditorField = val
+}
+
+// SetEditorRoles sets the value of EditorRoles.
+func (s *CreateFormRequest) SetEditorRoles(val []string) {
+	s.EditorRoles = val
 }
 
 // Omitted keeps the setting.
@@ -26679,6 +26792,52 @@ func (o OptCategoryChartDataContext) Get() (v CategoryChartDataContext, ok bool)
 
 // Or returns value if set, or given parameter if does not.
 func (o OptCategoryChartDataContext) Or(d CategoryChartDataContext) CategoryChartDataContext {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCellExpected returns new OptCellExpected with value set to v.
+func NewOptCellExpected(v CellExpected) OptCellExpected {
+	return OptCellExpected{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCellExpected is optional CellExpected.
+type OptCellExpected struct {
+	Value CellExpected
+	Set   bool
+}
+
+// IsSet returns true if OptCellExpected was set.
+func (o OptCellExpected) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCellExpected) Reset() {
+	var v CellExpected
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCellExpected) SetTo(v CellExpected) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCellExpected) Get() (v CellExpected, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCellExpected) Or(d CellExpected) CellExpected {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -45232,8 +45391,9 @@ type WritebackBatchReqCellsItem struct {
 	// A pick-list cell's member, by code or label.
 	Member OptString `json:"member"`
 	// A text cell's text, or a date cell's yyyy-mm-dd.
-	Text  OptString `json:"text"`
-	Clear OptBool   `json:"clear"`
+	Text     OptString       `json:"text"`
+	Clear    OptBool         `json:"clear"`
+	Expected OptCellExpected `json:"expected"`
 }
 
 // GetMetricID returns the value of MetricID.
@@ -45266,6 +45426,11 @@ func (s *WritebackBatchReqCellsItem) GetClear() OptBool {
 	return s.Clear
 }
 
+// GetExpected returns the value of Expected.
+func (s *WritebackBatchReqCellsItem) GetExpected() OptCellExpected {
+	return s.Expected
+}
+
 // SetMetricID sets the value of MetricID.
 func (s *WritebackBatchReqCellsItem) SetMetricID(val uuid.UUID) {
 	s.MetricID = val
@@ -45294,6 +45459,11 @@ func (s *WritebackBatchReqCellsItem) SetText(val OptString) {
 // SetClear sets the value of Clear.
 func (s *WritebackBatchReqCellsItem) SetClear(val OptBool) {
 	s.Clear = val
+}
+
+// SetExpected sets the value of Expected.
+func (s *WritebackBatchReqCellsItem) SetExpected(val OptCellExpected) {
+	s.Expected = val
 }
 
 // Dimension id → leaf member code.
@@ -45482,7 +45652,8 @@ type WritebackRequest struct {
 	// Empties the cell — no value, not 0: its typed rows are deleted (kept in the cell history with
 	// the reason "cleared"); rows a form or an import posted stay. The answer's status is "cleared". A
 	// dim_codes code that is no member of the dimension is refused with 400, as for any write.
-	Clear OptBool `json:"clear"`
+	Clear    OptBool         `json:"clear"`
+	Expected OptCellExpected `json:"expected"`
 }
 
 // GetModelID returns the value of ModelID.
@@ -45535,6 +45706,11 @@ func (s *WritebackRequest) GetClear() OptBool {
 	return s.Clear
 }
 
+// GetExpected returns the value of Expected.
+func (s *WritebackRequest) GetExpected() OptCellExpected {
+	return s.Expected
+}
+
 // SetModelID sets the value of ModelID.
 func (s *WritebackRequest) SetModelID(val uuid.UUID) {
 	s.ModelID = val
@@ -45583,6 +45759,11 @@ func (s *WritebackRequest) SetRecalc(val OptWritebackRequestRecalc) {
 // SetClear sets the value of Clear.
 func (s *WritebackRequest) SetClear(val OptBool) {
 	s.Clear = val
+}
+
+// SetExpected sets the value of Expected.
+func (s *WritebackRequest) SetExpected(val OptCellExpected) {
+	s.Expected = val
 }
 
 // DimensionId to member code — the preferred, N-dimensional form.

@@ -210,6 +210,26 @@ test.describe("board widget", () => {
     await expect(dialog.getByLabel("Deal Name")).toHaveValue("Big");
   });
 
+  test("a number field shows its thousands as they are typed (owner, 2026-11-27)", async ({ page }) => {
+    await serveBoard(page);
+    await openBoard(page);
+    await page.getByRole("button", { name: "New deal" }).click();
+    const value = page.getByRole("dialog").getByLabel("Deal Value");
+    await value.pressSequentially("5000000");
+    await expect(value).toHaveValue("5\u00a0000\u00a0000");
+    // A money field takes two decimals, after a point or a comma.
+    await value.fill("");
+    await value.pressSequentially("1234,567");
+    await expect(value).toHaveValue("1\u00a0234,56");
+    // Typing in the middle keeps the caret after the digit typed.
+    await value.fill("");
+    await value.pressSequentially("1000");
+    await value.press("Home");
+    await value.press("ArrowRight");
+    await value.pressSequentially("5");
+    await expect(value).toHaveValue("15\u00a0000");
+  });
+
   test("a new deal's account is made in place and picked", async ({ page }) => {
     const server = await serveBoard(page);
     await openBoard(page);

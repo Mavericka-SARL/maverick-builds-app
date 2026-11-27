@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/mavericks-engine/mavericks/internal/approvalsnap"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 )
 
@@ -132,6 +133,18 @@ func TestApprovedFiguresChangedSinceApproval(t *testing.T) {
 	calc("SEP", 1900)
 	if got := changes(); len(got) != 1 {
 		t.Fatalf("moved again: %v", got)
+	}
+	// The run keeps its figures again (what an approval's own freeze does once
+	// it has written): the value it shows now is the approved one.
+	if _, err := approvalsnap.Retake(ctx, f.pool, ex.InstanceID); err != nil {
+		t.Fatal(err)
+	}
+	if got := changes(); len(got) != 0 {
+		t.Fatalf("after the figures were kept again: %v", got)
+	}
+	calc("SEP", 1950)
+	if got := changes(); len(got) != 1 {
+		t.Fatalf("a move after keeping them again: %v", got)
 	}
 	exec(`UPDATE model.metric_def SET approval_watch = false WHERE id = $1::uuid`, assets)
 	if got := changes(); len(got) != 0 {

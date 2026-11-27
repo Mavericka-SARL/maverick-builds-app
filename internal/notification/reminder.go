@@ -192,8 +192,12 @@ func (r *Reminder) dueSteps(ctx context.Context, leadHours int32, limit int) ([]
 func (r *Reminder) assignees(ctx context.Context, stepID string) ([]string, error) {
 	var rolesJSON []byte
 	var appID string
+	var named string
 	err := r.Store.pool.QueryRow(ctx, `
-		SELECT COALESCE(step_def.elem->'assignee_roles', '[]'::jsonb), wd.application_id::text
+		SELECT COALESCE(step_def.elem->'assignee_roles', '[]'::jsonb), wd.application_id::text,
+		       -- A step naming its person (assignee_field): theirs alone.
+		       CASE WHEN ws.status = 'in_progress' AND COALESCE(step_def.elem->>'assignee_field', '') <> ''
+		            THEN COALESCE(ws.assignee_user_id::text, '') ELSE '' END
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -202,9 +206,12 @@ func (r *Reminder) assignees(ctx context.Context, stepID string) ([]string, erro
 		    WHERE elem->>'id' = ws.step_def_id LIMIT 1
 		) step_def ON TRUE
 		WHERE ws.id = $1::uuid
-	`, stepID).Scan(&rolesJSON, &appID)
+	`, stepID).Scan(&rolesJSON, &appID, &named)
 	if err != nil {
 		return nil, err
+	}
+	if named != "" {
+		return []string{named}, nil
 	}
 	var roles []string
 	_ = json.Unmarshal(rolesJSON, &roles)

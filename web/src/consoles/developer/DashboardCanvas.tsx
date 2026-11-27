@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useReducer, useMemo } from "react";
 import { TimeWindowFields } from "./TimeWindowFields";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
-import { api, dimLabel, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
+import { api, dimLabel, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners, type GanttSettings } from "../../api/client";
 import { useDemo } from "../../api/useDemo";
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
@@ -10,6 +10,7 @@ import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { SelectorBarEditor } from "./SelectorBarEditor";
 import { BoardSettingsEditor, RecordPresetsEditor, RecordSelectionEditor } from "./RecordWidgetSettings";
+import { GanttSettingsEditor } from "./GanttSettingsEditor";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
 import { MAX_WIDGET_DECIMALS, widgetDecimals } from "../shownDecimals";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText, Txt } from "../../ui";
@@ -50,6 +51,7 @@ const PALETTE_TYPES = [
   { type: "chart",              label: "Chart" },
   { type: "form",               label: "Records" },
   { type: "board",              label: "Board" },
+  { type: "gantt",              label: "Gantt" },
   { type: "metric_kpi",         label: "Metric KPI" },
   { type: "automation_button",  label: "Trigger" },
   { type: "integration_button", label: "Integration" },
@@ -128,6 +130,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [newRecordButton, setNewRecordButton] = useState(false);
   // A new board's column field: what its columns are.
   const [newBoardColumn, setNewBoardColumn] = useState("");
+  const [newGantt, setNewGantt] = useState<GanttSettings>({ start_field: "" });
   const [imageError, setImageError] = useState("");
   const [propsDraft, setPropsDraft] = useState<Record<string, { ref_id?: string; content?: string; title?: string | null; show_title?: boolean; widget_props?: WidgetProps | null }>>({});
   // Widgets added (or duplicated) and removed since the last save: like
@@ -344,6 +347,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       widget_props: chartCfg ? { chart: chartCfg }
         : newWidget.widget_type === "form" && newRecordButton ? { new_record_button: true }
         : newWidget.widget_type === "board" ? { board: { column_field: newBoardColumn }, ...(newRecordButton ? { new_record_button: true } : {}) }
+        : newWidget.widget_type === "gantt" ? { gantt: newGantt }
         : null,
       sort_order: widgetsRef.current.length, col_start: 1, col_span: 12, pos_x: x, pos_y: y, size_w: defW, size_h: defH,
     };
@@ -396,7 +400,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     const refId  = pd?.ref_id  !== undefined ? pd.ref_id  : w.ref_id;
     if (w.widget_type === "text" || w.widget_type === "image") return "";
     if (w.widget_type === "grid")               return (grids as GridDef[]).find(g => g.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
-    if (w.widget_type === "form" || w.widget_type === "board") return (forms as FormDef[]).find(f => f.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
+    if (w.widget_type === "form" || w.widget_type === "board" || w.widget_type === "gantt") return (forms as FormDef[]).find(f => f.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "automation_button")  return (rules as AutomationRule[]).find(r => r.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "integration_button") return (integrations as IntegrationDef[]).find(i => i.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "metric_kpi")         return (metrics as Metric[]).find(m => m.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
@@ -464,6 +468,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       return chartConfigFromDraft(newChartDraft) === null;
     }
     if (newWidget.widget_type === "board") return !newWidget.ref_id || !newBoardColumn;
+    if (newWidget.widget_type === "gantt") return !newWidget.ref_id || !newGantt.start_field;
     return !newWidget.ref_id;
   }
 
@@ -752,6 +757,20 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     </Field>
                   )}
                   <Checkbox checked={newRecordButton} onChange={e => setNewRecordButton(e.target.checked)} label="Show the + New button" />
+                </>
+              );
+            })()}
+            {newWidget.widget_type === "gantt" && (() => {
+              const table = (forms as FormDef[]).find(f => f.id === newWidget.ref_id);
+              return (
+                <>
+                  <Field label="Table">
+                    <Select value={newWidget.ref_id} onChange={e => { setNewWidget(w => ({ ...w, ref_id: e.target.value })); setNewGantt({ start_field: "" }); }}>
+                      <option value="">— select —</option>
+                      {(forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
+                    </Select>
+                  </Field>
+                  {table && <GanttSettingsEditor form={table} value={newGantt} onChange={setNewGantt} />}
                 </>
               );
             })()}
@@ -1403,6 +1422,22 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               );
             })()}
 
+            {selectedWidget.widget_type === "gantt" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              const table = (forms as FormDef[]).find(f => f.id === (propsDraft[selectedWidget.id]?.ref_id ?? selectedWidget.ref_id));
+              if (!table) return null;
+              const wid = selectedWidget!.id;
+              const setWp = (patch: Partial<WidgetProps>) => setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, ...patch } } }));
+              return (
+                <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="mvx-prop-section">Gantt</div>
+                  <GanttSettingsEditor form={table} value={wp.gantt ?? { start_field: "" }} onChange={gantt => setWp({ gantt })} />
+                  <RecordPresetsEditor form={table} dims={kpiScopeDims as DevDimension[]} metrics={metrics as Metric[]} value={wp} withColumns={false} onChange={setWp} />
+                  <RecordSelectionEditor form={table} dims={kpiScopeDims as DevDimension[]} value={wp} canSelect={false} onChange={setWp} />
+                </div>
+              );
+            })()}
+
             {/* Row hierarchy — grid only */}
             {(selectedWidget.widget_type === "grid" || selectedWidget.widget_type === "chart") && selectedGridData && (() => {
               // A rolling window on the widget's time dimension (time_window).
@@ -1661,7 +1696,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             {selectedWidget.widget_type !== "text" && selectedWidget.widget_type !== "grid" && selectedWidget.widget_type !== "chart" && selectedWidget.widget_type !== "import" && (
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">
-                  {selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board" ? "Table"
+                  {selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board" || selectedWidget.widget_type === "gantt" ? "Table"
                   : selectedWidget.widget_type === "metric_kpi" ? "Metric"
                   : selectedWidget.widget_type === "automation_button" ? "Trigger"
                   : "Integration"}
@@ -1676,7 +1711,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   aria-label="Source object"
                 >
                   <option value="">— none —</option>
-                  {(selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board") && (forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
+                  {(selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board" || selectedWidget.widget_type === "gantt") && (forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
                   {selectedWidget.widget_type === "metric_kpi"         && (metrics as Metric[]).map(m => <option key={m.id} value={m.id}>{m.label || m.name}</option>)}
                   {selectedWidget.widget_type === "automation_button"  && eligibleRules.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   {selectedWidget.widget_type === "integration_button" && (integrations as IntegrationDef[]).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}

@@ -182,3 +182,33 @@ func TestAnalyzeRangeNames(t *testing.T) {
 		t.Errorf("RangeNames = %v, want [act_region act_status]", an.RangeNames)
 	}
 }
+
+// A metric criteria range read through RangeReads (one metric's evaluation,
+// every cell sharing it) answers as reading it each time: SUMIFS and COUNTIFS
+// over pick-list ranges, a cell after another of the same metric.
+func TestRangeReadsAnswerAsReading(t *testing.T) {
+	m := activityModel()
+	pl := map[string]string{"ACT_REGION": "region", "ACT_STATUS": "status"}
+	shared := map[string]map[string]Value{}
+	for _, c := range []struct {
+		region, formula string
+	}{
+		{"NA", `SUMIFS(spend, act_region, region)`},
+		{"EU", `SUMIFS(spend, act_region, region)`},
+		{"NA", `SUMIFS(spend, act_region, region, act_status, "<>Cancelled")`},
+		{"EU", `COUNTIFS(act_status, "Draft", act_region, region)`},
+		{"NA", `SUMIFS(spend, act_region, region)`},
+	} {
+		plain := picklistCtx(m, map[string]string{"region": c.region}, pl)
+		want := evalIn(t, plain, c.formula)
+		cached := picklistCtx(m, map[string]string{"region": c.region}, pl)
+		cached.Dim.RangeReads = shared
+		got := evalIn(t, cached, c.formula)
+		if got != want {
+			t.Errorf("%s at %s: with RangeReads %v, without %v", c.formula, c.region, got, want)
+		}
+	}
+	if len(shared["act_region"]) == 0 && len(shared["ACT_REGION"]) == 0 {
+		t.Errorf("RangeReads kept nothing: %v", shared)
+	}
+}

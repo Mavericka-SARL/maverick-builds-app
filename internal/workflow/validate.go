@@ -61,6 +61,20 @@ func ValidateDef(def *WorkflowDefFull) []string {
 
 		routes, _ := s["routes"].(map[string]any)
 
+		// assignee_field: the run's data naming the step's person
+		// (named_assignee.go) — a path of field names.
+		if af, _ := s["assignee_field"].(string); strings.TrimSpace(af) != "" {
+			if stepType != "task" && stepType != "approval" {
+				errs = append(errs, fmt.Sprintf("Step %q names an assignee field, which only a task or approval step has", label))
+			}
+			for _, seg := range strings.Split(af, ".") {
+				if strings.TrimSpace(seg) == "" {
+					errs = append(errs, fmt.Sprintf("Step %q: the assignee field %q has an empty part (write it as project.country.manager)", label, af))
+					break
+				}
+			}
+		}
+
 		switch stepType {
 		case "task":
 			roles, _ := s["assignee_roles"].([]any)

@@ -375,7 +375,13 @@ func (h *handler) storeCellsChanged(ctx context.Context, modelID, revisionID, us
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	for _, c := range cells {
+	for i, c := range cells {
+		checked := c.req.Expected.checks()
+		if checked {
+			if err := lockCell(ctx, tx, modelID, revisionID, c.metricID, c.dimMembers); err != nil {
+				return nil, err
+			}
+		}
 		var held bool
 		var oldValue float64
 		var oldText *string
@@ -388,6 +394,9 @@ func (h *handler) storeCellsChanged(ctx context.Context, modelID, revisionID, us
 			held = true
 		case !errors.Is(err, pgx.ErrNoRows):
 			return nil, err
+		}
+		if checked && !c.req.Expected.holds(held, oldValue, oldText) {
+			return nil, &cellChangedError{index: i, metric: c.metricID, members: c.dimMembers, held: held, value: oldValue, text: oldText}
 		}
 		if c.write.clear {
 			if held {
@@ -439,6 +448,8 @@ type cellBatchCell struct {
 	Member   *string           `json:"member,omitempty"`
 	Text     *string           `json:"text,omitempty"`
 	Clear    bool              `json:"clear,omitempty"`
+	// Expected: the cell as its writer read it (cell_conflict.go).
+	Expected *cellExpected `json:"expected,omitempty"`
 	// hasValue: the cell named a value (0 included).
 	hasValue bool
 }
@@ -453,9 +464,9 @@ func (c *cellBatchCell) UnmarshalJSON(b []byte) error {
 	}
 	for k := range raw {
 		switch k {
-		case "metric_id", "dim_codes", "value", "member", "text", "clear":
+		case "metric_id", "dim_codes", "value", "member", "text", "clear", "expected":
 		default:
-			return fmt.Errorf("a cell has no %q: it names metric_id, dim_codes and one of value, member, text or clear", k)
+			return fmt.Errorf("a cell has no %q: it names metric_id, dim_codes and one of value, member, text or clear (and expected, the cell as read)", k)
 		}
 	}
 	type plain cellBatchCell
@@ -517,6 +528,14 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 		ref.respond(w)
 		return
 	}
+	// One batch's checks read each member's chain and the writer's rules
+	// once (writeguard.Memo), the rules all at once.
+	memo := writeguard.NewMemo()
+	if err := memo.PreloadRules(ctx, h.db.For(ctx), a.UserID, revisionID); err != nil {
+		h.log.Warn().Err(err).Msg("cell batch: reading the writer's access rules at once failed; checking member by member")
+		memo = writeguard.NewMemo()
+	}
+	ctx = writeguard.WithMemo(ctx, memo)
 
 	formats := map[string]cellMetricInfo{}
 	metricRefusals := map[string]*cellRefusal{}
@@ -546,7 +565,7 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 			formats[c.MetricID] = info
 		}
 		one := writebackReq{ModelID: req.ModelID, RevisionID: revisionID, MetricID: c.MetricID, DimCodes: c.DimCodes,
-			Value: c.Value, Member: c.Member, Text: c.Text, Clear: c.Clear}
+			Value: c.Value, Member: c.Member, Text: c.Text, Clear: c.Clear, Expected: c.Expected}
 		p, cref := h.prepareCell(ctx, a, revisionID, one, info)
 		if cref != nil {
 			refuse(cref)

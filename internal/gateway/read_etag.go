@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
@@ -127,4 +128,16 @@ func etagListed(header, tag string) bool {
 		}
 	}
 	return false
+}
+
+// withReadGeneration lets ctx's whole-revision aggregate reads of modelID be
+// answered from the memo at the model's data generation, taken now — before
+// the read is worked out, as its ETag is (calculation.WithReadGeneration).
+// Unchanged where the generation cannot be read.
+func (h *handler) withReadGeneration(ctx context.Context, modelID string) context.Context {
+	gen, ok := h.dataGeneration(ctx, modelID)
+	if !ok {
+		return ctx
+	}
+	return calculation.WithReadGeneration(ctx, tenantdb.TenantFrom(ctx)+"|"+modelID+"|"+strconv.FormatInt(gen, 10))
 }

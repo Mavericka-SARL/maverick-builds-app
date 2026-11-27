@@ -1,9 +1,7 @@
-# The console of a maverickbuilds.app deployment. Crawlers may read what a
-# visitor reads before an account exists (sign-up, the terms, the privacy
-# notice and the manuals) and nothing behind sign-in.
+# The console of a maverickbuilds.app deployment. Crawlers may fetch every
+# page, so that they can read the noindex the pages behind sign-in answer
+# with (web/nginx.conf); sign-up, the terms, the privacy notice and the
+# manuals under /docs/ are the pages meant for search results. The API has
+# nothing to read.
 User-agent: *
-Allow: /signup
-Allow: /terms
-Allow: /privacy
-Allow: /docs/
-Disallow: /
+Disallow: /api/

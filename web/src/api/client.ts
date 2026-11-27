@@ -281,6 +281,9 @@ export interface ScimToken {
 }
 
 /** One value a cell held (enterprise `cell_history`), newest first from the API. */
+/** A cell as its writer read it: one of value, text or blank (cell_conflict.go). */
+export type CellExpected = { value?: number; text?: string; blank?: boolean };
+
 export interface CellHistoryEntry {
   id: string;
   value: number;
@@ -1010,6 +1013,8 @@ export interface WidgetProps {
   record_follows?: string[];
   /** Board widgets: the records as cards in columns. */
   board?: BoardSettings;
+  /** A Gantt widget's settings. */
+  gantt?: GanttSettings;
   /** Widget surface: "white" draws the widget on a card (surface + border),
       "none" draws it straight on the page. Absent = the type's default
       (KPI tiles are cards, everything else is bare). */
@@ -1577,6 +1582,9 @@ export interface FormDef {
   posting_fields?: Record<string, string[]>;
   /** The table has a live mapping posting its records into a grid. */
   posts?: boolean;
+  /** A person field: to holders of editor_roles, members whose record names someone else are read-only (migration 200). */
+  editor_field?: string;
+  editor_roles?: string[];
 }
 
 /** The table's status field, when it has one. */
@@ -1626,6 +1634,27 @@ export interface FormRecord {
 
 /** A board widget's layout: columns are the members of a dimension field (any
     dimension) or the choices of a select field; moving a card sets that field. */
+/** A Gantt widget's settings (widget_props.gantt): a table's records as bars on a timeline. */
+export interface GanttSettings {
+  /** The date field a bar starts on. */
+  start_field: string;
+  /** The date field it ends on; empty (or the same day): a milestone. */
+  end_field?: string;
+  /** Names each row (the table's member label, else its first text field, when absent). */
+  label_field?: string;
+  /** Date fields of the baseline, drawn under the bar. */
+  baseline_start_field?: string;
+  baseline_end_field?: string;
+  /** Rows grouped under this field's values (a project, a work package). */
+  group_field?: string;
+  /** Bars coloured by this field's value (a status, a priority). */
+  color_field?: string;
+  /** A number field, 0–100: the part of the bar done. */
+  progress_field?: string;
+  /** A field naming the record (by code) this one follows: drawn as an arrow, red when it starts before that one ends. */
+  predecessor_field?: string;
+}
+
 export interface BoardSettings {
   column_field: string;
   /** Titles each card (the table's first text field when absent). */
@@ -1664,6 +1693,9 @@ export interface TableSettings {
   delete_roles?: string[];
   record_scope?: "" | "open";
   existing_codes?: "refuse" | "update";
+  /** A person field: to holders of editor_roles, the members whose record names someone else are read-only ("" stops it). */
+  editor_field?: string;
+  editor_roles?: string[];
 }
 
 /** How many records of a table a delete touches through one of its fields. */
@@ -2019,6 +2051,8 @@ export interface AutomationRule {
   last_fire_at?: string;
   /** form_submit / form_approval rules: also for the records a file import creates. */
   fires_on_import?: boolean;
+  /** record_updated: the record's fields whose change fires it (status included); empty, any change. */
+  watch_fields?: string[];
 }
 
 // ── Workflow Definitions ──────────────────────────────────────────────────────
@@ -2050,6 +2084,8 @@ export interface WorkflowStepDef {
   type: StepType;
   instructions?: string;
   assignee_roles?: string[];
+  /** The run's data naming the step's person, e.g. "project.country.manager" (internal/workflow/named_assignee.go). */
+  assignee_field?: string;
   sla_hours?: number;
   required_comment?: boolean;
   completion_label?: string;
@@ -2999,9 +3035,11 @@ export const api = {
   // recalc_pending until the dependents are recalculated.
   // Up to 500 cells of one model, all or nothing, one recalculation: a
   // block pasted into a grid.
-  writebackBatch: (body: { model_id: string; revision_id: string; recalc?: "background"; cells: { metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; member?: string; clear?: boolean }[] }) =>
+  writebackBatch: (body: { model_id: string; revision_id: string; recalc?: "background"; cells: { metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; member?: string; clear?: boolean; expected?: CellExpected }[] }) =>
     apiFetch<{ status: string; cells?: number; cleared?: number; recalculating?: boolean }>("/api/cells/batch", { method: "POST", body: JSON.stringify(body) }),
-  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean; recalc?: "background" }) =>
+  // expected: the cell as read — a cell someone changed since is refused,
+  // 409 cell_changed (internal/gateway/cell_conflict.go).
+  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean; recalc?: "background"; expected?: CellExpected }) =>
     apiFetch<{ status: string; recalculating?: boolean }>("/api/cells", {
       method: "POST",
       body: JSON.stringify(body),
@@ -3510,7 +3548,7 @@ export const api = {
 
   deleteAutomationRule: (ruleId: string) =>
     apiFetch<{ status: string }>(`/api/automation/rules/${ruleId}`, { method: "DELETE" }),
-  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean }) =>
+  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean; watch_fields?: string[] }) =>
     apiFetch<AutomationRule>(`/api/automation/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   // Answers the same whether the address already had an account (which is
@@ -3598,7 +3636,7 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/revisions/${id}`, { method: "DELETE" }),
 
   listAutomationRules: (revisionId?: string) => apiFetch<AutomationRule[]>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean }, revisionId?: string) =>
+  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string; fires_on_import?: boolean; watch_fields?: string[] }, revisionId?: string) =>
     apiFetch<AutomationRule>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
   triggerRule: (ruleId: string, payload?: Record<string, string>) =>
     apiFetch<Execution>(`/api/automation/trigger/${ruleId}`, { method: "POST", body: JSON.stringify({ payload: payload ?? {} }) }),

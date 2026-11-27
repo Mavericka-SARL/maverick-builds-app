@@ -39,6 +39,10 @@ type incremental struct {
 	dimIDToName  map[string]string
 	defs         map[string]*MetricDef
 
+	// seeds are where each reader of changed member properties starts
+	// (req.members): the members' cells, or everywhere.
+	seeds map[string]*region
+
 	mu      sync.Mutex
 	changed map[string]*region // metric ID → what changed in this pass
 	shapes  map[string]readShape
@@ -52,7 +56,7 @@ func (s *Scheduler) newIncremental(ctx context.Context, modelID, revisionID, tim
 ) *incremental {
 	inc := &incremental{req: req, allDims: allDims, metricDimIDs: metricDimIDs, dimIDToName: dimIDToName, defs: defs,
 		changed: map[string]*region{}, shapes: map[string]readShape{}, requested: map[string]bool{}}
-	if len(req.cells) == 0 {
+	if len(req.cells) == 0 && len(req.members) == 0 {
 		return inc
 	}
 	status, err := s.store.LoadPartitionStatuses(ctx, modelID, revisionID, timePartition)
@@ -67,7 +71,66 @@ func (s *Scheduler) newIncremental(ctx context.Context, modelID, revisionID, tim
 	for _, c := range req.cells {
 		inc.changed[c.MetricID] = inc.changed[c.MetricID].union(cellRegion(allDims, metricDimIDs[c.MetricID], c.Combo))
 	}
+	inc.seeds = memberSeeds(req, allDims, metricDimIDs, dimIDToName, defs)
 	return inc
+}
+
+// memberSeeds is where each reader of req.members starts: the members'
+// cells when it reads the dimension at its own member — the dimension is
+// one of its own, it reads no other member of it (no LOOKUP, PARENT or
+// criteria range across it) and the members are leaves of it — else every
+// cell. A cost line's quantity changed: its phased amounts are evaluated at
+// that cost line only, not at all 575 (2026-11-27).
+func memberSeeds(req passRequest, allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string,
+	dimIDToName map[string]string, defs map[string]*MetricDef,
+) map[string]*region {
+	if len(req.members) == 0 {
+		return nil
+	}
+	seeds := make(map[string]*region, len(req.readers))
+	for _, id := range req.readers {
+		def := defs[id]
+		if def == nil || def.IsInput {
+			continue
+		}
+		dims := metricDimIDs[id]
+		shape := shapeOf(def, dims, allDims, dimIDToName)
+		seed := &region{bound: map[string]map[string]bool{}}
+		for dimID, codes := range req.members {
+			own := false
+			for _, d := range dims {
+				if d == dimID {
+					own = true
+				}
+			}
+			leaves := map[string]bool{}
+			if d := allDims[dimID]; d != nil {
+				for _, c := range rollup.LeafCodes(d) {
+					leaves[c] = true
+				}
+			}
+			allLeaves := len(codes) > 0
+			for _, c := range codes {
+				if !leaves[c] {
+					allLeaves = false
+				}
+			}
+			if !own || shape.everywhere || shape.moving[dimID] || !allLeaves {
+				seed = everywhere()
+				break
+			}
+			set := seed.bound[dimID]
+			if set == nil {
+				set = map[string]bool{}
+				seed.bound[dimID] = set
+			}
+			for _, c := range codes {
+				set[c] = true
+			}
+		}
+		seeds[id] = seed
+	}
+	return seeds
 }
 
 // plan decides whether comp runs and, in a pass following cells, each
@@ -129,6 +192,12 @@ func (inc *incremental) plan(comp metricformula.Component) (map[string]*incremen
 				rule := EffectiveAggRule(dep.AggRule, dep.Formula, inc.dimIDToName)
 				readerRule := EffectiveAggRule(def.AggRule, def.Formula, inc.dimIDToName)
 				in = in.union(project(changed, dep, inc.metricDimIDs[depID], rule, shape, inc.metricDimIDs[id], readerRule))
+			}
+		}
+		// A reader of changed member properties starts at its seed.
+		for _, id := range comp.Members {
+			if seed := inc.seeds[id]; seed != nil {
+				in = in.union(seed)
 			}
 		}
 		inc.mu.Unlock()

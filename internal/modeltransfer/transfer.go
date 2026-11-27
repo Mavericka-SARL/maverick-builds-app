@@ -48,7 +48,10 @@ const (
 	// export that uses them (Package.MinimumVersion), so an engine that would
 	// import the tables without their rules refuses the file instead;
 	// anything else is still written as version 3 (Package.MinimumVersion).
-	PackageVersion = 4
+	// Version 5 (record_updated rules and their watched fields, migration
+	// 199; a table's editor field, migration 200; a step's assignee_field):
+	// likewise written only by an export that uses them.
+	PackageVersion = 5
 	// BaseVersion is what a package using nothing of version 4 is written
 	// as — and what the built-in starter packages say, so their content
 	// hash (startersync) does not change with the version count.
@@ -281,6 +284,11 @@ type Form struct {
 	// Absent: as a table made before it.
 	RecordScope   string `json:"record_scope,omitempty"`
 	ExistingCodes string `json:"existing_codes,omitempty"`
+	// EditorField / EditorRoles: to a holder of one of the roles, the
+	// members whose record names someone else in the person field are
+	// read-only (migration 200); written as version 5.
+	EditorField string   `json:"editor_field,omitempty"`
+	EditorRoles []string `json:"editor_roles,omitempty"`
 }
 
 type FormRecord struct {
@@ -383,6 +391,9 @@ type AutomationRule struct {
 	// import creates (migration 152); a package without it fires for them,
 	// as every rule did.
 	FiresOnImport *bool `json:"fires_on_import,omitempty"`
+	// WatchFields: a record_updated rule fires for a change of one of these
+	// fields only (migration 199); none, for any change.
+	WatchFields []string `json:"watch_fields,omitempty"`
 }
 
 type Fact struct {
@@ -861,7 +872,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only,
 		       COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''),
 		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END, create_roles, member_label_with_code,
-		       delete_access, delete_roles, record_scope, existing_codes
+		       delete_access, delete_roles, record_scope, existing_codes, editor_field, editor_roles
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -869,9 +880,12 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreateRoles, &f.MemberLabelWithCode, &f.DeleteAccess, &f.DeleteRoles, &f.RecordScope, &f.ExistingCodes, &f.EditorField, &f.EditorRoles); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if f.EditorField == "" {
+			f.EditorRoles = nil
 		}
 		pkg.Forms = append(pkg.Forms, f)
 	}
@@ -985,7 +999,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT ar.id::text, ar.name, COALESCE(ar.description,''), ar.trigger_type::text, ar.workflow_name, ar.enabled,
 		       ar.workflow_def_id::text, ar.source_form_id::text, ar.source_grid_id::text, ar.source_integration_id::text,
 		       COALESCE(ar.cron_expr,''), ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
-		       ar.fires_on_import
+		       ar.fires_on_import, ar.watch_fields
 		FROM workflow.automation_rule ar
 		WHERE ar.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (ar.revision_id=$2::uuid OR ar.revision_id IS NULL)
@@ -1000,7 +1014,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		var firesOnImport bool
 		if err := rows.Scan(&ar.ID, &ar.Name, &ar.Description, &ar.TriggerType, &ar.WorkflowName, &ar.Enabled,
 			&ar.WorkflowDefID, &ar.SourceFormID, &ar.SourceGridID, &ar.SourceIntegrationID,
-			&ar.CronExpr, &ar.Timezone, &ar.MisfirePolicy, &ar.MaxRetries, &backoff, &firesOnImport); err != nil {
+			&ar.CronExpr, &ar.Timezone, &ar.MisfirePolicy, &ar.MaxRetries, &backoff, &firesOnImport, &ar.WatchFields); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1013,6 +1027,9 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		}
 		if !firesOnImport {
 			ar.FiresOnImport = &firesOnImport // the default (true) is left out
+		}
+		if len(ar.WatchFields) == 0 {
+			ar.WatchFields = nil // left out
 		}
 		pkg.AutomationRules = append(pkg.AutomationRules, ar)
 	}
@@ -1576,7 +1593,7 @@ func (w Widget) name() string {
 // kinds the dashboard writer checks it against); a type not listed resolves
 // through every kind.
 var widgetRefKinds = map[string]string{
-	"grid": "grid", "chart": "grid", "import": "grid", "form": "form", "board": "form",
+	"grid": "grid", "chart": "grid", "import": "grid", "form": "form", "board": "form", "gantt": "form",
 	"metric_kpi": "metric", "integration_button": "integration", "automation_button": "rule",
 }
 
@@ -2462,13 +2479,14 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code,
-			                            delete_access, delete_roles, record_scope, existing_codes)
+			                            delete_access, delete_roles, record_scope, existing_codes, editor_field, editor_roles)
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''), COALESCE($11::jsonb, '[]'::jsonb), $12,
-			        $13, COALESCE($14::jsonb, '[]'::jsonb), $15, $16)
+			        $13, COALESCE($14::jsonb, '[]'::jsonb), $15, $16, $17, COALESCE($18::text[], '{}'))
 			RETURNING id::text`,
 			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel, rolesArg(f.CreateRoles),
 			f.MemberLabelWithCode && keeps != "", packageDeleteAccess(f.DeleteAccess), rolesArg(f.DeleteRoles),
-			packageChoice(f.RecordScope, "open"), packageChoice(f.ExistingCodes, "refuse", "update")).Scan(&newID); err != nil {
+			packageChoice(f.RecordScope, "open"), packageChoice(f.ExistingCodes, "refuse", "update"),
+			editorFieldArg(f.EditorField, keeps), f.EditorRoles).Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -2669,15 +2687,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			INSERT INTO workflow.automation_rule
 			  (application_id, revision_id, name, description, trigger_type, workflow_name, enabled,
 			   workflow_def_id, source_form_id, source_grid_id,
-			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import)
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, watch_fields)
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE(NULLIF($5::text,''),'manual')::workflow.trigger_type, $6, COALESCE($7::bool, true),
 			        $8::uuid, $9::uuid, $10::uuid,
 			        NULLIF($11,''), COALESCE(NULLIF($12,''),'UTC'), COALESCE(NULLIF($13,''),'skip'), $14, COALESCE($15::int, 60),
-			        COALESCE($16::bool, true))
+			        COALESCE($16::bool, true), COALESCE($17::text[], '{}'))
 			RETURNING id::text`,
 			appID, revisionID, ar.Name, ar.Description, ar.TriggerType, ar.WorkflowName, ar.Enabled,
 			wfID, formID, gridID,
-			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds, ar.FiresOnImport).Scan(&newRuleID); err != nil {
+			ar.CronExpr, ar.Timezone, ar.MisfirePolicy, ar.MaxRetries, ar.RetryBackoffSeconds, ar.FiresOnImport, ar.WatchFields).Scan(&newRuleID); err != nil {
 			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
 		ruleIDs[i] = newRuleID
@@ -2979,6 +2997,34 @@ func packageChoice(v string, allowed ...string) string {
 // rules), else 3. existing_codes does not count: an engine without it reads
 // a file row's code as it always did.
 func (p *Package) MinimumVersion() int {
+	for _, ar := range p.AutomationRules {
+		if ar.TriggerType == "record_updated" || len(ar.WatchFields) > 0 {
+			return 5
+		}
+	}
+	for _, f := range p.Forms {
+		if f.EditorField != "" {
+			return 5
+		}
+	}
+	for _, d := range p.Dashboards {
+		for _, w := range d.Widgets {
+			if w.WidgetType == "gantt" {
+				return 5 // an engine without the Gantt widget refuses the type
+			}
+		}
+	}
+	for _, w := range p.Workflows {
+		var steps []map[string]any
+		if json.Unmarshal(w.Steps, &steps) != nil {
+			continue
+		}
+		for _, st := range steps {
+			if af, _ := st["assignee_field"].(string); af != "" {
+				return 5 // a step naming its person (workflow/named_assignee.go)
+			}
+		}
+	}
 	for _, f := range p.Forms {
 		if f.DeleteAccess != "" || len(f.DeleteRoles) > 0 || f.RecordScope != "" {
 			return 4
@@ -2999,4 +3045,13 @@ func (p *Package) MinimumVersion() int {
 		}
 	}
 	return BaseVersion
+}
+
+// editorFieldArg is a package table's editor field as stored: only on a
+// table that keeps a dimension (the field narrows its members).
+func editorFieldArg(field, keeps string) string {
+	if keeps == "" {
+		return ""
+	}
+	return field
 }

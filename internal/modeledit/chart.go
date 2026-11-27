@@ -243,7 +243,7 @@ func seriesGrids(ctx context.Context, db DB, metricIDs []string) string {
 // WidgetTypes are the dashboard widget types the console renders
 // (DashboardWidgets.tsx). Another type saved, drew nothing, and said
 // nothing: the AI Developer added "workflow_button" widgets for a trigger.
-var WidgetTypes = []string{"grid", "chart", "form", "board", "metric_kpi", "automation_button", "integration_button", "text", "image", "import", "workflow_status"}
+var WidgetTypes = []string{"grid", "chart", "form", "board", "gantt", "metric_kpi", "automation_button", "integration_button", "text", "image", "import", "workflow_status"}
 
 // CheckWidgetType refuses a widget type the console does not render.
 func CheckWidgetType(t string) error {
@@ -269,7 +269,7 @@ var (
 		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
 		"sync_context": true, "show_members": true, "time_window": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
-		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
+		"new_record_button": true, "board": true, "gantt": true, "record_filters": true, "record_columns": true, "record_sort": true,
 		"record_selects": true, "record_follows": true, "follow_rows": true, "follow_columns": true,
 		"kpi_compare": true, "kpi_good": true, "number_scale": true, "decimals": true,
 		"hide_total_row": true, "label_width": true, "hide_legend": true, "hide_badges": true, "footer": true,

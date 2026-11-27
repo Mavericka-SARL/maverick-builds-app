@@ -56,4 +56,25 @@ func TestFreezeValuesIntoAnInput(t *testing.T) {
 	if n, _ := whole["cells"].(float64); n < 1 {
 		t.Errorf("freezing every period: %v", whole)
 	}
+	// Every period is read at once (one grid read for the pins); each value
+	// is the one freezing that period alone reads (its own totals read).
+	periods, _ := whole["values"].([]any)
+	for _, x := range periods {
+		v := x.(map[string]any)
+		members, _ := v["members"].(map[string]any)
+		code, _ := members["period"].(string)
+		if code == "" {
+			for _, c := range members {
+				if s, _ := c.(string); s != "UK" && s != "LAPTOP" {
+					code = s
+				}
+			}
+		}
+		alone := d.call("POST", path, d.admin, map[string]any{"pairs": body["pairs"],
+			"at": map[string]string{d.geoDim: "UK", d.prodDim: "LAPTOP", d.periodDim: code}, "dry_run": true})
+		av, _ := alone["values"].([]any)
+		if len(av) != 1 || av[0].(map[string]any)["value"] != v["value"] {
+			t.Errorf("period %s: frozen with every period %v, alone %v", code, v["value"], alone["values"])
+		}
+	}
 }

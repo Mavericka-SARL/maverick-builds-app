@@ -889,6 +889,20 @@ components:
             Empties the cell — no value, not 0: its typed rows are deleted (kept in the cell history with
             the reason "cleared"); rows a form or an import posted stay. The answer's status is "cleared".
             A dim_codes code that is no member of the dimension is refused with 400, as for any write.
+        expected:
+          $ref: "#/components/schemas/CellExpected"
+
+    CellExpected:
+      type: object
+      description: >-
+        The cell as the writer read it: one of value, text or blank. Set, a cell someone changed since is not
+        written over: 409 with code "cell_changed", the message, the cell's index in a batch and what it holds
+        now ("current", null when blank); a batch is then written not at all. Omitted, the write is made as
+        before (the last write wins).
+      properties:
+        value: { type: number, description: "The number (or pick-list key, or date serial) read" }
+        text: { type: string, description: "The text read" }
+        blank: { type: boolean, description: "The cell was empty" }
 
     SubmitBudgetRequest:
       type: object
@@ -2721,6 +2735,14 @@ components:
         member_root_label:  { type: string, description: "The label of a total member (code ALL) the records' members sit under; \"\" for none, omitted keeps it." }
         member_label_with_code: { type: boolean, description: "Name each member code first (IC03 · Intragroup loan principal), so records with the same text tell apart; omitted keeps it" }
         edit_access: { type: string, enum: [creator, everyone], description: "Omitted keeps the setting." }
+        editor_field:
+          type: string
+          description: >-
+            A person field of a table that keeps a dimension: to a holder of one of editor_roles, the members whose
+            record names someone else there are read-only — their records, the records naming them and their cells —
+            while every member stays visible (a project manager changes the projects naming them). "" stops it;
+            omitted keeps it. A field that is no person field, or no roles, is refused (400).
+        editor_roles: { type: array, items: { type: string }, description: "With editor_field: the business roles it narrows; everyone else keeps the access they have." }
 
     FormRecord:
       type: object
@@ -2922,7 +2944,7 @@ components:
         revision_id:            { type: string, format: uuid, description: "Empty means revision-global" }
         name:                   { type: string }
         description:            { type: string }
-        trigger_type:           { type: string, enum: [manual, form_submit, api, form_approval, grid_change, schedule, integration_completed, integration_failed] }
+        trigger_type:           { type: string, enum: [manual, form_submit, api, form_approval, record_updated, grid_change, schedule, integration_completed, integration_failed] }
         workflow_name:          { type: string }
         workflow_def_id:        { type: string, format: uuid }
         source_form_id:         { type: string, format: uuid }
@@ -2937,14 +2959,15 @@ components:
         retry_backoff_seconds:  { type: integer }
         next_fire_at:           { type: string, format: date-time, nullable: true }
         last_fire_at:           { type: string, format: date-time, nullable: true }
-        fires_on_import:        { type: boolean, description: "A form_submit or form_approval rule also fires for the records a file import creates" }
+        fires_on_import:        { type: boolean, description: "A form_submit, form_approval or record_updated rule also fires for the records a file import creates" }
+        watch_fields:           { type: array, items: { type: string }, description: "A record_updated rule fires only for a change of one of these fields of the record (or status); empty, for any change. Its run gets changed_fields and old_<field> / new_<field>." }
 
     AutomationRuleRequest:
       type: object
       properties:
         name:                  { type: string }
         description:           { type: string }
-        trigger_type:          { type: string, enum: [manual, form_submit, api, form_approval, grid_change, schedule, integration_completed, integration_failed], default: manual }
+        trigger_type:          { type: string, enum: [manual, form_submit, api, form_approval, record_updated, grid_change, schedule, integration_completed, integration_failed], default: manual }
         workflow_name:         { type: string }
         workflow_def_id:       { type: string, format: uuid }
         source_form_id:        { type: string, format: uuid }
@@ -2957,6 +2980,7 @@ components:
         max_retries:           { type: integer, default: 0 }
         retry_backoff_seconds: { type: integer, default: 60 }
         fires_on_import:       { type: boolean, default: true, description: "false: a form_submit or form_approval rule leaves out the records a file import creates" }
+        watch_fields:          { type: array, items: { type: string }, description: "record_updated only: the record's fields whose change fires the rule (status included); a name that is no field of the rule's table is refused (400). Omitted keeps them; [] fires for any change." }
 
     TriggerAutomationRequest:
       type: object
@@ -4566,6 +4590,7 @@ paths:
                       member: { type: string, description: "A pick-list cell's member, by code or label" }
                       text: { type: string, description: "A text cell's text, or a date cell's yyyy-mm-dd" }
                       clear: { type: boolean }
+                      expected: { $ref: "#/components/schemas/CellExpected" }
       responses:
         "200":
           description: Cells written (status "ok"), or checked by a dry run (status "valid")

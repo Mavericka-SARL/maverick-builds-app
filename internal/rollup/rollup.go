@@ -616,7 +616,7 @@ func resolve(
 
 	// The fetch's stored facts, when the caller listed them (WithRecorded):
 	// the ones inside codeSets, not every coordinate codeSets spans.
-	if v, ok, handled, err := resolveListed(ctx, metricID, metricDimIDs, aggRule, codeSets, fetch); handled {
+	if v, ok, handled, err := resolveListed(ctx, dims, metricID, metricDimIDs, aggRule, codeSets, fetch); handled {
 		return v, ok, err
 	}
 	combos := cartesianProduct(metricDimIDs, codeSets)
@@ -839,67 +839,93 @@ func chainReaches(dims map[string]*Dimension, fromID, ancestorID string) bool {
 	return false
 }
 
-// relate finds the resolved code-set for ownDimID against whichever of
-// combo's pinned dimensions structurally or property-relates to it — the
-// first such relation found, in stable order. Returns nil when none relates
-// at all, so the caller aggregates over ownDimID's full leaf set instead.
-// Mirrors resolveAxisCodes's structural/property branches (the exact-match
-// branch is handled by the caller before relate is ever reached).
+// relate finds the resolved code-set for ownDimID against the combo's
+// pinned dimensions that structurally or property-relate to it: the codes
+// every such relation admits (their intersection, in the order the first
+// relation gives them). Returns nil when none relates at all, so the caller
+// aggregates over ownDimID's full leaf set instead. Mirrors
+// resolveAxisCodes's structural/property branches (the exact-match branch is
+// handled by the caller before relate is ever reached).
+//
+// It used to stop at the first relation found: a grid of country × sector,
+// both property groupings of project, read every country's row as the
+// sector's total (RW·Education showed 40 where it holds nothing,
+// 2026-11-27).
 func relate(dims map[string]*Dimension, ownDimID string, combo map[string]string) []string {
 	ownDim, ok := dims[ownDimID]
 	if !ok {
 		return nil
 	}
+	var out []string
+	found := false
 	for _, pinnedDimID := range sortedKeys(combo) {
 		if pinnedDimID == ownDimID {
 			continue
 		}
-		pinnedDim, ok := dims[pinnedDimID]
-		if !ok {
+		codes, related := relateOne(dims, ownDim, ownDimID, pinnedDimID, combo[pinnedDimID])
+		if !related {
 			continue
 		}
-		pinnedCode := combo[pinnedDimID]
-		pinnedMember := findMember(pinnedDim, pinnedCode)
-		if pinnedMember == nil {
+		if !found {
+			out, found = codes, true
 			continue
 		}
-
-		kind, chain := relation(dims, ownDimID, pinnedDimID)
-		switch kind {
-		case relationChildChain:
-			// A found chain commits to "this relation exists"
-			// unconditionally — descendantsInChain legitimately returning
-			// zero codes (e.g. every child is currently hidden) must still
-			// mean "zero", not fall through to relate's own
-			// nil-means-"no relation" sentinel below, which would wrongly
-			// trigger the full-leaf-aggregate fallback and silently leak
-			// every OTHER branch's values into this one.
-			codes := descendantsInChain(dims, chain, *pinnedMember)
-			if codes == nil {
-				codes = []string{}
-			}
-			return codes
-		case relationParentChain:
-			code := ancestorCodeInChain(dims, chain, *pinnedMember)
-			if code == "" {
-				return []string{}
-			}
-			return []string{code}
-		case relationProperty:
-			// Starts non-nil for the same reason as the child-chain branch
-			// above — a real match against zero currently-visible members
-			// must stay "zero", not be reinterpreted as "no relation found".
-			codes := []string{}
-			for _, m := range ownDim.Members {
-				if PropertyValue(m.Properties, pinnedDim.SourceProperty) == pinnedCode {
-					codes = append(codes, m.Code)
-				}
-			}
-			return codes
-		case relationNone:
+		in := make(map[string]bool, len(codes))
+		for _, c := range codes {
+			in[c] = true
 		}
+		kept := make([]string, 0, len(out))
+		for _, c := range out {
+			if in[c] {
+				kept = append(kept, c)
+			}
+		}
+		out = kept
 	}
-	return nil
+	if !found {
+		return nil
+	}
+	return out
+}
+
+// relateOne is the codes of ownDim that pinnedDimID's member pinnedCode
+// stands for, and whether the two dimensions relate at all. A relation
+// that admits no member is (empty, true), never "no relation": every other
+// branch's values must not leak into this one.
+func relateOne(dims map[string]*Dimension, ownDim *Dimension, ownDimID, pinnedDimID, pinnedCode string) ([]string, bool) {
+	pinnedDim, ok := dims[pinnedDimID]
+	if !ok {
+		return nil, false
+	}
+	pinnedMember := findMember(pinnedDim, pinnedCode)
+	if pinnedMember == nil {
+		return nil, false
+	}
+	kind, chain := relation(dims, ownDimID, pinnedDimID)
+	switch kind {
+	case relationChildChain:
+		codes := descendantsInChain(dims, chain, *pinnedMember)
+		if codes == nil {
+			codes = []string{}
+		}
+		return codes, true
+	case relationParentChain:
+		code := ancestorCodeInChain(dims, chain, *pinnedMember)
+		if code == "" {
+			return []string{}, true
+		}
+		return []string{code}, true
+	case relationProperty:
+		codes := []string{}
+		for _, m := range ownDim.Members {
+			if PropertyValue(m.Properties, pinnedDim.SourceProperty) == pinnedCode {
+				codes = append(codes, m.Code)
+			}
+		}
+		return codes, true
+	case relationNone:
+	}
+	return nil, false
 }
 
 // dimensionChainTo returns the chain of dimension IDs from fromID up to (and

@@ -172,6 +172,8 @@ type automationRuleParams struct {
 	MaxRetries          int    `json:"max_retries"`
 	RetryBackoffSeconds int    `json:"retry_backoff_seconds"`
 	FiresOnImport       *bool  `json:"fires_on_import"`
+	// WatchFields: a record_updated rule's fields (migration 199).
+	WatchFields *[]string `json:"watch_fields"`
 }
 
 // importNote says, when the plan set it, whether a record rule also fires
@@ -284,6 +286,15 @@ func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMe
 	if err := e.ruleSources(ctx, &p); err != nil {
 		return "", "", err
 	}
+	if p.WatchFields != nil {
+		form := p.SourceFormID
+		if form == "" && p.AutomationRuleID != "" {
+			_ = e.pool.QueryRow(ctx, `SELECT COALESCE(source_form_id::text,'') FROM workflow.automation_rule WHERE id = $1::uuid`, p.AutomationRuleID).Scan(&form)
+		}
+		if msg := crudapp.NewStoreOn(e.pool).WatchFieldsRefusal(ctx, p.TriggerType, form, *p.WatchFields); msg != "" {
+			return "", "", errors.New(msg)
+		}
+	}
 	rule, err := workflow.NewStoreOn(e.pool).CreateAutomationRuleScoped(ctx, appID, e.revID, p.Name, p.Description, p.TriggerType,
 		workflowName, workflowDefID, p.SourceFormID, p.SourceGridID, p.SourceIntegrationID, schedule(p))
 	if err != nil {
@@ -297,6 +308,11 @@ func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMe
 	if p.FiresOnImport != nil {
 		if err := workflow.NewStoreOn(e.pool).SetRuleFiresOnImport(ctx, rule.ID, *p.FiresOnImport); err != nil {
 			return "", "", fmt.Errorf("set fires_on_import: %w", err)
+		}
+	}
+	if p.WatchFields != nil {
+		if err := workflow.NewStoreOn(e.pool).SetRuleWatchFields(ctx, rule.ID, *p.WatchFields); err != nil {
+			return "", "", fmt.Errorf("set watch_fields: %w", err)
 		}
 	}
 	msg := fmt.Sprintf("Automation rule '%s' created (id: %s, trigger: %s, starts workflow '%s'%s)", p.Name, rule.ID, p.TriggerType, workflowName, importNote(p.FiresOnImport))
@@ -346,6 +362,15 @@ func (e *WriteExecutor) updateAutomationRule(ctx context.Context, raw json.RawMe
 	if err := e.ruleSources(ctx, &p); err != nil {
 		return "", "", err
 	}
+	if p.WatchFields != nil {
+		form := p.SourceFormID
+		if form == "" && p.AutomationRuleID != "" {
+			_ = e.pool.QueryRow(ctx, `SELECT COALESCE(source_form_id::text,'') FROM workflow.automation_rule WHERE id = $1::uuid`, p.AutomationRuleID).Scan(&form)
+		}
+		if msg := crudapp.NewStoreOn(e.pool).WatchFieldsRefusal(ctx, p.TriggerType, form, *p.WatchFields); msg != "" {
+			return "", "", errors.New(msg)
+		}
+	}
 	// The store treats an empty trigger_type as "unchanged", so only pass it
 	// when the caller actually asked for a change.
 	trigger := p.TriggerType
@@ -360,6 +385,11 @@ func (e *WriteExecutor) updateAutomationRule(ctx context.Context, raw json.RawMe
 	if p.FiresOnImport != nil {
 		if err := workflow.NewStoreOn(e.pool).SetRuleFiresOnImport(ctx, rule.ID, *p.FiresOnImport); err != nil {
 			return "", "", fmt.Errorf("set fires_on_import: %w", err)
+		}
+	}
+	if p.WatchFields != nil {
+		if err := workflow.NewStoreOn(e.pool).SetRuleWatchFields(ctx, rule.ID, *p.WatchFields); err != nil {
+			return "", "", fmt.Errorf("set watch_fields: %w", err)
 		}
 	}
 	state := "enabled"

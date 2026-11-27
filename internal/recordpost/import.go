@@ -215,6 +215,10 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		// target is the record the row updates: the one holding its typed
 		// code. Nil adds a record.
 		target *crudapp.FormRecord
+		// unchanged: the row holds what target holds. Staged only in a load
+		// that replaces (replace_by): if target goes with its period the row
+		// adds it anew, else it is left as it is.
+		unchanged bool
 	}
 	var staged []stagedRecord
 	memberLeaves := NewMemberCache()
@@ -403,10 +407,19 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 		// A row holding a value with a mapped field empty would post at a
 		// partial coordinate: refused naming its column, whoever imports.
 		targetID := ""
+		unchanged := false
 		if target != nil {
 			if status == target.Status && sameData(data, target.Data) {
-				res.Unchanged++
-				continue
+				// In a load that replaces, the record may go with the period the
+				// file replaces: the row is kept to add it anew then. It used to
+				// be skipped here and its record deleted, so a corrected month
+				// loaded again lost every row it held unchanged (2,340 of 4,335
+				// ERP actuals, 2026-11-27).
+				if replaceBy == nil {
+					res.Unchanged++
+					continue
+				}
+				unchanged = true
 			}
 			targetID = target.ID
 		}
@@ -424,7 +437,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				continue
 			}
 		}
-		staged = append(staged, stagedRecord{data: data, status: status, target: target})
+		staged = append(staged, stagedRecord{data: data, status: status, target: target, unchanged: unchanged})
 	}
 
 	res.Errors = errs
@@ -437,19 +450,24 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	}
 	// A row whose code a record the load replaces holds adds the record
 	// anew: the old one goes with its period.
+	unchangedBefore := res.Unchanged
 	count := func(replaced []*crudapp.FormRecord) error {
 		gone := make(map[string]bool, len(replaced))
 		for _, r := range replaced {
 			gone[r.ID] = true
 		}
-		res.Created, res.Updated = 0, 0
+		res.Created, res.Updated, res.Unchanged = 0, 0, unchangedBefore
 		for i := range staged {
 			if t := staged[i].target; t != nil && gone[t.ID] {
 				staged[i].target = nil
+				staged[i].unchanged = false
 			}
-			if staged[i].target == nil {
+			switch {
+			case staged[i].target == nil:
 				res.Created++
-			} else {
+			case staged[i].unchanged:
+				res.Unchanged++
+			default:
 				res.Updated++
 			}
 		}
@@ -520,7 +538,15 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	txStore := crudapp.NewStoreOn(tx)
 	recs := make([]*crudapp.FormRecord, 0, len(staged))
 	var moved []*crudapp.FormRecord // updated records whose status the file changed
+	// The records the file created, and those it changed (with what they
+	// held), for the rules they fire: recs leaves out the rows kept as they
+	// were, so it does not line up with staged.
+	var created []*crudapp.FormRecord
+	var changed []UpdatedRecord
 	for _, sr := range staged {
+		if sr.target != nil && sr.unchanged {
+			continue // its record stays as it is
+		}
 		if sr.target != nil {
 			rec, uErr := ps.updateImported(ctx, tx, form, sr.target, sr.status, sr.data, req.CreatorID, &membersAdded)
 			if uErr != nil {
@@ -528,6 +554,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 				return ImportResult{}, uErr
 			}
 			recs = append(recs, rec)
+			changed = append(changed, UpdatedRecord{Old: sr.target, New: rec})
 			if rec.Status != sr.target.Status {
 				moved = append(moved, rec)
 			}
@@ -539,6 +566,7 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 			return ImportResult{}, fmt.Errorf("create record: %w", cErr)
 		}
 		recs = append(recs, rec)
+		created = append(created, rec)
 	}
 	if req.BeforeCommit != nil {
 		if err := req.BeforeCommit(ctx, tx, res); err != nil {
@@ -569,15 +597,18 @@ func (ps *Poster) Import(ctx context.Context, req ImportRequest) (res ImportResu
 	// workflow per submitted expense did not start for imported ones. The
 	// records exist now whatever happens to the request.
 	dispatchCtx := context.WithoutCancel(ctx)
-	for i, rec := range recs {
-		if staged[i].target == nil {
-			ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator, true)
-		}
+	for _, rec := range created {
+		ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator, true)
 	}
 	// A record the file moved into submitted or approved fires what a
 	// record moved there by hand fires.
 	for _, rec := range moved {
 		ps.DispatchRecordStatus(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator)
+	}
+	// A record the file changed fires its table's record_updated rules
+	// (the ones not switched off for imports).
+	for _, u := range changed {
+		ps.DispatchRecordUpdated(dispatchCtx, req.AppID, req.RevisionID, form.ID, u.Old.ID, u.Old.Status, u.New.Status, u.Old.Data, u.New.Data, creator, true)
 	}
 	return res, nil
 }

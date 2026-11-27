@@ -131,6 +131,7 @@ func flatCtx(ctx context.Context, aggRule AggRule) (context.Context, *virtualZer
 // lists, when it lists metricID's (handled=false: walk every coordinate).
 func resolveListed(
 	ctx context.Context,
+	dims map[string]*Dimension,
 	metricID string,
 	dimIDs []string,
 	aggRule AggRule,
@@ -144,7 +145,8 @@ func resolveListed(
 	if !known {
 		return 0, false, false, nil
 	}
-	v, ok, empty, err := combineRecorded(ctx, metricID, dimIDs, aggRule, codeSets, coords, at == elsewhereNoValue, fetch)
+	v, ok, empty, err := combineRecorded(ctx, metricID, dimIDs, aggRule, codeSets, coords, at == elsewhereNoValue, fetch,
+		factIndexFor(ctx, dims, metricID, dimIDs, coords))
 	if at == elsewhereRecordedZero && empty > 0 {
 		obs, _ := ctx.Value(virtualZerosKey{}).(*virtualZeros)
 		obs.note()
@@ -171,6 +173,7 @@ func combineRecorded(
 	coords []map[string]string,
 	absent bool,
 	fetch RawValue,
+	idx *factIndex,
 ) (float64, bool, int64, error) {
 	total := int64(1)
 	positions := make([]map[string][]int, len(dimIDs))
@@ -192,7 +195,8 @@ func combineRecorded(
 	}
 	var hits []hit
 	lists := make([][]int, len(dimIDs))
-	for _, c := range coords {
+	for _, n := range candidateFacts(idx, dimIDs, codeSets, len(coords)) {
+		c := coords[n]
 		if len(c) != len(dimIDs) {
 			continue // not a coordinate of the metric's dimensions: never walked
 		}
@@ -243,6 +247,55 @@ func combineRecorded(
 		return 0, false, 0, ErrNoValue
 	}
 	return combineAggWithEmpty(vals, empty, aggRule), true, empty, nil
+}
+
+// candidateFacts are the positions in coords combineRecorded examines, in
+// ascending order: with an index (factIndexFor), the facts at or under the
+// codes of the dimension whose codes hold the fewest facts — the others
+// cannot match there — else every fact. Each read used to examine every
+// fact the metric has: a cost line's all-month total read 240,000 phased
+// cells for each of its 3,450 cells, so one driver change took 86 s to
+// recalculate (2026-11-27). The facts kept are the ones the scan keeps, in
+// the same order, so the hits and their sums are the same to the bit.
+func candidateFacts(idx *factIndex, dimIDs []string, codeSets [][]string, n int) []int32 {
+	all := func() []int32 {
+		out := make([]int32, n)
+		for i := range out {
+			out[i] = int32(i)
+		}
+		return out
+	}
+	if idx == nil || len(idx.under) != len(dimIDs) {
+		return all()
+	}
+	best, bestN := -1, 0
+	for i := range dimIDs {
+		if idx.dims[i] == nil {
+			continue // not indexed: constrains nothing here
+		}
+		k := 0
+		for _, code := range codeSets[i] {
+			k += len(idx.under[i][code])
+		}
+		if best < 0 || k < bestN {
+			best, bestN = i, k
+		}
+	}
+	if best < 0 || bestN >= n {
+		return all()
+	}
+	seen := make(map[int32]bool, bestN)
+	out := make([]int32, 0, bestN)
+	for _, code := range codeSets[best] {
+		for _, p := range idx.under[best][code] {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // positionTuples is every choice of one position from each list, in

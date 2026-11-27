@@ -27,7 +27,10 @@ import (
 //	4  2026-11-24: a rate metric's subtotals, slices and (with a time
 //	   function) total are its numerator over its denominator, not its
 //	   formula there (RatioFormula).
-const EngineVersion = 4
+//	5  2026-11-27: a grid with two property groupings of one dimension
+//	   (country × sector over projects) reads the members both relate to,
+//	   not the first grouping's alone (rollup.relate).
+const EngineVersion = 5
 
 // engineUpgradeLease is how long a replica's claim on the sweep holds
 // without being renewed; the claim is renewed after every revision.

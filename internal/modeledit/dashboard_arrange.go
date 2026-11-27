@@ -154,7 +154,7 @@ func WidgetHeight(ctx context.Context, q Querier, widgetType, refID string, prop
 		return 40
 	case "chart":
 		return 360
-	case "form", "board":
+	case "form", "board", "gantt":
 		return 540
 	case "grid":
 		return gridWidgetHeight(ctx, q, refID, props)

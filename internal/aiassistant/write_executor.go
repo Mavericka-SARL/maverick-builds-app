@@ -2839,7 +2839,7 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	p.Content = textWidgetContent(p.WidgetType, p.Content)
-	if (p.WidgetType == "form" || p.WidgetType == "board") && p.RefID != nil {
+	if (p.WidgetType == "form" || p.WidgetType == "board" || p.WidgetType == "gantt") && p.RefID != nil {
 		if err := modeledit.CheckRecordWidgetProps(ctx, e.pool, p.WidgetType, *p.RefID, p.WidgetProps); err != nil {
 			return "", "", err
 		}
@@ -3270,7 +3270,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			),
 			new_forms AS (
 				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only,
-					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes)
+					edit_access, keeps_dimension_id, member_label_field, member_root_label, create_roles, member_label_with_code, delete_access, delete_roles, record_scope, existing_codes, editor_field, editor_roles)
 				SELECT f.model_id, f.name, f.label,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -3282,7 +3282,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					), '[]'::jsonb),
 					$2::uuid, f.own_records_only,
 					f.edit_access, (SELECT dm.new_id FROM dim_map dm WHERE dm.old_id = f.keeps_dimension_id),
-					f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes
+					f.member_label_field, f.member_root_label, f.create_roles, f.member_label_with_code, f.delete_access, f.delete_roles, f.record_scope, f.existing_codes, f.editor_field, f.editor_roles
 				FROM model.form_def f
 				WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 				RETURNING id AS new_id, name
@@ -3582,7 +3582,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				INSERT INTO workflow.automation_rule
 				  (application_id, name, description, trigger_type, workflow_name, enabled,
 				   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
-				   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, revision_id)
+				   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, fires_on_import, watch_fields, revision_id)
 				SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 					wm.new_id,
 					(SELECT nf.id FROM model.form_def ofd
@@ -3595,7 +3595,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
 					          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
 					          HAVING count(*) = 1), ar.source_integration_id),
-					ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import,
+					ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds, ar.fires_on_import, ar.watch_fields,
 					$2::uuid
 				FROM workflow.automation_rule ar
 				LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id
@@ -3645,7 +3645,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					 WHERE og.id::text = wm.old_ref_id AND wm.widget_type IN ('grid', 'chart', 'import')),
 					(SELECT nf.id::text FROM model.form_def ofd
 					 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-					 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board')),
+					 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board', 'gantt')),
 					(SELECT nm.id::text FROM model.metric_def om
 					 JOIN model.metric_def nm ON nm.model_id = om.model_id AND nm.name = om.name AND nm.revision_id = $2::uuid
 					 WHERE om.id::text = wm.old_ref_id AND wm.widget_type = 'metric_kpi'),
@@ -4017,6 +4017,9 @@ type tableSettingParams struct {
 	// row naming an auto code is refused ("refuse") or updates ("update").
 	RecordScope   *string `json:"record_scope"`
 	ExistingCodes *string `json:"existing_codes"`
+	// EditorField / EditorRoles: who changes each record (migration 200).
+	EditorField *string   `json:"editor_field"`
+	EditorRoles *[]string `json:"editor_roles"`
 }
 
 // applyTableSettings resolves p's dimension in revID and saves the
@@ -4024,7 +4027,7 @@ type tableSettingParams struct {
 func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.FormDef, revID string, p tableSettingParams) (string, error) {
 	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess, CreateRoles: p.CreateRoles,
 		MemberLabelWithCode: p.MemberLabelWithCode, DeleteAccess: p.DeleteAccess, DeleteRoles: p.DeleteRoles,
-		RecordScope: p.RecordScope, ExistingCodes: p.ExistingCodes}
+		RecordScope: p.RecordScope, ExistingCodes: p.ExistingCodes, EditorField: p.EditorField, EditorRoles: p.EditorRoles}
 	if p.KeepsDimension != nil {
 		ref := strings.TrimSpace(*p.KeepsDimension)
 		id := ""

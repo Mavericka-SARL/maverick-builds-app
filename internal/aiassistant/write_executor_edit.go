@@ -965,7 +965,7 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 			return "", "", err
 		}
 	}
-	if (widgetType == "form" || widgetType == "board") && (p.RefID != nil || props != nil) {
+	if (widgetType == "form" || widgetType == "board" || widgetType == "gantt") && (p.RefID != nil || props != nil) {
 		// A records widget or board as it will be, over its table's fields.
 		var refID string
 		var stored []byte
