@@ -169,3 +169,53 @@ test("a region clicked: the countries under it; a floor clicked: the cabinets on
   await expect(desks.getByText("North desk")).toHaveCount(0);
   await expect(desks.getByText("South desk")).toBeVisible();
 });
+
+// A grouping of a grouping: desks grouped by floor, floors by building — a
+// building clicked leaves the desks on its floors (project → activity → cost
+// line: a project dashboard's cost-line grid showed every cost line of the
+// portfolio, 2026-11-27). The Total row shows every desk again.
+test("a building clicked: the desks on its floors, through the floors' grouping", async ({ page }) => {
+  await mockApi(page);
+  const building = { id: "bld", name: "Building", display_level: null, source_dimension_id: "floor", source_property: "building", members: [
+    { id: "b-w", code: "BW", label: "West wing" }, { id: "b-e", code: "BE", label: "East wing" },
+  ] };
+  const floor = { id: "floor", name: "Floor", display_level: null, source_dimension_id: "desk", source_property: "floor", members: [
+    { id: "f-1", code: "F1", label: "West ground floor", properties: { building: "BW" } },
+    { id: "f-2", code: "F2", label: "East ground floor", properties: { building: "BE" } },
+  ] };
+  const desk = { id: "desk", name: "Desk", display_level: null, members: [
+    { id: "k-1", code: "K1", label: "Window desk", properties: { floor: "F1" } },
+    { id: "k-2", code: "K2", label: "Door desk", properties: { floor: "F2" } },
+  ] };
+  const all = [building, floor, desk];
+  const g2 = (dims: unknown[]) => ({ scenario: "Working", version: "draft", metrics: [metric], dimensions: dims, all_dimensions: all, departments: [],
+    cells: {}, totals: {}, access_rules: { dim_members: {}, metrics: {} } });
+  const grids: Record<string, unknown> = { "grid-buildings": g2([building]), "grid-desks": g2([desk]) };
+  const view = (dim: string) => ({ default_view: { rows: [dim], cols: ["__metrics__"], context: [] } });
+  const dash = { id: "bld-dash", name: "Buildings and desks", tags: [], widgets: [
+    { id: "w1", widget_type: "grid", ref_id: "grid-buildings", content: null, sort_order: 0, pos_x: 0, pos_y: 0, size_w: 400, size_h: 200, widget_props: view("bld") },
+    { id: "w2", widget_type: "grid", ref_id: "grid-desks", content: null, sort_order: 1, pos_x: 0, pos_y: 220, size_w: 400, size_h: 200, widget_props: { ...view("desk"), follow_rows: true } },
+  ] };
+  await page.route("**/api/dashboards", (route) => route.fulfill({ json: [dash] }));
+  await page.route("**/api/dashboards/bld-dash", (route) => route.fulfill({ json: dash }));
+  const deskReads: string[] = [];
+  await page.route("**/api/grid*", (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    const id = q.get("grid_def_id") ?? "";
+    if (id === "grid-desks" && q.get("meta_only") !== "1") deskReads.push(q.get("members") ?? "");
+    return route.fulfill({ json: grids[id] ?? g2(all) });
+  });
+  await loadAs(page, "dept_head");
+  const desks = page.locator("table").nth(1).locator("tbody");
+  await expect(desks.getByText("Door desk")).toBeVisible({ timeout: 15_000 });
+  await expect(desks.getByText("Window desk")).toBeVisible();
+
+  await page.getByTitle("Set Building to West wing for synced widgets").click();
+  await expect(desks.getByText("Door desk")).toHaveCount(0);
+  await expect(desks.getByText("Window desk")).toBeVisible();
+  // The read names the desks it shows: the server reads only those.
+  await expect.poll(() => deskReads.at(-1)).toBe(JSON.stringify({ desk: ["K1"] }));
+  await page.getByTitle("Set Building to East wing for synced widgets").click();
+  await expect(desks.getByText("Window desk")).toHaveCount(0);
+  await expect(desks.getByText("Door desk")).toBeVisible();
+});

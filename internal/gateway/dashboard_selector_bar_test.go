@@ -38,7 +38,7 @@ func TestDashboardSelectorBar(t *testing.T) {
 
 	// A dimension named by name is stored by id; the default is kept.
 	status, body := f.do(t, "PATCH", path, dev, map[string]any{
-		"selector_bar": []map[string]any{{"dimension_id": "departments", "default": "DEPT_B", "members": []string{"DEPT_B", "DEPT_A"}}, {"dimension_id": f.staffDimID}},
+		"selector_bar": []map[string]any{{"dimension_id": "departments", "default": "DEPT_B", "members": []string{"DEPT_B", "DEPT_A"}, "keep_choice": true}, {"dimension_id": f.staffDimID}},
 	})
 	if status != http.StatusOK {
 		t.Fatalf("set bar: %d %v", status, body)
@@ -46,7 +46,7 @@ func TestDashboardSelectorBar(t *testing.T) {
 	var got []modeledit.SelectorBarEntry
 	_ = json.Unmarshal([]byte(bar(dashID)), &got)
 	if len(got) != 2 || got[0].DimensionID != f.deptsDimID || got[0].Default != "DEPT_B" || got[1].DimensionID != f.staffDimID || got[1].Default != "" ||
-		strings.Join(got[0].Members, ",") != "DEPT_B,DEPT_A" || len(got[1].Members) != 0 {
+		strings.Join(got[0].Members, ",") != "DEPT_B,DEPT_A" || len(got[1].Members) != 0 || !got[0].KeepChoice || got[1].KeepChoice {
 		t.Fatalf("stored bar = %+v", got)
 	}
 	// The members a selector offers are member codes, its default among them.
@@ -106,8 +106,8 @@ func TestDashboardSelectorBar(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("user detail: %d %v", status, detail)
 	}
-	if sb, _ := detail["selector_bar"].([]any); len(sb) != 2 {
-		t.Errorf("user detail selector_bar = %v, want 2 entries", detail["selector_bar"])
+	if sb, _ := detail["selector_bar"].([]any); len(sb) != 2 || sb[0].(map[string]any)["keep_choice"] != true {
+		t.Errorf("user detail selector_bar = %v, want 2 entries, the first keeping its choice", detail["selector_bar"])
 	}
 
 	// A member code rename re-keys the default.
@@ -115,7 +115,7 @@ func TestDashboardSelectorBar(t *testing.T) {
 		t.Fatalf("rekey: %v", err)
 	}
 	_ = json.Unmarshal([]byte(bar(dashID)), &got)
-	if got[0].Default != "DEPT_BETA" || got[1].Default != "" || strings.Join(got[0].Members, ",") != "DEPT_BETA,DEPT_A" {
+	if got[0].Default != "DEPT_BETA" || got[1].Default != "" || strings.Join(got[0].Members, ",") != "DEPT_BETA,DEPT_A" || !got[0].KeepChoice {
 		t.Errorf("after rename bar = %+v, want departments=DEPT_BETA offering DEPT_BETA,DEPT_A", got)
 	}
 
@@ -144,7 +144,7 @@ func TestDashboardSelectorBar(t *testing.T) {
 		t.Fatalf("copied dashboard: %v", err)
 	}
 	_ = json.Unmarshal([]byte(copyBar), &got)
-	if len(got) != 2 || got[0].DimensionID != copyDepts || got[0].Default != "DEPT_BETA" || got[1].DimensionID != copyStaff {
+	if len(got) != 2 || got[0].DimensionID != copyDepts || got[0].Default != "DEPT_BETA" || got[1].DimensionID != copyStaff || !got[0].KeepChoice {
 		t.Errorf("copied bar = %s, want departments %s (DEPT_BETA), staff %s", copyBar, copyDepts, copyStaff)
 	}
 

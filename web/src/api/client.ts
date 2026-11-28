@@ -1260,6 +1260,9 @@ export interface SelectorBarEntry {
       moved `default_offset` members on (1: the first open month). */
   default_metric_id?: string;
   default_offset?: number;
+  /** The member a person picks opens the next dashboard whose selector on the
+      same dimension keeps its choice too, for the browser session. */
+  keep_choice?: boolean;
 }
 
 export interface DashboardDef {
@@ -2818,13 +2821,14 @@ function noAnswer(res: Response): string {
 const revalidated = new Map<string, { tag: string; data: unknown }>();
 const REVALIDATED_MAX = 64;
 
-async function apiFetchRevalidated<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const key = JSON.stringify([path, tenantHeader(), localStorage.getItem("selected_app_id") ?? "", localStorage.getItem("selected_model_id") ?? ""]);
+async function apiFetchRevalidated<T>(path: string, signal?: AbortSignal, body?: string): Promise<T> {
+  // A POST read (a chart's data) is kept per body: the context it asks for.
+  const key = JSON.stringify([path, body ?? "", tenantHeader(), localStorage.getItem("selected_app_id") ?? "", localStorage.getItem("selected_model_id") ?? ""]);
   const held = revalidated.get(key);
   let tag = "";
   const data = await apiFetch<T>(
     path,
-    { ...(signal ? { signal } : {}), ...(held ? { headers: { "If-None-Match": held.tag } } : {}) },
+    { ...(body !== undefined ? { method: "POST", body } : {}), ...(signal ? { signal } : {}), ...(held ? { headers: { "If-None-Match": held.tag } } : {}) },
     false,
     { held, onTag: (t) => { tag = t; } },
   );
@@ -3057,7 +3061,7 @@ export const api = {
   // back empty. For a reader that has its metadata already (a KPI tile).
   // metricIds (with totalsOnly, no grid): only these metrics' totals, and a
   // scoped read works out only them and what they read.
-  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; fields?: "totals"; metricIds?: string[]; scope?: Record<string, string>; signal?: AbortSignal }) => {
+  getGrid: (revisionId: string, gridDefId?: string, opts?: { metaOnly?: boolean; totalsOnly?: boolean; fields?: "totals"; metricIds?: string[]; scope?: Record<string, string>; members?: Record<string, string[]>; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ revision_id: revisionId });
     if (gridDefId) params.set("grid_def_id", gridDefId);
     if (opts?.metaOnly) params.set("meta_only", "1");
@@ -3065,6 +3069,8 @@ export const api = {
     if (opts?.totalsOnly && opts?.fields) params.set("fields", opts.fields);
     if (opts?.totalsOnly && opts?.metricIds?.length) params.set("metric_ids", opts.metricIds.join(","));
     if (opts?.scope && Object.keys(opts.scope).length > 0) params.set("scope", JSON.stringify(opts.scope));
+    // The members a grid following the dashboard's selection shows on an axis: read only those when the server can.
+    if (opts?.members && Object.keys(opts.members).length > 0) params.set("members", JSON.stringify(opts.members));
     // Polled every two seconds by grids and KPI tiles: an unchanged answer
     // comes back as a 304 and is not worked out again (apiFetchRevalidated).
     return apiFetchRevalidated<GridData>(`/api/grid?${params.toString()}`, opts?.signal);
@@ -3745,12 +3751,10 @@ export const api = {
   // chart's own dimensions (a first request, before the chart knows them).
   // signal: React Query's — leaving the dashboard tab cancels the request and
   // the server stops working the chart out (2026-11-18).
+  // Polled every two seconds: an unchanged chart comes back as a 304 and is not worked out again.
   getChartData: (widgetId: string, context: Record<string, string>, shared?: Record<string, string>, signal?: AbortSignal) =>
-    apiFetch<ChartData>(`/api/dashboard-widgets/${widgetId}/chart-data`, {
-      method: "POST",
-      body: JSON.stringify(shared ? { context, shared } : { context }),
-      signal,
-    }),
+    apiFetchRevalidated<ChartData>(`/api/dashboard-widgets/${widgetId}/chart-data`, signal,
+      JSON.stringify(shared ? { context, shared } : { context })),
 
 
   // ── REST API connector ──────────────────────────────────────────────────────

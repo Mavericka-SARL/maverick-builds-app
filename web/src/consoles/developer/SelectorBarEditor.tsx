@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { api, type DevDimension, type SelectorBarEntry } from "../../api/client";
 import { defaultLeafCode } from "../dashboardLayout";
 import { MemberChooser } from "./MemberChooser";
-import { Button, IconButton, Select } from "../../ui";
+import { Button, Checkbox, IconButton, Select } from "../../ui";
 
 // The dashboard's selector bar, as the developer sets it: the dimensions
 // whose selector is drawn once at the top of the dashboard, each with the
@@ -110,6 +110,15 @@ export function SelectorBarEditor({ dashId, bar, dims, metrics = [], onSaved, on
                   <option value="-1">the member before that one</option>
                 </Select>
               )}
+              {/* The member a person picks opens the next dashboard selecting
+                  on this dimension that keeps its choice too (one project
+                  picked once for every Project · … dashboard). */}
+              <Checkbox
+                label="Keep the choice across dashboards"
+                aria-label={`Selector ${i + 1} keeps its choice across dashboards`}
+                checked={!!e.keep_choice}
+                onChange={ev => setDraft(prev => prev.map((p, j) => (j === i ? { ...p, keep_choice: ev.target.checked || undefined } : p)))}
+              />
             </div>
           </div>
         );

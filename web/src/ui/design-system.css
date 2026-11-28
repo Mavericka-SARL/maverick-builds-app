@@ -1294,6 +1294,44 @@
   color: var(--color-brand-700);
 }
 
+/* Tabs on one line that scrolls sideways (Tabs scroll): the Dashboards page.
+   Arrows show at an edge that hides tabs. */
+.mvx-tabs-scroll {
+  position: relative;
+  margin-bottom: var(--space-5);
+}
+.mvx-tabs--scroll {
+  position: relative;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  margin-bottom: 0;
+}
+.mvx-tabs--scroll .mvx-tabs__button { margin-bottom: 0; }
+.mvx-tabs-scroll__arrow {
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.mvx-tabs-scroll__arrow--left {
+  left: 0;
+  background: linear-gradient(to right, var(--color-page) 60%, transparent);
+}
+.mvx-tabs-scroll__arrow--right {
+  right: 0;
+  background: linear-gradient(to left, var(--color-page) 60%, transparent);
+}
+.mvx-tabs-scroll__arrow:hover { color: var(--color-brand-700); }
+
 .mvx-tabs__count {
   min-width: 16px;
   padding: 1px 5px;

@@ -7637,6 +7637,12 @@ type GetGridParams struct {
 	// restricted to the pinned subtree; a pin covering a whole dimension (its sole universal root) is
 	// dropped. Calc totals for a one-dimension pin are served from precomputed slice rows when available.
 	Scope OptString `json:",omitempty,omitzero"`
+	// JSON object of dimension id -> the member codes a grid shows on that axis (a grid following the
+	// dashboard's selection), e.g. {"<dim-uuid>":["A01","A02"]}; at most 2,000 per dimension. A read
+	// served from stored rows alone (no member hidden from the reader) reads only those members' rows on
+	// it — the same cells for them, none for the others; a dimension with a calculated member, or one
+	// the scope pins, is read whole.
+	Members OptString `json:",omitempty,omitzero"`
 	// "1" returns dimensions/metrics only — no cells or totals (fast first paint on large models).
 	MetaOnly OptGetGridMetaOnly `json:",omitempty,omitzero"`
 	// "1" returns per-metric totals with no per-combo cells — the KPI read shape.
@@ -7682,6 +7688,15 @@ func unpackGetGridParams(packed middleware.Parameters) (params GetGridParams) {
 		}
 		if v, ok := packed[key]; ok {
 			params.Scope = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "members",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Members = v.(OptString)
 		}
 	}
 	{
@@ -7854,6 +7869,47 @@ func decodeGetGridParams(args [0]string, argsEscaped bool, r *http.Request) (par
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "scope",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: members.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "members",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotMembersVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotMembersVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Members.SetTo(paramsDotMembersVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "members",
 			In:   "query",
 			Err:  err,
 		}

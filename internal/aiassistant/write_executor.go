@@ -2750,6 +2750,8 @@ type selectorBarParam struct {
 	DefaultMetric   string `json:"default_metric"`
 	DefaultMetricID string `json:"default_metric_id"`
 	DefaultOffset   int    `json:"default_offset"`
+	// KeepChoice: modeledit.SelectorBarEntry.KeepChoice.
+	KeepChoice bool `json:"keep_choice"`
 }
 
 // selectorBarEntries resolves each entry's dimension, by name or id, into
@@ -2773,7 +2775,7 @@ func (e *WriteExecutor) selectorBarEntries(ctx context.Context, ps []selectorBar
 			}
 			ref = id
 		}
-		entry := modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default, Members: p.Members, DefaultOffset: p.DefaultOffset}
+		entry := modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default, Members: p.Members, DefaultOffset: p.DefaultOffset, KeepChoice: p.KeepChoice}
 		if m := firstNonEmpty(p.DefaultMetric, p.DefaultMetricID); m != "" {
 			id, err := e.requireInModel(ctx, "metric", m)
 			if err != nil {

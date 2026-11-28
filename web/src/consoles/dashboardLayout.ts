@@ -28,7 +28,8 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
 // scrolls inside its own table area (owner, 2026-11-08: "huge spaces between
 // widgets must be eliminated"). Grids first; a records table kept its whole
 // box, 40 to 73 px empty under a few records.
-export const FIT_HEIGHT_WIDGET_TYPES = new Set(["grid", "form"]);
+// A Gantt too: its rows, not the rest of its box (2026-11-27).
+export const FIT_HEIGHT_WIDGET_TYPES = new Set(["grid", "form", "gantt"]);
 
 // Button widgets: intrinsic beside a taller sibling, but drawn at their
 // designed size_h exactly, as the design canvas draws them.

@@ -16,6 +16,7 @@ import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, u
 import { RunParametersDialog } from "../RunParametersDialog";
 import { runParametersOf } from "../runParameters";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, FIT_HEIGHT_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
+import { readKeptChoice, writeKeptChoice } from "../keptChoice";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/lazyChart";
 import { FormPanel } from "./FormPanel";
@@ -73,7 +74,18 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
     setFollows(prev => (prev.has(slot) ? prev : new Set(prev).add(slot)));
   }, []);
   const rows = groupWidgetsIntoRows(widgets);
-  const barRow = Math.max(0, rows.findIndex(row => row.some(w => follows.has(w.id))));
+  const followRow = Math.max(0, rows.findIndex(row => row.some(w => follows.has(w.id))));
+  // The bar takes its place once the widgets have said whether they follow
+  // it — 250 ms after the last one did — not at every answer: widgets report
+  // as their data arrives, in any order, and each move mounted the rows it
+  // passed again, their charts and grids loading a second and third time on
+  // a dashboard's first opening (2026-11-27).
+  const [barRow, setBarRow] = useState(0);
+  useEffect(() => {
+    if (followRow === barRow) return;
+    const t = setTimeout(() => setBarRow(followRow), 250);
+    return () => clearTimeout(t);
+  }, [followRow, barRow]);
   // One widget at a time fills the screen beside the left panel (the button
   // on its top edge); the close button or Escape returns. The widget is the
   // same one, moved into a fixed frame: a grid keeps its layout and search.
@@ -98,8 +110,13 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
     // proportionally, so nothing overflows on smaller screens.
     <div key={key} className="mvx-dash-segment">
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width, maxWidth: width }}>
-        {part.map((row, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 20px)` }}>
+        {part.map(row => (
+          // Keyed by its widgets, not its place: when the bar moves below
+          // the first rows (a widget below reports it follows the bar), the
+          // rows after it keep their widgets mounted — keyed by place, every
+          // chart and grid below was mounted again and read its data twice
+          // on a dashboard's first opening (2026-11-27).
+          <div key={row.map(w => w.id).join("|")} style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 20px)` }}>
             {row.map(widget => (
               <div
                 key={widget.id}
@@ -201,7 +218,9 @@ function DashboardBody({ widgets, ctx, bar, columns, width, onOpenInstance }: { 
   return (
     <DashboardContextSyncProvider
       reserved={bar.map(e => e.dimension_id)}
-      initial={Object.fromEntries(bar.filter(e => e.default).map(e => [e.dimension_id, e.default as string]))}
+      initial={Object.fromEntries(bar
+        .map(e => [e.dimension_id, (e.keep_choice ? readKeptChoice(ctx.model_id, e.dimension_id) : undefined) ?? e.default] as const)
+        .filter((kv): kv is readonly [string, string] => !!kv[1]))}
       followBar={bar.length > 0 ? followBar : undefined}
     >
       {segment(rows.slice(0, barRow), "above")}
@@ -254,6 +273,9 @@ function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: Select
   const values = sync?.values;
   const setValue = sync?.setValue;
   const fellBackTo = useRef<Record<string, string>>({});
+  // Members this bar set by itself (a default, a fallback): not a person's
+  // choice, so not kept for the next dashboard.
+  const autoSet = useRef<Record<string, string>>({});
   useEffect(() => {
     if (!setValue) return;
     for (const d of dims) {
@@ -266,10 +288,31 @@ function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: Select
       if (!code || code === current) continue;
       if (defVisible) delete fellBackTo.current[d.id];
       else fellBackTo.current[d.id] = code;
+      autoSet.current[d.id] = code;
       setValue(d.id, code);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims.map(d => `${d.id}:${d.members.length}`).join(","), values, setValue]);
+
+  // A selector that keeps its choice (keep_choice) keeps the member a person
+  // picks — here, or by clicking a widget that selects on the dimension — for
+  // the next dashboard whose selector on it keeps its choice too. What the
+  // page opened on is not a choice; nor is a member this bar set by itself.
+  const keep = entries.filter(e => e.keep_choice).map(e => e.dimension_id).join(",");
+  const seen = useRef<Record<string, string | undefined>>({ ...values });
+  useEffect(() => {
+    if (!values || !keep) return;
+    for (const id of keep.split(",")) {
+      const cur = values[id];
+      if (!cur || cur === seen.current[id]) continue;
+      seen.current[id] = cur;
+      if (autoSet.current[id] === cur) {
+        delete autoSet.current[id];
+        continue;
+      }
+      writeKeptChoice(ctx.model_id, id, cur);
+    }
+  }, [values, keep, ctx.model_id]);
 
   if (!sync || dims.length === 0) return null;
   return (
@@ -277,7 +320,7 @@ function DashboardSelectorBar({ entries, ctx, below, inline }: { entries: Select
       <ContextSelectors
         dims={dims as unknown as ChartContextDim[]}
         context={sync.values}
-        onChange={(dimId, code) => { delete fellBackTo.current[dimId]; sync.setValue(dimId, code); }}
+        onChange={(dimId, code) => { delete fellBackTo.current[dimId]; delete autoSet.current[dimId]; sync.setValue(dimId, code); }}
       />
     </div>
   );
@@ -361,8 +404,10 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
       </div>
     );
   } else if (widget.widget_type === "gantt" && widget.ref_id && widget.widget_props?.gantt) {
+    // A column the timeline shrinks in: the box is at most as tall as
+    // designed and its rows' height when fewer (FIT_HEIGHT_WIDGET_TYPES).
     inner = (
-      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
+      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" }}>
         <GanttWidgetPanel formId={widget.ref_id} ctx={ctx} settings={widget.widget_props.gantt} title={widget.title ?? undefined}
           fixedFilters={widget.widget_props?.record_filters} follows={widget.widget_props?.record_follows} />
       </div>
@@ -386,9 +431,10 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   const isNoPad = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "chart" || widget.widget_type === "image";
   const widgetLabel = widget.title || widget.widget_type.replace(/_/g, " ");
 
-  // A grid, a records list, a board and a KPI tile carry their title in
-  // their own header or card; the others get a title band above them.
-  const titleInside = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "board" || widget.widget_type === "metric_kpi"
+  // A grid, a records list, a board, a Gantt and a KPI tile carry their
+  // title in their own header or card; the others get a title band above
+  // them (a Gantt showed its title twice, 2026-11-27).
+  const titleInside = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "board" || widget.widget_type === "gantt" || widget.widget_type === "metric_kpi"
     || (BUTTON_WIDGET_TYPES.has(widget.widget_type) && !buttonTitleBand(widget));
   if (widget.show_title && widget.title && !titleInside) {
     return (
@@ -870,6 +916,9 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, 
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   const follow = useFollowSelection(form, follows, revisionId);
+  // A records widget following or making the dashboard's selection follows
+  // the selector bar's: the bar stands above it.
+  useFollowsBar((follows?.length ?? 0) > 0 || !!selects);
   const sync = useContext(DashboardContextSyncContext);
   const kept = form?.keeps_dimension_id;
   const selection = useMemo(
@@ -924,6 +973,7 @@ export function GanttWidgetPanel({ formId, ctx: hostCtx, settings, fixedFilters,
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   const follow = useFollowSelection(form, follows, revisionId);
+  useFollowsBar((follows?.length ?? 0) > 0);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
   return <GanttPanel form={form} revisionId={revisionId} settings={settings} fixedFilters={fixedFilters} followFilters={follow.follow} title={title} />;
 }
@@ -946,6 +996,7 @@ export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButt
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   const follow = useFollowSelection(form, follows, revisionId);
+  useFollowsBar((follows?.length ?? 0) > 0);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
   return <BoardPanel form={form} revisionId={revisionId} settings={settings} newRecordButton={newRecordButton} fixedFilters={fixedFilters} followFilters={follow.follow} title={title} prefill={follow.prefill} />;
 }

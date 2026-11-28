@@ -196,6 +196,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
           active={activeId ?? visible[0].id}
           onChange={(id) => setActiveDashId(id)}
           style={{ marginBottom: 24 }}
+          scroll
         />
       )}
 

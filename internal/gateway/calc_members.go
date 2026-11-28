@@ -376,3 +376,19 @@ func cellFormat(base string, formats map[string]map[string]string, dimIDs, codes
 	}
 	return base
 }
+
+// maxReadMembers bounds the members a read narrows a dimension to (the grid
+// read's members): more are read whole.
+const maxReadMembers = 2000
+
+// hasCalculatedMember reports whether a dimension has a member worked out
+// from its siblings (a formula member): a read narrowed to some members
+// could leave out what it adds up.
+func hasCalculatedMember(members []gridDimMember) bool {
+	for _, m := range members {
+		if m.Formula != "" {
+			return true
+		}
+	}
+	return false
+}

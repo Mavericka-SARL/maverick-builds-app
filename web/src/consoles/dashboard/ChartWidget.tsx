@@ -502,7 +502,31 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   // A chart learns its dimensions only from its first answer, so that first
   // request used to go out with none and drew every scenario added together
   // until the second (2026-11-08).
-  const shared = syncOn && sharedValues && Object.keys(sharedValues).length > 0 ? sharedValues : undefined;
+  const pageValues = syncOn && sharedValues && Object.keys(sharedValues).length > 0 ? sharedValues : undefined;
+  // The chart's own dimensions (its grid's, the description grids on the page
+  // share): only the page values on those apply, so only those go with the
+  // request and key it — a value another widget added for a dimension this
+  // chart lacks (Global portfolio, beside a chart by region) sent it again,
+  // two or three loads of every chart on a dashboard's first opening
+  // (2026-11-27). Until the description arrives, the chart waits for it.
+  const { data: gridMeta, isError: gridMetaFailed } = useQuery({
+    queryKey: ["grid-meta", ctx.revision_id, widget.ref_id ?? "all"],
+    queryFn: () => api.getGrid(ctx.revision_id, widget.ref_id ?? undefined, { metaOnly: true }),
+    staleTime: 30_000,
+    enabled: !!pageValues && !!widget.ref_id,
+  });
+  const ownDims = React.useMemo(() => {
+    const ds = (gridMeta as { dimensions?: { id: string }[] } | undefined)?.dimensions;
+    return ds ? new Set(ds.map(d => d.id)) : null;
+  }, [gridMeta]);
+  const plotted = chartConfig?.dimension_id;
+  const shared = React.useMemo(() => {
+    if (!pageValues || !ownDims) return pageValues;
+    // Not the plotted dimension either: the chart draws each of its members.
+    const own = Object.fromEntries(Object.entries(pageValues).filter(([k]) => ownDims.has(k) && k !== plotted));
+    return Object.keys(own).length > 0 ? own : undefined;
+  }, [pageValues, ownDims, plotted]);
+  const pageReady = !pageValues || !widget.ref_id || !!ownDims || gridMetaFailed;
   // The scope the server reads: the chart's own context, and the page's
   // values on the dimensions it does not name. The query is keyed on that, so
   // adopting a page value the request already carried (the chart learns its
@@ -520,8 +544,11 @@ export function ChartWidget({ widget, ctx }: { widget: DashboardWidget; ctx: Dem
   const { data: chartData, isPending, isError } = useQuery({
     queryKey: ["chart-data", ctx.revision_id, widget.id, scopeKey],
     queryFn: ({ signal }) => api.getChartData(widget.id, context, shared, signal),
-    enabled: !!chartConfig && isChartConfigComplete(chartConfig),
-    staleTime: 0,
+    enabled: !!chartConfig && isChartConfigComplete(chartConfig) && pageReady,
+    // An answer younger than the refresh is current: a chart mounted again
+    // (its row moved below the selector bar as the widgets around it
+    // loaded) used it instead of loading again (2026-11-27).
+    staleTime: refreshMs,
     refetchInterval: refreshMs,
     refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,

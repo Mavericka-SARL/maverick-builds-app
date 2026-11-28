@@ -4268,6 +4268,47 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// instead of the whole per-combo lattice.
 	totalsOnly := r.URL.Query().Get("totals_only") == "1"
 	fastTotals := !metaOnly && totalsOnly && len(scopePinned) == 0 && len(hiddenByDim) == 0
+	// members: a grid following the dashboard's selection names the members
+	// it shows on a followed axis ({"<dimension id>": [codes]}). A read served
+	// from stored rows alone — a grid's, unscoped, nothing hidden from the
+	// reader, no calculated member on that dimension — reads only the rows
+	// naming those members on it (or not dimensioned by it); its cells are
+	// the same, the others are not read. A project's activity grid read every
+	// activity of the portfolio, ~18,000 cells, and showed eleven
+	// (2026-11-27). memberSQL/memberArgs narrow the calculated read below.
+	// A pinned (scoped) read narrows only the calculated metrics it serves as
+	// stored (readAmong, loadServedReads): what it works out reads its inputs
+	// whole.
+	var memberSQL string
+	var memberArgs []any
+	var readAmong map[string][]string
+	if raw := r.URL.Query().Get("members"); raw != "" && gridDefID != "" && !metaOnly && !totalsOnly && len(hiddenByDim) == 0 {
+		var asked map[string][]string
+		if json.Unmarshal([]byte(raw), &asked) == nil {
+			for _, d := range dims {
+				codes := asked[d.ID]
+				if len(codes) == 0 || len(codes) > maxReadMembers || hasCalculatedMember(d.Members) {
+					continue
+				}
+				if _, pinned := scopePinned[d.ID]; pinned {
+					continue
+				}
+				if len(scopePinned) > 0 {
+					if readAmong == nil {
+						readAmong = map[string][]string{}
+					}
+					readAmong[d.ID] = codes
+					continue
+				}
+				scopeArgs = append(scopeArgs, d.ID, codes) // the input reads: $3 on
+				n := 2 + len(scopeArgs)
+				scopeSQL += fmt.Sprintf(" AND (NOT (dim_members ? $%d) OR dim_members->>$%d = ANY($%d))", n-1, n-1, n)
+				memberArgs = append(memberArgs, d.ID, codes) // the calculated read: $4 on ($3 its metrics)
+				k := 3 + len(memberArgs)
+				memberSQL += fmt.Sprintf(" AND (NOT (dim_members ? $%d) OR dim_members->>$%d = ANY($%d))", k-1, k-1, k)
+			}
+		}
+	}
 	// metric_ids (with totals_only, a model-wide read): the metrics a KPI
 	// tile shows. The answer carries their totals alone, and a scoped read
 	// works out only them and what they read. Absent: every metric.
@@ -4659,7 +4700,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			// keepGridMetrics): the whole model's were the bulk of a read's
 			// memory.
 			allCalc, ccErr = calcStore.LoadAllCalcValueMapsScoped(ctx, modelID, revisionID,
-				` AND metric_id = ANY($3::text[]::uuid[])`, []any{gridMetricIDs(metrics)})
+				` AND metric_id = ANY($3::text[]::uuid[])`+memberSQL, append([]any{gridMetricIDs(metrics)}, memberArgs...))
 		} else {
 			allCalc, ccErr = calcStore.LoadAllCalcValueMaps(ctx, modelID, revisionID)
 		}
@@ -4782,7 +4823,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		var sErr error
 		if direct := readMetricIDs(gridDefID, metrics, askedMetrics); len(hiddenByDim) == 0 && direct != nil {
 			sr, sErr = h.loadServedReads(ctx, modelID, revisionID, unfilteredDims, dimIDToName, allMetrics, revisionMetrics,
-				metricDims, scopePinned, scopeSubtrees, direct)
+				metricDims, scopePinned, scopeSubtrees, direct, readAmong)
 			if sErr == nil {
 				only = sr.Only
 			}
@@ -21388,6 +21429,16 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+	}
+	// A chart polls every two seconds and was worked out again each time —
+	// 0.5–1 s for each of six charts on one dashboard, as long as it stayed
+	// open (2026-11-27). Like a grid read (read_etag.go), it is tagged with
+	// everything its answer depends on — the model's data generation, the
+	// reader, the widget's settings, the context asked — and an unchanged poll
+	// is answered 304 before it waits for a turn.
+	ctxJSON, _ := json.Marshal(req.Context)
+	if h.answeredUnchangedWith(w, r, a, modelID, string(widgetPropsRaw)+"\x00"+revisionID+"\x00"+gridDefID+"\x00"+string(ctxJSON)) {
+		return
 	}
 	// Working a chart out is heavy: it takes a turn of its tenant's, as a
 	// grid read does (heavyTurn).

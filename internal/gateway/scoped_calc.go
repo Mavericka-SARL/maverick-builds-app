@@ -1076,7 +1076,7 @@ func (h *handler) loadScopedReads(
 	only map[string]bool,
 ) (*scopedReads, error) {
 	return h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
-		hiddenByDim, scopePinned, scopeSubtrees, only, false)
+		hiddenByDim, scopePinned, scopeSubtrees, only, false, false, nil, nil)
 }
 
 // loadServedReads is loadScopedReads for a caller with no hidden member: the
@@ -1095,13 +1095,16 @@ func (h *handler) loadServedReads(
 	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
 	allMetrics, revisionMetrics []metricRow, metricDims map[string][]string,
 	scopePinned map[string]string, scopeSubtrees map[string]map[string]bool, direct []string,
+	among map[string][]string,
 ) (*scopedReads, error) {
 	want := make(map[string]bool, len(direct))
 	for _, id := range direct {
 		want[id] = true
 	}
+	// First every wanted metric served as stored, each read narrowed to the
+	// rows of the leaf members the scope pins (loadScopedReadsServing pinRows).
 	sr, err := h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
-		nil, scopePinned, scopeSubtrees, want, true)
+		nil, scopePinned, scopeSubtrees, want, true, true, among, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1114,22 +1117,33 @@ func (h *handler) loadServedReads(
 	if len(rest) == 0 {
 		return sr, nil
 	}
-	for id := range readsClosure(rest, allMetrics) {
+	closure := readsClosure(rest, allMetrics)
+	for id := range closure {
 		want[id] = true
 	}
+	// Something is worked out from what it reads, which may lie outside the
+	// pinned members: those metrics and what they read are loaded whole; the
+	// others are still only shown, at the pinned and shown members (a project
+	// with no stored total of one metric reloaded every metric of the grid
+	// whole, 2.1 s against 0.3 s, 2026-11-27).
 	return h.loadScopedReadsServing(ctx, modelID, revisionID, unfiltered, dimIDToName, allMetrics, revisionMetrics, metricDims,
-		nil, scopePinned, scopeSubtrees, want, true)
+		nil, scopePinned, scopeSubtrees, want, true, true, among, closure)
 }
 
 // loadScopedReadsServing is loadScopedReads; serveAll serves every wanted
 // calculated metric whose total under the scope a stored row holds (a
-// caller with no hidden member, loadServedReads).
+// caller with no hidden member, loadServedReads). pinRows reads a metric
+// served as stored (not naturally: its rows are shown, never read across)
+// only at the leaf members the scope pins on its own dimensions — the cells
+// and totals a scoped read shows all name them — and every metric of the pass
+// only at the members a followed axis shows (among); a metric in whole (worked
+// out, or read by one that is) is loaded whole.
 func (h *handler) loadScopedReadsServing(
 	ctx context.Context, modelID, revisionID string,
 	unfiltered map[string]*rollup.Dimension, dimIDToName map[string]string,
 	allMetrics, revisionMetrics []metricRow, metricDims map[string][]string,
 	hiddenByDim map[string]map[string]bool, scopePinned map[string]string, scopeSubtrees map[string]map[string]bool,
-	only map[string]bool, serveAll bool,
+	only map[string]bool, serveAll, pinRows bool, among map[string][]string, whole map[string]bool,
 ) (*scopedReads, error) {
 	store := calculation.NewStore(h.db.For(ctx))
 	schema, err := store.LoadDimensionSchema(ctx, modelID, revisionID)
@@ -1192,7 +1206,28 @@ func (h *handler) loadScopedReadsServing(
 		if !natural && (!serveAll || m.Format == metricformula.FormatText) {
 			continue
 		}
-		rows, err := calcValueMapOnce(ctx, store, modelID, revisionID, m.ID)
+		var pins map[string]string
+		var shown map[string][]string
+		if pinRows && !whole[m.ID] {
+			for _, d := range metricDims[m.ID] {
+				if code, ok := scopePinned[d]; ok && len(scopeSubtrees[d]) == 1 && !natural {
+					if pins == nil {
+						pins = map[string]string{}
+					}
+					pins[d] = code
+				}
+				// The members a followed axis shows: every metric of this
+				// pass is shown as stored, a natural one too (nothing here is
+				// worked out from its rows; a second pass reloads whole).
+				if codes, ok := among[d]; ok {
+					if shown == nil {
+						shown = map[string][]string{}
+					}
+					shown[d] = codes
+				}
+			}
+		}
+		rows, err := calcValueMapOnce(ctx, store, modelID, revisionID, m.ID, pins, shown)
 		if err != nil {
 			return nil, err
 		}
@@ -1232,14 +1267,16 @@ func withCalcValueMemo(ctx context.Context) context.Context {
 	return context.WithValue(ctx, calcValueMemoKey{}, &calcValueMemo{maps: map[[3]string]*calcValueEntry{}})
 }
 
-// calcValueMapOnce is store.LoadCalcValueMap, read once per ctx's
+// calcValueMapOnce is store.LoadCalcValueMapPinned, read once per ctx's
 // calcValueMemo when it has one.
-func calcValueMapOnce(ctx context.Context, store *calculation.Store, modelID, revisionID, metricID string) (map[string]float64, error) {
+func calcValueMapOnce(ctx context.Context, store *calculation.Store, modelID, revisionID, metricID string, pins map[string]string, among map[string][]string) (map[string]float64, error) {
 	memo, _ := ctx.Value(calcValueMemoKey{}).(*calcValueMemo)
 	if memo == nil {
-		return store.LoadCalcValueMap(ctx, modelID, revisionID, metricID)
+		return store.LoadCalcValueMapAmong(ctx, modelID, revisionID, metricID, pins, among)
 	}
-	key := [3]string{modelID, revisionID, metricID}
+	pinned, _ := json.Marshal(pins)
+	shown, _ := json.Marshal(among)
+	key := [3]string{modelID, revisionID, metricID + "|" + string(pinned) + "|" + string(shown)}
 	memo.mu.Lock()
 	e := memo.maps[key]
 	if e == nil {
@@ -1247,7 +1284,7 @@ func calcValueMapOnce(ctx context.Context, store *calculation.Store, modelID, re
 		memo.maps[key] = e
 	}
 	memo.mu.Unlock()
-	e.once.Do(func() { e.rows, e.err = store.LoadCalcValueMap(ctx, modelID, revisionID, metricID) })
+	e.once.Do(func() { e.rows, e.err = store.LoadCalcValueMapAmong(ctx, modelID, revisionID, metricID, pins, among) })
 	return e.rows, e.err
 }
 

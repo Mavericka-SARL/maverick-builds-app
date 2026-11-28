@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -923,6 +924,59 @@ func (s *Store) loadCalcValueMap(ctx context.Context, modelID, revisionID, metri
 		ORDER BY dim_members, calc_at DESC
 	`, modelID, revisionID, metricID)
 	return scanDimValueMap(rows, err)
+}
+
+// LoadCalcValueMapPinned is LoadCalcValueMap narrowed to the rows naming each
+// pinned member (dimension id → member code): a read scoped to one project
+// and one scenario loaded every stored row of each of its grid's metrics —
+// about 42,000 each for a monthly project forecast, 2.2 s a read, too many
+// to keep in the read memo — and showed 60 of them (2026-11-27). No pins:
+// LoadCalcValueMap.
+func (s *Store) LoadCalcValueMapPinned(ctx context.Context, modelID, revisionID, metricID string, pins map[string]string) (map[string]float64, error) {
+	return s.LoadCalcValueMapAmong(ctx, modelID, revisionID, metricID, pins, nil)
+}
+
+// LoadCalcValueMapAmong is LoadCalcValueMapPinned also narrowed to the rows
+// whose member of each dimension in among is one of its codes (or which
+// carry no member of it): the members a grid following the dashboard's
+// selection shows on an axis — a project's sixteen cost lines, not the
+// portfolio's 576 (2026-11-27).
+func (s *Store) LoadCalcValueMapAmong(ctx context.Context, modelID, revisionID, metricID string, pins map[string]string, among map[string][]string) (map[string]float64, error) {
+	if len(pins) == 0 && len(among) == 0 {
+		return s.LoadCalcValueMap(ctx, modelID, revisionID, metricID)
+	}
+	if pins == nil {
+		pins = map[string]string{}
+	}
+	pinned, err := json.Marshal(pins) // map keys sorted: one memo key per set of pins
+	if err != nil {
+		return nil, err
+	}
+	amongKey, err := json.Marshal(among)
+	if err != nil {
+		return nil, err
+	}
+	return memoRead(ctx, "calc_values_pinned", []string{modelID, revisionID, metricID, string(pinned), string(amongKey)}, func() (map[string]float64, error) {
+		args := []any{modelID, revisionID, metricID, string(pinned)}
+		cond := ""
+		dims := make([]string, 0, len(among))
+		for d := range among {
+			dims = append(dims, d)
+		}
+		sort.Strings(dims)
+		for _, d := range dims {
+			args = append(args, d, among[d])
+			n := len(args)
+			cond += fmt.Sprintf(" AND (NOT (dim_members ? $%d) OR dim_members->>$%d = ANY($%d))", n-1, n-1, n)
+		}
+		rows, err := s.db.Query(ctx, `
+			SELECT DISTINCT ON (dim_members) dim_members::text, value
+			FROM runtime.calc_result
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND dim_members @> $4::jsonb`+cond+`
+			ORDER BY dim_members, calc_at DESC
+		`, args...)
+		return scanDimValueMap(rows, err)
+	}, floatMapSize, cloneFloatMap)
 }
 
 // LoadAllCalcValueMaps is LoadCalcValueMap generalized across every metric in

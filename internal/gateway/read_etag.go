@@ -67,12 +67,15 @@ func (h *handler) dataGeneration(ctx context.Context, modelID string) (int64, bo
 	return gen, true
 }
 
-// readTag is the ETag of a read by act of modelID: the model's data
+// readTagWith is the ETag of a read by act of modelID: the model's data
 // generation (a save in another model leaves it as it is), the code, the
 // clock's bucket, the database the request is routed to, who reads
 // (their account and roles; the access rules they read under are data), the
 // model and the request itself. false: no tag (the generation is unknown).
-func (h *handler) readTag(ctx context.Context, act *actor, modelID string, r *http.Request) (string, bool) {
+//
+// readTagWith takes in what else the answer depends on that the URL does not
+// carry (a chart's request body and widget settings); "" for a grid read.
+func (h *handler) readTagWith(ctx context.Context, act *actor, modelID string, r *http.Request, extra string) (string, bool) {
 	gen, ok := h.dataGeneration(ctx, modelID)
 	if !ok || act == nil {
 		return "", false
@@ -90,6 +93,7 @@ func (h *handler) readTag(ctx context.Context, act *actor, modelID string, r *ht
 		modelID,
 		r.URL.Path, r.URL.Query().Encode(),
 		r.Header.Get("X-App-Id"), r.Header.Get("X-Model-Id"),
+		extra,
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return `W/"` + hex.EncodeToString(sum[:16]) + `"`, true
@@ -100,7 +104,12 @@ func (h *handler) readTag(ctx context.Context, act *actor, modelID string, r *ht
 // and the caller sends nothing more. It must run before the answer is
 // worked out (see the file comment).
 func (h *handler) answeredUnchanged(w http.ResponseWriter, r *http.Request, act *actor, modelID string) bool {
-	tag, ok := h.readTag(r.Context(), act, modelID, r)
+	return h.answeredUnchangedWith(w, r, act, modelID, "")
+}
+
+// answeredUnchangedWith is answeredUnchanged over readTagWith's extra.
+func (h *handler) answeredUnchangedWith(w http.ResponseWriter, r *http.Request, act *actor, modelID, extra string) bool {
+	tag, ok := h.readTagWith(r.Context(), act, modelID, r, extra)
 	if !ok {
 		return false
 	}

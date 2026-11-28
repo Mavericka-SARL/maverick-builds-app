@@ -23390,6 +23390,10 @@ func (s *Server) handleGetGridRequest(args [0]string, argsEscaped bool, w http.R
 					In:   "query",
 				}: params.Scope,
 				{
+					Name: "members",
+					In:   "query",
+				}: params.Members,
+				{
 					Name: "meta_only",
 					In:   "query",
 				}: params.MetaOnly,

@@ -14,7 +14,7 @@ import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
 import { scaleFor, scales, type Scale } from "../numberScale";
 import { invalidateModelData, refreshAfterRecalc } from "../modelDataQueries";
-import { DashboardContextSyncContext, foreignSelection, useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
+import { DashboardContextSyncContext, foreignSelection, useFollowsBar, useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { selectionScope } from "../selectionScope";
 import { downloadBlob } from "./blobUtils";
 import { parseCellNumber } from "./cellNumber";
@@ -855,6 +855,44 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }, [pivotContext, filterSel, gridMeta, multiSel, multiSelect]);
   const scopeKey = JSON.stringify(scope);
 
+  // Rows or columns following the dashboard's selection (follow_rows /
+  // follow_columns) show what is under the member another widget selected —
+  // in the same dimension, a parent dimension or a grouping. This grid's own
+  // clicks select for the others, never narrow it: it reads, per dimension,
+  // the newest member someone else selected.
+  const following = !!(followRows || followColumns);
+  // It follows the selection the selector bar drives: the bar stands above it
+  // (the bar stood half-way down a project dashboard, above its first chart,
+  // while the activity grids above it already showed the bar's project).
+  useFollowsBar(following);
+  const followSync = useContext(DashboardContextSyncContext);
+  const selfId = useId();
+  const foreignSel = useMemo(() => (following && followSync ? foreignSelection(followSync, selfId) : {}), [following, followSync, selfId]);
+  const { data: modelDims } = useQuery({
+    queryKey: ["grid-meta", ctx.revision_id],
+    queryFn: () => api.getGrid(ctx.revision_id, undefined, { metaOnly: true }),
+    staleTime: 30_000,
+    enabled: following && !!followSync,
+  });
+  // The members a followed axis shows go with the read (members): served from
+  // stored rows, the server reads only those — a project's eleven activities,
+  // not the portfolio's 1,200 (2026-11-27). Until the model's dimensions are
+  // known, the read waits for them rather than reading everything first.
+  const readMembers = useMemo(() => {
+    if (!following || !followSync) return undefined;
+    const all = (modelDims as GridData | undefined)?.all_dimensions;
+    if (!all) return undefined;
+    const out: Record<string, string[]> = {};
+    for (const id of [...(followRows ? pivotRows : []), ...(followColumns ? pivotCols : [])]) {
+      if (id === METRICS_ID) continue;
+      const shown = selectionScope(id, all, foreignSel);
+      if (shown && shown.size > 0 && shown.size <= 500) out[id] = [...shown].sort();
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }, [following, followSync, modelDims, foreignSel, followRows, followColumns, pivotRows, pivotCols]);
+  const membersReady = !following || !followSync || !!modelDims;
+  const membersKey = readMembers ? JSON.stringify(readMembers) : "";
+
   // While a new scope loads, the last scope's answer is kept for the grid's
   // layout. Its cells are keyed by the members chosen before, so no cell of
   // the new scope is in them: read from them, every input showed an editable
@@ -863,12 +901,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // own answer is in (cellsLoading), every value reads as not yet known
   // ("…") and takes no input.
   const { data: cellsData, error: cellsError, isPlaceholderData } = useQuery({
-    queryKey: ["grid-cells", ctx.revision_id, gridDefId ?? "all", scopeKey],
-    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, gridDefId, { scope, signal }),
-    enabled: pivotContextReady,
+    queryKey: ["grid-cells", ctx.revision_id, gridDefId ?? "all", scopeKey, membersKey],
+    queryFn: ({ signal }) => api.getGrid(ctx.revision_id, gridDefId, { scope, members: readMembers, signal }),
+    enabled: pivotContextReady && membersReady,
     // While a write's dependents are being recalculated the grid asks every
     // 0.4 s instead of every 2 s, so the result shows as soon as it lands.
     refetchInterval: (q) => (q.state.data?.recalc_pending ? 250 : 2000),
+    // An answer younger than the poll is current: a grid mounted again (its
+    // row moved below the selector bar as the widgets around it loaded) used
+    // it instead of reading the same cells again (2026-11-27). A save
+    // invalidates it at once.
+    staleTime: 2000,
     placeholderData: (prev) => prev,
   });
   // The server's answer as the next save names it (expectedFor).
@@ -983,21 +1026,6 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // Works on any dashboard, independent of this grid's own sync flag: the
   // click is the user's explicit choice (see ChartWidget for the same rule).
   const pushSync = useSyncSetter(true);
-  // Rows or columns following the dashboard's selection (follow_rows /
-  // follow_columns) show what is under the member another widget selected —
-  // in the same dimension, a parent dimension or a grouping. This grid's own
-  // clicks select for the others, never narrow it: it reads, per dimension,
-  // the newest member someone else selected.
-  const following = !!(followRows || followColumns);
-  const followSync = useContext(DashboardContextSyncContext);
-  const selfId = useId();
-  const foreignSel = useMemo(() => (following && followSync ? foreignSelection(followSync, selfId) : {}), [following, followSync, selfId]);
-  const { data: modelDims } = useQuery({
-    queryKey: ["grid-meta", ctx.revision_id],
-    queryFn: () => api.getGrid(ctx.revision_id, undefined, { metaOnly: true }),
-    staleTime: 30_000,
-    enabled: following && !!followSync,
-  });
   const selPos: SelectorsPosition = selectorsPosition ?? "top";
   const selVertical = selPos === "left" || selPos === "right";
   // The row-label column: widget_props.label_width when set, else a minimum
@@ -2188,7 +2216,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     {colDims.length > 0
                       ? colCombos.map(cc => (
                           <th key={comboKey(cc)} {...pickComboProps(cc, colDims)} style={{ ...th, textAlign: "right", minWidth: colMin, borderLeft: "1px solid var(--color-grid-col-header-border-soft)", color: "var(--color-grid-col-header-text)" }}>
-                            {cc.map(m => m.label).join(" / ")}
+                            <span style={{ display: "inline-block", maxWidth: 120, whiteSpace: "normal", overflowWrap: "break-word" }}>{cc.map(m => m.label).join(" / ")}</span>
                           </th>
                         ))
                       : <th style={{ ...th, textAlign: "right", minWidth: 90 }}>{ctxHeader}</th>
@@ -2287,7 +2315,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                       <th key={m.id} colSpan={effectiveColCombos.length}
                         style={{ ...th, textAlign: "center", borderLeft: mi > 0 ? "1px solid var(--color-border)" : undefined,
                           color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)" }}>
-                        {m.label}
+                        {/* A metric of one column wraps its name at 120 px: the
+                            column is as wide as its figures, not its one-line
+                            name — "Estimate at completion (EUR)" took 190 px, and
+                            ten such columns ran 430 px past a full-width widget,
+                            the last four out of sight (2026-11-27). */}
+                        <span style={effectiveColCombos.length <= 1 ? { display: "inline-block", maxWidth: 120, whiteSpace: "normal", overflowWrap: "break-word" } : undefined}>{m.label}</span>
                         {!hideBadges && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
                       </th>
                     ))}
@@ -2314,7 +2347,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                         <th key={`${m.id}-${comboKey(cc)}`} {...pickComboProps(cc, colDims)}
                           style={{ ...th, textAlign: "right", minWidth: 82, color: "var(--color-grid-col-header-text)", fontSize: 12,
                             borderLeft: ci === 0 && mi > 0 ? "1px solid var(--color-border)" : undefined }}>
-                          {cc.map(x => x.label).join(" / ")}
+                          {/* Wrapped at 120 px, as a metric's name: a column of
+                              scenarios is as wide as its figures. */}
+                          <span style={{ display: "inline-block", maxWidth: 120, whiteSpace: "normal", overflowWrap: "break-word" }}>{cc.map(x => x.label).join(" / ")}</span>
                         </th>
                       )))}
                     </tr>
@@ -2372,7 +2407,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                           borderLeft: hasColDims && ci > 0 && gridMetrics[0]?.id === m.id ? "1px solid var(--color-border-muted)" : undefined,
                           color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)",
                         }}>
-                        {m.label}
+                        {/* Wrapped at 120 px: the column as wide as its figures (see the metric header above). */}
+                        <span style={{ display: "inline-block", maxWidth: 120, whiteSpace: "normal", overflowWrap: "break-word" }}>{m.label}</span>
                         {!metricsInContext && !hideBadges && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
                       </th>
                     ))

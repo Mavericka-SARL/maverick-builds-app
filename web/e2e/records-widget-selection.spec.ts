@@ -55,7 +55,7 @@ const LINE_RECORDS = [
 type Server = { lineQueries: Body[]; posts: Body[] };
 const url = (route: { request(): { url(): string } }) => new URL(route.request().url()).pathname;
 
-async function serve(page: Page, selectorBar?: Body[]): Promise<Server> {
+async function serve(page: Page, selectorBar?: Body[], intro = false): Promise<Server> {
   const server: Server = { lineQueries: [], posts: [] };
   await page.route((url) => url.pathname === "/api/forms", (route) => route.fulfill({ json: [JOURNALS, LINES] }));
   await page.route((url) => url.pathname === "/api/dimensions", (route) => route.fulfill({ json: DIMS }));
@@ -83,6 +83,11 @@ async function serve(page: Page, selectorBar?: Body[]): Promise<Server> {
     { id: "w-l", widget_type: "form", ref_id: "form-l", content: null, sort_order: 1, col_start: 1, col_span: 12,
       widget_props: { record_follows: ["journal"], new_record_button: true } },
   ] };
+  // A text above the records, on rows of their own: the bar stands below it.
+  if (intro) dashboard.widgets = [
+    { id: "w-t", widget_type: "text", ref_id: null as unknown as string, content: "Journals and their lines", sort_order: 0, col_start: 1, col_span: 12, pos_x: 0, pos_y: 0, size_w: 1100, size_h: 60 } as never,
+    ...dashboard.widgets.map((w, i) => ({ ...w, pos_x: 0, pos_y: 100 + i * 400, size_w: 1100, size_h: 360 })),
+  ];
   await page.route((url) => url.pathname === "/api/dashboards/dash-3", (route) => route.fulfill({ json: { ...dashboard, selector_bar: selectorBar } }));
   // The selector bar's members: the model-wide grid meta.
   const barDims = DIMS.map(d => ({ id: d.id, name: d.name, members: d.members.map(m => ({ id: m.id, code: m.code, label: m.label,
@@ -153,4 +158,22 @@ test("the selector bar's journal drives the lines too: a parent, the leaves unde
   // A journal clicked moves the bar with it.
   await panel(page, "Journals").getByRole("row").filter({ hasText: "J-001" }).getByText("Accrual").click();
   await expect(barJournal).toHaveText("Accrual");
+});
+
+// The bar stands above the first widget following the selection it drives —
+// a records widget following or making it too (it stood half-way down a
+// project dashboard, above its first chart, 2026-11-27); a text above stays
+// above it.
+test("the selector bar stands above the records that follow it, below a text", async ({ page }) => {
+  await mockApi(page);
+  await serve(page, [{ dimension_id: "dim-journal", default: "Q3" }], true);
+  await loadAs(page, "dept_head");
+  await open(page);
+  const bar = page.getByRole("toolbar", { name: "Dashboard selectors" });
+  await expect(bar).toBeVisible();
+  const intro = page.getByText("Journals and their lines");
+  await expect.poll(async () => {
+    const [b, t, j] = [await bar.boundingBox(), await intro.boundingBox(), await panel(page, "Journals").boundingBox()];
+    return !!b && !!t && !!j && b.y > t.y + t.height - 1 && b.y + b.height <= j.y + 1;
+  }).toBe(true);
 });

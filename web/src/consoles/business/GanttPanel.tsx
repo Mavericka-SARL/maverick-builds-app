@@ -10,7 +10,7 @@
  * /api/forms/{id}/records/query): the reader's access, the widget's fixed
  * filters and the dashboard selection it follows.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { api, type FormDef, type FormRecord, type GanttSettings, type RecordFilter, type DevDimension } from "../../api/client";
 import { LoadingState, EmptyState, ErrorState } from "../../ui";
@@ -22,13 +22,13 @@ const LABEL_W = 240;
 const PALETTE = ["--color-chart-1", "--color-chart-2", "--color-chart-3", "--color-chart-4", "--color-chart-5",
   "--color-chart-6", "--color-chart-7", "--color-chart-8", "--color-chart-9", "--color-chart-10"];
 const DAY = 86_400_000;
-// The width a timeline fits in before it scrolls: a full-width widget's.
+// The width a timeline fits in before its box is measured: a full-width widget's.
 const FIT_PX = 860;
 
-/** The finest zoom showing days days within FIT_PX. */
-function autoZoom(days: number): Zoom {
-  if (days * DAY_PX.month <= FIT_PX) return "month";
-  if (days * DAY_PX.quarter <= FIT_PX) return "quarter";
+/** The finest zoom whose scale shows days days within fit px. */
+function autoZoom(days: number, fit: number): Zoom {
+  if (days * DAY_PX.month <= fit) return "month";
+  if (days * DAY_PX.quarter <= fit) return "quarter";
   return "year";
 }
 
@@ -64,6 +64,17 @@ export function GanttPanel({ form, settings, fixedFilters, followFilters, title 
 }) {
   // null: the finest zoom that shows the whole span (autoZoom); a person's choice once made.
   const [chosenZoom, setZoom] = useState<Zoom | null>(null);
+  // The timeline's box, measured: until a person zooms, the whole span fits
+  // it — at the Years scale a 2026–2029 plan ran 118 px past the right edge
+  // of a full-width widget, its last bars cut (2026-11-27).
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [avail, setAvail] = useState<number | null>(null);
+  useEffect(() => {
+    if (!scrollEl) return;
+    const ro = new ResizeObserver(([e]) => setAvail(Math.floor(e.contentRect.width)));
+    ro.observe(scrollEl);
+    return () => ro.disconnect();
+  }, [scrollEl]);
   // Today's line: the day the widget opened.
   const [today] = useState(() => Date.now());
   const filters = useMemo(() => [...(fixedFilters ?? []), ...(followFilters ?? [])], [fixedFilters, followFilters]);
@@ -127,8 +138,10 @@ export function GanttPanel({ form, settings, fixedFilters, followFilters, title 
   }
   const first = new Date(lo); const from = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1);
   const last = new Date(hi); const to = Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 1, 1);
-  const zoom: Zoom = chosenZoom ?? autoZoom((to - from) / DAY);
-  const px = DAY_PX[zoom];
+  const days = (to - from) / DAY;
+  const fit = avail != null ? Math.max(avail - LABEL_W - 2, 200) : FIT_PX;
+  const zoom: Zoom = chosenZoom ?? autoZoom(days, fit);
+  const px = chosenZoom ? DAY_PX[zoom] : fit / days;
   const x = (t: number) => ((t - from) / DAY) * px;
   const width = Math.max(x(to), 200);
 
@@ -157,8 +170,8 @@ export function GanttPanel({ form, settings, fixedFilters, followFilters, title 
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--color-border)" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--color-border)", flexShrink: 0 }}>
         {title && <strong style={{ fontSize: 13 }}>{title}</strong>}
         <span className="mvx-admin-muted" style={{ fontSize: 12 }}>{bars.length} {form.label || form.name}</span>
         <span style={{ flex: 1 }} />
@@ -171,7 +184,7 @@ export function GanttPanel({ form, settings, fixedFilters, followFilters, title 
           </select>
         </label>
       </div>
-      <div style={{ overflow: "auto", flex: 1 }} data-testid="gantt">
+      <div ref={setScrollEl} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }} data-testid="gantt">
         <div style={{ display: "grid", gridTemplateColumns: `${LABEL_W}px ${width}px`, minWidth: LABEL_W + width }}>
           <div style={{ position: "sticky", left: 0, top: 0, zIndex: 3, background: "var(--color-surface)", height: 28, borderBottom: "1px solid var(--color-border)" }} />
           <svg width={width} height={28} style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>

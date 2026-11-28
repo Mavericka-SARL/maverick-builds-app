@@ -487,7 +487,9 @@ steps carefully.
   data — the last member offered (the leaves, when it offers every member) where that metric holds a value other
   than 0, e.g. a flag set in closed months gives "the month just closed" — and "default_offset": 1 the member after
   it (the first open month); "default" is then only the fallback. Use it for a page that should open on the latest
-  closed or first open period instead of a fixed month that someone must change at every close.
+  closed or first open period instead of a fixed month that someone must change at every close. "keep_choice": true
+  carries the member a person picks to the next dashboard whose selector on the same dimension keeps its choice too
+  (for their session): set it on every dashboard about one project, customer or entity, so it is picked once.
   reorder_dashboards {"dashboards": every dashboard of the revision, by name, once each, in order}: the order of the
   Dashboards page's tabs, and the first is where everyone lands (a guide page first, then the pages in the order of
   the workflow's steps); list_dashboards lists them in that order. Never number names to order them.

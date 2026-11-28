@@ -32,7 +32,7 @@ const records = [
 ];
 
 async function serve(page: Page) {
-  const dashboard = { id: "dash-gantt", name: "Timeline", tags: [], widgets: [{ id: "wg", widget_type: "gantt", ref_id: "acts", content: null, title: "Activity plan",
+  const dashboard = { id: "dash-gantt", name: "Timeline", tags: [], widgets: [{ id: "wg", widget_type: "gantt", ref_id: "acts", content: null, title: "Activity plan", show_title: true,
     sort_order: 0, col_start: 1, col_span: 12, pos_x: 0, pos_y: 0, size_w: 1100, size_h: 420,
     widget_props: { gantt: { start_field: "start", end_field: "finish", label_field: "title", group_field: "project",
       baseline_start_field: "base_start", baseline_end_field: "base_finish", predecessor_field: "after" } } }] };
@@ -52,6 +52,14 @@ test("records drawn as bars, grouped, with a milestone and a late dependency in 
   const gantt = page.getByTestId("gantt");
   await expect(gantt).toBeVisible({ timeout: 15_000 });
   await expect(gantt.locator("[data-gantt-bar]")).toHaveCount(4);
+  // Its title once: the Gantt draws it, the dashboard adds no band above it.
+  await expect(page.getByText("Activity plan", { exact: true })).toHaveCount(1);
+  // Until a person zooms, the whole span fits the box: nothing runs past its
+  // right edge (a 2026–2029 plan was cut at the Years scale). And the box
+  // takes its rows' height, not the 420 px designed: no blank under them.
+  await expect.poll(() => gantt.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  const frame = page.locator('.mvx-dash-cell[data-widget-id="wg"] .mvx-dash-cell__frame');
+  await expect.poll(async () => (await frame.boundingBox())?.height ?? 0).toBeLessThan(330);
   // Grouped by project, every label shown whole.
   for (const label of ["Clinic", "School", "Design the clinic", "Build the clinic", "Clinic opens", "Train teachers"]) {
     await expect(gantt.getByText(label, { exact: true })).toBeVisible();

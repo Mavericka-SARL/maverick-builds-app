@@ -9,7 +9,11 @@
 // Department) and its chain of parents reaches the selected member, over any
 // number of levels (Division → Department → Cabinet); or when its dimension is
 // grouped by the selected member's dimension (source_dimension_id /
-// source_property) and its property holds that member's code. Selections are
+// source_property) and its property holds that member's code — or the code of
+// a member the selection leaves of that grouping, so a grouping of a grouping
+// narrows too: a project selected leaves its activities, and the cost lines
+// whose activity is one of them (2026-11-27: a project dashboard's cost-line
+// grid showed all 576 lines of the portfolio). Selections are
 // read from the top ancestor down; one that is no longer under the selection
 // above it (a department of another division) is left out, so a new choice
 // higher up never empties what follows.
@@ -34,6 +38,12 @@ export interface ScopeDim {
  * dashboard's member per dimension; a dimension in ignore (the widget's own clicks) does not narrow itself.
  */
 export function selectionScope(dimId: string, dims: ScopeDim[], selected: Record<string, string>, ignore?: Set<string>): Set<string> | null {
+  return scopeOf(dimId, dims, selected, ignore, new Set());
+}
+
+function scopeOf(dimId: string, dims: ScopeDim[], selected: Record<string, string>, ignore: Set<string> | undefined, seen: Set<string>): Set<string> | null {
+  if (seen.has(dimId)) return null;
+  seen = new Set(seen).add(dimId);
   const byId = new Map(dims.map(d => [d.id, d]));
   const dim = byId.get(dimId);
   if (!dim) return null;
@@ -73,8 +83,11 @@ export function selectionScope(dimId: string, dims: ScopeDim[], selected: Record
   for (const g of dims) {
     if (g.source_dimension_id !== dimId || !g.source_property || ignore?.has(g.id)) continue;
     const sel = selected[g.id];
-    if (!sel || !g.members.some(m => m.code === sel && !g.members.some(x => x.parent_code === m.code))) continue;
-    const grouped = new Set(dim.members.filter(m => m.properties?.[g.source_property!] === sel).map(m => m.code));
+    let groups: Set<string> | null = null;
+    if (sel && g.members.some(m => m.code === sel && !g.members.some(x => x.parent_code === m.code))) groups = new Set([sel]);
+    else if (!sel) groups = scopeOf(g.id, dims, selected, ignore, seen); // what a selection further up leaves of the grouping
+    if (!groups) continue;
+    const grouped = new Set(dim.members.filter(m => groups!.has(m.properties?.[g.source_property!] ?? "")).map(m => m.code));
     allowed = allowed ? new Set([...allowed].filter(c => grouped.has(c))) : grouped;
   }
   // Everything left (the top member selected): nothing narrows.

@@ -1480,6 +1480,7 @@ components:
       properties:
         dimension_id: { type: string, description: "A dimension of the dashboard's revision, by id (its name is accepted on writes and stored as the id)" }
         default:      { type: string, description: "Member code the selector opens on; omitted or empty = the dimension's first member" }
+        keep_choice:  { type: boolean, description: "The member a person picks here opens the next dashboard whose selector on the same dimension keeps its choice too, for their browser session; omitted or false = the selector always opens on its default" }
 
     CreateDashboardRequest:
       type: object
@@ -4489,6 +4490,10 @@ paths:
         - name: scope
           in: query
           description: 'JSON object of dimension id -> pinned member code, e.g. {"<dim-uuid>":"Q1"}. Cells/totals are restricted to the pinned subtree; a pin covering a whole dimension (its sole universal root) is dropped. Calc totals for a one-dimension pin are served from precomputed slice rows when available.'
+          schema: { type: string }
+        - name: members
+          in: query
+          description: 'JSON object of dimension id -> the member codes a grid shows on that axis (a grid following the dashboard''s selection), e.g. {"<dim-uuid>":["A01","A02"]}; at most 2,000 per dimension. A read served from stored rows alone (no member hidden from the reader) reads only those members'' rows on it — the same cells for them, none for the others; a dimension with a calculated member, or one the scope pins, is read whole.'
           schema: { type: string }
         - name: meta_only
           in: query

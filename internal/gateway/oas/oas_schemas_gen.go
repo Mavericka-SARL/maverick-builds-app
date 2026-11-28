@@ -38850,6 +38850,10 @@ type SelectorBarEntry struct {
 	DimensionID string `json:"dimension_id"`
 	// Member code the selector opens on; omitted or empty = the dimension's first member.
 	Default OptString `json:"default"`
+	// The member a person picks here opens the next dashboard whose selector on the same dimension keeps
+	// its choice too, for their browser session; omitted or false = the selector always opens on its
+	// default.
+	KeepChoice OptBool `json:"keep_choice"`
 }
 
 // GetDimensionID returns the value of DimensionID.
@@ -38862,6 +38866,11 @@ func (s *SelectorBarEntry) GetDefault() OptString {
 	return s.Default
 }
 
+// GetKeepChoice returns the value of KeepChoice.
+func (s *SelectorBarEntry) GetKeepChoice() OptBool {
+	return s.KeepChoice
+}
+
 // SetDimensionID sets the value of DimensionID.
 func (s *SelectorBarEntry) SetDimensionID(val string) {
 	s.DimensionID = val
@@ -38870,6 +38879,11 @@ func (s *SelectorBarEntry) SetDimensionID(val string) {
 // SetDefault sets the value of Default.
 func (s *SelectorBarEntry) SetDefault(val OptString) {
 	s.Default = val
+}
+
+// SetKeepChoice sets the value of KeepChoice.
+func (s *SelectorBarEntry) SetKeepChoice(val OptBool) {
+	s.KeepChoice = val
 }
 
 type SendAiMessageBadRequest Error

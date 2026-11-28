@@ -475,7 +475,8 @@ func TestRestrictedViewerWithheldCells(t *testing.T) {
 func TestScopePinServesPersistedCells(t *testing.T) {
 	f := setupRestrictedFixture(t)
 	f.hide() // no rules
-	served := []string{"us_rev", "smb_rev", "conv", "prev", "dyn", "yv", "ts_q1", "ts_q2", "prev_all"}
+	// scaled and dep are plain formulas: served as stored, read only at a leaf pin.
+	served := []string{"us_rev", "smb_rev", "conv", "prev", "dyn", "yv", "ts_q1", "ts_q2", "prev_all", "scaled", "dep"}
 	for _, tc := range []struct {
 		label string
 		dim   string
@@ -484,6 +485,9 @@ func TestScopePinServesPersistedCells(t *testing.T) {
 	}{
 		{"region pin", f.region, "EMEA", map[string]bool{"EMEA": true, "UK": true, "DE": true}},
 		{"period pin", f.period, "Q1", map[string]bool{"Q1": true, "2026-01": true, "2026-02": true, "2026-03": true}},
+		// A leaf pin reads only the rows naming it (calculation.LoadCalcValueMapPinned).
+		{"leaf region pin", f.region, "UK", map[string]bool{"UK": true}},
+		{"leaf period pin", f.period, "2026-02", map[string]bool{"2026-02": true}},
 	} {
 		scope := fmt.Sprintf(`{%q:%q}`, tc.dim, tc.code)
 		for _, gridID := range []string{f.plan, f.byPeriod} {

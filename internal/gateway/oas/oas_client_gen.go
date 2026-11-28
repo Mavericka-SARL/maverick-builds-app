@@ -18208,6 +18208,23 @@ func (c *Client) sendGetGrid(ctx context.Context, params GetGridParams) (res Get
 		}
 	}
 	{
+		// Encode "members" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "members",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Members.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
 		// Encode "meta_only" parameter.
 		cfg := uri.QueryParameterEncodingConfig{
 			Name:    "meta_only",

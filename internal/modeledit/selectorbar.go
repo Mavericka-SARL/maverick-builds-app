@@ -38,6 +38,13 @@ type SelectorBarEntry struct {
 	// month had to be edited at every close.
 	DefaultMetricID string `json:"default_metric_id,omitempty"`
 	DefaultOffset   int    `json:"default_offset,omitempty"`
+	// KeepChoice carries the member picked here to the next dashboard whose
+	// selector on the same dimension keeps its choice too, for the browser
+	// session (owner, 2026-11-27: a project picked on Project · Overview
+	// opened the next project dashboard on its default project again). The
+	// console keeps it; a dashboard without it opens on its default, as
+	// before.
+	KeepChoice bool `json:"keep_choice,omitempty"`
 }
 
 // MaxSelectorDefaultOffset bounds DefaultOffset either way.
@@ -97,7 +104,7 @@ func NormalizeSelectorBar(ctx context.Context, db DB, modelID, revisionID string
 		if code != "" && len(members) > 0 && !slices.Contains(members, code) {
 			return nil, fmt.Errorf("selector_bar: the default %q of dimension %q is not among the members it offers", code, dimName)
 		}
-		entry := SelectorBarEntry{DimensionID: dimID, Default: code, Members: members}
+		entry := SelectorBarEntry{DimensionID: dimID, Default: code, Members: members, KeepChoice: e.KeepChoice}
 		if ref := strings.TrimSpace(e.DefaultMetricID); ref != "" {
 			if err := db.QueryRow(ctx, `
 				SELECT id::text FROM model.metric_def

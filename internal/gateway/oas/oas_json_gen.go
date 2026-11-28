@@ -80658,11 +80658,18 @@ func (s *SelectorBarEntry) encodeFields(e *jx.Encoder) {
 			s.Default.Encode(e)
 		}
 	}
+	{
+		if s.KeepChoice.Set {
+			e.FieldStart("keep_choice")
+			s.KeepChoice.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfSelectorBarEntry = [2]string{
+var jsonFieldsNameOfSelectorBarEntry = [3]string{
 	0: "dimension_id",
 	1: "default",
+	2: "keep_choice",
 }
 
 // Decode decodes SelectorBarEntry from json.
@@ -80695,6 +80702,16 @@ func (s *SelectorBarEntry) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"default\"")
+			}
+		case "keep_choice":
+			if err := func() error {
+				s.KeepChoice.Reset()
+				if err := s.KeepChoice.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"keep_choice\"")
 			}
 		default:
 			return d.Skip()
